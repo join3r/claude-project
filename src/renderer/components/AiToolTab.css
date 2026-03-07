@@ -1,0 +1,9 @@
+.ai-tool-tab {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+}
+
+.ai-tool-tab .xterm {
+  height: 100%;
+}
