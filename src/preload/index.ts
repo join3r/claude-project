@@ -27,6 +27,9 @@ const api = {
   ptyKill: (id: string): void => ipcRenderer.send('pty-kill', id),
   onPtyData: (callback: (id: string, data: string) => void): void => {
     ipcRenderer.on('pty-data', (_e, id, data) => callback(id, data))
+  },
+  onPtyExit: (callback: (id: string, exitCode: number) => void): void => {
+    ipcRenderer.on('pty-exit', (_e, id, exitCode) => callback(id, exitCode))
   }
 }
 

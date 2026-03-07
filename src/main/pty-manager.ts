@@ -34,6 +34,10 @@ export class PtyManager {
     this.instances.get(id)?.process.onData(callback)
   }
 
+  onExit(id: string, callback: (exitCode: number) => void): void {
+    this.instances.get(id)?.process.onExit(({ exitCode }) => callback(exitCode))
+  }
+
   kill(id: string): void {
     const instance = this.instances.get(id)
     if (instance) {

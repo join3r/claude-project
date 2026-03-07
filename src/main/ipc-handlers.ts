@@ -39,6 +39,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     ptyManager.onData(id, (data) => {
       mainWindow.webContents.send('pty-data', id, data)
     })
+    ptyManager.onExit(id, (exitCode) => {
+      mainWindow.webContents.send('pty-exit', id, exitCode)
+    })
   })
 
   ipcMain.on('pty-write', (_e, id: string, data: string) => {
