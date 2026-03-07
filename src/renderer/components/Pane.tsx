@@ -1,6 +1,7 @@
 import React from 'react'
 import TabBar from './TabBar'
 import TerminalTab from './TerminalTab'
+import BrowserTab from './BrowserTab'
 import type { Tab } from '../../shared/types'
 
 interface Props {
@@ -27,12 +28,17 @@ export default function Pane({ tabs, activeTabId, pane }: Props): React.ReactEle
               />
             )
           }
-          // Browser tabs will be added in the next task
-          return tab.id === activeTabId ? (
-            <div key={tab.id} className="tab-content-placeholder">
-              Browser &mdash; coming next
-            </div>
-          ) : null
+          if (tab.type === 'browser') {
+            return (
+              <BrowserTab
+                key={tab.id}
+                tabId={tab.id}
+                visible={tab.id === activeTabId}
+                initialUrl={tab.url}
+              />
+            )
+          }
+          return null
         })}
       </div>
     </div>
