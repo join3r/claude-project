@@ -1,6 +1,17 @@
+export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode'
+
+export const AI_TAB_TYPES = ['claude', 'codex', 'opencode'] as const
+export type AiTabType = typeof AI_TAB_TYPES[number]
+
+export const AI_TAB_META: Record<AiTabType, { label: string; command: string }> = {
+  claude: { label: 'Claude Code', command: 'claude' },
+  codex: { label: 'Codex', command: 'codex' },
+  opencode: { label: 'OpenCode', command: 'opencode' }
+}
+
 export interface Tab {
   id: string
-  type: 'terminal' | 'browser'
+  type: TabType
   title: string
   url?: string
 }
@@ -37,6 +48,9 @@ export interface AppConfig {
   theme: 'system' | 'dark' | 'light'
   terminalTheme: 'system' | 'dark' | 'light'
   defaultShell: string
+  enableClaude: boolean
+  enableCodex: boolean
+  enableOpencode: boolean
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -44,5 +58,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   fontSize: 14,
   theme: 'system',
   terminalTheme: 'system',
-  defaultShell: process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh'
+  defaultShell: process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh',
+  enableClaude: false,
+  enableCodex: false,
+  enableOpencode: false
 }
