@@ -11,7 +11,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
   if (!config) return <div />
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
+    <div className="settings-overlay">
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <h2>Settings</h2>
