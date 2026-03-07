@@ -136,6 +136,31 @@ export function useAppState() {
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
   }, [projects, persistProjects])
 
+  const updateTabSessionId = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, sessionId: string) => {
+    persistProjects(
+      projects.map((p) =>
+        p.id === projectId
+          ? {
+              ...p,
+              tasks: p.tasks.map((t) =>
+                t.id === taskId
+                  ? {
+                      ...t,
+                      tabs: {
+                        ...t.tabs,
+                        [pane]: t.tabs[pane].map((tab) =>
+                          tab.id === tabId ? { ...tab, sessionId } : tab
+                        )
+                      }
+                    }
+                  : t
+              )
+            }
+          : p
+      )
+    )
+  }, [projects, persistProjects])
+
   const setActiveTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
     persistProjects(
       projects.map((p) =>
@@ -216,6 +241,7 @@ export function useAppState() {
     renameTask,
     addTab,
     removeTab,
+    updateTabSessionId,
     setActiveTab,
     toggleSplit,
     setSplitRatio,

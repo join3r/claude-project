@@ -10,10 +10,13 @@ interface Props {
   tabs: Tab[]
   activeTabId: string | null
   pane: 'left' | 'right'
+  projectId: string
+  taskId: string
+  projectDir: string
   style?: React.CSSProperties
 }
 
-export default function Pane({ tabs, activeTabId, pane, style }: Props): React.ReactElement {
+export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, style }: Props): React.ReactElement {
   return (
     <div className="pane" style={style}>
       <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} />
@@ -48,6 +51,11 @@ export default function Pane({ tabs, activeTabId, pane, style }: Props): React.R
                 tabId={tab.id}
                 toolType={tab.type as AiTabType}
                 visible={tab.id === activeTabId}
+                sessionId={tab.sessionId}
+                pane={pane}
+                projectId={projectId}
+                taskId={taskId}
+                projectDir={projectDir}
               />
             )
           }

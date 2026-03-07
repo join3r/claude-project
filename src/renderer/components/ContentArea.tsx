@@ -72,6 +72,9 @@ export default function ContentArea(): React.ReactElement {
                   tabs={task.tabs.left}
                   activeTabId={task.activeTab.left}
                   pane="left"
+                  projectId={project.id}
+                  taskId={task.id}
+                  projectDir={project.directory}
                   style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                 />
                 {task.splitOpen && (
@@ -84,6 +87,9 @@ export default function ContentArea(): React.ReactElement {
                       tabs={task.tabs.right}
                       activeTabId={task.activeTab.right}
                       pane="right"
+                      projectId={project.id}
+                      taskId={task.id}
+                      projectDir={project.directory}
                       style={{ flex: 'none', width: `calc(${(1 - ratio) * 100}% - 1.5px)` }}
                     />
                   </>
