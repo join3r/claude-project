@@ -19,9 +19,33 @@ const api = {
     ipcRenderer.on('theme-changed', (_e, theme) => callback(theme))
   },
 
+  // Scrollback
+  scrollbackSave: (tabId: string, data: string): Promise<void> => ipcRenderer.invoke('scrollback-save', tabId, data),
+  scrollbackSaveSync: (tabId: string, data: string): void => { ipcRenderer.sendSync('scrollback-save-sync', tabId, data) },
+  scrollbackLoad: (tabId: string): Promise<string | null> => ipcRenderer.invoke('scrollback-load', tabId),
+  scrollbackDelete: (tabId: string): Promise<void> => ipcRenderer.invoke('scrollback-delete', tabId),
+
+  // Hook injection
+  hooksInject: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-inject', projectDir),
+  hooksCleanup: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-cleanup', projectDir),
+
+  // Hook events from server
+  onHookSessionStart: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
+    ipcRenderer.on('hook-session-start', (_e, tabId, body) => callback(tabId, body))
+  },
+  onHookWorking: (callback: (tabId: string) => void): void => {
+    ipcRenderer.on('hook-working', (_e, tabId) => callback(tabId))
+  },
+  onHookStopped: (callback: (tabId: string) => void): void => {
+    ipcRenderer.on('hook-stopped', (_e, tabId) => callback(tabId))
+  },
+  onHookNotification: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
+    ipcRenderer.on('hook-notification', (_e, tabId, body) => callback(tabId, body))
+  },
+
   // PTY
-  ptySpawn: (id: string, shell: string, cwd: string, cols: number, rows: number): Promise<void> =>
-    ipcRenderer.invoke('pty-spawn', id, shell, cwd, cols, rows),
+  ptySpawn: (id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>): Promise<void> =>
+    ipcRenderer.invoke('pty-spawn', id, shell, cwd, cols, rows, args, extraEnv),
   ptyWrite: (id: string, data: string): void => ipcRenderer.send('pty-write', id, data),
   ptyResize: (id: string, cols: number, rows: number): void => ipcRenderer.send('pty-resize', id, cols, rows),
   ptyKill: (id: string): void => ipcRenderer.send('pty-kill', id),
