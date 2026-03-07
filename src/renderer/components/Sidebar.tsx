@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
+import Settings from './Settings'
 import './Sidebar.css'
 
 export default function Sidebar(): React.ReactElement {
@@ -13,6 +14,7 @@ export default function Sidebar(): React.ReactElement {
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
   } | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
@@ -152,8 +154,10 @@ export default function Sidebar(): React.ReactElement {
       )}
 
       <div className="sidebar-footer">
-        <button className="sidebar-btn settings-btn" title="Settings">&#9881;</button>
+        <button className="sidebar-btn settings-btn" onClick={() => setSettingsOpen(true)} title="Settings">&#9881;</button>
       </div>
+
+      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }
