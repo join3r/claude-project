@@ -76,6 +76,36 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               placeholder="/bin/zsh"
             />
           </div>
+
+          <div className="settings-group">
+            <label className="settings-label">AI Tools</label>
+            <div className="settings-checkboxes">
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.enableClaude}
+                  onChange={(e) => updateConfig({ enableClaude: e.target.checked })}
+                />
+                Claude Code
+              </label>
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.enableCodex}
+                  onChange={(e) => updateConfig({ enableCodex: e.target.checked })}
+                />
+                Codex
+              </label>
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.enableOpencode}
+                  onChange={(e) => updateConfig({ enableOpencode: e.target.checked })}
+                />
+                OpenCode
+              </label>
+            </div>
+          </div>
         </div>
       </div>
     </div>
