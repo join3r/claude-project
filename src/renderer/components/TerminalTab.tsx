@@ -26,6 +26,7 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
   const containerRef = useRef<HTMLDivElement>(null)
   const { selectedProject, config, effectiveTerminalTheme } = useApp()
   const initializedRef = useRef(false)
+  const spawnedRef = useRef(false)
 
   useEffect(() => {
     if (!containerRef.current || !selectedProject || !config) return
@@ -55,14 +56,7 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
       // WebGL not available, fallback to canvas
     }
 
-    fitAddon.fit()
     terminals.set(tabId, { term, fitAddon })
-
-    const shell = config.defaultShell
-    const cols = term.cols
-    const rows = term.rows
-
-    window.api.ptySpawn(tabId, shell, selectedProject.directory, cols, rows)
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -75,24 +69,35 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
     ensurePtyListener()
   }, [tabId, selectedProject, config])
 
-  // Fit on visibility change
+  // Use ResizeObserver to fit terminal when container dimensions change.
+  // This handles initial layout, window resize, visibility changes, and
+  // sidebar toggles — all cases where the container size may change.
+  useEffect(() => {
+    if (!containerRef.current || !selectedProject || !config) return
+    const container = containerRef.current
+    const ro = new ResizeObserver(() => {
+      const entry = terminals.get(tabId)
+      if (entry) {
+        entry.fitAddon.fit()
+        // Spawn PTY on first real fit (container has non-zero size)
+        if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
+          spawnedRef.current = true
+          window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows)
+        }
+      }
+    })
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [tabId, selectedProject, config])
+
+  // Focus terminal on visibility change
   useEffect(() => {
     if (visible) {
       const entry = terminals.get(tabId)
       if (entry) {
-        setTimeout(() => entry.fitAddon.fit(), 50)
         entry.term.focus()
       }
     }
-  }, [visible, tabId])
-
-  // Fit on window resize
-  useEffect(() => {
-    const onResize = () => {
-      if (visible) terminals.get(tabId)?.fitAddon.fit()
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
   }, [visible, tabId])
 
   // Update font when config changes
