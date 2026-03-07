@@ -8,16 +8,16 @@ interface PtyInstance {
 export class PtyManager {
   private instances: Map<string, PtyInstance> = new Map()
 
-  spawn(id: string, shell: string, cwd: string, cols: number, rows: number): void {
+  spawn(id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>): void {
     if (this.instances.has(id)) {
       this.kill(id)
     }
-    const proc = pty.spawn(shell, [], {
+    const proc = pty.spawn(shell, args ?? [], {
       name: 'xterm-256color',
       cols,
       rows,
       cwd,
-      env: process.env as Record<string, string>
+      env: { ...process.env as Record<string, string>, ...extraEnv }
     })
     this.instances.set(id, { process: proc, projectDir: cwd })
   }
