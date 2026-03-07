@@ -1,6 +1,6 @@
 {
   "name": "devtool",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Development workspace manager",
   "main": "out/main/index.js",
   "private": true,
