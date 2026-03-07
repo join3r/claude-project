@@ -1,0 +1,91 @@
+.tab-bar {
+  display: flex;
+  align-items: center;
+  background: var(--tab-bg);
+  border-bottom: 1px solid var(--border);
+  height: 36px;
+  min-height: 36px;
+}
+
+.tab-list {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.tab-list::-webkit-scrollbar {
+  height: 0;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 36px;
+  font-size: 12px;
+  cursor: pointer;
+  border-right: 1px solid var(--tab-border);
+  white-space: nowrap;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.tab:hover {
+  background: var(--hover);
+}
+
+.tab-active {
+  background: var(--tab-active-bg);
+  color: var(--text-primary);
+}
+
+.tab-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.tab-close:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.tab-actions {
+  display: flex;
+  padding: 0 4px;
+  gap: 2px;
+}
+
+.tab-add-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.tab-add-btn:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}

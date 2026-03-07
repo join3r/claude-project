@@ -1,0 +1,70 @@
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.content-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 8px;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+}
+
+.split-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 14px;
+  -webkit-app-region: no-drag;
+}
+
+.split-btn:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.content-panes {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.pane-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.pane-divider {
+  width: 3px;
+  background: var(--border);
+  cursor: col-resize;
+}
+
+.pane-divider:hover {
+  background: var(--accent);
+}
+
+.pane-empty, .tab-content-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: 13px;
+}

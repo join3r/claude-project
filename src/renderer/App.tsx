@@ -1,15 +1,14 @@
 import React from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import Sidebar from './components/Sidebar'
+import ContentArea from './components/ContentArea'
 
 function AppInner(): React.ReactElement {
   const { effectiveTheme } = useApp()
   return (
     <div className={`app ${effectiveTheme === 'light' ? 'theme-light' : ''}`}>
       <Sidebar />
-      <div className="content">
-        <div className="content-empty">Select or create a task to get started</div>
-      </div>
+      <ContentArea />
     </div>
   )
 }
