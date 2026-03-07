@@ -2,7 +2,9 @@ import React from 'react'
 import TabBar from './TabBar'
 import TerminalTab from './TerminalTab'
 import BrowserTab from './BrowserTab'
-import type { Tab } from '../../shared/types'
+import AiToolTab from './AiToolTab'
+import { AI_TAB_TYPES } from '../../shared/types'
+import type { Tab, AiTabType } from '../../shared/types'
 
 interface Props {
   tabs: Tab[]
@@ -36,6 +38,16 @@ export default function Pane({ tabs, activeTabId, pane, style }: Props): React.R
                 tabId={tab.id}
                 visible={tab.id === activeTabId}
                 initialUrl={tab.url}
+              />
+            )
+          }
+          if ((AI_TAB_TYPES as readonly string[]).includes(tab.type)) {
+            return (
+              <AiToolTab
+                key={tab.id}
+                tabId={tab.id}
+                toolType={tab.type as AiTabType}
+                visible={tab.id === activeTabId}
               />
             )
           }
