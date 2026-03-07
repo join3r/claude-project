@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
 import './TerminalTab.css'
@@ -11,7 +12,7 @@ interface Props {
   visible: boolean
 }
 
-const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon }>()
+const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon }>()
 
 let ptyListenerRegistered = false
 function ensurePtyListener(): void {
@@ -19,6 +20,22 @@ function ensurePtyListener(): void {
   ptyListenerRegistered = true
   window.api.onPtyData((id: string, data: string) => {
     terminals.get(id)?.term.write(data)
+  })
+}
+
+let beforeUnloadRegistered = false
+function ensureBeforeUnloadHandler(): void {
+  if (beforeUnloadRegistered) return
+  beforeUnloadRegistered = true
+  window.addEventListener('beforeunload', () => {
+    for (const [id, entry] of terminals) {
+      try {
+        const data = entry.serializeAddon.serialize()
+        window.api.scrollbackSaveSync(id, data)
+      } catch {
+        // Terminal may already be disposed
+      }
+    }
   })
 }
 
@@ -46,7 +63,9 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
     })
 
     const fitAddon = new FitAddon()
+    const serializeAddon = new SerializeAddon()
     term.loadAddon(fitAddon)
+    term.loadAddon(serializeAddon)
     term.open(containerRef.current)
 
     try {
@@ -56,7 +75,12 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
       // WebGL not available, fallback to canvas
     }
 
-    terminals.set(tabId, { term, fitAddon })
+    terminals.set(tabId, { term, fitAddon, serializeAddon })
+
+    // Restore scrollback
+    window.api.scrollbackLoad(tabId).then((data) => {
+      if (data) term.write(data)
+    })
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -67,11 +91,10 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
     })
 
     ensurePtyListener()
+    ensureBeforeUnloadHandler()
   }, [tabId, selectedProject, config])
 
   // Use ResizeObserver to fit terminal when container dimensions change.
-  // This handles initial layout, window resize, visibility changes, and
-  // sidebar toggles — all cases where the container size may change.
   useEffect(() => {
     if (!containerRef.current || !selectedProject || !config) return
     const container = containerRef.current
@@ -79,7 +102,6 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
       const entry = terminals.get(tabId)
       if (entry) {
         entry.fitAddon.fit()
-        // Spawn PTY on first real fit (container has non-zero size)
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           spawnedRef.current = true
           window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows)
@@ -143,6 +165,13 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
 export function disposeTerminal(tabId: string): void {
   const entry = terminals.get(tabId)
   if (entry) {
+    // Save scrollback before disposing
+    try {
+      const data = entry.serializeAddon.serialize()
+      window.api.scrollbackSaveSync(tabId, data)
+    } catch {
+      // Terminal may already be in bad state
+    }
     entry.term.dispose()
     terminals.delete(tabId)
     window.api.ptyKill(tabId)
