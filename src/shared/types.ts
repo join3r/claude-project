@@ -14,6 +14,7 @@ export interface Tab {
   type: TabType
   title: string
   url?: string
+  sessionId?: string
 }
 
 export interface Task {

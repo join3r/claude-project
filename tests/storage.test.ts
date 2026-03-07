@@ -50,4 +50,22 @@ describe('Storage', () => {
     expect(loaded.projects).toHaveLength(1)
     expect(loaded.projects[0].name).toBe('Test')
   })
+
+  it('preserves sessionId on tabs', () => {
+    const projects = {
+      projects: [{
+        id: '1', name: 'Test', directory: '/tmp', tasks: [{
+          id: 't1', name: 'Task', splitOpen: false, splitRatio: 0.5,
+          activeTab: { left: 'tab1', right: null },
+          tabs: {
+            left: [{ id: 'tab1', type: 'claude' as const, title: 'Claude Code', sessionId: 'sess-abc-123' }],
+            right: []
+          }
+        }]
+      }]
+    }
+    storage.saveProjects(projects)
+    const loaded = storage.loadProjects()
+    expect(loaded.projects[0].tasks[0].tabs.left[0].sessionId).toBe('sess-abc-123')
+  })
 })
