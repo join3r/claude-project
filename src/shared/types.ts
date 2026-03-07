@@ -34,6 +34,7 @@ export interface AppConfig {
   fontFamily: string
   fontSize: number
   theme: 'system' | 'dark' | 'light'
+  terminalTheme: 'system' | 'dark' | 'light'
   defaultShell: string
 }
 
@@ -41,5 +42,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   fontFamily: 'monospace',
   fontSize: 14,
   theme: 'system',
+  terminalTheme: 'system',
   defaultShell: process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh'
 }

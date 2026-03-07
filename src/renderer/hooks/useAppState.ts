@@ -176,6 +176,7 @@ export function useAppState() {
   const selectedTask = selectedProject?.tasks.find((t) => t.id === selectedTaskId) ?? null
 
   const effectiveTheme = config?.theme === 'system' || !config ? theme : config.theme
+  const effectiveTerminalTheme = config?.terminalTheme === 'system' || !config ? theme : config.terminalTheme
 
   return {
     projects,
@@ -185,6 +186,7 @@ export function useAppState() {
     selectedProjectId,
     selectedTaskId,
     effectiveTheme,
+    effectiveTerminalTheme,
     setSelectedProjectId,
     setSelectedTaskId,
     addProject,

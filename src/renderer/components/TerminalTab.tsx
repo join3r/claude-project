@@ -24,7 +24,7 @@ function ensurePtyListener(): void {
 
 export default function TerminalTab({ tabId, visible }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { selectedProject, config } = useApp()
+  const { selectedProject, config, effectiveTerminalTheme } = useApp()
   const initializedRef = useRef(false)
 
   useEffect(() => {
@@ -32,14 +32,14 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
     if (initializedRef.current) return
     initializedRef.current = true
 
+    const termTheme = effectiveTerminalTheme === 'light'
+      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000' }
+      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff' }
+
     const term = new Terminal({
       fontFamily: config.fontFamily,
       fontSize: config.fontSize,
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#cccccc',
-        cursor: '#ffffff'
-      },
+      theme: termTheme,
       allowProposedApi: true,
       cursorBlink: true
     })
@@ -105,6 +105,16 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
       entry.fitAddon.fit()
     }
   }, [config?.fontFamily, config?.fontSize, tabId])
+
+  // Update terminal theme when it changes
+  useEffect(() => {
+    const entry = terminals.get(tabId)
+    if (entry) {
+      entry.term.options.theme = effectiveTerminalTheme === 'light'
+        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000' }
+        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff' }
+    }
+  }, [effectiveTerminalTheme, tabId])
 
   // Listen for tab removal to dispose
   useEffect(() => {

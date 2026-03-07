@@ -55,6 +55,19 @@ export default function Settings({ onClose }: Props): React.ReactElement {
           </div>
 
           <div className="settings-group">
+            <label className="settings-label">Terminal Theme</label>
+            <select
+              className="settings-input"
+              value={config.terminalTheme}
+              onChange={(e) => updateConfig({ terminalTheme: e.target.value as 'system' | 'dark' | 'light' })}
+            >
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </div>
+
+          <div className="settings-group">
             <label className="settings-label">Default Shell</label>
             <input
               className="settings-input"

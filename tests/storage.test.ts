@@ -28,7 +28,7 @@ describe('Storage', () => {
   })
 
   it('saves and loads config', () => {
-    storage.saveConfig({ fontFamily: 'MesloLGS NF', fontSize: 16, theme: 'dark', defaultShell: '/bin/bash' })
+    storage.saveConfig({ fontFamily: 'MesloLGS NF', fontSize: 16, theme: 'dark', terminalTheme: 'dark', defaultShell: '/bin/bash' })
     const config = storage.loadConfig()
     expect(config.fontFamily).toBe('MesloLGS NF')
     expect(config.fontSize).toBe(16)
