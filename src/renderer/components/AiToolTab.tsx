@@ -20,11 +20,14 @@ const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon }>()
 let ptyListenerRegistered = false
 let exitListenerRegistered = false
 
+const activityCallbacks = new Map<string, () => void>()
+
 function ensurePtyListener(): void {
   if (ptyListenerRegistered) return
   ptyListenerRegistered = true
   window.api.onPtyData((id: string, data: string) => {
     terminals.get(id)?.term.write(data)
+    activityCallbacks.get(id)?.()
   })
 }
 
@@ -44,6 +47,10 @@ export default function AiToolTab({ tabId, toolType, visible }: Props): React.Re
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
+  const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressUntilRef = useRef(0)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
 
   useEffect(() => {
     if (!containerRef.current || !selectedProject || !config) return
@@ -83,6 +90,25 @@ export default function AiToolTab({ tabId, toolType, visible }: Props): React.Re
       window.api.ptyResize(tabId, cols, rows)
     })
 
+    // Track pty output activity (not input echo) via activityCallbacks
+    activityCallbacks.set(tabId, () => {
+      if (Date.now() < suppressUntilRef.current) return
+      const current = statusStore.getStatus(tabId)
+      if (current === 'exited') return
+      if (current !== 'attention') {
+        statusStore.setStatus(tabId, 'working')
+      }
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+      activityTimerRef.current = setTimeout(() => {
+        const latest = statusStore.getStatus(tabId)
+        if (latest === 'working') {
+          // If tab not visible, tool probably needs attention (finished work)
+          // If tab visible, user can see it — just clear to idle
+          statusStore.setStatus(tabId, visibleRef.current ? null : 'attention')
+        }
+      }, 3000)
+    })
+
     // Bell = needs attention
     term.onBell(() => {
       statusStore.setStatus(tabId, 'attention')
@@ -90,6 +116,7 @@ export default function AiToolTab({ tabId, toolType, visible }: Props): React.Re
 
     // Exit callback
     exitCallbacks.set(tabId, () => {
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
       statusStore.setStatus(tabId, 'exited')
     })
 
@@ -102,6 +129,7 @@ export default function AiToolTab({ tabId, toolType, visible }: Props): React.Re
     if (!containerRef.current || !selectedProject || !config) return
     const container = containerRef.current
     const ro = new ResizeObserver(() => {
+      if (container.clientWidth === 0 || container.clientHeight === 0) return
       const entry = terminals.get(tabId)
       if (entry) {
         entry.fitAddon.fit()
@@ -109,7 +137,6 @@ export default function AiToolTab({ tabId, toolType, visible }: Props): React.Re
           spawnedRef.current = true
           const command = AI_TAB_META[toolType].command
           window.api.ptySpawn(tabId, command, selectedProject.directory, entry.term.cols, entry.term.rows)
-          statusStore.setStatus(tabId, 'working')
         }
       }
     })
@@ -117,15 +144,18 @@ export default function AiToolTab({ tabId, toolType, visible }: Props): React.Re
     return () => ro.disconnect()
   }, [tabId, toolType, selectedProject, config])
 
-  // Focus on visibility change + clear attention
+  // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
     if (visible) {
+      // Suppress activity tracking briefly to ignore resize-triggered output
+      suppressUntilRef.current = Date.now() + 500
       const entry = terminals.get(tabId)
       if (entry) {
+        entry.fitAddon.fit()
         entry.term.focus()
         const current = statusStore.getStatus(tabId)
         if (current === 'attention') {
-          statusStore.setStatus(tabId, 'working')
+          statusStore.setStatus(tabId, null)
         }
       }
     }
@@ -164,6 +194,7 @@ export default function AiToolTab({ tabId, toolType, visible }: Props): React.Re
           window.api.ptyKill(tabId)
         }
         exitCallbacks.delete(tabId)
+        activityCallbacks.delete(tabId)
         statusStore.removeTab(tabId)
       }
     }

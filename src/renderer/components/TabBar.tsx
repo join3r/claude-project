@@ -15,8 +15,8 @@ function tabIcon(type: TabType): string {
   if (type === 'terminal') return '>'
   if (type === 'browser') return '\u25C9'
   if (type === 'claude') return '\u2726'
-  if (type === 'codex') return '\u2B22'
-  if (type === 'opencode') return '\u25C8'
+  if (type === 'codex') return '\u25EB'
+  if (type === 'opencode') return '\u25C7'
   return '>'
 }
 
@@ -72,12 +72,12 @@ export default function TabBar({ tabs, activeTabId, pane }: Props): React.ReactE
         )}
         {config?.enableCodex && (
           <button className="tab-add-btn" onClick={() => handleAdd('codex')} title="New Codex">
-            &#11042;
+            &#9707;
           </button>
         )}
         {config?.enableOpencode && (
           <button className="tab-add-btn" onClick={() => handleAdd('opencode')} title="New OpenCode">
-            &#9672;
+            &#9671;
           </button>
         )}
       </div>

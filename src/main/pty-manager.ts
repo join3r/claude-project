@@ -27,7 +27,11 @@ export class PtyManager {
   }
 
   resize(id: string, cols: number, rows: number): void {
-    this.instances.get(id)?.process.resize(cols, rows)
+    try {
+      this.instances.get(id)?.process.resize(cols, rows)
+    } catch {
+      // Process already exited, fd is closed — ignore
+    }
   }
 
   onData(id: string, callback: (data: string) => void): void {

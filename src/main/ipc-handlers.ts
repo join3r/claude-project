@@ -37,10 +37,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('pty-spawn', (_e, id: string, shell: string, cwd: string, cols: number, rows: number) => {
     ptyManager.spawn(id, shell, cwd, cols, rows)
     ptyManager.onData(id, (data) => {
-      mainWindow.webContents.send('pty-data', id, data)
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('pty-data', id, data)
     })
     ptyManager.onExit(id, (exitCode) => {
-      mainWindow.webContents.send('pty-exit', id, exitCode)
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('pty-exit', id, exitCode)
     })
   })
 
