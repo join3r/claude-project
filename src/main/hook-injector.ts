@@ -17,13 +17,19 @@ export class HookInjector {
     this.port = port
   }
 
+  /** Identify devtool hooks by marker OR by URL pattern (marker may be stripped by Claude) */
+  private isDevtoolHook(h: HookEntry): boolean {
+    if ((h as Record<string, unknown>)[DEVTOOL_HOOK_MARKER]) return true
+    return h.hooks.some((hook) => /localhost:\d+\/hook\//.test(hook.command))
+  }
+
   private buildHooks(): Record<string, HookEntry[]> {
     const base = `http://localhost:${this.port}`
     const mkHook = (endpoint: string): HookEntry => ({
       matcher: '*',
       hooks: [{
         type: 'command',
-        command: `curl -s -X POST ${base}/hook/${endpoint} -H "X-Tab-Id: $DEVTOOL_TAB_ID" -d @-`
+        command: `curl -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "X-Tab-Id: $DEVTOOL_TAB_ID" -d @- 2>/dev/null; printf Success`
       }],
       [DEVTOOL_HOOK_MARKER]: true
     })
@@ -65,7 +71,7 @@ export class HookInjector {
     for (const [event, entries] of Object.entries(devtoolHooks)) {
       // Remove any previously injected devtool hooks on this event
       const userHooks = (mergedHooks[event] ?? []).filter(
-        (h) => !(h as Record<string, unknown>)[DEVTOOL_HOOK_MARKER]
+        (h) => !this.isDevtoolHook(h)
       )
       mergedHooks[event] = [...userHooks, ...entries]
     }
@@ -93,7 +99,7 @@ export class HookInjector {
 
       for (const event of Object.keys(hooks)) {
         hooks[event] = hooks[event].filter(
-          (h) => !(h as Record<string, unknown>)[DEVTOOL_HOOK_MARKER]
+          (h) => !this.isDevtoolHook(h)
         )
         if (hooks[event].length === 0) {
           delete hooks[event]

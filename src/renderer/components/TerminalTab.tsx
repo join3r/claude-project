@@ -77,11 +77,6 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
 
     terminals.set(tabId, { term, fitAddon, serializeAddon })
 
-    // Restore scrollback
-    window.api.scrollbackLoad(tabId).then((data) => {
-      if (data) term.write(data)
-    })
-
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
     })
@@ -104,6 +99,10 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
         entry.fitAddon.fit()
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           spawnedRef.current = true
+          // Restore scrollback after first fit (correct terminal dimensions)
+          window.api.scrollbackLoad(tabId).then((data) => {
+            if (data) entry.term.write(data)
+          })
           window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows)
         }
       }

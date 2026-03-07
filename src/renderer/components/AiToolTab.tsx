@@ -136,11 +136,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
     terminals.set(tabId, { term, fitAddon, serializeAddon })
 
-    // Restore scrollback
-    window.api.scrollbackLoad(tabId).then((data) => {
-      if (data) term.write(data)
-    })
-
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
     })
@@ -179,8 +174,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         }
       })
 
-      // Inject hooks before spawning
-      window.api.hooksInject(projectDir)
       ensureHookListeners()
     } else {
       // Non-Claude AI tabs: keep PTY output heuristic
@@ -227,12 +220,25 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         entry.fitAddon.fit()
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           spawnedRef.current = true
-          const command = AI_TAB_META[toolType].command
-          // Use args array for --resume, not a single string
-          const args = sessionId ? ['--resume', sessionId] : []
-          // For Claude tabs, pass DEVTOOL_TAB_ID env var
-          const extraEnv = isClaudeTab ? { DEVTOOL_TAB_ID: tabId } : undefined
-          window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+
+          const startSession = async (): Promise<void> => {
+            // Restore scrollback only for non-resume tabs (resume re-outputs content)
+            if (!sessionId) {
+              const data = await window.api.scrollbackLoad(tabId)
+              if (data) entry.term.write(data)
+            }
+
+            // Ensure hooks are injected before spawning Claude
+            if (isClaudeTab) {
+              await window.api.hooksInject(projectDir)
+            }
+
+            const command = AI_TAB_META[toolType].command
+            const args = sessionId ? ['--resume', sessionId] : []
+            const extraEnv = isClaudeTab ? { DEVTOOL_TAB_ID: tabId } : undefined
+            window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+          }
+          startSession()
         }
       }
     })

@@ -121,6 +121,28 @@ describe('HookInjector', () => {
     fs.rmSync(dir2, { recursive: true })
   })
 
+  it('cleanup removes stale hooks where marker was stripped (identified by URL pattern)', () => {
+    fs.mkdirSync(claudeDir, { recursive: true })
+    // Simulate stale hooks from previous session (marker stripped by Claude Code)
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      hooks: {
+        SessionStart: [{
+          matcher: '*',
+          hooks: [{ type: 'command', command: 'curl -s -X POST http://localhost:9999/hook/session-start -H "X-Tab-Id: $DEVTOOL_TAB_ID" -d @-' }]
+        }],
+        PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'echo user-hook' }] }]
+      }
+    }))
+    const injector = new HookInjector(3456)
+    injector.inject(testDir)
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    // Old stale hook (port 9999) should be replaced, not duplicated
+    expect(settings.hooks.SessionStart).toHaveLength(1)
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('localhost:3456')
+    // User hooks preserved
+    expect(settings.hooks.PreToolUse).toHaveLength(1)
+  })
+
   it('ref-counts inject/cleanup per directory', () => {
     const injector = new HookInjector(3456)
     injector.inject(testDir)
