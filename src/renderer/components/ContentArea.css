@@ -40,6 +40,14 @@
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative;
+}
+
+.pane-drag-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  cursor: col-resize;
 }
 
 .pane {
@@ -58,11 +66,13 @@
 
 .pane-divider {
   width: 3px;
+  flex-shrink: 0;
   background: var(--border);
   cursor: col-resize;
 }
 
-.pane-divider:hover {
+.pane-divider:hover,
+.pane-divider:active {
   background: var(--accent);
 }
 

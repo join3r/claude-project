@@ -50,7 +50,8 @@ export function useAppState() {
       name,
       tabs: { left: [], right: [] },
       activeTab: { left: null, right: null },
-      splitOpen: false
+      splitOpen: false,
+      splitRatio: 0.5
     }
     persistProjects(
       projects.map((p) =>
@@ -164,6 +165,21 @@ export function useAppState() {
     )
   }, [projects, persistProjects])
 
+  const setSplitRatio = useCallback((projectId: string, taskId: string, ratio: number) => {
+    persistProjects(
+      projects.map((p) =>
+        p.id === projectId
+          ? {
+              ...p,
+              tasks: p.tasks.map((t) =>
+                t.id === taskId ? { ...t, splitRatio: ratio } : t
+              )
+            }
+          : p
+      )
+    )
+  }, [projects, persistProjects])
+
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
     if (!config) return
     const newConfig = { ...config, ...updates }
@@ -199,6 +215,7 @@ export function useAppState() {
     removeTab,
     setActiveTab,
     toggleSplit,
+    setSplitRatio,
     updateConfig
   }
 }

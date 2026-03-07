@@ -8,11 +8,12 @@ interface Props {
   tabs: Tab[]
   activeTabId: string | null
   pane: 'left' | 'right'
+  style?: React.CSSProperties
 }
 
-export default function Pane({ tabs, activeTabId, pane }: Props): React.ReactElement {
+export default function Pane({ tabs, activeTabId, pane, style }: Props): React.ReactElement {
   return (
-    <div className="pane">
+    <div className="pane" style={style}>
       <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} />
       <div className="pane-content">
         {tabs.length === 0 && (

@@ -17,6 +17,7 @@ export interface Task {
     right: string | null
   }
   splitOpen: boolean
+  splitRatio: number
 }
 
 export interface Project {
