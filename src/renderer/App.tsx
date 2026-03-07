@@ -1,5 +1,6 @@
 import React from 'react'
 import { AppProvider, useApp } from './context/AppContext'
+import { TabStatusProvider } from './context/TabStatusContext'
 import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
 
@@ -16,7 +17,9 @@ function AppInner(): React.ReactElement {
 export default function App(): React.ReactElement {
   return (
     <AppProvider>
-      <AppInner />
+      <TabStatusProvider>
+        <AppInner />
+      </TabStatusProvider>
     </AppProvider>
   )
 }
