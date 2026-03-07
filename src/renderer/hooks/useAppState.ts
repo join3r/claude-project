@@ -134,6 +134,7 @@ export function useAppState() {
       )
     )
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+    window.api.scrollbackDelete(tabId)
   }, [projects, persistProjects])
 
   const updateTabSessionId = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, sessionId: string) => {
