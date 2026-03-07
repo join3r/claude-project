@@ -13,6 +13,15 @@ interface Props {
 
 const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon }>()
 
+let ptyListenerRegistered = false
+function ensurePtyListener(): void {
+  if (ptyListenerRegistered) return
+  ptyListenerRegistered = true
+  window.api.onPtyData((id: string, data: string) => {
+    terminals.get(id)?.term.write(data)
+  })
+}
+
 export default function TerminalTab({ tabId, visible }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const { selectedProject, config } = useApp()
@@ -63,12 +72,7 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
       window.api.ptyResize(tabId, cols, rows)
     })
 
-    // Listen for pty data
-    window.api.onPtyData((id: string, data: string) => {
-      if (id === tabId) {
-        terminals.get(tabId)?.term.write(data)
-      }
-    })
+    ensurePtyListener()
   }, [tabId, selectedProject, config])
 
   // Fit on visibility change

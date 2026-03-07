@@ -5,6 +5,12 @@
   overflow: hidden;
 }
 
+.content-task {
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .content-toolbar {
   display: flex;
   justify-content: flex-end;
