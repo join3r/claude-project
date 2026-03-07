@@ -1,7 +1,28 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
+import { useAllTabStatuses, type TabStatusValue } from '../context/TabStatusContext'
+import { AI_TAB_TYPES } from '../../shared/types'
+import type { Tab, Task } from '../../shared/types'
 import Settings from './Settings'
 import './Sidebar.css'
+
+function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
+  const aiTabIds = [...task.tabs.left, ...task.tabs.right]
+    .filter((t) => (AI_TAB_TYPES as readonly string[]).includes(t.type))
+    .map((t) => t.id)
+  if (aiTabIds.length === 0) return null
+  const statuses = aiTabIds.map((id) => allStatuses[id]).filter(Boolean)
+  if (statuses.includes('attention')) return 'attention'
+  if (statuses.includes('working')) return 'working'
+  if (statuses.includes('exited')) return 'exited'
+  return null
+}
+
+function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<string, TabStatusValue> }): React.ReactElement | null {
+  const status = getTaskStatus(task, allStatuses)
+  if (!status) return null
+  return <span className={`sidebar-status sidebar-status-${status}`} />
+}
 
 export default function Sidebar(): React.ReactElement {
   const {
@@ -10,6 +31,7 @@ export default function Sidebar(): React.ReactElement {
     addProject, removeProject, renameProject,
     addTask, removeTask, renameTask
   } = useApp()
+  const allStatuses = useAllTabStatuses()
 
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
@@ -118,7 +140,10 @@ export default function Sidebar(): React.ReactElement {
                         }}
                       />
                     ) : (
-                      <span className="sidebar-label">{task.name}</span>
+                      <>
+                        <TaskStatusDot task={task} allStatuses={allStatuses} />
+                        <span className="sidebar-label">{task.name}</span>
+                      </>
                     )}
                   </div>
                 ))}
