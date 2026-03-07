@@ -1,0 +1,9 @@
+.terminal-tab {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+}
+
+.terminal-tab .xterm {
+  height: 100%;
+}
