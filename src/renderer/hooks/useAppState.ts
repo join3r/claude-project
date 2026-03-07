@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
-import type { Project, Task, Tab, AppConfig } from '../../shared/types'
+import { AI_TAB_META, AI_TAB_TYPES } from '../../shared/types'
+import type { Project, Task, Tab, AppConfig, TabType, AiTabType } from '../../shared/types'
 
 export function useAppState() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -84,8 +85,10 @@ export function useAppState() {
   }, [projects, persistProjects])
 
   // Tab management
-  const addTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', type: 'terminal' | 'browser') => {
-    const tab: Tab = { id: uuid(), type, title: type === 'terminal' ? 'Terminal' : 'Browser' }
+  const addTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', type: TabType) => {
+    const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
+    const title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
+    const tab: Tab = { id: uuid(), type, title }
     persistProjects(
       projects.map((p) =>
         p.id === projectId

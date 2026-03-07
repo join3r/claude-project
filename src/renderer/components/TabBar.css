@@ -89,3 +89,29 @@
   background: var(--hover);
   color: var(--text-primary);
 }
+
+.tab-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tab-status-working {
+  background: var(--text-secondary);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.tab-status-attention {
+  background: #f59e0b;
+  box-shadow: 0 0 4px #f59e0b80;
+}
+
+.tab-status-exited {
+  background: #6b7280;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
