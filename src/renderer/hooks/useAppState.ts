@@ -40,21 +40,46 @@ export function useAppState() {
     window.api.saveProjects({ projects: updated })
   }, [])
 
+  const updateConfig = useCallback((updates: Partial<AppConfig>) => {
+    if (!config) return
+    const newConfig = { ...config, ...updates }
+    setConfig(newConfig)
+    window.api.saveConfig(newConfig)
+  }, [config])
+
+  const selectProject = useCallback((id: string | null) => {
+    setSelectedProjectId(id)
+    if (config) {
+      const newConfig = { ...config, lastProjectId: id, lastTaskId: null }
+      setConfig(newConfig)
+      window.api.saveConfig(newConfig)
+    }
+  }, [config])
+
+  const selectTask = useCallback((id: string | null) => {
+    setSelectedTaskId(id)
+    if (config) {
+      const newConfig = { ...config, lastTaskId: id }
+      setConfig(newConfig)
+      window.api.saveConfig(newConfig)
+    }
+  }, [config])
+
   // Project CRUD
   const addProject = useCallback((name: string, directory: string) => {
     const project: Project = { id: uuid(), name, directory, tasks: [] }
     persistProjects([...projects, project])
-    setSelectedProjectId(project.id)
+    selectProject(project.id)
     return project
-  }, [projects, persistProjects])
+  }, [projects, persistProjects, selectProject])
 
   const removeProject = useCallback((id: string) => {
     persistProjects(projects.filter((p) => p.id !== id))
     if (selectedProjectId === id) {
-      setSelectedProjectId(null)
-      setSelectedTaskId(null)
+      selectProject(null)
+      selectTask(null)
     }
-  }, [projects, selectedProjectId, persistProjects])
+  }, [projects, selectedProjectId, persistProjects, selectProject, selectTask])
 
   const renameProject = useCallback((id: string, name: string) => {
     persistProjects(projects.map((p) => (p.id === id ? { ...p, name } : p)))
@@ -75,9 +100,9 @@ export function useAppState() {
         p.id === projectId ? { ...p, tasks: [...p.tasks, task] } : p
       )
     )
-    setSelectedTaskId(task.id)
+    selectTask(task.id)
     return task
-  }, [projects, persistProjects])
+  }, [projects, persistProjects, selectTask])
 
   const removeTask = useCallback((projectId: string, taskId: string) => {
     persistProjects(
@@ -87,8 +112,8 @@ export function useAppState() {
           : p
       )
     )
-    if (selectedTaskId === taskId) setSelectedTaskId(null)
-  }, [projects, selectedTaskId, persistProjects])
+    if (selectedTaskId === taskId) selectTask(null)
+  }, [projects, selectedTaskId, persistProjects, selectTask])
 
   const renameTask = useCallback((projectId: string, taskId: string, name: string) => {
     persistProjects(
@@ -224,31 +249,6 @@ export function useAppState() {
       )
     )
   }, [projects, persistProjects])
-
-  const updateConfig = useCallback((updates: Partial<AppConfig>) => {
-    if (!config) return
-    const newConfig = { ...config, ...updates }
-    setConfig(newConfig)
-    window.api.saveConfig(newConfig)
-  }, [config])
-
-  const selectProject = useCallback((id: string | null) => {
-    setSelectedProjectId(id)
-    if (config) {
-      const newConfig = { ...config, lastProjectId: id }
-      setConfig(newConfig)
-      window.api.saveConfig(newConfig)
-    }
-  }, [config])
-
-  const selectTask = useCallback((id: string | null) => {
-    setSelectedTaskId(id)
-    if (config) {
-      const newConfig = { ...config, lastTaskId: id }
-      setConfig(newConfig)
-      window.api.saveConfig(newConfig)
-    }
-  }, [config])
 
   // Derived state
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
