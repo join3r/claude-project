@@ -52,6 +52,8 @@ export interface AppConfig {
   enableClaude: boolean
   enableCodex: boolean
   enableOpencode: boolean
+  lastProjectId: string | null
+  lastTaskId: string | null
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -62,5 +64,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   defaultShell: typeof process !== 'undefined' && process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh',
   enableClaude: false,
   enableCodex: false,
-  enableOpencode: false
+  enableOpencode: false,
+  lastProjectId: null,
+  lastTaskId: null
 }
