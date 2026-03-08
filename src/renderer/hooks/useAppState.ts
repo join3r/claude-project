@@ -12,8 +12,24 @@ export function useAppState() {
 
   // Load initial data
   useEffect(() => {
-    window.api.loadProjects().then((data) => setProjects(data.projects))
-    window.api.loadConfig().then(setConfig)
+    Promise.all([
+      window.api.loadProjects(),
+      window.api.loadConfig()
+    ]).then(([projectsData, loadedConfig]) => {
+      setProjects(projectsData.projects)
+      setConfig(loadedConfig)
+
+      if (loadedConfig.lastProjectId) {
+        const project = projectsData.projects.find((p) => p.id === loadedConfig.lastProjectId)
+        if (project) {
+          setSelectedProjectId(loadedConfig.lastProjectId)
+          if (loadedConfig.lastTaskId) {
+            const task = project.tasks.find((t) => t.id === loadedConfig.lastTaskId)
+            if (task) setSelectedTaskId(loadedConfig.lastTaskId)
+          }
+        }
+      }
+    })
     window.api.getNativeTheme().then(setTheme)
     window.api.onThemeChanged(setTheme)
   }, [])
@@ -216,6 +232,24 @@ export function useAppState() {
     window.api.saveConfig(newConfig)
   }, [config])
 
+  const selectProject = useCallback((id: string | null) => {
+    setSelectedProjectId(id)
+    if (config) {
+      const newConfig = { ...config, lastProjectId: id }
+      setConfig(newConfig)
+      window.api.saveConfig(newConfig)
+    }
+  }, [config])
+
+  const selectTask = useCallback((id: string | null) => {
+    setSelectedTaskId(id)
+    if (config) {
+      const newConfig = { ...config, lastTaskId: id }
+      setConfig(newConfig)
+      window.api.saveConfig(newConfig)
+    }
+  }, [config])
+
   // Derived state
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
   const selectedTask = selectedProject?.tasks.find((t) => t.id === selectedTaskId) ?? null
@@ -232,8 +266,8 @@ export function useAppState() {
     selectedTaskId,
     effectiveTheme,
     effectiveTerminalTheme,
-    setSelectedProjectId,
-    setSelectedTaskId,
+    setSelectedProjectId: selectProject,
+    setSelectedTaskId: selectTask,
     addProject,
     removeProject,
     renameProject,
