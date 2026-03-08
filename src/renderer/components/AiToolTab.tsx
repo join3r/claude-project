@@ -110,15 +110,15 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     initializedRef.current = true
 
     const termTheme = effectiveTerminalTheme === 'light'
-      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000' }
-      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff' }
+      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
+      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
 
     const term = new Terminal({
       fontFamily: config.fontFamily,
       fontSize: config.fontSize,
       theme: termTheme,
       allowProposedApi: true,
-      cursorBlink: true
+      cursorBlink: true,
     })
 
     const fitAddon = new FitAddon()
@@ -142,6 +142,14 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
     term.onResize(({ cols, rows }) => {
       window.api.ptyResize(tabId, cols, rows)
+    })
+
+    // Show scrollbar only while scrolling
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null
+    term.onScroll(() => {
+      containerRef.current?.classList.add('is-scrolling')
+      if (scrollTimer) clearTimeout(scrollTimer)
+      scrollTimer = setTimeout(() => containerRef.current?.classList.remove('is-scrolling'), 800)
     })
 
     if (isClaudeTab) {
@@ -225,7 +233,16 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             // Restore scrollback only for non-resume tabs (resume re-outputs content)
             if (!sessionId) {
               const data = await window.api.scrollbackLoad(tabId)
-              if (data) entry.term.write(data)
+              if (data) {
+                await new Promise<void>(resolve => {
+                  entry.term.write(data, () => {
+                    // After xterm processes scrollback, re-sync viewport dimensions
+                    entry.fitAddon.fit()
+                    entry.term.scrollToBottom()
+                    resolve()
+                  })
+                })
+              }
             }
 
             // Ensure hooks are injected before spawning Claude
@@ -280,8 +297,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     const entry = terminals.get(tabId)
     if (entry) {
       entry.term.options.theme = effectiveTerminalTheme === 'light'
-        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000' }
-        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff' }
+        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
+        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
     }
   }, [effectiveTerminalTheme, tabId])
 

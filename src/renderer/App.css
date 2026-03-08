@@ -4,6 +4,25 @@
   box-sizing: border-box;
 }
 
+/* Thin scrollbars, visible only while scrolling */
+*::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.theme-light *::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
 html, body, #root {
   height: 100%;
   width: 100%;

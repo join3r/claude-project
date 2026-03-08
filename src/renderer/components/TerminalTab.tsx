@@ -51,15 +51,15 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
     initializedRef.current = true
 
     const termTheme = effectiveTerminalTheme === 'light'
-      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000' }
-      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff' }
+      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
+      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
 
     const term = new Terminal({
       fontFamily: config.fontFamily,
       fontSize: config.fontSize,
       theme: termTheme,
       allowProposedApi: true,
-      cursorBlink: true
+      cursorBlink: true,
     })
 
     const fitAddon = new FitAddon()
@@ -85,6 +85,14 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
       window.api.ptyResize(tabId, cols, rows)
     })
 
+    // Show scrollbar only while scrolling
+    let scrollTimer: ReturnType<typeof setTimeout> | null = null
+    term.onScroll(() => {
+      containerRef.current?.classList.add('is-scrolling')
+      if (scrollTimer) clearTimeout(scrollTimer)
+      scrollTimer = setTimeout(() => containerRef.current?.classList.remove('is-scrolling'), 800)
+    })
+
     ensurePtyListener()
     ensureBeforeUnloadHandler()
   }, [tabId, selectedProject, config])
@@ -101,7 +109,13 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
           spawnedRef.current = true
           // Restore scrollback after first fit (correct terminal dimensions)
           window.api.scrollbackLoad(tabId).then((data) => {
-            if (data) entry.term.write(data)
+            if (data) {
+              entry.term.write(data, () => {
+                // After xterm processes scrollback, re-sync viewport dimensions
+                entry.fitAddon.fit()
+                entry.term.scrollToBottom()
+              })
+            }
           })
           window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows)
         }
@@ -137,8 +151,8 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
     const entry = terminals.get(tabId)
     if (entry) {
       entry.term.options.theme = effectiveTerminalTheme === 'light'
-        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000' }
-        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff' }
+        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
+        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
     }
   }, [effectiveTerminalTheme, tabId])
 
