@@ -51,6 +51,17 @@ describe('Storage', () => {
     expect(loaded.projects[0].name).toBe('Test')
   })
 
+  it('saves and loads lastProjectId and lastTaskId', () => {
+    const config = storage.loadConfig()
+    expect(config.lastProjectId).toBeNull()
+    expect(config.lastTaskId).toBeNull()
+
+    storage.saveConfig({ ...config, lastProjectId: 'proj-1', lastTaskId: 'task-1' })
+    const loaded = storage.loadConfig()
+    expect(loaded.lastProjectId).toBe('proj-1')
+    expect(loaded.lastTaskId).toBe('task-1')
+  })
+
   it('preserves sessionId on tabs', () => {
     const projects = {
       projects: [{
