@@ -262,3 +262,65 @@ describe('SshConnectionManager connect/disconnect', () => {
     expect(manager.getStatus('proj-2')).toBe('disconnected')
   })
 })
+
+describe('SshConnectionManager health checks', () => {
+  let manager: SshConnectionManager
+  let socketDir: string
+
+  beforeEach(() => {
+    socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-test-'))
+    manager = new SshConnectionManager(socketDir, 9999)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    manager.stopHealthChecks()
+    manager.disconnectAll()
+    fs.rmSync(socketDir, { recursive: true })
+    vi.useRealTimers()
+  })
+
+  it('startHealthChecks calls checkConnection periodically', async () => {
+    const config = { host: 'h', port: 22, username: 'u', remoteDir: '/d' }
+    manager.setStatus('proj-1', 'connected')
+
+    const checkSpy = vi.spyOn(manager, 'checkConnection').mockResolvedValue(true)
+    manager.startHealthChecks('proj-1', config, 10000)
+
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(checkSpy).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(checkSpy).toHaveBeenCalledTimes(2)
+
+    checkSpy.mockRestore()
+  })
+
+  it('sets disconnected when health check fails', async () => {
+    const config = { host: 'h', port: 22, username: 'u', remoteDir: '/d' }
+    manager.setStatus('proj-1', 'connected')
+
+    const checkSpy = vi.spyOn(manager, 'checkConnection').mockResolvedValue(false)
+    const handler = vi.fn()
+    manager.on('status-changed', handler)
+
+    manager.startHealthChecks('proj-1', config, 10000)
+    await vi.advanceTimersByTimeAsync(10000)
+
+    expect(manager.getStatus('proj-1')).toBe('disconnected')
+    checkSpy.mockRestore()
+  })
+
+  it('stopHealthChecks stops the timer', async () => {
+    const config = { host: 'h', port: 22, username: 'u', remoteDir: '/d' }
+    manager.setStatus('proj-1', 'connected')
+
+    const checkSpy = vi.spyOn(manager, 'checkConnection').mockResolvedValue(true)
+    manager.startHealthChecks('proj-1', config, 10000)
+    manager.stopHealthChecks()
+
+    await vi.advanceTimersByTimeAsync(20000)
+    expect(checkSpy).not.toHaveBeenCalled()
+    checkSpy.mockRestore()
+  })
+})

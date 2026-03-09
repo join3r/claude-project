@@ -212,8 +212,37 @@ export class SshConnectionManager extends EventEmitter {
     }
   }
 
-  // Stub — filled in by Task 4
-  stopHealthChecks(): void { /* implemented in Task 4 */ }
+  private healthCheckTimers = new Map<string, ReturnType<typeof setInterval>>()
+
+  startHealthChecks(projectId: string, config: SshConfig, intervalMs = 10000): void {
+    this.stopHealthCheck(projectId)
+    const timer = setInterval(async () => {
+      if (this.getStatus(projectId) !== 'connected') {
+        this.stopHealthCheck(projectId)
+        return
+      }
+      const ok = await this.checkConnection(projectId, config)
+      if (!ok) {
+        this.setStatus(projectId, 'disconnected')
+        this.stopHealthCheck(projectId)
+      }
+    }, intervalMs)
+    this.healthCheckTimers.set(projectId, timer)
+  }
+
+  private stopHealthCheck(projectId: string): void {
+    const timer = this.healthCheckTimers.get(projectId)
+    if (timer) {
+      clearInterval(timer)
+      this.healthCheckTimers.delete(projectId)
+    }
+  }
+
+  stopHealthChecks(): void {
+    for (const projectId of [...this.healthCheckTimers.keys()]) {
+      this.stopHealthCheck(projectId)
+    }
+  }
 
   async disconnectAll(): Promise<void> {
     this.stopHealthChecks()
