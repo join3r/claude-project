@@ -1,5 +1,6 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
+import { isRemoteProject } from '../../shared/types'
 import Pane from './Pane'
 import './ContentArea.css'
 
@@ -7,6 +8,21 @@ export default function ContentArea(): React.ReactElement {
   const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir } = useApp()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const [dragRatio, setDragRatio] = useState<number | null>(null)
+  const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    window.api.onSshStatusChanged((projectId: string, status: string) => {
+      setSshStatuses(prev => ({ ...prev, [projectId]: status }))
+    })
+  }, [])
+
+  useEffect(() => {
+    projects.filter(isRemoteProject).forEach(p => {
+      window.api.sshStatus(p.id).then(status => {
+        setSshStatuses(prev => ({ ...prev, [p.id]: status }))
+      })
+    })
+  }, [projects])
   const isDragging = dragRatio !== null
 
   const hasSelection = selectedProjectId && selectedTaskId
@@ -68,6 +84,24 @@ export default function ContentArea(): React.ReactElement {
               </div>
               <div className="content-panes" ref={isVisible ? panesRef : undefined}>
                 {isDragging && <div className="pane-drag-overlay" />}
+                {isRemoteProject(project) && sshStatuses[project.id] !== 'connected' && (
+                  <div className="content-disconnected-overlay">
+                    <div className="content-disconnected-message">
+                      <span className="content-disconnected-icon">&#9888;</span>
+                      <span>SSH connection lost</span>
+                      <button
+                        className="add-remote-btn add-remote-btn-primary"
+                        onClick={() => {
+                          if (project.ssh) {
+                            window.api.sshConnect(project.id, project.ssh).catch(() => {})
+                          }
+                        }}
+                      >
+                        {sshStatuses[project.id] === 'connecting' ? 'Connecting...' : 'Reconnect'}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <Pane
                   tabs={task.tabs.left}
                   activeTabId={task.activeTab.left}
