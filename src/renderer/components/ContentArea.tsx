@@ -5,7 +5,7 @@ import Pane from './Pane'
 import './ContentArea.css'
 
 export default function ContentArea(): React.ReactElement {
-  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir } = useApp()
+  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab } = useApp()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const [dragRatio, setDragRatio] = useState<number | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
@@ -26,6 +26,32 @@ export default function ContentArea(): React.ReactElement {
   const isDragging = dragRatio !== null
 
   const hasSelection = selectedProjectId && selectedTaskId
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e.metaKey || !selectedProjectId || !selectedTaskId) return
+
+      const digit = e.code.match(/^Digit([1-9])$/)?.[1]
+      if (!digit) return
+
+      const project = projects.find(p => p.id === selectedProjectId)
+      const task = project?.tasks.find(t => t.id === selectedTaskId)
+      if (!task) return
+
+      const index = parseInt(digit, 10) - 1
+      const pane: 'left' | 'right' = e.shiftKey ? 'right' : 'left'
+      const tabs = task.tabs[pane]
+      const tab = tabs[index]
+
+      if (tab) {
+        e.preventDefault()
+        setActiveTab(selectedProjectId, selectedTaskId, pane, tab.id)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [projects, selectedProjectId, selectedTaskId, setActiveTab])
 
   const handleDividerMouseDown = useCallback(
     (projectId: string, taskId: string) => (e: React.MouseEvent) => {
