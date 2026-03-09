@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -47,6 +47,21 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig }: Pr
   const { selectedProject, config, effectiveTerminalTheme } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
+  const [sshReady, setSshReady] = useState(!sshConfig)
+
+  // Poll SSH status until connected (for remote tabs)
+  useEffect(() => {
+    if (!sshConfig) return
+    let cancelled = false
+    const check = () => {
+      window.api.sshStatus(projectId).then(status => {
+        if (!cancelled && status === 'connected') setSshReady(true)
+      })
+    }
+    check()
+    const interval = setInterval(check, 500)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [sshConfig, projectId])
 
   useEffect(() => {
     if (!containerRef.current || !selectedProject || !config) return
@@ -109,6 +124,7 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig }: Pr
       if (entry) {
         entry.fitAddon.fit()
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
+          if (sshConfig && !sshReady) return // wait for SSH connection
           spawnedRef.current = true
           // Restore scrollback after first fit (correct terminal dimensions)
           window.api.scrollbackLoad(tabId).then((data) => {
@@ -130,7 +146,7 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig }: Pr
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, selectedProject, config])
+  }, [tabId, selectedProject, config, sshReady])
 
   // Focus terminal on visibility change
   useEffect(() => {

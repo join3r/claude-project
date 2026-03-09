@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -102,6 +102,21 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const suppressUntilRef = useRef(0)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
+  const [sshReady, setSshReady] = useState(!sshConfig)
+
+  // Poll SSH status until connected (for remote tabs)
+  useEffect(() => {
+    if (!sshConfig) return
+    let cancelled = false
+    const check = () => {
+      window.api.sshStatus(projectId).then(status => {
+        if (!cancelled && status === 'connected') setSshReady(true)
+      })
+    }
+    check()
+    const interval = setInterval(check, 500)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [sshConfig, projectId])
 
   const isClaudeTab = toolType === 'claude'
 
@@ -228,6 +243,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       if (entry) {
         entry.fitAddon.fit()
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
+          if (sshConfig && !sshReady) return // wait for SSH connection
           spawnedRef.current = true
 
           const startSession = async (): Promise<void> => {
@@ -270,7 +286,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, toolType, config, sessionId, projectDir])
+  }, [tabId, toolType, config, sessionId, projectDir, sshReady])
 
   // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
