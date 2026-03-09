@@ -124,7 +124,9 @@ export class SshConnectionManager extends EventEmitter {
       : ''
     const cmdSuffix = commandArgs?.length ? ' ' + commandArgs.map(a => this.shellQuote(a)).join(' ') : ''
     const prefix = commandPrefix || ''
-    args.push(`${prefix}cd ${this.shellQuote(config.remoteDir)} && ${envPrefix}exec ${command}${cmdSuffix}`)
+    // Wrap in login shell so the user's profile is sourced (PATH, etc.)
+    const innerCmd = `${prefix}cd ${this.shellQuote(config.remoteDir)} && ${envPrefix}exec ${command}${cmdSuffix}`
+    args.push(`bash -l -c ${this.shellQuote(innerCmd)}`)
     return args
   }
 

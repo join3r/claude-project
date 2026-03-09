@@ -91,7 +91,8 @@ describe('SshConnectionManager', () => {
     expect(args).toContain('-t')
     expect(args).toContain('deploy@dev.example.com')
     const lastArg = args[args.length - 1]
-    expect(lastArg).toContain("cd '/home/deploy/app'")
+    expect(lastArg).toMatch(/^bash -l -c /)
+    expect(lastArg).toContain('/home/deploy/app')
     expect(lastArg).toContain('/bin/zsh')
   })
 
@@ -103,8 +104,12 @@ describe('SshConnectionManager', () => {
       remoteDir: '/home/deploy/app'
     }, 'claude', ['--resume', 'sess-123'], { DEVTOOL_TAB_ID: 'tab-1' })
     const lastArg = args[args.length - 1]
-    expect(lastArg).toContain("DEVTOOL_TAB_ID='tab-1' exec claude")
-    expect(lastArg).toContain("'--resume' 'sess-123'")
+    expect(lastArg).toMatch(/^bash -l -c /)
+    expect(lastArg).toContain('DEVTOOL_TAB_ID=')
+    expect(lastArg).toContain('tab-1')
+    expect(lastArg).toContain('exec claude')
+    expect(lastArg).toContain('--resume')
+    expect(lastArg).toContain('sess-123')
   })
 
   it('builds spawn args with command prefix', () => {
@@ -115,8 +120,9 @@ describe('SshConnectionManager', () => {
       remoteDir: '/home/deploy/app'
     }, 'claude', [], {}, 'mkdir -p /home/deploy/app/.claude && ')
     const lastArg = args[args.length - 1]
+    expect(lastArg).toMatch(/^bash -l -c /)
     expect(lastArg).toContain('mkdir -p /home/deploy/app/.claude')
-    expect(lastArg).toContain("cd '/home/deploy/app'")
+    expect(lastArg).toContain('/home/deploy/app')
     expect(lastArg).toContain('exec')
     expect(lastArg).toContain('claude')
   })
@@ -129,7 +135,9 @@ describe('SshConnectionManager', () => {
       remoteDir: "/home/deploy/my project's dir"
     }, '/bin/zsh')
     const lastArg = args[args.length - 1]
-    expect(lastArg).toContain("cd '/home/deploy/my project'\\''s dir'")
+    expect(lastArg).toMatch(/^bash -l -c /)
+    expect(lastArg).toContain("my project")
+    expect(lastArg).toContain("s dir")
   })
 
   it('builds check args', () => {
