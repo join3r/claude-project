@@ -143,6 +143,53 @@ describe('HookInjector', () => {
     expect(settings.hooks.PreToolUse).toHaveLength(1)
   })
 
+  // --- Remote hook injection tests ---
+
+  it('builds remote inject script that merges hooks into existing settings', () => {
+    const injector = new HookInjector(3456)
+    const script = injector.buildRemoteInjectScript('/home/deploy/app', 45678)
+    // Should create .claude dir
+    expect(script).toContain('mkdir -p')
+    expect(script).toContain('.claude')
+    // Should use merge logic to preserve existing settings
+    expect(script).toContain('settings.local.json')
+    // Hooks are base64-encoded — decode and check the port
+    const b64Match = script.match(/base64\.b64decode\('([^']+)'\)/)
+    expect(b64Match).toBeTruthy()
+    const decoded = Buffer.from(b64Match![1], 'base64').toString()
+    // Should use the remote forwarded port (45678), not the local hook port (3456)
+    expect(decoded).toContain('localhost:45678')
+    expect(decoded).not.toContain('localhost:3456')
+  })
+
+  it('builds remote cleanup script that removes only devtool hooks', () => {
+    const injector = new HookInjector(3456)
+    const script = injector.buildRemoteCleanupScript('/home/deploy/app')
+    expect(script).toContain('settings.local.json')
+    // Should NOT delete the whole file — should filter out devtool hooks only
+    expect(script).not.toMatch(/rm\s.*settings\.local\.json/)
+  })
+
+  it('ref-counts remote inject/cleanup per projectId', () => {
+    const injector = new HookInjector(3456)
+    // First inject increments refcount
+    injector.remoteInject('proj-1')
+    injector.remoteInject('proj-1')
+    // First cleanup decrements but hooks stay
+    expect(injector.remoteCleanup('proj-1')).toBe(false) // not last ref
+    // Second cleanup is last ref — returns true (caller should run remote cleanup script)
+    expect(injector.remoteCleanup('proj-1')).toBe(true)
+  })
+
+  it('does not collide ref-counts across different projects with same remoteDir', () => {
+    const injector = new HookInjector(3456)
+    injector.remoteInject('proj-1')
+    injector.remoteInject('proj-2')
+    // Cleaning up proj-1 should not affect proj-2
+    expect(injector.remoteCleanup('proj-1')).toBe(true)
+    expect(injector.remoteCleanup('proj-2')).toBe(true)
+  })
+
   it('ref-counts inject/cleanup per directory', () => {
     const injector = new HookInjector(3456)
     injector.inject(testDir)
