@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, AI_TAB_TYPES } from '../../shared/types'
-import type { Project, Task, Tab, AppConfig, TabType, AiTabType } from '../../shared/types'
+import type { Project, Task, Tab, AppConfig, TabType, AiTabType, SshConfig } from '../../shared/types'
 
 export function useAppState() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -72,6 +72,20 @@ export function useAppState() {
     selectProject(project.id)
     return project
   }, [projects, persistProjects, selectProject])
+
+  const addRemoteProject = useCallback((name: string, sshConfig: SshConfig) => {
+    const project: Project = { id: uuid(), name, directory: '', ssh: sshConfig, tasks: [] }
+    persistProjects([...projects, project])
+    selectProject(project.id)
+    window.api.sshConnect(project.id, sshConfig).catch(() => {
+      // Connection failed — status change event will update UI
+    })
+    return project
+  }, [projects, persistProjects, selectProject])
+
+  const getProjectDir = useCallback((project: Project): string => {
+    return project.ssh ? project.ssh.remoteDir : project.directory
+  }, [])
 
   const removeProject = useCallback((id: string) => {
     persistProjects(projects.filter((p) => p.id !== id))
@@ -269,6 +283,8 @@ export function useAppState() {
     setSelectedProjectId: selectProject,
     setSelectedTaskId: selectTask,
     addProject,
+    addRemoteProject,
+    getProjectDir,
     removeProject,
     renameProject,
     addTask,
