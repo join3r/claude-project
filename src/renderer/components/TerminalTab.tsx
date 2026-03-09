@@ -5,11 +5,14 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
+import type { SshConfig } from '../../shared/types'
 import './TerminalTab.css'
 
 interface Props {
   tabId: string
   visible: boolean
+  projectId: string
+  sshConfig?: SshConfig
 }
 
 const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon }>()
@@ -39,7 +42,7 @@ function ensureBeforeUnloadHandler(): void {
   })
 }
 
-export default function TerminalTab({ tabId, visible }: Props): React.ReactElement {
+export default function TerminalTab({ tabId, visible, projectId, sshConfig }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const { selectedProject, config, effectiveTerminalTheme } = useApp()
   const initializedRef = useRef(false)
@@ -117,7 +120,11 @@ export default function TerminalTab({ tabId, visible }: Props): React.ReactEleme
               })
             }
           })
-          window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows)
+          if (sshConfig) {
+            window.api.ptySpawn(tabId, '$SHELL', '', entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
+          } else {
+            window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows)
+          }
         }
       }
     })

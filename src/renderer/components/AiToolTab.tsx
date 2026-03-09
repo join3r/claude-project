@@ -6,7 +6,7 @@ import { SerializeAddon } from '@xterm/addon-serialize'
 import { useApp } from '../context/AppContext'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
-import type { AiTabType } from '../../shared/types'
+import type { AiTabType, SshConfig } from '../../shared/types'
 import '@xterm/xterm/css/xterm.css'
 import './AiToolTab.css'
 
@@ -19,6 +19,7 @@ interface Props {
   projectId: string
   taskId: string
   projectDir: string
+  sshConfig?: SshConfig
 }
 
 const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon }>()
@@ -91,7 +92,7 @@ function ensureBeforeUnloadHandler(): void {
   })
 }
 
-export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir }: Props): React.ReactElement {
+export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const { config, effectiveTerminalTheme, updateTabSessionId } = useApp()
   const statusStore = useTabStatusStore()
@@ -247,13 +248,21 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
             // Ensure hooks are injected before spawning Claude
             if (isClaudeTab) {
-              await window.api.hooksInject(projectDir)
+              if (sshConfig) {
+                // Remote hooks injected inline via SSH spawn args — skip local injection
+              } else {
+                await window.api.hooksInject(projectDir)
+              }
             }
 
             const command = AI_TAB_META[toolType].command
             const args = sessionId ? ['--resume', sessionId] : []
             const extraEnv = isClaudeTab ? { DEVTOOL_TAB_ID: tabId } : undefined
-            window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+            if (sshConfig) {
+              window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
+            } else {
+              window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+            }
           }
           startSession()
         }

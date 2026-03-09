@@ -4,7 +4,7 @@ import TerminalTab from './TerminalTab'
 import BrowserTab from './BrowserTab'
 import AiToolTab from './AiToolTab'
 import { AI_TAB_TYPES } from '../../shared/types'
-import type { Tab, AiTabType } from '../../shared/types'
+import type { Tab, AiTabType, SshConfig } from '../../shared/types'
 
 interface Props {
   tabs: Tab[]
@@ -13,10 +13,11 @@ interface Props {
   projectId: string
   taskId: string
   projectDir: string
+  sshConfig?: SshConfig
   style?: React.CSSProperties
 }
 
-export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, style }: Props): React.ReactElement {
+export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, sshConfig, style }: Props): React.ReactElement {
   return (
     <div className="pane" style={style}>
       <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} />
@@ -31,6 +32,8 @@ export default function Pane({ tabs, activeTabId, pane, projectId, taskId, proje
                 key={tab.id}
                 tabId={tab.id}
                 visible={tab.id === activeTabId}
+                projectId={projectId}
+                sshConfig={sshConfig}
               />
             )
           }
@@ -56,6 +59,7 @@ export default function Pane({ tabs, activeTabId, pane, projectId, taskId, proje
                 projectId={projectId}
                 taskId={taskId}
                 projectDir={projectDir}
+                sshConfig={sshConfig}
               />
             )
           }
