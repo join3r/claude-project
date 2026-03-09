@@ -4,6 +4,8 @@ import { ScrollbackStorage } from './scrollback-storage'
 import { PtyManager } from './pty-manager'
 import { HookServer } from './hook-server'
 import { HookInjector } from './hook-injector'
+import { SshConnectionManager } from './ssh-connection-manager'
+import type { SshConfig } from '../shared/types'
 import { AppConfig, ProjectsData } from '../shared/types'
 import os from 'os'
 import path from 'path'
@@ -84,6 +86,38 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     e.returnValue = true
   })
 
+  // SSH
+  const sshDir = path.join(CONFIG_DIR, 'ssh')
+  const sshManager = new SshConnectionManager(sshDir, hookServer.getPort())
+
+  sshManager.on('status-changed', (projectId: string, status: string) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('ssh-status-changed', projectId, status)
+    }
+  })
+
+  ipcMain.handle('ssh-connect', async (_e, projectId: string, sshConfig: SshConfig) => {
+    await sshManager.connect(projectId, sshConfig)
+    sshManager.startHealthChecks(projectId, sshConfig)
+  })
+
+  ipcMain.handle('ssh-disconnect', async (_e, projectId: string, sshConfig: SshConfig) => {
+    await sshManager.disconnect(projectId, sshConfig)
+  })
+
+  ipcMain.handle('ssh-status', (_e, projectId: string) => {
+    return sshManager.getStatus(projectId)
+  })
+
+  // File picker (for SSH key selection)
+  ipcMain.handle('pick-file', async (_e, title?: string) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: title || 'Select file',
+      properties: ['openFile', 'showHiddenFiles']
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
+
   // Hook injection
   ipcMain.handle('hooks-inject', (_e, projectDir: string) => {
     hookInjector.inject(projectDir)
@@ -92,9 +126,19 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     hookInjector.cleanup(projectDir)
   })
 
-  // PTY — accepts args array and extraEnv
-  ipcMain.handle('pty-spawn', (_e, id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>) => {
-    ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv)
+  // PTY — accepts args array, extraEnv, and optional SSH config for remote spawn
+  ipcMain.handle('pty-spawn', (_e, id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>, projectId?: string, sshConfig?: SshConfig) => {
+    if (sshConfig && projectId) {
+      // Remote spawn via SSH
+      if (sshManager.getStatus(projectId) !== 'connected') {
+        throw new Error('SSH connection not established')
+      }
+      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv)
+      ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs)
+    } else {
+      // Local spawn (existing behavior)
+      ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv)
+    }
     ptyManager.onData(id, (data) => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('pty-data', id, data)
     })
@@ -120,6 +164,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     ptyManager.killAll()
     hookInjector.cleanupAll()
     hookServer.stop()
+    sshManager.disconnectAll().catch(() => {})
   }
 
   mainWindow.on('closed', cleanup)

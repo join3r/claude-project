@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppConfig, ProjectsData } from '../shared/types'
+import type { AppConfig, ProjectsData, SshConfig } from '../shared/types'
 
 const api = {
   // Projects
@@ -12,6 +12,21 @@ const api = {
 
   // Directory picker
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('pick-directory'),
+
+  // File picker
+  pickFile: (title?: string): Promise<string | null> =>
+    ipcRenderer.invoke('pick-file', title),
+
+  // SSH
+  sshConnect: (projectId: string, sshConfig: SshConfig): Promise<void> =>
+    ipcRenderer.invoke('ssh-connect', projectId, sshConfig),
+  sshDisconnect: (projectId: string, sshConfig: SshConfig): Promise<void> =>
+    ipcRenderer.invoke('ssh-disconnect', projectId, sshConfig),
+  sshStatus: (projectId: string): Promise<'connected' | 'connecting' | 'disconnected'> =>
+    ipcRenderer.invoke('ssh-status', projectId),
+  onSshStatusChanged: (callback: (projectId: string, status: string) => void): void => {
+    ipcRenderer.on('ssh-status-changed', (_e, projectId, status) => callback(projectId, status))
+  },
 
   // Theme
   getNativeTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('get-native-theme'),
@@ -44,8 +59,8 @@ const api = {
   },
 
   // PTY
-  ptySpawn: (id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>): Promise<void> =>
-    ipcRenderer.invoke('pty-spawn', id, shell, cwd, cols, rows, args, extraEnv),
+  ptySpawn: (id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>, projectId?: string, sshConfig?: SshConfig): Promise<void> =>
+    ipcRenderer.invoke('pty-spawn', id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig),
   ptyWrite: (id: string, data: string): void => ipcRenderer.send('pty-write', id, data),
   ptyResize: (id: string, cols: number, rows: number): void => ipcRenderer.send('pty-resize', id, cols, rows),
   ptyKill: (id: string): void => ipcRenderer.send('pty-kill', id),
