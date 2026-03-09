@@ -1,0 +1,61 @@
+.add-remote-panel {
+  width: 440px;
+}
+
+.add-remote-keyfile {
+  display: flex;
+  gap: 6px;
+}
+
+.add-remote-keyfile .settings-input {
+  flex: 1;
+}
+
+.add-remote-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.add-remote-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--input-bg);
+  color: var(--text-primary);
+}
+
+.add-remote-btn:hover {
+  background: var(--hover);
+}
+
+.add-remote-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.add-remote-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.add-remote-btn-primary:hover {
+  opacity: 0.9;
+  background: var(--accent);
+}
+
+.add-remote-error {
+  color: #f87171;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.add-remote-success {
+  color: #34d399;
+  font-size: 12px;
+  margin-top: 8px;
+}
