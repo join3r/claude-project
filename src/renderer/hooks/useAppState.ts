@@ -54,6 +54,25 @@ export function useAppState() {
     window.api.saveProjects({ projects: updated })
   }, [])
 
+  const reorderProjects = useCallback((fromIndex: number, toIndex: number) => {
+    const updated = [...projects]
+    const [moved] = updated.splice(fromIndex, 1)
+    updated.splice(toIndex, 0, moved)
+    persistProjects(updated)
+  }, [projects, persistProjects])
+
+  const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
+    persistProjects(
+      projects.map((p) => {
+        if (p.id !== projectId) return p
+        const tasks = [...p.tasks]
+        const [moved] = tasks.splice(fromIndex, 1)
+        tasks.splice(toIndex, 0, moved)
+        return { ...p, tasks }
+      })
+    )
+  }, [projects, persistProjects])
+
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
     if (!config) return
     const newConfig = { ...config, ...updates }
@@ -332,6 +351,8 @@ export function useAppState() {
     addTask,
     removeTask,
     renameTask,
+    reorderProjects,
+    reorderTasks,
     addTab,
     removeTab,
     updateTabSessionId,
