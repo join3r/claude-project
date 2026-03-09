@@ -4,7 +4,7 @@ import Pane from './Pane'
 import './ContentArea.css'
 
 export default function ContentArea(): React.ReactElement {
-  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio } = useApp()
+  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir } = useApp()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const [dragRatio, setDragRatio] = useState<number | null>(null)
   const isDragging = dragRatio !== null
@@ -74,7 +74,7 @@ export default function ContentArea(): React.ReactElement {
                   pane="left"
                   projectId={project.id}
                   taskId={task.id}
-                  projectDir={project.directory}
+                  projectDir={getProjectDir(project)}
                   style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                 />
                 {task.splitOpen && (
@@ -89,7 +89,7 @@ export default function ContentArea(): React.ReactElement {
                       pane="right"
                       projectId={project.id}
                       taskId={task.id}
-                      projectDir={project.directory}
+                      projectDir={getProjectDir(project)}
                       style={{ flex: 'none', width: `calc(${(1 - ratio) * 100}% - 1.5px)` }}
                     />
                   </>
