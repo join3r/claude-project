@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events'
+import { execFile } from 'child_process'
+import fs from 'fs'
 import path from 'path'
 
 export type SshStatus = 'disconnected' | 'connecting' | 'connected'
@@ -17,6 +19,16 @@ export class SshConnectionManager extends EventEmitter {
   private statuses = new Map<string, SshStatus>()
   private remotePorts = new Map<string, number>()
   private configs = new Map<string, SshConfig>()
+
+  /** Promisified execFile that always returns { stdout, stderr } */
+  private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      execFile(cmd, args, opts, (err, stdout, stderr) => {
+        if (err) reject(err)
+        else resolve({ stdout: stdout as string, stderr: stderr as string })
+      })
+    })
+  }
 
   constructor(socketDir: string, hookPort: number) {
     super()
@@ -143,9 +155,65 @@ export class SshConnectionManager extends EventEmitter {
     return connected
   }
 
-  // Stubs — filled in by later tasks. No-op until then so Task 2 type-checks.
+  async connect(projectId: string, config: SshConfig): Promise<void> {
+    if (!fs.existsSync(this.socketDir)) {
+      fs.mkdirSync(this.socketDir, { recursive: true })
+    }
+
+    this.setStatus(projectId, 'connecting')
+    this.configs.set(projectId, config)
+
+    try {
+      // Step 1: Establish ControlMaster connection (forks to background)
+      const masterArgs = this.buildMasterArgs(projectId, config)
+      await this.execFileAsync('ssh', masterArgs, { timeout: 30000 })
+
+      // Step 2: Add dynamic remote port forwarding via -O forward.
+      // This prints the allocated port to stdout reliably.
+      const forwardArgs = this.buildForwardArgs(projectId, config)
+      const { stdout } = await this.execFileAsync('ssh', forwardArgs, { timeout: 10000 })
+
+      // Parse the allocated port from stdout (format: "Allocated port XXXXX for remote forward ...")
+      const portMatch = stdout.match(/Allocated port (\d+)/)
+      if (!portMatch) {
+        await this.execFileAsync('ssh', this.buildExitArgs(projectId, config), { timeout: 5000 }).catch(() => {})
+        this.setStatus(projectId, 'disconnected')
+        this.configs.delete(projectId)
+        throw new Error('SSH master connected but remote port forwarding was not allocated — stdout: ' + stdout.slice(0, 200))
+      }
+      this.setRemotePort(projectId, parseInt(portMatch[1], 10))
+      this.setStatus(projectId, 'connected')
+    } catch (err) {
+      this.setStatus(projectId, 'disconnected')
+      this.configs.delete(projectId)
+      throw err
+    }
+  }
+
+  async disconnect(projectId: string, config: SshConfig): Promise<void> {
+    const args = this.buildExitArgs(projectId, config)
+    try {
+      await this.execFileAsync('ssh', args, { timeout: 5000 })
+    } catch {
+      // Best-effort cleanup
+    }
+    const socketPath = this.getSocketPath(projectId)
+    try { fs.unlinkSync(socketPath) } catch { /* may not exist */ }
+    this.clearProject(projectId)
+  }
+
+  async checkConnection(projectId: string, config: SshConfig): Promise<boolean> {
+    const args = this.buildCheckArgs(projectId, config)
+    try {
+      await this.execFileAsync('ssh', args, { timeout: 5000 })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // Stub — filled in by Task 4
   stopHealthChecks(): void { /* implemented in Task 4 */ }
-  async disconnect(_projectId: string, _config: SshConfig): Promise<void> { /* implemented in Task 3 */ }
 
   async disconnectAll(): Promise<void> {
     this.stopHealthChecks()

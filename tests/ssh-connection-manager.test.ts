@@ -1,8 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+// Mock child_process at module level BEFORE SshConnectionManager is imported.
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof import('child_process')>('child_process')
+  return { ...actual, execFile: vi.fn() }
+})
+
+import { execFile } from 'child_process'
 import { SshConnectionManager } from '../src/main/ssh-connection-manager'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+
+// Access the mock through the named import (vi.mock has already replaced it)
+const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>
 
 describe('SshConnectionManager', () => {
   let manager: SshConnectionManager
@@ -79,7 +90,6 @@ describe('SshConnectionManager', () => {
     expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
     expect(args).toContain('-t')
     expect(args).toContain('deploy@dev.example.com')
-    // Last arg should be the remote command with shell-quoted dir
     const lastArg = args[args.length - 1]
     expect(lastArg).toContain("cd '/home/deploy/app'")
     expect(lastArg).toContain('/bin/zsh')
@@ -152,5 +162,103 @@ describe('SshConnectionManager', () => {
     manager.clearProject('proj-1')
     expect(manager.getStatus('proj-1')).toBe('disconnected')
     expect(manager.getRemotePort('proj-1')).toBeUndefined()
+  })
+})
+
+describe('SshConnectionManager connect/disconnect', () => {
+  let manager: SshConnectionManager
+  let socketDir: string
+
+  beforeEach(() => {
+    socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-test-'))
+    manager = new SshConnectionManager(socketDir, 9999)
+    mockExecFile.mockReset()
+  })
+
+  afterEach(() => {
+    manager.disconnectAll()
+    fs.rmSync(socketDir, { recursive: true })
+  })
+
+  it('connect uses two-step flow: master then -O forward for port discovery', async () => {
+    const statuses: string[] = []
+    manager.on('status-changed', (_id: string, status: string) => statuses.push(status))
+
+    let callCount = 0
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: unknown) => {
+        callCount++
+        if (callCount === 1) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '')
+        } else {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Allocated port 45678 for remote forward to localhost:9999', '')
+        }
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await manager.connect('proj-1', {
+      host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+    })
+
+    expect(callCount).toBe(2)
+    expect(statuses).toEqual(['connecting', 'connected'])
+    expect(manager.getRemotePort('proj-1')).toBe(45678)
+  })
+
+  it('connect sets status to disconnected on failure', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        (cb as (err: Error) => void)(new Error('Connection refused'))
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await expect(manager.connect('proj-1', {
+      host: 'bad.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+    })).rejects.toThrow('Connection refused')
+
+    expect(manager.getStatus('proj-1')).toBe('disconnected')
+  })
+
+  it('disconnect sends exit command and clears state', async () => {
+    manager.setStatus('proj-1', 'connected')
+    manager.setRemotePort('proj-1', 45678)
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        (cb as (err: null) => void)(null)
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await manager.disconnect('proj-1', {
+      host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+    })
+
+    expect(manager.getStatus('proj-1')).toBe('disconnected')
+    expect(manager.getRemotePort('proj-1')).toBeUndefined()
+  })
+
+  it('disconnectAll sends ssh -O exit for each stored config', async () => {
+    const config1 = { host: 'a.com', port: 22, username: 'u', remoteDir: '/d' }
+    const config2 = { host: 'b.com', port: 22, username: 'u', remoteDir: '/d' }
+
+    manager.setStatus('proj-1', 'connected')
+    manager.setStatus('proj-2', 'connected')
+    ;(manager as any).configs.set('proj-1', config1)
+    ;(manager as any).configs.set('proj-2', config2)
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        (cb as (err: null) => void)(null)
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await manager.disconnectAll()
+    expect(mockExecFile).toHaveBeenCalledTimes(2)
+    expect(manager.getStatus('proj-1')).toBe('disconnected')
+    expect(manager.getStatus('proj-2')).toBe('disconnected')
   })
 })
