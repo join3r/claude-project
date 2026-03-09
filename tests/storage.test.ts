@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Storage } from '../src/main/storage'
+import { isRemoteProject } from '../src/shared/types'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -60,6 +61,41 @@ describe('Storage', () => {
     const loaded = storage.loadConfig()
     expect(loaded.lastProjectId).toBe('proj-1')
     expect(loaded.lastTaskId).toBe('task-1')
+  })
+
+  it('saves and loads projects with ssh config', () => {
+    const projects = {
+      projects: [{
+        id: '1', name: 'Remote', directory: '', tasks: [],
+        ssh: { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/home/deploy/app' }
+      }]
+    }
+    storage.saveProjects(projects)
+    const loaded = storage.loadProjects()
+    expect(loaded.projects[0].ssh).toBeDefined()
+    expect(loaded.projects[0].ssh!.host).toBe('dev.example.com')
+    expect(loaded.projects[0].ssh!.port).toBe(22)
+    expect(loaded.projects[0].ssh!.username).toBe('deploy')
+    expect(loaded.projects[0].ssh!.remoteDir).toBe('/home/deploy/app')
+    expect(loaded.projects[0].directory).toBe('')
+  })
+
+  it('saves and loads projects with ssh keyFile', () => {
+    const projects = {
+      projects: [{
+        id: '1', name: 'Remote Key', directory: '', tasks: [],
+        ssh: { host: 'dev.example.com', port: 2222, username: 'deploy', keyFile: '/home/user/.ssh/id_ed25519', remoteDir: '/opt/app' }
+      }]
+    }
+    storage.saveProjects(projects)
+    const loaded = storage.loadProjects()
+    expect(loaded.projects[0].ssh!.keyFile).toBe('/home/user/.ssh/id_ed25519')
+    expect(loaded.projects[0].ssh!.port).toBe(2222)
+  })
+
+  it('isRemoteProject returns true for projects with ssh config', () => {
+    expect(isRemoteProject({ id: '1', name: 'R', directory: '', tasks: [], ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/d' } })).toBe(true)
+    expect(isRemoteProject({ id: '2', name: 'L', directory: '/local', tasks: [] })).toBe(false)
   })
 
   it('preserves sessionId on tabs', () => {

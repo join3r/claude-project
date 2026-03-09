@@ -37,6 +37,19 @@ export interface Project {
   name: string
   directory: string
   tasks: Task[]
+  ssh?: SshConfig
+}
+
+export function isRemoteProject(project: Project): boolean {
+  return !!project.ssh
+}
+
+export interface SshConfig {
+  host: string
+  port: number
+  username: string
+  keyFile?: string
+  remoteDir: string
 }
 
 export interface ProjectsData {
