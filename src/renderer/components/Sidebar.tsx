@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, type TabStatusValue } from '../context/TabStatusContext'
-import { AI_TAB_TYPES } from '../../shared/types'
+import { AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
 import type { Tab, Task } from '../../shared/types'
+import AddRemoteProject from './AddRemoteProject'
 import Settings from './Settings'
 import './Sidebar.css'
 
@@ -28,7 +29,7 @@ export default function Sidebar(): React.ReactElement {
   const {
     projects, selectedProjectId, selectedTaskId,
     setSelectedProjectId, setSelectedTaskId,
-    addProject, removeProject, renameProject,
+    addProject, addRemoteProject, removeProject, renameProject,
     addTask, removeTask, renameTask
   } = useApp()
   const allStatuses = useAllTabStatuses()
@@ -37,6 +38,9 @@ export default function Sidebar(): React.ReactElement {
     x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
   } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const [remoteModalOpen, setRemoteModalOpen] = useState(false)
+  const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
@@ -46,10 +50,24 @@ export default function Sidebar(): React.ReactElement {
   }, [editingId])
 
   useEffect(() => {
-    const dismiss = () => setContextMenu(null)
+    const dismiss = () => { setContextMenu(null); setAddMenuOpen(false) }
     window.addEventListener('click', dismiss)
     return () => window.removeEventListener('click', dismiss)
   }, [])
+
+  useEffect(() => {
+    window.api.onSshStatusChanged((projectId: string, status: string) => {
+      setSshStatuses(prev => ({ ...prev, [projectId]: status }))
+    })
+  }, [])
+
+  useEffect(() => {
+    projects.filter(isRemoteProject).forEach(p => {
+      window.api.sshStatus(p.id).then(status => {
+        setSshStatuses(prev => ({ ...prev, [p.id]: status }))
+      })
+    })
+  }, [projects])
 
   const handleAddProject = async () => {
     const dir = await window.api.pickDirectory()
@@ -90,7 +108,15 @@ export default function Sidebar(): React.ReactElement {
     <div className="sidebar">
       <div className="sidebar-header">
         <span className="sidebar-title">Projects</span>
-        <button className="sidebar-btn" onClick={handleAddProject} title="Add project">+</button>
+        <div className="sidebar-add-wrapper">
+          <button className="sidebar-btn" onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }} title="Add project">+</button>
+          {addMenuOpen && (
+            <div className="sidebar-add-menu">
+              <button onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
+              <button onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="sidebar-list">
@@ -114,7 +140,13 @@ export default function Sidebar(): React.ReactElement {
                   }}
                 />
               ) : (
-                <span className="sidebar-label">{project.name}</span>
+                <>
+                  <span className="sidebar-label">{project.name}</span>
+                  {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
+                  {isRemoteProject(project) && (
+                    <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
+                  )}
+                </>
               )}
             </div>
 
@@ -183,6 +215,16 @@ export default function Sidebar(): React.ReactElement {
       </div>
 
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+
+      {remoteModalOpen && (
+        <AddRemoteProject
+          onAdd={(name, ssh) => {
+            addRemoteProject(name, ssh)
+            setRemoteModalOpen(false)
+          }}
+          onCancel={() => setRemoteModalOpen(false)}
+        />
+      )}
     </div>
   )
 }
