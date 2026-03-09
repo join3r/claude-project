@@ -107,6 +107,20 @@ describe('SshConnectionManager', () => {
     expect(lastArg).toContain("claude '--resume' 'sess-123'")
   })
 
+  it('builds spawn args with command prefix', () => {
+    const args = manager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, 'claude', [], {}, 'mkdir -p /home/deploy/app/.claude && ')
+    const lastArg = args[args.length - 1]
+    expect(lastArg).toContain('mkdir -p /home/deploy/app/.claude')
+    expect(lastArg).toContain("cd '/home/deploy/app'")
+    expect(lastArg).toContain('exec')
+    expect(lastArg).toContain('claude')
+  })
+
   it('shell-quotes paths with spaces and special chars', () => {
     const args = manager.buildSpawnArgs('proj-1', {
       host: 'dev.example.com',

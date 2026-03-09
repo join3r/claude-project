@@ -133,7 +133,19 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       if (sshManager.getStatus(projectId) !== 'connected') {
         throw new Error('SSH connection not established')
       }
-      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv)
+
+      // For Claude tabs on remote, inject hooks via the spawn command (ref-counted)
+      const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      let hookInjectPrefix = ''
+      if (isClaudeRemote) {
+        const remotePort = sshManager.getRemotePort(projectId)
+        if (remotePort) {
+          hookInjector.remoteInject(projectId)
+          hookInjectPrefix = hookInjector.buildRemoteInjectScript(sshConfig.remoteDir, remotePort) + ' && '
+        }
+      }
+
+      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix)
       ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs)
     } else {
       // Local spawn (existing behavior)
