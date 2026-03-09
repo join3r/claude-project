@@ -103,8 +103,8 @@ describe('SshConnectionManager', () => {
       remoteDir: '/home/deploy/app'
     }, 'claude', ['--resume', 'sess-123'], { DEVTOOL_TAB_ID: 'tab-1' })
     const lastArg = args[args.length - 1]
-    expect(lastArg).toContain("DEVTOOL_TAB_ID='tab-1'")
-    expect(lastArg).toContain("claude '--resume' 'sess-123'")
+    expect(lastArg).toContain("DEVTOOL_TAB_ID='tab-1' exec claude")
+    expect(lastArg).toContain("'--resume' 'sess-123'")
   })
 
   it('builds spawn args with command prefix', () => {
