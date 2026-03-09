@@ -43,6 +43,8 @@ const api = {
   // Hook injection
   hooksInject: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-inject', projectDir),
   hooksCleanup: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-cleanup', projectDir),
+  hooksCleanupRemote: (projectId: string, sshConfig: SshConfig): Promise<void> =>
+    ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig),
 
   // Hook events from server
   onHookSessionStart: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {

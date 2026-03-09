@@ -113,6 +113,15 @@ export function useAppState() {
   }, [])
 
   const removeProject = useCallback((id: string) => {
+    const project = projects.find(p => p.id === id)
+    if (project) {
+      for (const task of project.tasks) {
+        for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+          window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
+          window.api.scrollbackDelete(tab.id)
+        }
+      }
+    }
     persistProjects(projects.filter((p) => p.id !== id))
     if (selectedProjectId === id) {
       selectProject(null)
@@ -144,6 +153,14 @@ export function useAppState() {
   }, [projects, persistProjects, selectTask])
 
   const removeTask = useCallback((projectId: string, taskId: string) => {
+    const project = projects.find(p => p.id === projectId)
+    const task = project?.tasks.find(t => t.id === taskId)
+    if (task) {
+      for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
+        window.api.scrollbackDelete(tab.id)
+      }
+    }
     persistProjects(
       projects.map((p) =>
         p.id === projectId

@@ -336,7 +336,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
         // Cleanup hooks when Claude tab is removed (ref-counted)
         if (isClaudeTab) {
-          window.api.hooksCleanup(projectDir)
+          if (sshConfig) {
+            window.api.hooksCleanupRemote(projectId, sshConfig)
+          } else {
+            window.api.hooksCleanup(projectDir)
+          }
         }
       }
     }

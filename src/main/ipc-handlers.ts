@@ -125,6 +125,25 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   ipcMain.handle('hooks-cleanup', (_e, projectDir: string) => {
     hookInjector.cleanup(projectDir)
   })
+  ipcMain.handle('hooks-cleanup-remote', async (_e, projectId: string, sshConfig: SshConfig) => {
+    const isLast = hookInjector.remoteCleanup(projectId)
+    if (!isLast) return
+
+    if (sshManager.getStatus(projectId) !== 'connected') return
+    const cleanupScript = hookInjector.buildRemoteCleanupScript(sshConfig.remoteDir)
+    const cleanupArgs = [
+      '-S', sshManager.getSocketPath(projectId),
+      `${sshConfig.username}@${sshConfig.host}`,
+      cleanupScript
+    ]
+    try {
+      const { execFile } = await import('child_process')
+      const { promisify } = await import('util')
+      await promisify(execFile)('ssh', cleanupArgs, { timeout: 5000 })
+    } catch {
+      // Best-effort cleanup
+    }
+  })
 
   // PTY — accepts args array, extraEnv, and optional SSH config for remote spawn
   ipcMain.handle('pty-spawn', (_e, id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>, projectId?: string, sshConfig?: SshConfig) => {
