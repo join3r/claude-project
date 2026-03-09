@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
-import { AI_TAB_META, AI_TAB_TYPES } from '../../shared/types'
+import { AI_TAB_META, AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
 import type { Project, Task, Tab, AppConfig, TabType, AiTabType, SshConfig } from '../../shared/types'
 
 export function useAppState() {
@@ -34,6 +34,20 @@ export function useAppState() {
     window.api.onThemeChanged(setTheme)
   }, [])
 
+  // Auto-connect SSH for the restored remote project on startup.
+  useEffect(() => {
+    if (!selectedProjectId || projects.length === 0) return
+    const project = projects.find(p => p.id === selectedProjectId)
+    if (project && isRemoteProject(project) && project.ssh) {
+      window.api.sshStatus(selectedProjectId).then(status => {
+        if (status !== 'connected' && status !== 'connecting') {
+          window.api.sshConnect(selectedProjectId, project.ssh!).catch(() => {})
+        }
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects.length > 0 && selectedProjectId])
+
   // Persist projects on change
   const persistProjects = useCallback((updated: Project[]) => {
     setProjects(updated)
@@ -54,7 +68,18 @@ export function useAppState() {
       setConfig(newConfig)
       window.api.saveConfig(newConfig)
     }
-  }, [config])
+    // Auto-connect SSH for remote projects
+    if (id) {
+      const project = projects.find(p => p.id === id)
+      if (project && isRemoteProject(project) && project.ssh) {
+        window.api.sshStatus(id).then(status => {
+          if (status !== 'connected' && status !== 'connecting') {
+            window.api.sshConnect(id, project.ssh!).catch(() => {})
+          }
+        })
+      }
+    }
+  }, [config, projects])
 
   const selectTask = useCallback((id: string | null) => {
     setSelectedTaskId(id)
