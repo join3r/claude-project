@@ -173,8 +173,9 @@ export class SshConnectionManager extends EventEmitter {
       const forwardArgs = this.buildForwardArgs(projectId, config)
       const { stdout } = await this.execFileAsync('ssh', forwardArgs, { timeout: 10000 })
 
-      // Parse the allocated port from stdout (format: "Allocated port XXXXX for remote forward ...")
-      const portMatch = stdout.match(/Allocated port (\d+)/)
+      // Parse the allocated port from stdout.
+      // `-O forward` may output "Allocated port XXXXX ..." or just the port number.
+      const portMatch = stdout.match(/Allocated port (\d+)/) || stdout.trim().match(/^(\d+)$/)
       if (!portMatch) {
         await this.execFileAsync('ssh', this.buildExitArgs(projectId, config), { timeout: 5000 }).catch(() => {})
         this.setStatus(projectId, 'disconnected')

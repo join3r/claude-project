@@ -220,6 +220,27 @@ describe('SshConnectionManager connect/disconnect', () => {
     expect(manager.getRemotePort('proj-1')).toBe(45678)
   })
 
+  it('connect parses bare port number from -O forward stdout', async () => {
+    let callCount = 0
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: unknown) => {
+        callCount++
+        if (callCount === 1) {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '')
+        } else {
+          (cb as (err: null, stdout: string, stderr: string) => void)(null, '44069\n', '')
+        }
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await manager.connect('proj-1', {
+      host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+    })
+
+    expect(manager.getRemotePort('proj-1')).toBe(44069)
+  })
+
   it('connect sets status to disconnected on failure', async () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
