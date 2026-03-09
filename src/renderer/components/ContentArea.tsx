@@ -89,7 +89,7 @@ export default function ContentArea(): React.ReactElement {
       {!hasSelection && (
         <div className="content-empty">Select or create a task to get started</div>
       )}
-      {projects.map((project) =>
+      {projects.flatMap((project) =>
         project.tasks.map((task) => {
           const isVisible = project.id === selectedProjectId && task.id === selectedTaskId
           const ratio = dragRatio ?? task.splitRatio ?? 0.5
