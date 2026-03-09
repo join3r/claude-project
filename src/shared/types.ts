@@ -62,6 +62,7 @@ export interface AppConfig {
   theme: 'system' | 'dark' | 'light'
   terminalTheme: 'system' | 'dark' | 'light'
   defaultShell: string
+  copyOnSelect: boolean
   enableClaude: boolean
   enableCodex: boolean
   enableOpencode: boolean
@@ -75,6 +76,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   theme: 'system',
   terminalTheme: 'system',
   defaultShell: typeof process !== 'undefined' && process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh',
+  copyOnSelect: false,
   enableClaude: false,
   enableCodex: false,
   enableOpencode: false,

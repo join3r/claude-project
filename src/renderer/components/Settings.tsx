@@ -78,6 +78,20 @@ export default function Settings({ onClose }: Props): React.ReactElement {
           </div>
 
           <div className="settings-group">
+            <label className="settings-label">Terminal</label>
+            <div className="settings-checkboxes">
+              <label className="settings-checkbox">
+                <input
+                  type="checkbox"
+                  checked={config.copyOnSelect}
+                  onChange={(e) => updateConfig({ copyOnSelect: e.target.checked })}
+                />
+                Copy on select
+              </label>
+            </div>
+          </div>
+
+          <div className="settings-group">
             <label className="settings-label">AI Tools</label>
             <div className="settings-checkboxes">
               <label className="settings-checkbox">

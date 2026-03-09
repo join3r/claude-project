@@ -69,8 +69,8 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig }: Pr
     initializedRef.current = true
 
     const termTheme = effectiveTerminalTheme === 'light'
-      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
-      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
+      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', selectionBackground: 'rgba(0, 120, 215, 0.3)', selectionInactiveBackground: 'rgba(0, 120, 215, 0.15)', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
+      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: 'rgba(255, 255, 255, 0.3)', selectionInactiveBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
 
     const term = new Terminal({
       fontFamily: config.fontFamily,
@@ -114,6 +114,17 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig }: Pr
     ensurePtyListener()
     ensureBeforeUnloadHandler()
   }, [tabId, selectedProject, config])
+
+  // Copy on select
+  useEffect(() => {
+    const entry = terminals.get(tabId)
+    if (!entry || !config?.copyOnSelect) return
+    const disposable = entry.term.onSelectionChange(() => {
+      const selection = entry.term.getSelection()
+      if (selection) navigator.clipboard.writeText(selection)
+    })
+    return () => disposable.dispose()
+  }, [tabId, config?.copyOnSelect])
 
   // Use ResizeObserver to fit terminal when container dimensions change.
   useEffect(() => {
@@ -174,8 +185,8 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig }: Pr
     const entry = terminals.get(tabId)
     if (entry) {
       entry.term.options.theme = effectiveTerminalTheme === 'light'
-        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
-        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
+        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', selectionBackground: 'rgba(0, 120, 215, 0.3)', selectionInactiveBackground: 'rgba(0, 120, 215, 0.15)', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
+        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: 'rgba(255, 255, 255, 0.3)', selectionInactiveBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
     }
   }, [effectiveTerminalTheme, tabId])
 
