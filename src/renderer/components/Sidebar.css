@@ -224,3 +224,18 @@
 .sidebar-ssh-dot-disconnected {
   background: #f87171;
 }
+
+.sidebar-drop-indicator {
+  height: 2px;
+  background: var(--border-focus);
+  margin: 0 8px;
+  border-radius: 1px;
+}
+
+.task-drop-indicator {
+  margin-left: 24px;
+}
+
+.sidebar-item.dragging {
+  opacity: 0.4;
+}
