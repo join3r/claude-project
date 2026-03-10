@@ -38,6 +38,7 @@ export interface Project {
   directory: string
   tasks: Task[]
   ssh?: SshConfig
+  shellCommand?: ShellCommandConfig
 }
 
 export function isRemoteProject(project: Project): boolean {
@@ -50,6 +51,14 @@ export interface SshConfig {
   username: string
   keyFile?: string
   remoteDir: string
+}
+
+export interface ShellCommandConfig {
+  command: string
+}
+
+export function isShellCommandProject(project: Project): boolean {
+  return !!project.shellCommand
 }
 
 export interface ProjectsData {
