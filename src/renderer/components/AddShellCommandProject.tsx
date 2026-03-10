@@ -49,8 +49,7 @@ export default function AddShellCommandProject({ onAdd, onCancel }: Props): Reac
               <p>Examples:</p>
               <code>docker exec -it mycontainer /bin/bash</code>
               <code>docker exec -w /app -it mycontainer /bin/sh</code>
-              <code>orb shell -m vm-name /bin/bash</code>
-              <code>orb shell -m vm-name -- bash -c &quot;cd /app &amp;&amp; exec bash&quot;</code>
+              <code>orb shell -m vm-name bash -c &quot;cd dir &amp;&amp; bash&quot;</code>
             </div>
           </div>
 

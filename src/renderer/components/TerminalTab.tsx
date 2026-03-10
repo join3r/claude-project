@@ -153,7 +153,7 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig, shel
           } else if (sshConfig) {
             window.api.ptySpawn(tabId, '$SHELL', '', entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
           } else {
-            window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows)
+            window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows, ['-l'])
           }
         }
       }

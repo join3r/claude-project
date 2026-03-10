@@ -1,4 +1,5 @@
 import * as pty from 'node-pty'
+import { getShellEnv } from './shell-env'
 
 interface PtyInstance {
   process: pty.IPty
@@ -17,7 +18,7 @@ export class PtyManager {
       cols,
       rows,
       cwd,
-      env: { ...process.env as Record<string, string>, ...extraEnv }
+      env: { ...getShellEnv(), ...extraEnv }
     })
     this.instances.set(id, { process: proc, projectDir: cwd })
   }

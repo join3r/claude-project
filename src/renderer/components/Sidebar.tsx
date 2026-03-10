@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
-import { useAllTabStatuses, type TabStatusValue } from '../context/TabStatusContext'
+import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
 import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import type { Tab, Task } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
@@ -14,6 +14,14 @@ function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>):
     .map((t) => t.id)
   if (aiTabIds.length === 0) return null
   const statuses = aiTabIds.map((id) => allStatuses[id]).filter(Boolean)
+  if (statuses.includes('attention')) return 'attention'
+  if (statuses.includes('working')) return 'working'
+  if (statuses.includes('exited')) return 'exited'
+  return null
+}
+
+function getProjectStatus(tasks: Task[], allStatuses: Record<string, TabStatusValue>): TabStatusValue {
+  const statuses = tasks.map((t) => getTaskStatus(t, allStatuses)).filter(Boolean)
   if (statuses.includes('attention')) return 'attention'
   if (statuses.includes('working')) return 'working'
   if (statuses.includes('exited')) return 'exited'
@@ -35,6 +43,18 @@ export default function Sidebar(): React.ReactElement {
     reorderProjects, reorderTasks
   } = useApp()
   const allStatuses = useAllTabStatuses()
+  const tabStatusStore = useTabStatusStore()
+
+  const handleSelectTask = useCallback((task: Task) => {
+    setSelectedTaskId(task.id)
+    const aiTabs = [...task.tabs.left, ...task.tabs.right]
+      .filter((t) => (AI_TAB_TYPES as readonly string[]).includes(t.type))
+    for (const tab of aiTabs) {
+      if (tabStatusStore.getStatus(tab.id) === 'attention') {
+        tabStatusStore.setStatus(tab.id, null)
+      }
+    }
+  }, [setSelectedTaskId, tabStatusStore])
 
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
@@ -222,6 +242,10 @@ export default function Sidebar(): React.ReactElement {
                 />
               ) : (
                 <>
+                  {(() => {
+                    const projectStatus = getProjectStatus(project.tasks, allStatuses)
+                    return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
+                  })()}
                   <span className="sidebar-label">{project.name}</span>
                   {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
                   {isShellCommandProject(project) && <span className="sidebar-ssh-badge">shell</span>}
@@ -241,7 +265,7 @@ export default function Sidebar(): React.ReactElement {
                     )}
                   <div
                     className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
-                    onClick={() => setSelectedTaskId(task.id)}
+                    onClick={() => handleSelectTask(task)}
                     onMouseDown={(e) => handleDragMouseDown(e, 'task', project.id, tIdx)}
                     onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
                   >
