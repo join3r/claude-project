@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, type TabStatusValue } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
+import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import type { Tab, Task } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
+import AddShellCommandProject from './AddShellCommandProject'
 import Settings from './Settings'
 import './Sidebar.css'
 
@@ -29,7 +30,7 @@ export default function Sidebar(): React.ReactElement {
   const {
     projects, selectedProjectId, selectedTaskId,
     setSelectedProjectId, setSelectedTaskId,
-    addProject, addRemoteProject, removeProject, renameProject,
+    addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject,
     addTask, removeTask, renameTask,
     reorderProjects, reorderTasks
   } = useApp()
@@ -41,6 +42,7 @@ export default function Sidebar(): React.ReactElement {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
+  const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -187,6 +189,7 @@ export default function Sidebar(): React.ReactElement {
             <div className="sidebar-add-menu">
               <button onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
               <button onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
+              <button onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
             </div>
           )}
         </div>
@@ -221,6 +224,7 @@ export default function Sidebar(): React.ReactElement {
                 <>
                   <span className="sidebar-label">{project.name}</span>
                   {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
+                  {isShellCommandProject(project) && <span className="sidebar-ssh-badge">shell</span>}
                   {isRemoteProject(project) && (
                     <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
                   )}
@@ -313,6 +317,16 @@ export default function Sidebar(): React.ReactElement {
             setRemoteModalOpen(false)
           }}
           onCancel={() => setRemoteModalOpen(false)}
+        />
+      )}
+
+      {shellCommandModalOpen && (
+        <AddShellCommandProject
+          onAdd={(name, command) => {
+            addShellCommandProject(name, command)
+            setShellCommandModalOpen(false)
+          }}
+          onCancel={() => setShellCommandModalOpen(false)}
         />
       )}
     </div>
