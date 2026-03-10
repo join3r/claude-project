@@ -46,6 +46,9 @@ export default function Pane({ tabs, activeTabId, pane, projectId, taskId, proje
                 tabId={tab.id}
                 visible={tab.id === activeTabId}
                 initialUrl={tab.url}
+                projectId={projectId}
+                taskId={taskId}
+                pane={pane}
               />
             )
           }

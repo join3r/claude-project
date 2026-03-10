@@ -1,13 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useApp } from '../context/AppContext'
 import './BrowserTab.css'
 
 interface Props {
   tabId: string
   visible: boolean
   initialUrl?: string
+  projectId: string
+  taskId: string
+  pane: 'left' | 'right'
 }
 
-export default function BrowserTab({ tabId, visible, initialUrl }: Props): React.ReactElement {
+export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane }: Props): React.ReactElement {
+  const { updateTabUrl } = useApp()
   const [url, setUrl] = useState(initialUrl || 'https://www.google.com')
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
@@ -18,8 +23,10 @@ export default function BrowserTab({ tabId, visible, initialUrl }: Props): React
     if (!webview) return
 
     const handleNavigation = () => {
-      setUrl(webview.getURL())
-      setInputUrl(webview.getURL())
+      const newUrl = webview.getURL()
+      setUrl(newUrl)
+      setInputUrl(newUrl)
+      updateTabUrl(projectId, taskId, pane, tabId, newUrl)
     }
 
     webview.addEventListener('did-navigate', handleNavigation)
@@ -29,7 +36,18 @@ export default function BrowserTab({ tabId, visible, initialUrl }: Props): React
       webview.removeEventListener('did-navigate', handleNavigation)
       webview.removeEventListener('did-navigate-in-page', handleNavigation)
     }
-  }, [])
+  }, [projectId, taskId, pane, tabId, updateTabUrl])
+
+  useEffect(() => {
+    const handleReload = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.tabId === tabId) {
+        webviewRef.current?.reload()
+      }
+    }
+    window.addEventListener('reload-browser-tab', handleReload)
+    return () => window.removeEventListener('reload-browser-tab', handleReload)
+  }, [tabId])
 
   const navigate = (targetUrl: string) => {
     let normalized = targetUrl.trim()
@@ -38,6 +56,7 @@ export default function BrowserTab({ tabId, visible, initialUrl }: Props): React
     }
     setUrl(normalized)
     setInputUrl(normalized)
+    updateTabUrl(projectId, taskId, pane, tabId, normalized)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

@@ -260,6 +260,31 @@ export function useAppState() {
     window.api.scrollbackDelete(tabId)
   }, [projects, persistProjects])
 
+  const updateTabUrl = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, url: string) => {
+    persistProjects(
+      projects.map((p) =>
+        p.id === projectId
+          ? {
+              ...p,
+              tasks: p.tasks.map((t) =>
+                t.id === taskId
+                  ? {
+                      ...t,
+                      tabs: {
+                        ...t.tabs,
+                        [pane]: t.tabs[pane].map((tab) =>
+                          tab.id === tabId ? { ...tab, url } : tab
+                        )
+                      }
+                    }
+                  : t
+              )
+            }
+          : p
+      )
+    )
+  }, [projects, persistProjects])
+
   const updateTabSessionId = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, sessionId: string) => {
     persistProjects(
       projects.map((p) =>
@@ -363,6 +388,7 @@ export function useAppState() {
     reorderTasks,
     addTab,
     removeTab,
+    updateTabUrl,
     updateTabSessionId,
     setActiveTab,
     toggleSplit,

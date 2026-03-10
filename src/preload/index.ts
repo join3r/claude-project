@@ -71,6 +71,23 @@ const api = {
   },
   onPtyExit: (callback: (id: string, exitCode: number) => void): void => {
     ipcRenderer.on('pty-exit', (_e, id, exitCode) => callback(id, exitCode))
+  },
+
+  // Menu shortcuts
+  onMenuCloseTab: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-close-tab', handler)
+    return () => ipcRenderer.removeListener('menu-close-tab', handler)
+  },
+  onMenuReloadTab: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-reload-tab', handler)
+    return () => ipcRenderer.removeListener('menu-reload-tab', handler)
+  },
+  onMenuNewTerminal: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-new-terminal', handler)
+    return () => ipcRenderer.removeListener('menu-new-terminal', handler)
   }
 }
 

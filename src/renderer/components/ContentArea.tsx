@@ -5,7 +5,7 @@ import Pane from './Pane'
 import './ContentArea.css'
 
 export default function ContentArea(): React.ReactElement {
-  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab } = useApp()
+  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab } = useApp()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const [dragRatio, setDragRatio] = useState<number | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
@@ -52,6 +52,47 @@ export default function ContentArea(): React.ReactElement {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [projects, selectedProjectId, selectedTaskId, setActiveTab])
+
+  // Menu shortcut handlers (Cmd+W, Cmd+R, Cmd+T)
+  useEffect(() => {
+    if (!selectedProjectId || !selectedTaskId) return
+
+    const getActiveTabInfo = () => {
+      const project = projects.find(p => p.id === selectedProjectId)
+      const task = project?.tasks.find(t => t.id === selectedTaskId)
+      if (!task) return null
+      // Use left pane's active tab by default
+      const pane: 'left' | 'right' = 'left'
+      const activeTabId = task.activeTab[pane]
+      const activeTab = activeTabId ? task.tabs[pane].find(t => t.id === activeTabId) : null
+      return { project, task, pane, activeTabId, activeTab }
+    }
+
+    const cleanupClose = window.api.onMenuCloseTab(() => {
+      const info = getActiveTabInfo()
+      if (info?.activeTabId) {
+        removeTab(selectedProjectId!, selectedTaskId!, info.pane, info.activeTabId)
+      }
+    })
+
+    const cleanupReload = window.api.onMenuReloadTab(() => {
+      const info = getActiveTabInfo()
+      if (info?.activeTab?.type === 'browser' && info.activeTabId) {
+        window.dispatchEvent(new CustomEvent('reload-browser-tab', { detail: { tabId: info.activeTabId } }))
+      }
+      // Do nothing for terminal/AI tabs
+    })
+
+    const cleanupNewTerminal = window.api.onMenuNewTerminal(() => {
+      addTab(selectedProjectId!, selectedTaskId!, 'left', 'terminal')
+    })
+
+    return () => {
+      cleanupClose()
+      cleanupReload()
+      cleanupNewTerminal()
+    }
+  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab])
 
   const handleDividerMouseDown = useCallback(
     (projectId: string, taskId: string) => (e: React.MouseEvent) => {
