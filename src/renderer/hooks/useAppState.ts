@@ -127,6 +127,13 @@ export function useAppState() {
     return project
   }, [projects, persistProjects, selectProject])
 
+  const addShellCommandProject = useCallback((name: string, command: string) => {
+    const project: Project = { id: uuid(), name, directory: '', shellCommand: { command }, tasks: [] }
+    persistProjects([...projects, project])
+    selectProject(project.id)
+    return project
+  }, [projects, persistProjects, selectProject])
+
   const getProjectDir = useCallback((project: Project): string => {
     return project.ssh ? project.ssh.remoteDir : project.directory
   }, [])
@@ -345,6 +352,7 @@ export function useAppState() {
     setSelectedTaskId: selectTask,
     addProject,
     addRemoteProject,
+    addShellCommandProject,
     getProjectDir,
     removeProject,
     renameProject,
