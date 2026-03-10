@@ -136,6 +136,7 @@ export default function ContentArea(): React.ReactElement {
                   taskId={task.id}
                   projectDir={getProjectDir(project)}
                   sshConfig={project.ssh}
+                  shellCommand={project.shellCommand}
                   style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                 />
                 {task.splitOpen && (
@@ -152,6 +153,7 @@ export default function ContentArea(): React.ReactElement {
                       taskId={task.id}
                       projectDir={getProjectDir(project)}
                       sshConfig={project.ssh}
+                      shellCommand={project.shellCommand}
                       style={{ flex: 'none', width: `calc(${(1 - ratio) * 100}% - 1.5px)` }}
                     />
                   </>
