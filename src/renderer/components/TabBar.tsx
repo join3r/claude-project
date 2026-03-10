@@ -1,7 +1,7 @@
 import React from 'react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
-import { AI_TAB_TYPES } from '../../shared/types'
+import { AI_TAB_TYPES, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import './TabBar.css'
 
@@ -65,17 +65,17 @@ export default function TabBar({ tabs, activeTabId, pane }: Props): React.ReactE
         <button className="tab-add-btn" onClick={() => handleAdd('browser')} title="New browser">
           &#9673;
         </button>
-        {config?.enableClaude && (
+        {config?.enableClaude && selectedProject && !isShellCommandProject(selectedProject) && (
           <button className="tab-add-btn" onClick={() => handleAdd('claude')} title="New Claude Code">
             &#10022;
           </button>
         )}
-        {config?.enableCodex && (
+        {config?.enableCodex && selectedProject && !isShellCommandProject(selectedProject) && (
           <button className="tab-add-btn" onClick={() => handleAdd('codex')} title="New Codex">
             &#9707;
           </button>
         )}
-        {config?.enableOpencode && (
+        {config?.enableOpencode && selectedProject && !isShellCommandProject(selectedProject) && (
           <button className="tab-add-btn" onClick={() => handleAdd('opencode')} title="New OpenCode">
             &#9671;
           </button>
