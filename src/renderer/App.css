@@ -82,6 +82,16 @@ html, body, #root {
   overflow: hidden;
 }
 
+.sidebar-hidden .content-toolbar {
+  padding-left: 76px;
+  background: var(--tab-bg);
+  border-bottom: none;
+}
+
+.sidebar-hidden .tab-bar {
+  padding-left: 76px;
+}
+
 .content-empty {
   flex: 1;
   display: flex;

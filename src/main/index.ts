@@ -63,9 +63,31 @@ function buildAppMenu(): void {
       label: 'View',
       submenu: [
         {
+          label: 'Toggle Sidebar',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => sendToRenderer('menu-toggle-sidebar')
+        },
+        { type: 'separator' },
+        {
           label: 'Reload Tab',
           accelerator: 'CmdOrCtrl+R',
           click: () => sendToRenderer('menu-reload-tab')
+        },
+        { type: 'separator' },
+        {
+          label: 'Zoom In',
+          accelerator: 'CmdOrCtrl+=',
+          click: () => sendToRenderer('menu-zoom-in')
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          click: () => sendToRenderer('menu-zoom-out')
+        },
+        {
+          label: 'Reset Zoom',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => sendToRenderer('menu-zoom-reset')
         },
         { type: 'separator' },
         { role: 'togglefullscreen' }

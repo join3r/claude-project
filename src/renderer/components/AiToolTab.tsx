@@ -20,6 +20,7 @@ interface Props {
   taskId: string
   projectDir: string
   sshConfig?: SshConfig
+  extraArgs?: string
 }
 
 const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon }>()
@@ -92,9 +93,9 @@ function ensureBeforeUnloadHandler(): void {
   })
 }
 
-export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig }: Props): React.ReactElement {
+export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { config, effectiveTerminalTheme, updateTabSessionId } = useApp()
+  const { config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta } = useApp()
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
@@ -131,7 +132,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
     const term = new Terminal({
       fontFamily: config.fontFamily,
-      fontSize: config.fontSize,
+      fontSize: config.fontSize + terminalZoomDelta,
       theme: termTheme,
       allowProposedApi: true,
       cursorBlink: true,
@@ -283,7 +284,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             }
 
             const command = AI_TAB_META[toolType].command
-            const args = sessionId ? ['--resume', sessionId] : []
+            const parsedExtra = extraArgs ? extraArgs.trim().split(/\s+/).filter(Boolean) : []
+            const args = [...parsedExtra, ...(sessionId ? ['--resume', sessionId] : [])]
             const extraEnv = isClaudeTab ? { DEVTOOL_TAB_ID: tabId } : undefined
             if (sshConfig) {
               window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
@@ -317,16 +319,16 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     }
   }, [visible, tabId])
 
-  // Update font when config changes
+  // Update font when config or zoom changes
   useEffect(() => {
     if (!config) return
     const entry = terminals.get(tabId)
     if (entry) {
       entry.term.options.fontFamily = config.fontFamily
-      entry.term.options.fontSize = config.fontSize
+      entry.term.options.fontSize = config.fontSize + terminalZoomDelta
       entry.fitAddon.fit()
     }
-  }, [config?.fontFamily, config?.fontSize, tabId])
+  }, [config?.fontFamily, config?.fontSize, terminalZoomDelta, tabId])
 
   // Update terminal theme
   useEffect(() => {

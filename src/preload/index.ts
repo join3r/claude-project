@@ -74,6 +74,11 @@ const api = {
   },
 
   // Menu shortcuts
+  onMenuToggleSidebar: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-toggle-sidebar', handler)
+    return () => ipcRenderer.removeListener('menu-toggle-sidebar', handler)
+  },
   onMenuCloseTab: (callback: () => void): (() => void) => {
     const handler = () => callback()
     ipcRenderer.on('menu-close-tab', handler)
@@ -88,6 +93,21 @@ const api = {
     const handler = () => callback()
     ipcRenderer.on('menu-new-terminal', handler)
     return () => ipcRenderer.removeListener('menu-new-terminal', handler)
+  },
+  onMenuZoomIn: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-zoom-in', handler)
+    return () => ipcRenderer.removeListener('menu-zoom-in', handler)
+  },
+  onMenuZoomOut: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-zoom-out', handler)
+    return () => ipcRenderer.removeListener('menu-zoom-out', handler)
+  },
+  onMenuZoomReset: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-zoom-reset', handler)
+    return () => ipcRenderer.removeListener('menu-zoom-reset', handler)
   }
 }
 

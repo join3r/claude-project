@@ -5,7 +5,7 @@ import Pane from './Pane'
 import './ContentArea.css'
 
 export default function ContentArea(): React.ReactElement {
-  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab } = useApp()
+  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab, zoomTerminal, zoomBrowser } = useApp()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const [dragRatio, setDragRatio] = useState<number | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
@@ -87,12 +87,28 @@ export default function ContentArea(): React.ReactElement {
       addTab(selectedProjectId!, selectedTaskId!, 'left', 'terminal')
     })
 
+    const handleZoom = (direction: 'in' | 'out' | 'reset') => {
+      const info = getActiveTabInfo()
+      if (info?.activeTab?.type === 'browser') {
+        zoomBrowser(direction)
+      } else {
+        zoomTerminal(direction)
+      }
+    }
+
+    const cleanupZoomIn = window.api.onMenuZoomIn(() => handleZoom('in'))
+    const cleanupZoomOut = window.api.onMenuZoomOut(() => handleZoom('out'))
+    const cleanupZoomReset = window.api.onMenuZoomReset(() => handleZoom('reset'))
+
     return () => {
       cleanupClose()
       cleanupReload()
       cleanupNewTerminal()
+      cleanupZoomIn()
+      cleanupZoomOut()
+      cleanupZoomReset()
     }
-  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab])
+  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, zoomTerminal, zoomBrowser])
 
   const handleDividerMouseDown = useCallback(
     (projectId: string, taskId: string) => (e: React.MouseEvent) => {
@@ -178,6 +194,7 @@ export default function ContentArea(): React.ReactElement {
                   projectDir={getProjectDir(project)}
                   sshConfig={project.ssh}
                   shellCommand={project.shellCommand}
+                  aiToolArgs={project.aiToolArgs}
                   style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                 />
                 {task.splitOpen && (
@@ -195,6 +212,7 @@ export default function ContentArea(): React.ReactElement {
                       projectDir={getProjectDir(project)}
                       sshConfig={project.ssh}
                       shellCommand={project.shellCommand}
+                      aiToolArgs={project.aiToolArgs}
                       style={{ flex: 'none', width: `calc(${(1 - ratio) * 100}% - 1.5px)` }}
                     />
                   </>

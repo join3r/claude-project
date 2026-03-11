@@ -39,6 +39,7 @@ export interface Project {
   tasks: Task[]
   ssh?: SshConfig
   shellCommand?: ShellCommandConfig
+  aiToolArgs?: Partial<Record<AiTabType, string>>
 }
 
 export function isRemoteProject(project: Project): boolean {

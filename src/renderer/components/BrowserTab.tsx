@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane }: Props): React.ReactElement {
-  const { updateTabUrl } = useApp()
+  const { updateTabUrl, browserZoomFactor } = useApp()
   const [url, setUrl] = useState(initialUrl || 'https://www.google.com')
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
@@ -48,6 +48,18 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     window.addEventListener('reload-browser-tab', handleReload)
     return () => window.removeEventListener('reload-browser-tab', handleReload)
   }, [tabId])
+
+  // Apply browser zoom factor
+  useEffect(() => {
+    const webview = webviewRef.current
+    if (!webview) return
+    const applyZoom = () => {
+      try { webview.setZoomFactor(browserZoomFactor) } catch {}
+    }
+    applyZoom()
+    webview.addEventListener('dom-ready', applyZoom)
+    return () => webview.removeEventListener('dom-ready', applyZoom)
+  }, [browserZoomFactor])
 
   const navigate = (targetUrl: string) => {
     let normalized = targetUrl.trim()

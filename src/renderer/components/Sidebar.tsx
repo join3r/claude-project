@@ -5,6 +5,7 @@ import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject } from '../../shar
 import type { Tab, Task } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
+import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import './Sidebar.css'
 
@@ -38,7 +39,7 @@ export default function Sidebar(): React.ReactElement {
   const {
     projects, selectedProjectId, selectedTaskId,
     setSelectedProjectId, setSelectedTaskId,
-    addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject,
+    addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, removeTask, renameTask,
     reorderProjects, reorderTasks
   } = useApp()
@@ -63,6 +64,7 @@ export default function Sidebar(): React.ReactElement {
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
+  const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -320,6 +322,12 @@ export default function Sidebar(): React.ReactElement {
             setEditValue(item?.name ?? '')
             setContextMenu(null)
           }}>Rename</button>
+          {contextMenu.type === 'project' && (
+            <button onClick={() => {
+              setProjectSettingsId(contextMenu.projectId)
+              setContextMenu(null)
+            }}>Settings</button>
+          )}
           <button onClick={() => {
             if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
             else removeTask(contextMenu.projectId, contextMenu.taskId!)
@@ -336,8 +344,8 @@ export default function Sidebar(): React.ReactElement {
 
       {remoteModalOpen && (
         <AddRemoteProject
-          onAdd={(name, ssh) => {
-            addRemoteProject(name, ssh)
+          onAdd={(name, ssh, aiToolArgs) => {
+            addRemoteProject(name, ssh, aiToolArgs)
             setRemoteModalOpen(false)
           }}
           onCancel={() => setRemoteModalOpen(false)}
@@ -353,6 +361,18 @@ export default function Sidebar(): React.ReactElement {
           onCancel={() => setShellCommandModalOpen(false)}
         />
       )}
+
+      {projectSettingsId && (() => {
+        const project = projects.find(p => p.id === projectSettingsId)
+        if (!project) return null
+        return (
+          <ProjectSettings
+            project={project}
+            onSave={(aiToolArgs) => updateProject(projectSettingsId, { aiToolArgs })}
+            onClose={() => setProjectSettingsId(null)}
+          />
+        )
+      })()}
     </div>
   )
 }

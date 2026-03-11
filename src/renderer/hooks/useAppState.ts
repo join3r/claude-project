@@ -3,12 +3,16 @@ import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
 import type { Project, Task, Tab, AppConfig, TabType, AiTabType, SshConfig } from '../../shared/types'
 
+export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs'>>
+
 export function useAppState() {
   const [projects, setProjects] = useState<Project[]>([])
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [terminalZoomDelta, setTerminalZoomDelta] = useState(0)
+  const [browserZoomFactor, setBrowserZoomFactor] = useState(1.0)
 
   // Load initial data
   useEffect(() => {
@@ -117,8 +121,8 @@ export function useAppState() {
     return project
   }, [projects, persistProjects, selectProject])
 
-  const addRemoteProject = useCallback((name: string, sshConfig: SshConfig) => {
-    const project: Project = { id: uuid(), name, directory: '', ssh: sshConfig, tasks: [] }
+  const addRemoteProject = useCallback((name: string, sshConfig: SshConfig, aiToolArgs?: Partial<Record<AiTabType, string>>) => {
+    const project: Project = { id: uuid(), name, directory: '', ssh: sshConfig, tasks: [], ...(aiToolArgs ? { aiToolArgs } : {}) }
     persistProjects([...projects, project])
     selectProject(project.id)
     window.api.sshConnect(project.id, sshConfig).catch(() => {
@@ -157,6 +161,10 @@ export function useAppState() {
 
   const renameProject = useCallback((id: string, name: string) => {
     persistProjects(projects.map((p) => (p.id === id ? { ...p, name } : p)))
+  }, [projects, persistProjects])
+
+  const updateProject = useCallback((id: string, updates: ProjectUpdate) => {
+    persistProjects(projects.map((p) => (p.id === id ? { ...p, ...updates } : p)))
   }, [projects, persistProjects])
 
   // Task CRUD
@@ -357,6 +365,27 @@ export function useAppState() {
     )
   }, [projects, persistProjects])
 
+  const zoomTerminal = useCallback((direction: 'in' | 'out' | 'reset') => {
+    setTerminalZoomDelta(prev => {
+      if (direction === 'reset') return 0
+      const step = direction === 'in' ? 2 : -2
+      const next = prev + step
+      const effective = (config?.fontSize ?? 14) + next
+      if (effective < 6 || effective > 48) return prev
+      return next
+    })
+  }, [config?.fontSize])
+
+  const zoomBrowser = useCallback((direction: 'in' | 'out' | 'reset') => {
+    setBrowserZoomFactor(prev => {
+      if (direction === 'reset') return 1.0
+      const step = direction === 'in' ? 0.1 : -0.1
+      const next = Math.round((prev + step) * 10) / 10
+      if (next < 0.3 || next > 3.0) return prev
+      return next
+    })
+  }, [])
+
   // Derived state
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
   const selectedTask = selectedProject?.tasks.find((t) => t.id === selectedTaskId) ?? null
@@ -381,6 +410,7 @@ export function useAppState() {
     getProjectDir,
     removeProject,
     renameProject,
+    updateProject,
     addTask,
     removeTask,
     renameTask,
@@ -393,7 +423,11 @@ export function useAppState() {
     setActiveTab,
     toggleSplit,
     setSplitRatio,
-    updateConfig
+    updateConfig,
+    terminalZoomDelta,
+    browserZoomFactor,
+    zoomTerminal,
+    zoomBrowser
   }
 }
 

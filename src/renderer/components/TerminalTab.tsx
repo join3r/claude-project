@@ -45,7 +45,7 @@ function ensureBeforeUnloadHandler(): void {
 
 export default function TerminalTab({ tabId, visible, projectId, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { selectedProject, config, effectiveTerminalTheme } = useApp()
+  const { selectedProject, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
   const [sshReady, setSshReady] = useState(!sshConfig)
@@ -75,7 +75,7 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig, shel
 
     const term = new Terminal({
       fontFamily: config.fontFamily,
-      fontSize: config.fontSize,
+      fontSize: config.fontSize + terminalZoomDelta,
       theme: termTheme,
       allowProposedApi: true,
       cursorBlink: true,
@@ -172,16 +172,16 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig, shel
     }
   }, [visible, tabId])
 
-  // Update font when config changes
+  // Update font when config or zoom changes
   useEffect(() => {
     if (!config) return
     const entry = terminals.get(tabId)
     if (entry) {
       entry.term.options.fontFamily = config.fontFamily
-      entry.term.options.fontSize = config.fontSize
+      entry.term.options.fontSize = config.fontSize + terminalZoomDelta
       entry.fitAddon.fit()
     }
-  }, [config?.fontFamily, config?.fontSize, tabId])
+  }, [config?.fontFamily, config?.fontSize, terminalZoomDelta, tabId])
 
   // Update terminal theme when it changes
   useEffect(() => {

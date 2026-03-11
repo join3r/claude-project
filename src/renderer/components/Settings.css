@@ -98,3 +98,21 @@
 .settings-checkbox input[type="checkbox"] {
   cursor: pointer;
 }
+
+.project-settings-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.project-settings-tool-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  min-width: 90px;
+  flex-shrink: 0;
+}
+
+.project-settings-tool-row .settings-input {
+  flex: 1;
+}

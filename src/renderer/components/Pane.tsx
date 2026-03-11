@@ -15,10 +15,11 @@ interface Props {
   projectDir: string
   sshConfig?: SshConfig
   shellCommand?: ShellCommandConfig
+  aiToolArgs?: Partial<Record<AiTabType, string>>
   style?: React.CSSProperties
 }
 
-export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, sshConfig, shellCommand, style }: Props): React.ReactElement {
+export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, sshConfig, shellCommand, aiToolArgs, style }: Props): React.ReactElement {
   return (
     <div className="pane" style={style}>
       <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} />
@@ -65,6 +66,7 @@ export default function Pane({ tabs, activeTabId, pane, projectId, taskId, proje
                 taskId={taskId}
                 projectDir={projectDir}
                 sshConfig={sshConfig}
+                extraArgs={aiToolArgs?.[tab.type as AiTabType]}
               />
             )
           }
