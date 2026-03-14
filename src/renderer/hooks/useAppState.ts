@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
-import type { Project, Task, Tab, AppConfig, TabType, AiTabType, SshConfig } from '../../shared/types'
+import type { Project, Task, Tab, AppConfig, TabType, AiTabType, SshConfig, WorkspaceConfig } from '../../shared/types'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs'>>
 
@@ -167,6 +167,12 @@ export function useAppState() {
           window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
           window.api.scrollbackDelete(tab.id)
         }
+        if (task.workspace) {
+          window.api.workspaceDelete(
+            project.directory, task.workspace.worktreePath,
+            task.workspace.branchName, task.workspace.baseBranch, true
+          ).catch(() => { /* Best effort cleanup */ })
+        }
       }
     }
     persistProjects(prev => prev.filter((p) => p.id !== id))
@@ -203,13 +209,38 @@ export function useAppState() {
     return task
   }, [persistProjects, selectTask])
 
-  const removeTask = useCallback((projectId: string, taskId: string) => {
+  const addWorkspaceTask = useCallback((projectId: string, name: string, workspace: WorkspaceConfig) => {
+    const task: Task = {
+      id: uuid(),
+      name,
+      workspace,
+      tabs: { left: [], right: [] },
+      activeTab: { left: null, right: null },
+      splitOpen: false,
+      splitRatio: 0.5
+    }
+    persistProjects(prev =>
+      prev.map((p) =>
+        p.id === projectId ? { ...p, tasks: [...p.tasks, task] } : p
+      )
+    )
+    selectTask(task.id)
+    return task
+  }, [persistProjects, selectTask])
+
+  const removeTask = useCallback((projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => {
     const project = projectsRef.current.find(p => p.id === projectId)
     const task = project?.tasks.find(t => t.id === taskId)
     if (task) {
       for (const tab of [...task.tabs.left, ...task.tabs.right]) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
         window.api.scrollbackDelete(tab.id)
+      }
+      if (task.workspace && project && !skipWorkspaceCleanup) {
+        window.api.workspaceDelete(
+          project.directory, task.workspace.worktreePath,
+          task.workspace.branchName, task.workspace.baseBranch, true
+        ).catch(() => { /* Workspace may already be cleaned up */ })
       }
     }
     persistProjects(prev =>
@@ -429,6 +460,7 @@ export function useAppState() {
     renameProject,
     updateProject,
     addTask,
+    addWorkspaceTask,
     removeTask,
     renameTask,
     reorderProjects,
