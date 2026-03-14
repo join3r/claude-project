@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildAiToolArgs, parseExtraArgs, resolveCodexResumeSessionId } from '../src/renderer/components/aiToolTabUtils'
+import { buildAiToolArgs, parseExtraArgs } from '../src/renderer/components/aiToolTabUtils'
 
 describe('aiToolTabUtils', () => {
   it('parses extra args into argv tokens', () => {
     expect(parseExtraArgs('  --model gpt-5   --search  ')).toEqual(['--model', 'gpt-5', '--search'])
     expect(parseExtraArgs()).toEqual([])
-  })
-
-  it('prefers persisted Codex session ids over isolated home discovery', () => {
-    expect(resolveCodexResumeSessionId('sess-saved', 'sess-isolated')).toBe('sess-saved')
-    expect(resolveCodexResumeSessionId(undefined, 'sess-isolated')).toBe('sess-isolated')
-    expect(resolveCodexResumeSessionId(undefined, null)).toBeUndefined()
   })
 
   it('builds Codex args with native bell notifications and resume', () => {

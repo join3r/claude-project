@@ -4,11 +4,10 @@ import { ScrollbackStorage } from './scrollback-storage'
 import { PtyManager } from './pty-manager'
 import { HookServer } from './hook-server'
 import { HookInjector } from './hook-injector'
-import { CodexSessionManager } from './codex-session-manager'
 import { SshConnectionManager } from './ssh-connection-manager'
+import { CodexSessionManager } from './codex-session-manager'
 import type { SshConfig } from '../shared/types'
 import { AppConfig, ProjectsData } from '../shared/types'
-import { WorkspaceManager } from './workspace-manager'
 import os from 'os'
 import path from 'path'
 
@@ -17,14 +16,13 @@ const CONFIG_DIR = path.join(os.homedir(), '.devtool')
 export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ cleanup: () => void }> {
   const storage = new Storage(CONFIG_DIR)
   const scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
-  const codexSessionManager = new CodexSessionManager(path.join(CONFIG_DIR, 'codex-tabs'))
   const ptyManager = new PtyManager()
 
   // Start hook server BEFORE registering IPC handlers — no race condition
   const hookServer = new HookServer()
   await hookServer.start()
   const hookInjector = new HookInjector(hookServer.getPort())
-  const workspaceManager = new WorkspaceManager()
+  const codexSessionManager = new CodexSessionManager()
 
   // Hook server events → renderer
   hookServer.on('session-start', (tabId: string, body: Record<string, unknown>) => {
@@ -149,55 +147,17 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     }
   })
 
-  // Workspace
-  ipcMain.handle('workspace-list-branches', async (_e, projectDir: string) => {
-    return workspaceManager.listBranches(projectDir)
-  })
-
-  ipcMain.handle('workspace-create', async (_e, projectDir: string, name: string, baseBranch: string) => {
-    return workspaceManager.create(projectDir, name, baseBranch)
-  })
-
-  ipcMain.handle('workspace-delete', async (_e, projectDir: string, worktreePath: string, branchName: string, baseBranch: string, force?: boolean, keepBranch?: boolean) => {
-    return workspaceManager.delete({ projectDir, worktreePath, branchName, baseBranch, force, keepBranch })
-  })
-
-  ipcMain.handle('codex-prepare', async (_e, tabId: string, projectId?: string, sshConfig?: SshConfig) => {
+  // Codex session reading
+  ipcMain.handle('codex-read-session', async (_e, cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig) => {
     if (!sshConfig || !projectId) {
-      return codexSessionManager.prepareLocalTab(tabId)
+      return { sessionId: await codexSessionManager.readLatestSessionId(cwd, afterTs) }
     }
 
     if (sshManager.getStatus(projectId) !== 'connected') {
       throw new Error('SSH connection not established')
     }
 
-    const prepareScript = codexSessionManager.buildRemotePrepareScript(sshConfig.remoteDir, tabId)
-    const sshArgs = [
-      '-S', sshManager.getSocketPath(projectId),
-      `${sshConfig.username}@${sshConfig.host}`,
-      prepareScript
-    ]
-
-    try {
-      const { execFile } = await import('child_process')
-      const { promisify } = await import('util')
-      const { stdout } = await promisify(execFile)('ssh', sshArgs, { timeout: 5000 })
-      return JSON.parse(stdout.trim()) as { home: string; sessionId: string | null }
-    } catch (error) {
-      throw new Error(`Failed to prepare Codex tab: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  })
-
-  ipcMain.handle('codex-read-session', async (_e, tabId: string, projectId?: string, sshConfig?: SshConfig) => {
-    if (!sshConfig || !projectId) {
-      return { sessionId: codexSessionManager.readLocalTabSessionId(tabId) }
-    }
-
-    if (sshManager.getStatus(projectId) !== 'connected') {
-      throw new Error('SSH connection not established')
-    }
-
-    const readScript = codexSessionManager.buildRemoteReadSessionScript(sshConfig.remoteDir, tabId)
+    const readScript = codexSessionManager.buildRemoteReadSessionScript(cwd, afterTs)
     const sshArgs = [
       '-S', sshManager.getSocketPath(projectId),
       `${sshConfig.username}@${sshConfig.host}`,
@@ -205,35 +165,12 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     ]
 
     try {
-      const { execFile } = await import('child_process')
+      const { execFile: execFileCb } = await import('child_process')
       const { promisify } = await import('util')
-      const { stdout } = await promisify(execFile)('ssh', sshArgs, { timeout: 5000 })
+      const { stdout } = await promisify(execFileCb)('ssh', sshArgs, { timeout: 5000 })
       return JSON.parse(stdout.trim()) as { sessionId: string | null }
     } catch (error) {
       throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  })
-
-  ipcMain.handle('codex-cleanup', (_e, tabId: string) => {
-    codexSessionManager.cleanupLocalTab(tabId)
-  })
-
-  ipcMain.handle('codex-cleanup-remote', async (_e, tabId: string, projectId: string, sshConfig: SshConfig) => {
-    if (sshManager.getStatus(projectId) !== 'connected') return
-
-    const cleanupScript = codexSessionManager.buildRemoteCleanupScript(sshConfig.remoteDir, tabId)
-    const cleanupArgs = [
-      '-S', sshManager.getSocketPath(projectId),
-      `${sshConfig.username}@${sshConfig.host}`,
-      cleanupScript
-    ]
-
-    try {
-      const { execFile } = await import('child_process')
-      const { promisify } = await import('util')
-      await promisify(execFile)('ssh', cleanupArgs, { timeout: 5000 })
-    } catch {
-      // Best-effort cleanup.
     }
   })
 

@@ -7,7 +7,7 @@ import { useApp } from '../context/AppContext'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
-import { buildAiToolArgs, parseExtraArgs, resolveCodexResumeSessionId } from './aiToolTabUtils'
+import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
 import '@xterm/xterm/css/xterm.css'
 import './AiToolTab.css'
 
@@ -101,12 +101,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const suppressUntilRef = useRef(0)
   const visibleRef = useRef(visible)
-  const latestSessionIdRef = useRef(sessionId)
   visibleRef.current = visible
-  latestSessionIdRef.current = sessionId
   const [sshReady, setSshReady] = useState(!sshConfig)
 
   // Poll SSH status until connected (for remote tabs)
@@ -125,6 +122,14 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
   const isClaudeTab = toolType === 'claude'
   const isCodexTab = toolType === 'codex'
+  const codexSpawnTsRef = useRef(0)
+  const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const latestSessionIdRef = useRef<string | null>(sessionId ?? null)
+
+  function startCodexSessionPolling(): void {
+    if (codexSessionPollRef.current) return
+    codexSessionPollRef.current = setInterval(refreshCodexSessionId, 2000)
+  }
 
   function stopCodexSessionPolling(): void {
     if (codexSessionPollRef.current) {
@@ -136,9 +141,17 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   async function refreshCodexSessionId(): Promise<void> {
     if (!isCodexTab) return
 
+    // Resume case: stop polling after 30 seconds if no new session found
+    if (latestSessionIdRef.current && Date.now() / 1000 > codexSpawnTsRef.current + 30) {
+      stopCodexSessionPolling()
+      return
+    }
+
     try {
+      const cwd = sshConfig ? sshConfig.remoteDir : projectDir
       const { sessionId: latestSessionId } = await window.api.codexReadSession(
-        tabId,
+        cwd,
+        codexSpawnTsRef.current,
         sshConfig ? projectId : undefined,
         sshConfig
       )
@@ -147,18 +160,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
       latestSessionIdRef.current = latestSessionId
       updateTabSessionId(projectId, taskId, pane, tabId, latestSessionId)
+      stopCodexSessionPolling()
     } catch {
-      // Codex may not have written a session yet or the remote host may be reconnecting.
+      // sqlite3 not available or remote host reconnecting — skip this cycle.
     }
-  }
-
-  function startCodexSessionPolling(): void {
-    if (!isCodexTab || codexSessionPollRef.current) return
-
-    void refreshCodexSessionId()
-    codexSessionPollRef.current = setInterval(() => {
-      void refreshCodexSessionId()
-    }, 2000)
   }
 
   useEffect(() => {
@@ -266,7 +271,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     // Exit callback (both Claude and non-Claude)
     exitCallbacks.set(tabId, () => {
       if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
-      stopCodexSessionPolling()
       statusStore.setStatus(tabId, 'exited')
     })
 
@@ -301,13 +305,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
           const startSession = async (): Promise<void> => {
             let resumeSessionId = sessionId
-            let extraEnv: Record<string, string> | undefined
-
-            if (isCodexTab) {
-              const prepared = await window.api.codexPrepare(tabId, sshConfig ? projectId : undefined, sshConfig)
-              extraEnv = { CODEX_HOME: prepared.home }
-              resumeSessionId = resolveCodexResumeSessionId(sessionId, prepared.sessionId)
-            }
 
             // Restore scrollback only for non-resume tabs (resume re-outputs content)
             if (!resumeSessionId) {
@@ -315,7 +312,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
               if (data) {
                 await new Promise<void>(resolve => {
                   entry.term.write(data, () => {
-                    // After xterm processes scrollback, re-sync viewport dimensions
                     entry.fitAddon.fit()
                     entry.term.scrollToBottom()
                     resolve()
@@ -337,8 +333,14 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             const parsedExtra = parseExtraArgs(extraArgs)
             const args = buildAiToolArgs(toolType, parsedExtra, resumeSessionId)
 
+            let extraEnv: Record<string, string> | undefined
             if (isClaudeTab) {
               extraEnv = { DEVTOOL_TAB_ID: tabId }
+            }
+
+            // Record spawn timestamp for Codex session polling
+            if (isCodexTab) {
+              codexSpawnTsRef.current = Math.floor(Date.now() / 1000)
             }
 
             if (sshConfig) {
@@ -357,7 +359,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, toolType, config, sessionId, projectDir, sshReady, extraArgs, isClaudeTab, isCodexTab, projectId, sshConfig])
+  }, [tabId, toolType, config, sessionId, projectDir, sshReady])
 
   // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
@@ -416,7 +418,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           terminals.delete(tabId)
           window.api.ptyKill(tabId)
         }
-        stopCodexSessionPolling()
         exitCallbacks.delete(tabId)
         activityCallbacks.delete(tabId)
         hookStatusCallbacks.delete(tabId)
@@ -430,19 +431,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             window.api.hooksCleanup(projectDir)
           }
         }
-
-        if (isCodexTab) {
-          if (sshConfig) {
-            window.api.codexCleanupRemote(tabId, projectId, sshConfig)
-          } else {
-            window.api.codexCleanup(tabId)
-          }
-        }
       }
     }
     window.addEventListener('tab-removed', handler)
     return () => window.removeEventListener('tab-removed', handler)
-  }, [tabId, isClaudeTab, isCodexTab, projectDir, projectId, sshConfig])
+  }, [tabId, isClaudeTab, projectDir])
 
   return (
     <div
