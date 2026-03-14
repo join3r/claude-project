@@ -4,6 +4,10 @@ import { isRemoteProject } from '../../shared/types'
 import Pane from './Pane'
 import './ContentArea.css'
 
+function joinPath(...parts: string[]): string {
+  return parts.filter(Boolean).join('/')
+}
+
 export default function ContentArea(): React.ReactElement {
   const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab, zoomTerminal, zoomBrowser } = useApp()
   const panesRef = useRef<HTMLDivElement | null>(null)
@@ -150,6 +154,9 @@ export default function ContentArea(): React.ReactElement {
         project.tasks.map((task) => {
           const isVisible = project.id === selectedProjectId && task.id === selectedTaskId
           const ratio = dragRatio ?? task.splitRatio ?? 0.5
+          const effectiveDir = task.workspace
+            ? joinPath(task.workspace.worktreePath, task.workspace.relativeProjectPath)
+            : getProjectDir(project)
           return (
             <div
               key={`${project.id}-${task.id}`}
@@ -191,7 +198,7 @@ export default function ContentArea(): React.ReactElement {
                   pane="left"
                   projectId={project.id}
                   taskId={task.id}
-                  projectDir={getProjectDir(project)}
+                  projectDir={effectiveDir}
                   sshConfig={project.ssh}
                   shellCommand={project.shellCommand}
                   aiToolArgs={project.aiToolArgs}
@@ -209,7 +216,7 @@ export default function ContentArea(): React.ReactElement {
                       pane="right"
                       projectId={project.id}
                       taskId={task.id}
-                      projectDir={getProjectDir(project)}
+                      projectDir={effectiveDir}
                       sshConfig={project.ssh}
                       shellCommand={project.shellCommand}
                       aiToolArgs={project.aiToolArgs}
