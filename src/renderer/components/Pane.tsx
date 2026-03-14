@@ -35,6 +35,7 @@ export default function Pane({ tabs, activeTabId, pane, projectId, taskId, proje
                 tabId={tab.id}
                 visible={tab.id === activeTabId}
                 projectId={projectId}
+                projectDir={projectDir}
                 sshConfig={sshConfig}
                 shellCommand={shellCommand}
               />

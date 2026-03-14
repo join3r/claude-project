@@ -12,6 +12,7 @@ interface Props {
   tabId: string
   visible: boolean
   projectId: string
+  projectDir: string
   sshConfig?: SshConfig
   shellCommand?: ShellCommandConfig
 }
@@ -43,11 +44,13 @@ function ensureBeforeUnloadHandler(): void {
   })
 }
 
-export default function TerminalTab({ tabId, visible, projectId, sshConfig, shellCommand }: Props): React.ReactElement {
+export default function TerminalTab({ tabId, visible, projectId, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const { selectedProject, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
+  const projectDirRef = useRef(projectDir)
+  projectDirRef.current = projectDir
   const [sshReady, setSshReady] = useState(!sshConfig)
 
   // Poll SSH status until connected (for remote tabs)
@@ -153,7 +156,7 @@ export default function TerminalTab({ tabId, visible, projectId, sshConfig, shel
           } else if (sshConfig) {
             window.api.ptySpawn(tabId, '$SHELL', '', entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
           } else {
-            window.api.ptySpawn(tabId, config.defaultShell, selectedProject.directory, entry.term.cols, entry.term.rows, ['-l'])
+            window.api.ptySpawn(tabId, config.defaultShell, projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'])
           }
         }
       }
