@@ -30,6 +30,18 @@ export interface Task {
   }
   splitOpen: boolean
   splitRatio: number
+  workspace?: WorkspaceConfig
+}
+
+export interface WorkspaceConfig {
+  worktreePath: string
+  branchName: string
+  baseBranch: string
+  relativeProjectPath: string
+}
+
+export function isWorkspaceTask(task: Task): boolean {
+  return !!task.workspace
 }
 
 export interface Project {
