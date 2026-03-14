@@ -1,0 +1,49 @@
+.create-workspace-panel {
+  width: 440px;
+}
+
+.create-workspace-branch-filter {
+  margin-bottom: 4px;
+}
+
+.create-workspace-branch-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+}
+
+.create-workspace-branch-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  display: block;
+}
+
+.create-workspace-branch-item:hover {
+  background: var(--hover);
+}
+
+.create-workspace-branch-item.selected {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.create-workspace-branch-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.create-workspace-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
