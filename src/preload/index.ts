@@ -46,6 +46,14 @@ const api = {
   hooksCleanupRemote: (projectId: string, sshConfig: SshConfig): Promise<void> =>
     ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig),
 
+  // Workspace
+  workspaceListBranches: (projectDir: string): Promise<string[]> =>
+    ipcRenderer.invoke('workspace-list-branches', projectDir),
+  workspaceCreate: (projectDir: string, name: string, baseBranch: string): Promise<{ worktreePath: string; branchName: string; relativeProjectPath: string }> =>
+    ipcRenderer.invoke('workspace-create', projectDir, name, baseBranch),
+  workspaceDelete: (projectDir: string, worktreePath: string, branchName: string, baseBranch: string, force?: boolean, keepBranch?: boolean): Promise<{ status: 'ok' | 'uncommitted' | 'unmerged' | 'uncommitted-and-unmerged'; baseBranch?: string }> =>
+    ipcRenderer.invoke('workspace-delete', projectDir, worktreePath, branchName, baseBranch, force, keepBranch),
+
   // Hook events from server
   onHookSessionStart: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
     ipcRenderer.on('hook-session-start', (_e, tabId, body) => callback(tabId, body))
