@@ -7,6 +7,7 @@ import { useApp } from '../context/AppContext'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
+import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
 import '@xterm/xterm/css/xterm.css'
 import './AiToolTab.css'
 
@@ -120,6 +121,50 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   }, [sshConfig, projectId])
 
   const isClaudeTab = toolType === 'claude'
+  const isCodexTab = toolType === 'codex'
+  const codexSpawnTsRef = useRef(0)
+  const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const latestSessionIdRef = useRef<string | null>(sessionId ?? null)
+
+  function startCodexSessionPolling(): void {
+    if (codexSessionPollRef.current) return
+    codexSessionPollRef.current = setInterval(refreshCodexSessionId, 2000)
+  }
+
+  function stopCodexSessionPolling(): void {
+    if (codexSessionPollRef.current) {
+      clearInterval(codexSessionPollRef.current)
+      codexSessionPollRef.current = null
+    }
+  }
+
+  async function refreshCodexSessionId(): Promise<void> {
+    if (!isCodexTab) return
+
+    // Resume case: stop polling after 30 seconds if no new session found
+    if (latestSessionIdRef.current && Date.now() / 1000 > codexSpawnTsRef.current + 30) {
+      stopCodexSessionPolling()
+      return
+    }
+
+    try {
+      const cwd = sshConfig ? sshConfig.remoteDir : projectDir
+      const { sessionId: latestSessionId } = await window.api.codexReadSession(
+        cwd,
+        codexSpawnTsRef.current,
+        sshConfig ? projectId : undefined,
+        sshConfig
+      )
+
+      if (!latestSessionId || latestSessionId === latestSessionIdRef.current) return
+
+      latestSessionIdRef.current = latestSessionId
+      updateTabSessionId(projectId, taskId, pane, tabId, latestSessionId)
+      stopCodexSessionPolling()
+    } catch {
+      // sqlite3 not available or remote host reconnecting — skip this cycle.
+    }
+  }
 
   useEffect(() => {
     if (!containerRef.current || !config) return
@@ -259,13 +304,14 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           spawnedRef.current = true
 
           const startSession = async (): Promise<void> => {
+            let resumeSessionId = sessionId
+
             // Restore scrollback only for non-resume tabs (resume re-outputs content)
-            if (!sessionId) {
+            if (!resumeSessionId) {
               const data = await window.api.scrollbackLoad(tabId)
               if (data) {
                 await new Promise<void>(resolve => {
                   entry.term.write(data, () => {
-                    // After xterm processes scrollback, re-sync viewport dimensions
                     entry.fitAddon.fit()
                     entry.term.scrollToBottom()
                     resolve()
@@ -284,13 +330,27 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             }
 
             const command = AI_TAB_META[toolType].command
-            const parsedExtra = extraArgs ? extraArgs.trim().split(/\s+/).filter(Boolean) : []
-            const args = [...parsedExtra, ...(sessionId ? ['--resume', sessionId] : [])]
-            const extraEnv = isClaudeTab ? { DEVTOOL_TAB_ID: tabId } : undefined
+            const parsedExtra = parseExtraArgs(extraArgs)
+            const args = buildAiToolArgs(toolType, parsedExtra, resumeSessionId)
+
+            let extraEnv: Record<string, string> | undefined
+            if (isClaudeTab) {
+              extraEnv = { DEVTOOL_TAB_ID: tabId }
+            }
+
+            // Record spawn timestamp for Codex session polling
+            if (isCodexTab) {
+              codexSpawnTsRef.current = Math.floor(Date.now() / 1000)
+            }
+
             if (sshConfig) {
-              window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
+              await window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
             } else {
-              window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+              await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+            }
+
+            if (isCodexTab) {
+              startCodexSessionPolling()
             }
           }
           startSession()

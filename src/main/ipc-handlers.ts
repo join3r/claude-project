@@ -5,6 +5,7 @@ import { PtyManager } from './pty-manager'
 import { HookServer } from './hook-server'
 import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
+import { CodexSessionManager } from './codex-session-manager'
 import type { SshConfig } from '../shared/types'
 import { AppConfig, ProjectsData } from '../shared/types'
 import os from 'os'
@@ -21,6 +22,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   const hookServer = new HookServer()
   await hookServer.start()
   const hookInjector = new HookInjector(hookServer.getPort())
+  const codexSessionManager = new CodexSessionManager()
 
   // Hook server events → renderer
   hookServer.on('session-start', (tabId: string, body: Record<string, unknown>) => {
@@ -142,6 +144,33 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       await promisify(execFile)('ssh', cleanupArgs, { timeout: 5000 })
     } catch {
       // Best-effort cleanup
+    }
+  })
+
+  // Codex session reading
+  ipcMain.handle('codex-read-session', async (_e, cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig) => {
+    if (!sshConfig || !projectId) {
+      return { sessionId: await codexSessionManager.readLatestSessionId(cwd, afterTs) }
+    }
+
+    if (sshManager.getStatus(projectId) !== 'connected') {
+      throw new Error('SSH connection not established')
+    }
+
+    const readScript = codexSessionManager.buildRemoteReadSessionScript(cwd, afterTs)
+    const sshArgs = [
+      '-S', sshManager.getSocketPath(projectId),
+      `${sshConfig.username}@${sshConfig.host}`,
+      readScript
+    ]
+
+    try {
+      const { execFile: execFileCb } = await import('child_process')
+      const { promisify } = await import('util')
+      const { stdout } = await promisify(execFileCb)('ssh', sshArgs, { timeout: 5000 })
+      return JSON.parse(stdout.trim()) as { sessionId: string | null }
+    } catch (error) {
+      throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
     }
   })
 

@@ -46,6 +46,10 @@ const api = {
   hooksCleanupRemote: (projectId: string, sshConfig: SshConfig): Promise<void> =>
     ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig),
 
+  // Codex session reading
+  codexReadSession: (cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig): Promise<{ sessionId: string | null }> =>
+    ipcRenderer.invoke('codex-read-session', cwd, afterTs, projectId, sshConfig),
+
   // Hook events from server
   onHookSessionStart: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
     ipcRenderer.on('hook-session-start', (_e, tabId, body) => callback(tabId, body))
