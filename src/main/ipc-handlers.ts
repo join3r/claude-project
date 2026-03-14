@@ -7,6 +7,7 @@ import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import type { SshConfig } from '../shared/types'
 import { AppConfig, ProjectsData } from '../shared/types'
+import { WorkspaceManager } from './workspace-manager'
 import os from 'os'
 import path from 'path'
 
@@ -21,6 +22,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   const hookServer = new HookServer()
   await hookServer.start()
   const hookInjector = new HookInjector(hookServer.getPort())
+  const workspaceManager = new WorkspaceManager()
 
   // Hook server events → renderer
   hookServer.on('session-start', (tabId: string, body: Record<string, unknown>) => {
@@ -143,6 +145,19 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     } catch {
       // Best-effort cleanup
     }
+  })
+
+  // Workspace
+  ipcMain.handle('workspace-list-branches', async (_e, projectDir: string) => {
+    return workspaceManager.listBranches(projectDir)
+  })
+
+  ipcMain.handle('workspace-create', async (_e, projectDir: string, name: string, baseBranch: string) => {
+    return workspaceManager.create(projectDir, name, baseBranch)
+  })
+
+  ipcMain.handle('workspace-delete', async (_e, projectDir: string, worktreePath: string, branchName: string, baseBranch: string, force?: boolean, keepBranch?: boolean) => {
+    return workspaceManager.delete({ projectDir, worktreePath, branchName, baseBranch, force, keepBranch })
   })
 
   // PTY — accepts args array, extraEnv, and optional SSH config for remote spawn
