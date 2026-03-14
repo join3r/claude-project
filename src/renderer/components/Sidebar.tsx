@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject } from '../../shared/types'
-import type { Tab, Task } from '../../shared/types'
+import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject, isWorkspaceTask } from '../../shared/types'
+import type { Tab, Task, WorkspaceConfig } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
+import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
@@ -40,8 +41,8 @@ export default function Sidebar(): React.ReactElement {
     projects, selectedProjectId, selectedTaskId,
     setSelectedProjectId, setSelectedTaskId,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
-    addTask, removeTask, renameTask,
-    reorderProjects, reorderTasks
+    addTask, addWorkspaceTask, removeTask, renameTask,
+    reorderProjects, reorderTasks, getProjectDir
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
@@ -75,6 +76,7 @@ export default function Sidebar(): React.ReactElement {
     index: number
   } | null>(null)
   const [dropTarget, setDropTarget] = useState<{ type: 'project' | 'task'; projectId?: string; index: number } | null>(null)
+  const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
 
   useEffect(() => {
     if (editingId && editRef.current) editRef.current.focus()
@@ -113,6 +115,58 @@ export default function Sidebar(): React.ReactElement {
     const task = addTask(projectId, 'New Task')
     setEditingId(task.id)
     setEditValue(task.name)
+  }
+
+  const handleAddWorkspace = (projectId: string) => {
+    setWorkspaceModalProjectId(projectId)
+  }
+
+  const handleDeleteTask = async (projectId: string, taskId: string) => {
+    const project = projects.find(p => p.id === projectId)
+    const task = project?.tasks.find(t => t.id === taskId)
+
+    if (task?.workspace && project) {
+      let keepBranch = false
+      try {
+        const result = await window.api.workspaceDelete(
+          project.directory, task.workspace.worktreePath,
+          task.workspace.branchName, task.workspace.baseBranch
+        )
+        if (result.status === 'uncommitted') {
+          if (!window.confirm('This workspace has uncommitted changes that will be lost. Delete anyway?')) return
+        } else if (result.status === 'unmerged') {
+          if (!window.confirm(`Branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete workspace?`)) return
+          keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
+        } else if (result.status === 'uncommitted-and-unmerged') {
+          if (!window.confirm(`This workspace has uncommitted changes and branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete anyway?`)) return
+          keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
+        }
+      } catch {
+        // Pre-flight failed, proceed with deletion
+      }
+
+      // Step 1: Kill all tabs/PTYs first so no process holds the worktree cwd
+      for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
+        window.api.scrollbackDelete(tab.id)
+      }
+
+      // Step 2: Now safe to remove worktree and branch
+      try {
+        await window.api.workspaceDelete(
+          project.directory, task.workspace.worktreePath,
+          task.workspace.branchName, task.workspace.baseBranch, true, keepBranch
+        )
+      } catch {
+        // Worktree may already be cleaned up
+      }
+
+      // Step 3: Remove task from state (skip both tab cleanup and workspace cleanup — already done)
+      removeTask(projectId, taskId, true)
+      return
+    }
+
+    removeTask(projectId, taskId)
   }
 
   const handleRenameSubmit = (type: 'project' | 'task', projectId: string, taskId?: string) => {
@@ -287,6 +341,7 @@ export default function Sidebar(): React.ReactElement {
                       <>
                         <TaskStatusDot task={task} allStatuses={allStatuses} />
                         <span className="sidebar-label">{task.name}</span>
+                        {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
                       </>
                     )}
                   </div>
@@ -301,6 +356,14 @@ export default function Sidebar(): React.ReactElement {
                 >
                   + Task
                 </button>
+                {!isShellCommandProject(project) && !isRemoteProject(project) && (
+                  <button
+                    className="sidebar-btn add-task-btn"
+                    onClick={() => handleAddWorkspace(project.id)}
+                  >
+                    + Workspace
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -330,7 +393,7 @@ export default function Sidebar(): React.ReactElement {
           )}
           <button onClick={() => {
             if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
-            else removeTask(contextMenu.projectId, contextMenu.taskId!)
+            else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
             setContextMenu(null)
           }}>Delete</button>
         </div>
@@ -370,6 +433,21 @@ export default function Sidebar(): React.ReactElement {
             project={project}
             onSave={(aiToolArgs) => updateProject(projectSettingsId, { aiToolArgs })}
             onClose={() => setProjectSettingsId(null)}
+          />
+        )
+      })()}
+
+      {workspaceModalProjectId && (() => {
+        const project = projects.find(p => p.id === workspaceModalProjectId)
+        if (!project) return null
+        return (
+          <CreateWorkspaceModal
+            projectDir={getProjectDir(project)}
+            onAdd={(name, workspace) => {
+              addWorkspaceTask(workspaceModalProjectId, name, workspace)
+              setWorkspaceModalProjectId(null)
+            }}
+            onCancel={() => setWorkspaceModalProjectId(null)}
           />
         )
       })()}
