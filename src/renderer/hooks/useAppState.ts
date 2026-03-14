@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
 import type { Project, Task, Tab, AppConfig, TabType, AiTabType, SshConfig, WorkspaceConfig } from '../../shared/types'
+import { applyQueuedStateUpdates, resolveInitialSelection, type StateUpdater } from './stateHydration'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs'>>
 
@@ -21,30 +22,76 @@ export function useAppState() {
   selectedProjectIdRef.current = selectedProjectId
   const selectedTaskIdRef = useRef(selectedTaskId)
   selectedTaskIdRef.current = selectedTaskId
+  const projectsLoadedRef = useRef(false)
+  const configLoadedRef = useRef(false)
+  const pendingProjectUpdatersRef = useRef<StateUpdater<Project[]>[]>([])
+  const pendingConfigUpdatersRef = useRef<StateUpdater<AppConfig>[]>([])
+  const lastSavedProjectsJsonRef = useRef<string | null>(null)
+  const lastSavedConfigJsonRef = useRef<string | null>(null)
 
   // Load initial data
   useEffect(() => {
+    let cancelled = false
+
     Promise.all([
       window.api.loadProjects(),
       window.api.loadConfig()
     ]).then(([projectsData, loadedConfig]) => {
-      setProjects(projectsData.projects)
-      setConfig(loadedConfig)
+      if (cancelled) return
 
-      if (loadedConfig.lastProjectId) {
-        const project = projectsData.projects.find((p) => p.id === loadedConfig.lastProjectId)
-        if (project) {
-          setSelectedProjectId(loadedConfig.lastProjectId)
-          if (loadedConfig.lastTaskId) {
-            const task = project.tasks.find((t) => t.id === loadedConfig.lastTaskId)
-            if (task) setSelectedTaskId(loadedConfig.lastTaskId)
-          }
-        }
+      const hydratedProjects = applyQueuedStateUpdates(projectsData.projects, pendingProjectUpdatersRef.current)
+      const hydratedConfig = applyQueuedStateUpdates(loadedConfig, pendingConfigUpdatersRef.current)
+      const restoredSelection = resolveInitialSelection(
+        hydratedProjects,
+        hydratedConfig,
+        selectedProjectIdRef.current,
+        selectedTaskIdRef.current
+      )
+
+      pendingProjectUpdatersRef.current = []
+      pendingConfigUpdatersRef.current = []
+      lastSavedProjectsJsonRef.current = JSON.stringify({ projects: projectsData.projects })
+      lastSavedConfigJsonRef.current = JSON.stringify(loadedConfig)
+      projectsLoadedRef.current = true
+      configLoadedRef.current = true
+
+      setProjects(hydratedProjects)
+      setConfig(hydratedConfig)
+
+      if (restoredSelection.projectId !== selectedProjectIdRef.current) {
+        setSelectedProjectId(restoredSelection.projectId)
+      }
+      if (restoredSelection.taskId !== selectedTaskIdRef.current) {
+        setSelectedTaskId(restoredSelection.taskId)
       }
     })
     window.api.getNativeTheme().then(setTheme)
     window.api.onThemeChanged(setTheme)
+
+    return () => {
+      cancelled = true
+    }
   }, [])
+
+  useEffect(() => {
+    if (!projectsLoadedRef.current) return
+
+    const serialized = JSON.stringify({ projects })
+    if (serialized === lastSavedProjectsJsonRef.current) return
+
+    lastSavedProjectsJsonRef.current = serialized
+    void window.api.saveProjects({ projects })
+  }, [projects])
+
+  useEffect(() => {
+    if (!configLoadedRef.current || !config) return
+
+    const serialized = JSON.stringify(config)
+    if (serialized === lastSavedConfigJsonRef.current) return
+
+    lastSavedConfigJsonRef.current = serialized
+    void window.api.saveConfig(config)
+  }, [config])
 
   // Auto-connect SSH for the restored remote project on startup.
   useEffect(() => {
@@ -60,13 +107,11 @@ export function useAppState() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects.length > 0 && selectedProjectId])
 
-  // Persist projects using functional updater to avoid stale closures
   const persistProjects = useCallback((updater: (prev: Project[]) => Project[]) => {
-    setProjects(prev => {
-      const updated = updater(prev)
-      window.api.saveProjects({ projects: updated })
-      return updated
-    })
+    if (!projectsLoadedRef.current) {
+      pendingProjectUpdatersRef.current.push(updater)
+    }
+    setProjects(prev => updater(prev))
   }, [])
 
   const reorderProjects = useCallback((fromIndex: number, toIndex: number) => {
@@ -91,22 +136,20 @@ export function useAppState() {
   }, [persistProjects])
 
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
-    setConfig(prev => {
-      if (!prev) return prev
-      const newConfig = { ...prev, ...updates }
-      window.api.saveConfig(newConfig)
-      return newConfig
-    })
+    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, ...updates })
+    if (!configLoadedRef.current) {
+      pendingConfigUpdatersRef.current.push(updater)
+    }
+    setConfig(prev => (prev ? updater(prev) : prev))
   }, [])
 
   const selectProject = useCallback((id: string | null) => {
     setSelectedProjectId(id)
-    setConfig(prev => {
-      if (!prev) return prev
-      const newConfig = { ...prev, lastProjectId: id, lastTaskId: null }
-      window.api.saveConfig(newConfig)
-      return newConfig
-    })
+    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastProjectId: id, lastTaskId: null })
+    if (!configLoadedRef.current) {
+      pendingConfigUpdatersRef.current.push(updater)
+    }
+    setConfig(prev => (prev ? updater(prev) : prev))
     // Auto-connect SSH for remote projects
     if (id) {
       const project = projectsRef.current.find(p => p.id === id)
@@ -122,12 +165,11 @@ export function useAppState() {
 
   const selectTask = useCallback((id: string | null) => {
     setSelectedTaskId(id)
-    setConfig(prev => {
-      if (!prev) return prev
-      const newConfig = { ...prev, lastTaskId: id }
-      window.api.saveConfig(newConfig)
-      return newConfig
-    })
+    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastTaskId: id })
+    if (!configLoadedRef.current) {
+      pendingConfigUpdatersRef.current.push(updater)
+    }
+    setConfig(prev => (prev ? updater(prev) : prev))
   }, [])
 
   // Project CRUD

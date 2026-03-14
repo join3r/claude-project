@@ -54,6 +54,15 @@ const api = {
   workspaceDelete: (projectDir: string, worktreePath: string, branchName: string, baseBranch: string, force?: boolean, keepBranch?: boolean): Promise<{ status: 'ok' | 'uncommitted' | 'unmerged' | 'uncommitted-and-unmerged'; baseBranch?: string }> =>
     ipcRenderer.invoke('workspace-delete', projectDir, worktreePath, branchName, baseBranch, force, keepBranch),
 
+  // Codex session isolation
+  codexPrepare: (tabId: string, projectId?: string, sshConfig?: SshConfig): Promise<{ home: string; sessionId: string | null }> =>
+    ipcRenderer.invoke('codex-prepare', tabId, projectId, sshConfig),
+  codexReadSession: (tabId: string, projectId?: string, sshConfig?: SshConfig): Promise<{ sessionId: string | null }> =>
+    ipcRenderer.invoke('codex-read-session', tabId, projectId, sshConfig),
+  codexCleanup: (tabId: string): Promise<void> => ipcRenderer.invoke('codex-cleanup', tabId),
+  codexCleanupRemote: (tabId: string, projectId: string, sshConfig: SshConfig): Promise<void> =>
+    ipcRenderer.invoke('codex-cleanup-remote', tabId, projectId, sshConfig),
+
   // Hook events from server
   onHookSessionStart: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
     ipcRenderer.on('hook-session-start', (_e, tabId, body) => callback(tabId, body))
