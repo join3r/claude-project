@@ -17,7 +17,7 @@ interface Props {
   shellCommand?: ShellCommandConfig
 }
 
-const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon }>()
+const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; webglAddon: WebglAddon | null }>()
 
 let ptyListenerRegistered = false
 function ensurePtyListener(): void {
@@ -44,6 +44,22 @@ function ensureBeforeUnloadHandler(): void {
   })
 }
 
+/** Try to attach a WebGL addon; dispose on context loss so xterm falls back to canvas. */
+function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
+  try {
+    const addon = new WebglAddon()
+    addon.onContextLoss(() => {
+      try { addon.dispose() } catch { /* already gone */ }
+      const entry = terminals.get(tabId)
+      if (entry) entry.webglAddon = null
+    })
+    term.loadAddon(addon)
+    return addon
+  } catch {
+    return null
+  }
+}
+
 export default function TerminalTab({ tabId, visible, projectId, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const { selectedProject, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
@@ -52,20 +68,43 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
   const projectDirRef = useRef(projectDir)
   projectDirRef.current = projectDir
   const [sshReady, setSshReady] = useState(!sshConfig)
+  const prevSshReadyRef = useRef(sshReady)
 
-  // Poll SSH status until connected (for remote tabs)
+  // Poll SSH status (tracks both connection and disconnection for remote tabs)
   useEffect(() => {
     if (!sshConfig) return
     let cancelled = false
     const check = () => {
       window.api.sshStatus(projectId).then(status => {
-        if (!cancelled && status === 'connected') setSshReady(true)
+        if (!cancelled) setSshReady(status === 'connected')
       })
     }
     check()
     const interval = setInterval(check, 500)
     return () => { cancelled = true; clearInterval(interval) }
   }, [sshConfig, projectId])
+
+  // Respawn PTY after SSH reconnection (detect false→true transition)
+  useEffect(() => {
+    const wasReady = prevSshReadyRef.current
+    prevSshReadyRef.current = sshReady
+
+    if (!sshConfig || !sshReady || !spawnedRef.current) return
+    if (wasReady) return // Not a reconnection — was already connected
+
+    // SSH reconnected: save scrollback, kill dead PTY, and reset spawn flag
+    const entry = terminals.get(tabId)
+    if (entry) {
+      try {
+        const data = entry.serializeAddon.serialize()
+        window.api.scrollbackSaveSync(tabId, data)
+      } catch {}
+      entry.term.write('\r\n\x1b[33mSSH reconnected — restarting session...\x1b[0m\r\n\r\n')
+    }
+    window.api.ptyKill(tabId)
+    spawnedRef.current = false
+    // ResizeObserver effect (also depends on sshReady) will re-run and respawn
+  }, [sshReady, tabId, sshConfig])
 
   useEffect(() => {
     if (!containerRef.current || !selectedProject || !config) return
@@ -90,14 +129,8 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     term.loadAddon(serializeAddon)
     term.open(containerRef.current)
 
-    try {
-      const webglAddon = new WebglAddon()
-      term.loadAddon(webglAddon)
-    } catch {
-      // WebGL not available, fallback to canvas
-    }
-
-    terminals.set(tabId, { term, fitAddon, serializeAddon })
+    // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
+    terminals.set(tabId, { term, fitAddon, serializeAddon, webglAddon: null })
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -118,6 +151,24 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     ensurePtyListener()
     ensureBeforeUnloadHandler()
   }, [tabId, selectedProject, config])
+
+  // Manage WebGL addon lifecycle based on visibility
+  useEffect(() => {
+    const entry = terminals.get(tabId)
+    if (!entry) return
+    if (visible) {
+      // Attach WebGL when tab becomes visible (if not already attached)
+      if (!entry.webglAddon) {
+        entry.webglAddon = attachWebgl(tabId, entry.term)
+      }
+    } else {
+      // Release WebGL context when tab is hidden to stay under the browser limit
+      if (entry.webglAddon) {
+        try { entry.webglAddon.dispose() } catch { /* already gone */ }
+        entry.webglAddon = null
+      }
+    }
+  }, [visible, tabId])
 
   // Copy on select
   useEffect(() => {

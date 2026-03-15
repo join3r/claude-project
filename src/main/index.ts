@@ -90,7 +90,9 @@ function buildAppMenu(): void {
           click: () => sendToRenderer('menu-zoom-reset')
         },
         { type: 'separator' },
-        { role: 'togglefullscreen' }
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
+        { role: 'toggleDevTools', accelerator: 'CmdOrCtrl+Alt+I' }
       ]
     },
     {

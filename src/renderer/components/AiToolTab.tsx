@@ -24,7 +24,7 @@ interface Props {
   extraArgs?: string
 }
 
-const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon }>()
+const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; webglAddon: WebglAddon | null }>()
 
 let ptyListenerRegistered = false
 let exitListenerRegistered = false
@@ -105,21 +105,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   const [sshReady, setSshReady] = useState(!sshConfig)
-
-  // Poll SSH status until connected (for remote tabs)
-  useEffect(() => {
-    if (!sshConfig) return
-    let cancelled = false
-    const check = () => {
-      window.api.sshStatus(projectId).then(status => {
-        if (!cancelled && status === 'connected') setSshReady(true)
-      })
-    }
-    check()
-    const interval = setInterval(check, 500)
-    return () => { cancelled = true; clearInterval(interval) }
-  }, [sshConfig, projectId])
-
+  const prevSshReadyRef = useRef(sshReady)
   const isClaudeTab = toolType === 'claude'
   const isCodexTab = toolType === 'codex'
   const codexSpawnTsRef = useRef(0)
@@ -166,6 +152,47 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     }
   }
 
+  // Poll SSH status (tracks both connection and disconnection for remote tabs)
+  useEffect(() => {
+    if (!sshConfig) return
+    let cancelled = false
+    const check = () => {
+      window.api.sshStatus(projectId).then(status => {
+        if (cancelled) return
+        setSshReady(status === 'connected')
+      })
+    }
+    check()
+    const interval = setInterval(check, 500)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [sshConfig, projectId])
+
+  // Respawn PTY after SSH reconnection (detect false→true transition)
+  useEffect(() => {
+    const wasReady = prevSshReadyRef.current
+    prevSshReadyRef.current = sshReady
+
+    if (!sshConfig || !sshReady || !spawnedRef.current) return
+    if (wasReady) return // Not a reconnection — was already connected
+
+    // SSH reconnected: save scrollback, kill dead PTY, and reset spawn flag
+    const entry = terminals.get(tabId)
+    if (entry) {
+      try {
+        const data = entry.serializeAddon.serialize()
+        window.api.scrollbackSaveSync(tabId, data)
+      } catch {}
+      entry.term.write('\r\n\x1b[33mSSH reconnected — restarting session...\x1b[0m\r\n\r\n')
+    }
+    window.api.ptyKill(tabId)
+    statusStore.setStatus(tabId, null) // Clear exited status
+    spawnedRef.current = false
+    if (isCodexTab) {
+      stopCodexSessionPolling()
+    }
+    // ResizeObserver effect (also depends on sshReady) will re-run and respawn
+  }, [sshReady, tabId, sshConfig])
+
   useEffect(() => {
     if (!containerRef.current || !config) return
     if (initializedRef.current) return
@@ -189,14 +216,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     term.loadAddon(serializeAddon)
     term.open(containerRef.current)
 
-    try {
-      const webglAddon = new WebglAddon()
-      term.loadAddon(webglAddon)
-    } catch {
-      // WebGL not available
-    }
-
-    terminals.set(tabId, { term, fitAddon, serializeAddon })
+    // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
+    terminals.set(tabId, { term, fitAddon, serializeAddon, webglAddon: null })
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -278,6 +299,35 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     ensureExitListener()
     ensureBeforeUnloadHandler()
   }, [tabId, toolType, config])
+
+  // Manage WebGL addon lifecycle based on visibility
+  useEffect(() => {
+    const entry = terminals.get(tabId)
+    if (!entry) return
+    if (visible) {
+      // Attach WebGL when tab becomes visible (if not already attached)
+      if (!entry.webglAddon) {
+        try {
+          const addon = new WebglAddon()
+          addon.onContextLoss(() => {
+            try { addon.dispose() } catch { /* already gone */ }
+            const e = terminals.get(tabId)
+            if (e) e.webglAddon = null
+          })
+          entry.term.loadAddon(addon)
+          entry.webglAddon = addon
+        } catch {
+          // WebGL not available — canvas renderer is fine
+        }
+      }
+    } else {
+      // Release WebGL context when tab is hidden to stay under the browser limit
+      if (entry.webglAddon) {
+        try { entry.webglAddon.dispose() } catch { /* already gone */ }
+        entry.webglAddon = null
+      }
+    }
+  }, [visible, tabId])
 
   // Copy on select
   useEffect(() => {
