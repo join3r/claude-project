@@ -43,6 +43,11 @@ function buildAppMenu(): void {
           accelerator: 'CmdOrCtrl+W',
           click: () => sendToRenderer('menu-close-tab')
         },
+        {
+          label: 'Project Switcher',
+          accelerator: 'CmdOrCtrl+P',
+          click: () => sendToRenderer('menu-project-switcher')
+        },
         { type: 'separator' },
         isMac ? { role: 'close' as const, accelerator: '' } : { role: 'quit' as const }
       ]

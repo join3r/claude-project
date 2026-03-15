@@ -8,6 +8,7 @@ import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
+import ProjectSwitcher from './ProjectSwitcher'
 import './Sidebar.css'
 
 function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
@@ -36,10 +37,10 @@ function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<
   return <span className={`sidebar-status sidebar-status-${status}`} />
 }
 
-export default function Sidebar(): React.ReactElement {
+export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
   const {
     projects, selectedProjectId, selectedTaskId,
-    setSelectedProjectId, setSelectedTaskId,
+    setSelectedProjectId, setSelectedTaskId, switchToTask,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
     reorderProjects, reorderTasks, getProjectDir
@@ -77,6 +78,14 @@ export default function Sidebar(): React.ReactElement {
   } | null>(null)
   const [dropTarget, setDropTarget] = useState<{ type: 'project' | 'task'; projectId?: string; index: number } | null>(null)
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
+  const [switcherActive, setSwitcherActive] = useState(false)
+
+  useEffect(() => {
+    if (switcherRequested) {
+      setSwitcherActive(true)
+      onSwitcherConsumed?.()
+    }
+  }, [switcherRequested, onSwitcherConsumed])
 
   useEffect(() => {
     if (editingId && editRef.current) editRef.current.focus()
@@ -86,6 +95,12 @@ export default function Sidebar(): React.ReactElement {
     const dismiss = () => { setContextMenu(null); setAddMenuOpen(false) }
     window.addEventListener('click', dismiss)
     return () => window.removeEventListener('click', dismiss)
+  }, [])
+
+  useEffect(() => {
+    return window.api.onMenuProjectSwitcher(() => {
+      setSwitcherActive(prev => !prev)
+    })
   }, [])
 
   useEffect(() => {
@@ -257,6 +272,17 @@ export default function Sidebar(): React.ReactElement {
 
   return (
     <div className="sidebar">
+      <ProjectSwitcher
+        projects={projects}
+        selectedProjectId={selectedProjectId}
+        setSelectedProjectId={setSelectedProjectId}
+        switchToTask={switchToTask}
+        isActive={switcherActive}
+        onActivate={() => setSwitcherActive(true)}
+        onDeactivate={() => setSwitcherActive(false)}
+      />
+
+      {switcherActive ? null : (<>
       <div className="sidebar-header">
         <span className="sidebar-title">Projects</span>
         <div className="sidebar-add-wrapper">
@@ -373,6 +399,7 @@ export default function Sidebar(): React.ReactElement {
           <div className="sidebar-drop-indicator" />
         )}
       </div>
+      </>)}
 
       {contextMenu && (
         <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>

@@ -7,6 +7,7 @@ import ContentArea from './components/ContentArea'
 function AppInner(): React.ReactElement {
   const { effectiveTheme } = useApp()
   const [sidebarHidden, setSidebarHidden] = useState(false)
+  const [switcherRequested, setSwitcherRequested] = useState(false)
 
   useEffect(() => {
     return window.api.onMenuToggleSidebar(() => {
@@ -14,9 +15,24 @@ function AppInner(): React.ReactElement {
     })
   }, [])
 
+  useEffect(() => {
+    return window.api.onMenuProjectSwitcher(() => {
+      if (sidebarHidden) {
+        setSidebarHidden(false)
+        setSwitcherRequested(true)
+      }
+      // When sidebar is visible, the Sidebar's own listener handles it
+    })
+  }, [sidebarHidden])
+
   return (
     <div className={`app ${effectiveTheme === 'light' ? 'theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}`}>
-      {!sidebarHidden && <Sidebar />}
+      {!sidebarHidden && (
+        <Sidebar
+          switcherRequested={switcherRequested}
+          onSwitcherConsumed={() => setSwitcherRequested(false)}
+        />
+      )}
       <ContentArea />
     </div>
   )

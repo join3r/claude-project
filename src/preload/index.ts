@@ -98,6 +98,11 @@ const api = {
     ipcRenderer.on('menu-new-terminal', handler)
     return () => ipcRenderer.removeListener('menu-new-terminal', handler)
   },
+  onMenuProjectSwitcher: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-project-switcher', handler)
+    return () => ipcRenderer.removeListener('menu-project-switcher', handler)
+  },
   onMenuZoomIn: (callback: () => void): (() => void) => {
     const handler = () => callback()
     ipcRenderer.on('menu-zoom-in', handler)

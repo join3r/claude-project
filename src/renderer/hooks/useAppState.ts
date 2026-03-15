@@ -172,6 +172,27 @@ export function useAppState() {
     setConfig(prev => (prev ? updater(prev) : prev))
   }, [])
 
+  const switchToTask = useCallback((projectId: string, taskId: string) => {
+    // Sync the ref before state updates so persistence logic uses the correct project
+    selectedProjectIdRef.current = projectId
+    setSelectedProjectId(projectId)
+    setSelectedTaskId(taskId)
+    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastProjectId: projectId, lastTaskId: taskId })
+    if (!configLoadedRef.current) {
+      pendingConfigUpdatersRef.current.push(updater)
+    }
+    setConfig(prev => (prev ? updater(prev) : prev))
+    // Auto-connect SSH for remote projects
+    const project = projectsRef.current.find(p => p.id === projectId)
+    if (project && isRemoteProject(project) && project.ssh) {
+      window.api.sshStatus(projectId).then(status => {
+        if (status !== 'connected' && status !== 'connecting') {
+          window.api.sshConnect(projectId, project.ssh!).catch(() => {})
+        }
+      })
+    }
+  }, [])
+
   // Project CRUD
   const addProject = useCallback((name: string, directory: string) => {
     const project: Project = { id: uuid(), name, directory, tasks: [] }
@@ -494,6 +515,7 @@ export function useAppState() {
     effectiveTerminalTheme,
     setSelectedProjectId: selectProject,
     setSelectedTaskId: selectTask,
+    switchToTask,
     addProject,
     addRemoteProject,
     addShellCommandProject,
