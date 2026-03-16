@@ -239,3 +239,49 @@
 .sidebar-item.dragging {
   opacity: 0.4;
 }
+
+.sidebar-folder-heading {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.sidebar-folder-heading:first-child {
+  margin-top: 0;
+}
+
+.sidebar-folder-heading:hover {
+  background: var(--hover);
+}
+
+.sidebar-folder-heading.drop-target {
+  background: var(--selected);
+  outline: 1px dashed var(--border-focus);
+  outline-offset: -1px;
+}
+
+.sidebar-folder-heading.dragging {
+  opacity: 0.4;
+}
+
+.sidebar-folder-chevron {
+  margin-right: 6px;
+  font-size: 8px;
+  width: 10px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.sidebar-folder-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
