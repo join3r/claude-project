@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
-import type { Project, Task, Tab, AppConfig, TabType, AiTabType, SshConfig, WorkspaceConfig } from '../../shared/types'
+import type { Project, ProjectsData, Folder, Task, Tab, AppConfig, TabType, AiTabType, SshConfig, WorkspaceConfig } from '../../shared/types'
 import { applyQueuedStateUpdates, resolveInitialSelection, type StateUpdater } from './stateHydration'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs'>>
 
 export function useAppState() {
-  const [projects, setProjects] = useState<Project[]>([])
+  const [projectsData, setProjectsData] = useState<ProjectsData>({ projects: [], folders: [], rootOrder: [] })
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -15,7 +15,14 @@ export function useAppState() {
   const [terminalZoomDelta, setTerminalZoomDelta] = useState(0)
   const [browserZoomFactor, setBrowserZoomFactor] = useState(1.0)
 
+  // Convenience derived values
+  const projects = projectsData.projects
+  const folders = projectsData.folders
+  const rootOrder = projectsData.rootOrder
+
   // Refs for reading latest state in callbacks without stale closures
+  const projectsDataRef = useRef(projectsData)
+  projectsDataRef.current = projectsData
   const projectsRef = useRef(projects)
   projectsRef.current = projects
   const selectedProjectIdRef = useRef(selectedProjectId)
@@ -24,7 +31,7 @@ export function useAppState() {
   selectedTaskIdRef.current = selectedTaskId
   const projectsLoadedRef = useRef(false)
   const configLoadedRef = useRef(false)
-  const pendingProjectUpdatersRef = useRef<StateUpdater<Project[]>[]>([])
+  const pendingProjectUpdatersRef = useRef<StateUpdater<ProjectsData>[]>([])
   const pendingConfigUpdatersRef = useRef<StateUpdater<AppConfig>[]>([])
   const lastSavedProjectsJsonRef = useRef<string | null>(null)
   const lastSavedConfigJsonRef = useRef<string | null>(null)
@@ -36,10 +43,11 @@ export function useAppState() {
     Promise.all([
       window.api.loadProjects(),
       window.api.loadConfig()
-    ]).then(([projectsData, loadedConfig]) => {
+    ]).then(([loadedProjectsData, loadedConfig]) => {
       if (cancelled) return
 
-      const hydratedProjects = applyQueuedStateUpdates(projectsData.projects, pendingProjectUpdatersRef.current)
+      const hydratedProjectsData = applyQueuedStateUpdates(loadedProjectsData, pendingProjectUpdatersRef.current)
+      const hydratedProjects = hydratedProjectsData.projects
       const hydratedConfig = applyQueuedStateUpdates(loadedConfig, pendingConfigUpdatersRef.current)
       const restoredSelection = resolveInitialSelection(
         hydratedProjects,
@@ -50,12 +58,12 @@ export function useAppState() {
 
       pendingProjectUpdatersRef.current = []
       pendingConfigUpdatersRef.current = []
-      lastSavedProjectsJsonRef.current = JSON.stringify({ projects: projectsData.projects })
+      lastSavedProjectsJsonRef.current = JSON.stringify(loadedProjectsData)
       lastSavedConfigJsonRef.current = JSON.stringify(loadedConfig)
       projectsLoadedRef.current = true
       configLoadedRef.current = true
 
-      setProjects(hydratedProjects)
+      setProjectsData(hydratedProjectsData)
       setConfig(hydratedConfig)
 
       if (restoredSelection.projectId !== selectedProjectIdRef.current) {
@@ -76,12 +84,12 @@ export function useAppState() {
   useEffect(() => {
     if (!projectsLoadedRef.current) return
 
-    const serialized = JSON.stringify({ projects })
+    const serialized = JSON.stringify(projectsData)
     if (serialized === lastSavedProjectsJsonRef.current) return
 
     lastSavedProjectsJsonRef.current = serialized
-    void window.api.saveProjects({ projects })
-  }, [projects])
+    void window.api.saveProjects(projectsData)
+  }, [projectsData])
 
   useEffect(() => {
     if (!configLoadedRef.current || !config) return
@@ -107,32 +115,33 @@ export function useAppState() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects.length > 0 && selectedProjectId])
 
-  const persistProjects = useCallback((updater: (prev: Project[]) => Project[]) => {
+  const persistProjects = useCallback((updater: (prev: ProjectsData) => ProjectsData) => {
     if (!projectsLoadedRef.current) {
       pendingProjectUpdatersRef.current.push(updater)
     }
-    setProjects(prev => updater(prev))
+    setProjectsData(prev => updater(prev))
   }, [])
 
   const reorderProjects = useCallback((fromIndex: number, toIndex: number) => {
     persistProjects(prev => {
-      const updated = [...prev]
+      const updated = [...prev.projects]
       const [moved] = updated.splice(fromIndex, 1)
       updated.splice(toIndex, 0, moved)
-      return updated
+      return { ...prev, projects: updated }
     })
   }, [persistProjects])
 
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
-    persistProjects(prev =>
-      prev.map((p) => {
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) => {
         if (p.id !== projectId) return p
         const tasks = [...p.tasks]
         const [moved] = tasks.splice(fromIndex, 1)
         tasks.splice(toIndex, 0, moved)
         return { ...p, tasks }
       })
-    )
+    }))
   }, [persistProjects])
 
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
@@ -176,9 +185,12 @@ export function useAppState() {
     // Persist last task per project
     const projectId = selectedProjectIdRef.current
     if (projectId && id) {
-      persistProjects(prev => prev.map(p =>
-        p.id === projectId ? { ...p, lastTaskId: id } : p
-      ))
+      persistProjects(prev => ({
+        ...prev,
+        projects: prev.projects.map(p =>
+          p.id === projectId ? { ...p, lastTaskId: id } : p
+        )
+      }))
     }
   }, [persistProjects])
 
@@ -206,14 +218,22 @@ export function useAppState() {
   // Project CRUD
   const addProject = useCallback((name: string, directory: string) => {
     const project: Project = { id: uuid(), name, directory, tasks: [] }
-    persistProjects(prev => [...prev, project])
+    persistProjects(prev => ({
+      ...prev,
+      projects: [...prev.projects, project],
+      rootOrder: [...prev.rootOrder, project.id]
+    }))
     selectProject(project.id)
     return project
   }, [persistProjects, selectProject])
 
   const addRemoteProject = useCallback((name: string, sshConfig: SshConfig, aiToolArgs?: Partial<Record<AiTabType, string>>) => {
     const project: Project = { id: uuid(), name, directory: '', ssh: sshConfig, tasks: [], ...(aiToolArgs ? { aiToolArgs } : {}) }
-    persistProjects(prev => [...prev, project])
+    persistProjects(prev => ({
+      ...prev,
+      projects: [...prev.projects, project],
+      rootOrder: [...prev.rootOrder, project.id]
+    }))
     selectProject(project.id)
     window.api.sshConnect(project.id, sshConfig).catch(() => {
       // Connection failed — status change event will update UI
@@ -223,7 +243,11 @@ export function useAppState() {
 
   const addShellCommandProject = useCallback((name: string, command: string) => {
     const project: Project = { id: uuid(), name, directory: '', shellCommand: { command }, tasks: [] }
-    persistProjects(prev => [...prev, project])
+    persistProjects(prev => ({
+      ...prev,
+      projects: [...prev.projects, project],
+      rootOrder: [...prev.rootOrder, project.id]
+    }))
     selectProject(project.id)
     return project
   }, [persistProjects, selectProject])
@@ -248,7 +272,15 @@ export function useAppState() {
         }
       }
     }
-    persistProjects(prev => prev.filter((p) => p.id !== id))
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.filter((p) => p.id !== id),
+      rootOrder: prev.rootOrder.filter(rid => rid !== id),
+      folders: prev.folders.map(f => ({
+        ...f,
+        projectIds: f.projectIds.filter(pid => pid !== id)
+      }))
+    }))
     if (selectedProjectIdRef.current === id) {
       selectProject(null)
       selectTask(null)
@@ -256,11 +288,11 @@ export function useAppState() {
   }, [persistProjects, selectProject, selectTask])
 
   const renameProject = useCallback((id: string, name: string) => {
-    persistProjects(prev => prev.map((p) => (p.id === id ? { ...p, name } : p)))
+    persistProjects(prev => ({ ...prev, projects: prev.projects.map((p) => (p.id === id ? { ...p, name } : p)) }))
   }, [persistProjects])
 
   const updateProject = useCallback((id: string, updates: ProjectUpdate) => {
-    persistProjects(prev => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)))
+    persistProjects(prev => ({ ...prev, projects: prev.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)) }))
   }, [persistProjects])
 
   // Task CRUD
@@ -273,11 +305,12 @@ export function useAppState() {
       splitOpen: false,
       splitRatio: 0.5
     }
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId ? { ...p, tasks: [...p.tasks, task] } : p
       )
-    )
+    }))
     selectTask(task.id)
     return task
   }, [persistProjects, selectTask])
@@ -292,11 +325,12 @@ export function useAppState() {
       splitOpen: false,
       splitRatio: 0.5
     }
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId ? { ...p, tasks: [...p.tasks, task] } : p
       )
-    )
+    }))
     selectTask(task.id)
     return task
   }, [persistProjects, selectTask])
@@ -316,24 +350,26 @@ export function useAppState() {
         ).catch(() => { /* Workspace may already be cleaned up */ })
       }
     }
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? { ...p, tasks: p.tasks.filter((t) => t.id !== taskId) }
           : p
       )
-    )
+    }))
     if (selectedTaskIdRef.current === taskId) selectTask(null)
   }, [persistProjects, selectTask])
 
   const renameTask = useCallback((projectId: string, taskId: string, name: string) => {
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? { ...p, tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, name } : t)) }
           : p
       )
-    )
+    }))
   }, [persistProjects])
 
   // Tab management
@@ -341,8 +377,9 @@ export function useAppState() {
     const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
     const title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
     const tab: Tab = { id: uuid(), type, title }
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? {
               ...p,
@@ -358,13 +395,14 @@ export function useAppState() {
             }
           : p
       )
-    )
+    }))
     return tab
   }, [persistProjects])
 
   const removeTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? {
               ...p,
@@ -384,14 +422,15 @@ export function useAppState() {
             }
           : p
       )
-    )
+    }))
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
     window.api.scrollbackDelete(tabId)
   }, [persistProjects])
 
   const updateTabUrl = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, url: string) => {
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? {
               ...p,
@@ -411,12 +450,13 @@ export function useAppState() {
             }
           : p
       )
-    )
+    }))
   }, [persistProjects])
 
   const updateTabSessionId = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, sessionId: string) => {
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? {
               ...p,
@@ -436,12 +476,13 @@ export function useAppState() {
             }
           : p
       )
-    )
+    }))
   }, [persistProjects])
 
   const setActiveTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? {
               ...p,
@@ -453,12 +494,13 @@ export function useAppState() {
             }
           : p
       )
-    )
+    }))
   }, [persistProjects])
 
   const toggleSplit = useCallback((projectId: string, taskId: string) => {
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? {
               ...p,
@@ -468,12 +510,13 @@ export function useAppState() {
             }
           : p
       )
-    )
+    }))
   }, [persistProjects])
 
   const setSplitRatio = useCallback((projectId: string, taskId: string, ratio: number) => {
-    persistProjects(prev =>
-      prev.map((p) =>
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((p) =>
         p.id === projectId
           ? {
               ...p,
@@ -483,7 +526,7 @@ export function useAppState() {
             }
           : p
       )
-    )
+    }))
   }, [persistProjects])
 
   const zoomTerminal = useCallback((direction: 'in' | 'out' | 'reset') => {
@@ -516,6 +559,8 @@ export function useAppState() {
 
   return {
     projects,
+    folders,
+    rootOrder,
     config,
     selectedProject,
     selectedTask,
