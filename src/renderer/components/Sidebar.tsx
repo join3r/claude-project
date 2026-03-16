@@ -436,16 +436,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           />
         ) : (
           <>
-            {(() => {
-              const projectStatus = getProjectStatus(project.tasks, allStatuses)
-              return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
-            })()}
             <span className="sidebar-label">{project.name}</span>
             {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
             {isShellCommandProject(project) && <span className="sidebar-ssh-badge">shell</span>}
             {isRemoteProject(project) && (
               <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
             )}
+            {(() => {
+              const projectStatus = getProjectStatus(project.tasks, allStatuses)
+              return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
+            })()}
           </>
         )}
       </div>
@@ -477,9 +477,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   />
                 ) : (
                   <>
-                    <TaskStatusDot task={task} allStatuses={allStatuses} />
                     <span className="sidebar-label">{task.name}</span>
                     {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
+                    <TaskStatusDot task={task} allStatuses={allStatuses} />
                   </>
                 )}
               </div>
@@ -579,8 +579,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   ) : (
                     <>
                       <span className="sidebar-folder-chevron">{isCollapsed ? '\u25B8' : '\u25BE'}</span>
-                      {folderStatus && <span className={`sidebar-status sidebar-status-${folderStatus}`} />}
                       <span className="sidebar-folder-label">{folder.name}</span>
+                      {folderStatus && <span className={`sidebar-status sidebar-status-${folderStatus}`} />}
                     </>
                   )}
                 </div>
