@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
+import { useMetaHeld } from '../hooks/useMetaHeld'
 import { isRemoteProject } from '../../shared/types'
 import Pane from './Pane'
 import './ContentArea.css'
@@ -10,6 +11,7 @@ function joinPath(...parts: string[]): string {
 
 export default function ContentArea(): React.ReactElement {
   const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab, zoomTerminal, zoomBrowser } = useApp()
+  useMetaHeld()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const [dragRatio, setDragRatio] = useState<number | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})

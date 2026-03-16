@@ -115,3 +115,18 @@
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
 }
+
+.tab-shortcut-hint {
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--hover);
+  pointer-events: none;
+  flex-shrink: 0;
+  visibility: hidden;
+}
+
+body.meta-held .tab-shortcut-hint {
+  visibility: visible;
+}

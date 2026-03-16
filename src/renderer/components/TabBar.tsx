@@ -37,12 +37,17 @@ export default function TabBar({ tabs, activeTabId, pane }: Props): React.ReactE
   return (
     <div className="tab-bar">
       <div className="tab-list">
-        {tabs.map((tab) => (
+        {tabs.map((tab, index) => (
           <div
             key={tab.id}
             className={`tab ${tab.id === activeTabId ? 'tab-active' : ''}`}
             onClick={() => setActiveTab(selectedProject.id, selectedTask.id, pane, tab.id)}
           >
+            {index < 9 && (
+              <span className="tab-shortcut-hint">
+                {pane === 'left' ? `⌘${index + 1}` : `⇧${index + 1}`}
+              </span>
+            )}
             <span className="tab-icon">{tabIcon(tab.type)}</span>
             <TabStatusIndicator tabId={tab.id} />
             <span className="tab-title">{tab.title}</span>
