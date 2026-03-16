@@ -87,11 +87,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
   const [dragState, setDragState] = useState<{
-    type: 'project' | 'task'
-    projectId: string
+    type: 'project' | 'task' | 'folder'
+    id: string
+    sourceFolderId: string | null
     index: number
+    projectId?: string
   } | null>(null)
-  const [dropTarget, setDropTarget] = useState<{ type: 'project' | 'task'; projectId?: string; index: number } | null>(null)
+  const [dropTarget, setDropTarget] = useState<
+    | { type: 'into-folder'; folderId: string }
+    | { type: 'between-root'; index: number }
+    | { type: 'between-folder-children'; folderId: string; index: number }
+    | { type: 'between-tasks'; projectId: string; index: number }
+    | null
+  >(null)
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
@@ -247,9 +255,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const handleDragMouseDown = useCallback((
     e: React.MouseEvent,
-    type: 'task',
-    projectId: string,
-    index: number
+    type: 'project' | 'task' | 'folder',
+    id: string,
+    index: number,
+    sourceFolderId: string | null = null,
+    projectId?: string
   ) => {
     if (e.button !== 0 || editingId) return
     const startY = e.clientY
@@ -260,24 +270,74 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (!dragging) {
         if (Math.abs(ev.clientY - startY) + Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return
         dragging = true
-        setDragState({ type, projectId, index })
+        setDragState({ type, id, sourceFolderId, index, projectId })
       }
 
       const sidebarList = document.querySelector('.sidebar-list')
       if (!sidebarList) return
 
-      const items = sidebarList.querySelectorAll<HTMLElement>(
-        `.sidebar-project:has(.sidebar-item.project-item.selected) .task-item`
-      )
-
-      let bestIndex = 0
-      for (let i = 0; i < items.length; i++) {
-        const rect = items[i].getBoundingClientRect()
-        const midY = rect.top + rect.height / 2
-        if (ev.clientY > midY) bestIndex = i + 1
+      if (type === 'task' && projectId) {
+        const items = sidebarList.querySelectorAll<HTMLElement>(
+          `.sidebar-project[data-project-id="${projectId}"] .task-item`
+        )
+        let bestIndex = 0
+        for (let i = 0; i < items.length; i++) {
+          const rect = items[i].getBoundingClientRect()
+          if (ev.clientY > rect.top + rect.height / 2) bestIndex = i + 1
+        }
+        setDropTarget({ type: 'between-tasks', projectId, index: bestIndex })
+        return
       }
 
-      setDropTarget({ type, projectId, index: bestIndex })
+      // Project or folder dragging
+      const allItems = sidebarList.querySelectorAll<HTMLElement>('[data-drag-type]')
+      let newTarget: typeof dropTarget = null
+
+      for (let i = 0; i < allItems.length; i++) {
+        const item = allItems[i]
+        const rect = item.getBoundingClientRect()
+        if (ev.clientY < rect.top || ev.clientY > rect.bottom) continue
+
+        const itemType = item.dataset.dragType
+        const itemId = item.dataset.dragId!
+        const itemFolderId = item.dataset.folderId || null
+
+        if (itemType === 'folder-heading') {
+          const quarter = rect.height * 0.25
+          if (ev.clientY < rect.top + quarter) {
+            const rootIdx = rootOrder.indexOf(itemId)
+            newTarget = { type: 'between-root', index: rootIdx }
+          } else if (ev.clientY > rect.bottom - quarter) {
+            const rootIdx = rootOrder.indexOf(itemId)
+            newTarget = { type: 'between-root', index: rootIdx + 1 }
+          } else {
+            if (type === 'project') {
+              newTarget = { type: 'into-folder', folderId: itemId }
+            }
+          }
+        } else if (itemType === 'project') {
+          const midY = rect.top + rect.height / 2
+          if (itemFolderId) {
+            const folder = folders.find(f => f.id === itemFolderId)
+            if (folder) {
+              const idxInFolder = folder.projectIds.indexOf(itemId)
+              const insertIdx = ev.clientY > midY ? idxInFolder + 1 : idxInFolder
+              newTarget = { type: 'between-folder-children', folderId: itemFolderId, index: insertIdx }
+            }
+          } else {
+            const rootIdx = rootOrder.indexOf(itemId)
+            const insertIdx = ev.clientY > midY ? rootIdx + 1 : rootIdx
+            newTarget = { type: 'between-root', index: insertIdx }
+          }
+        }
+        break
+      }
+
+      if (!newTarget) {
+        newTarget = { type: 'between-root', index: rootOrder.length }
+      }
+
+      setDropTarget(newTarget)
     }
 
     const onMouseUp = () => {
@@ -285,30 +345,81 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       document.removeEventListener('mouseup', onMouseUp)
       document.body.style.cursor = ''
 
-      if (dragging) {
-        setDragState(prev => {
-          setDropTarget(dt => {
-            if (prev && dt && dt.index !== prev.index && dt.index !== prev.index + 1) {
-              const toIndex = dt.index > prev.index ? dt.index - 1 : dt.index
-              reorderTasks(prev.projectId, prev.index, toIndex)
+      if (!dragging) return
+
+      setDragState(ds => {
+        setDropTarget(dt => {
+          if (ds && dt) {
+            if (ds.type === 'task' && ds.projectId && dt.type === 'between-tasks') {
+              if (dt.index !== ds.index && dt.index !== ds.index + 1) {
+                const toIndex = dt.index > ds.index ? dt.index - 1 : dt.index
+                reorderTasks(ds.projectId, ds.index, toIndex)
+              }
+            } else if (ds.type === 'project') {
+              if (dt.type === 'into-folder') {
+                if (ds.sourceFolderId !== dt.folderId) {
+                  moveProjectToFolder(ds.id, dt.folderId)
+                }
+              } else if (dt.type === 'between-root') {
+                if (ds.sourceFolderId) {
+                  moveProjectToRoot(ds.id, dt.index)
+                } else {
+                  const fromIdx = rootOrder.indexOf(ds.id)
+                  if (fromIdx !== dt.index && fromIdx + 1 !== dt.index) {
+                    const toIdx = dt.index > fromIdx ? dt.index - 1 : dt.index
+                    reorderRootItems(fromIdx, toIdx)
+                  }
+                }
+              } else if (dt.type === 'between-folder-children') {
+                if (ds.sourceFolderId === dt.folderId) {
+                  const folder = folders.find(f => f.id === dt.folderId)
+                  if (folder) {
+                    const fromIdx = folder.projectIds.indexOf(ds.id)
+                    if (fromIdx !== dt.index && fromIdx + 1 !== dt.index) {
+                      const toIdx = dt.index > fromIdx ? dt.index - 1 : dt.index
+                      reorderProjectsInFolder(dt.folderId, fromIdx, toIdx)
+                    }
+                  }
+                } else {
+                  moveProjectToFolder(ds.id, dt.folderId)
+                }
+              }
+            } else if (ds.type === 'folder') {
+              if (dt.type === 'between-root') {
+                const fromIdx = rootOrder.indexOf(ds.id)
+                if (fromIdx !== dt.index && fromIdx + 1 !== dt.index) {
+                  const toIdx = dt.index > fromIdx ? dt.index - 1 : dt.index
+                  reorderRootItems(fromIdx, toIdx)
+                }
+              }
             }
-            return null
-          })
+          }
           return null
         })
-      }
+        return null
+      })
     }
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [editingId, reorderTasks])
+  }, [editingId, rootOrder, folders, reorderTasks, moveProjectToFolder, moveProjectToRoot, reorderRootItems, reorderProjectsInFolder])
 
   const renderProject = (project: Project, folderId: string | null) => (
-    <div className="sidebar-project" key={project.id}>
+    <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
-        className={`sidebar-item project-item ${selectedProjectId === project.id ? 'selected' : ''}`}
+        className={`sidebar-item project-item ${selectedProjectId === project.id ? 'selected' : ''} ${dragState?.type === 'project' && dragState.id === project.id ? 'dragging' : ''}`}
+        data-drag-type="project"
+        data-drag-id={project.id}
+        data-folder-id={folderId || ''}
         onClick={() => setSelectedProjectId(project.id)}
         onContextMenu={(e) => handleContextMenu(e, 'project', project.id)}
+        onMouseDown={(e) => {
+          const folder = folderId ? folders.find(f => f.id === folderId) : null
+          const index = folder
+            ? folder.projectIds.indexOf(project.id)
+            : rootOrder.indexOf(project.id)
+          handleDragMouseDown(e, 'project', project.id, index, folderId)
+        }}
       >
         {editingId === project.id ? (
           <input
@@ -342,13 +453,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         <div className="sidebar-tasks">
           {project.tasks.map((task, tIdx) => (
             <React.Fragment key={task.id}>
-              {dropTarget?.type === 'task' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
+              {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
                 <div className="sidebar-drop-indicator task-drop-indicator" />
               )}
               <div
                 className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
                 onClick={() => handleSelectTask(task)}
-                onMouseDown={(e) => handleDragMouseDown(e, 'task', project.id, tIdx)}
+                onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, tIdx, null, project.id)}
                 onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
               >
                 {editingId === task.id ? (
@@ -373,7 +484,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               </div>
             </React.Fragment>
           ))}
-          {dropTarget?.type === 'task' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
+          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
             <div className="sidebar-drop-indicator task-drop-indicator" />
           )}
           <button
@@ -436,9 +547,17 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             const folderStatus = getFolderStatus(folder, projects, allStatuses)
             return (
               <React.Fragment key={folder.id}>
+                {dropTarget?.type === 'between-root' && dropTarget.index === rootIdx && (
+                  <div className="sidebar-drop-indicator" />
+                )}
                 <div
-                  className="sidebar-folder-heading"
+                  className={`sidebar-folder-heading ${
+                    dropTarget?.type === 'into-folder' && dropTarget.folderId === folder.id ? 'drop-target' : ''
+                  } ${dragState?.type === 'folder' && dragState.id === folder.id ? 'dragging' : ''}`}
+                  data-drag-type="folder-heading"
+                  data-drag-id={folder.id}
                   onClick={() => toggleFolderCollapse(folder.id)}
+                  onMouseDown={(e) => handleDragMouseDown(e, 'folder', folder.id, rootOrder.indexOf(folder.id))}
                   onContextMenu={(e) => {
                     e.preventDefault()
                     setContextMenu({ x: e.clientX, y: e.clientY, type: 'folder', projectId: folder.id })
@@ -464,19 +583,39 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     </>
                   )}
                 </div>
-                {!isCollapsed && folder.projectIds.map(pid => {
+                {!isCollapsed && folder.projectIds.map((pid, childIdx) => {
                   const project = projects.find(p => p.id === pid)
                   if (!project) return null
-                  return renderProject(project, folder.id)
+                  return (
+                    <React.Fragment key={pid}>
+                      {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === childIdx && (
+                        <div className="sidebar-drop-indicator" />
+                      )}
+                      {renderProject(project, folder.id)}
+                    </React.Fragment>
+                  )
                 })}
+                {!isCollapsed && dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === folder.projectIds.length && (
+                  <div className="sidebar-drop-indicator" />
+                )}
               </React.Fragment>
             )
           }
 
           const project = projects.find(p => p.id === itemId)
           if (!project) return null
-          return <React.Fragment key={project.id}>{renderProject(project, null)}</React.Fragment>
+          return (
+            <React.Fragment key={project.id}>
+              {dropTarget?.type === 'between-root' && dropTarget.index === rootIdx && (
+                <div className="sidebar-drop-indicator" />
+              )}
+              {renderProject(project, null)}
+            </React.Fragment>
+          )
         })}
+        {dropTarget?.type === 'between-root' && dropTarget.index === rootOrder.length && (
+          <div className="sidebar-drop-indicator" />
+        )}
       </div>
       </>)}
 
