@@ -195,11 +195,13 @@ export default function ProjectSwitcher({
               onClick={() => handleSelect(result)}
               onMouseEnter={() => setSelectedIndex(i)}
             >
-              <span className={`project-switcher-row-name ${result.type === 'project' ? 'is-project' : ''}`}>
-                {result.name}
-              </span>
-              <span className="project-switcher-badge">{result.type}</span>
-              <span className="project-switcher-context">{result.context}</span>
+              <div className="project-switcher-row-top">
+                <span className={`project-switcher-row-name ${result.type === 'project' ? 'is-project' : ''}`}>
+                  {result.name}
+                </span>
+                <span className="project-switcher-badge">{result.type}</span>
+              </div>
+              <div className="project-switcher-context">{result.context}</div>
             </div>
           ))
         )}

@@ -145,21 +145,24 @@ export function useAppState() {
 
   const selectProject = useCallback((id: string | null) => {
     setSelectedProjectId(id)
-    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastProjectId: id, lastTaskId: null })
+    // Restore per-project last task
+    const project = id ? projectsRef.current.find(p => p.id === id) : null
+    const restoredTaskId = project?.lastTaskId && project.tasks.some(t => t.id === project.lastTaskId)
+      ? project.lastTaskId!
+      : null
+    setSelectedTaskId(restoredTaskId)
+    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastProjectId: id, lastTaskId: restoredTaskId })
     if (!configLoadedRef.current) {
       pendingConfigUpdatersRef.current.push(updater)
     }
     setConfig(prev => (prev ? updater(prev) : prev))
     // Auto-connect SSH for remote projects
-    if (id) {
-      const project = projectsRef.current.find(p => p.id === id)
-      if (project && isRemoteProject(project) && project.ssh) {
-        window.api.sshStatus(id).then(status => {
-          if (status !== 'connected' && status !== 'connecting') {
-            window.api.sshConnect(id, project.ssh!).catch(() => {})
-          }
-        })
-      }
+    if (id && project && isRemoteProject(project) && project.ssh) {
+      window.api.sshStatus(id).then(status => {
+        if (status !== 'connected' && status !== 'connecting') {
+          window.api.sshConnect(id, project.ssh!).catch(() => {})
+        }
+      })
     }
   }, [])
 
@@ -170,7 +173,14 @@ export function useAppState() {
       pendingConfigUpdatersRef.current.push(updater)
     }
     setConfig(prev => (prev ? updater(prev) : prev))
-  }, [])
+    // Persist last task per project
+    const projectId = selectedProjectIdRef.current
+    if (projectId && id) {
+      persistProjects(prev => prev.map(p =>
+        p.id === projectId ? { ...p, lastTaskId: id } : p
+      ))
+    }
+  }, [persistProjects])
 
   const switchToTask = useCallback((projectId: string, taskId: string) => {
     // Sync the ref before state updates so persistence logic uses the correct project

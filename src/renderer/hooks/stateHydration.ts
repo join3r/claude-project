@@ -25,8 +25,9 @@ export function resolveInitialSelection(
     return { projectId: currentProjectId, taskId: currentTaskId }
   }
 
-  const taskId = currentTaskId === null && config.lastTaskId && project.tasks.some((task) => task.id === config.lastTaskId)
-    ? config.lastTaskId
+  const candidateTaskId = config.lastTaskId ?? project.lastTaskId ?? null
+  const taskId = currentTaskId === null && candidateTaskId && project.tasks.some((task) => task.id === candidateTaskId)
+    ? candidateTaskId
     : currentTaskId
 
   return { projectId: config.lastProjectId, taskId }

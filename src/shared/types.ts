@@ -49,6 +49,7 @@ export interface Project {
   name: string
   directory: string
   tasks: Task[]
+  lastTaskId?: string
   ssh?: SshConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
