@@ -99,6 +99,7 @@ export interface AppConfig {
   enableOpencode: boolean
   lastProjectId: string | null
   lastTaskId: string | null
+  collapsedFolderIds: string[]
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -112,5 +113,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   enableCodex: false,
   enableOpencode: false,
   lastProjectId: null,
-  lastTaskId: null
+  lastTaskId: null,
+  collapsedFolderIds: []
 }

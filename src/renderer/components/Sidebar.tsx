@@ -58,7 +58,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     addFolder, removeFolder, renameFolder,
     moveProjectToFolder, moveProjectToRoot,
     reorderRootItems, reorderProjectsInFolder,
-    reorderTasks, getProjectDir
+    reorderTasks, getProjectDir,
+    config, updateConfig
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
@@ -104,14 +105,26 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [switcherActive, setSwitcherActive] = useState(false)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
 
+  // Initialize collapsed state from config once loaded
+  const collapsedInitializedRef = useRef(false)
+  useEffect(() => {
+    if (config && !collapsedInitializedRef.current) {
+      collapsedInitializedRef.current = true
+      if (config.collapsedFolderIds.length > 0) {
+        setCollapsedFolders(new Set(config.collapsedFolderIds))
+      }
+    }
+  }, [config])
+
   const toggleFolderCollapse = useCallback((folderId: string) => {
     setCollapsedFolders(prev => {
       const next = new Set(prev)
       if (next.has(folderId)) next.delete(folderId)
       else next.add(folderId)
+      updateConfig({ collapsedFolderIds: [...next] })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   useEffect(() => {
     if (switcherRequested) {
@@ -158,10 +171,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         if (!prev.has(folder.id)) return prev
         const next = new Set(prev)
         next.delete(folder.id)
+        updateConfig({ collapsedFolderIds: [...next] })
         return next
       })
     }
-  }, [selectedProjectId, folders])
+  }, [selectedProjectId, folders, updateConfig])
 
   const handleAddProject = async () => {
     const dir = await window.api.pickDirectory()
