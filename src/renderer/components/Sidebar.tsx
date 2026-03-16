@@ -584,20 +584,24 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     </>
                   )}
                 </div>
-                {!isCollapsed && folder.projectIds.map((pid, childIdx) => {
-                  const project = projects.find(p => p.id === pid)
-                  if (!project) return null
-                  return (
-                    <React.Fragment key={pid}>
-                      {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === childIdx && (
-                        <div className="sidebar-drop-indicator" />
-                      )}
-                      {renderProject(project, folder.id)}
-                    </React.Fragment>
-                  )
-                })}
-                {!isCollapsed && dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === folder.projectIds.length && (
-                  <div className="sidebar-drop-indicator" />
+                {!isCollapsed && (
+                  <div className="sidebar-folder-children">
+                    {folder.projectIds.map((pid, childIdx) => {
+                      const project = projects.find(p => p.id === pid)
+                      if (!project) return null
+                      return (
+                        <React.Fragment key={pid}>
+                          {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === childIdx && (
+                            <div className="sidebar-drop-indicator" />
+                          )}
+                          {renderProject(project, folder.id)}
+                        </React.Fragment>
+                      )
+                    })}
+                    {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === folder.projectIds.length && (
+                      <div className="sidebar-drop-indicator" />
+                    )}
+                  </div>
                 )}
               </React.Fragment>
             )

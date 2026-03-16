@@ -285,3 +285,24 @@
   white-space: nowrap;
   flex: 1;
 }
+
+.sidebar-folder-children {
+  border-left: 1px solid var(--border);
+  margin-left: 11px;
+}
+
+.sidebar-folder-children .project-item {
+  padding-left: 12px;
+}
+
+.sidebar-folder-children .task-item {
+  padding-left: 24px;
+}
+
+.sidebar-folder-children .add-task-btn {
+  margin-left: 24px;
+}
+
+.sidebar-folder-children .sidebar-drop-indicator {
+  margin-left: 0;
+}
