@@ -98,6 +98,69 @@ describe('Storage', () => {
     expect(isRemoteProject({ id: '2', name: 'L', directory: '/local', tasks: [] })).toBe(false)
   })
 
+  it('normalizes legacy data without folders or rootOrder', () => {
+    const legacyData = {
+      projects: [
+        { id: 'p1', name: 'Project 1', directory: '/tmp/p1', tasks: [] },
+        { id: 'p2', name: 'Project 2', directory: '/tmp/p2', tasks: [] }
+      ]
+    }
+    fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(legacyData))
+    const loaded = storage.loadProjects()
+    expect(loaded.folders).toEqual([])
+    expect(loaded.rootOrder).toEqual(['p1', 'p2'])
+  })
+
+  it('returns empty folders and rootOrder on error fallback', () => {
+    const loaded = storage.loadProjects()
+    expect(loaded.folders).toEqual([])
+    expect(loaded.rootOrder).toEqual([])
+  })
+
+  it('removes orphaned IDs from rootOrder and folder.projectIds', () => {
+    const data = {
+      projects: [{ id: 'p1', name: 'P1', directory: '/tmp', tasks: [] }],
+      folders: [{ id: 'f1', name: 'Folder', projectIds: ['p1', 'deleted-project'] }],
+      rootOrder: ['f1', 'also-deleted']
+    }
+    fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(data))
+    const loaded = storage.loadProjects()
+    expect(loaded.folders[0].projectIds).toEqual(['p1'])
+    expect(loaded.rootOrder).toEqual(['f1'])
+  })
+
+  it('deduplicates project appearing in multiple folders', () => {
+    const data = {
+      projects: [
+        { id: 'p1', name: 'P1', directory: '/tmp', tasks: [] },
+        { id: 'p2', name: 'P2', directory: '/tmp', tasks: [] }
+      ],
+      folders: [
+        { id: 'f1', name: 'F1', projectIds: ['p1'] },
+        { id: 'f2', name: 'F2', projectIds: ['p1', 'p2'] }
+      ],
+      rootOrder: ['f1', 'f2']
+    }
+    fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(data))
+    const loaded = storage.loadProjects()
+    expect(loaded.folders[0].projectIds).toEqual(['p1'])
+    expect(loaded.folders[1].projectIds).toEqual(['p2'])
+  })
+
+  it('appends unplaced projects to rootOrder', () => {
+    const data = {
+      projects: [
+        { id: 'p1', name: 'P1', directory: '/tmp', tasks: [] },
+        { id: 'p2', name: 'P2', directory: '/tmp', tasks: [] }
+      ],
+      folders: [],
+      rootOrder: ['p1']
+    }
+    fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(data))
+    const loaded = storage.loadProjects()
+    expect(loaded.rootOrder).toEqual(['p1', 'p2'])
+  })
+
   it('preserves sessionId on tabs', () => {
     const projects = {
       projects: [{
