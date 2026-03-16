@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
 import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject, isWorkspaceTask } from '../../shared/types'
-import type { Tab, Task, WorkspaceConfig } from '../../shared/types'
+import type { Tab, Task, Project, Folder, WorkspaceConfig } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -31,6 +31,17 @@ function getProjectStatus(tasks: Task[], allStatuses: Record<string, TabStatusVa
   return null
 }
 
+function getFolderStatus(folder: { projectIds: string[] }, projects: { id: string; tasks: Task[] }[], allStatuses: Record<string, TabStatusValue>): TabStatusValue {
+  const folderProjects = folder.projectIds
+    .map(pid => projects.find(p => p.id === pid))
+    .filter(Boolean) as { tasks: Task[] }[]
+  const statuses = folderProjects.map(p => getProjectStatus(p.tasks, allStatuses)).filter(Boolean)
+  if (statuses.includes('attention')) return 'attention'
+  if (statuses.includes('working')) return 'working'
+  if (statuses.includes('exited')) return 'exited'
+  return null
+}
+
 function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<string, TabStatusValue> }): React.ReactElement | null {
   const status = getTaskStatus(task, allStatuses)
   if (!status) return null
@@ -39,11 +50,15 @@ function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
   const {
-    projects, selectedProjectId, selectedTaskId,
+    projects, folders, rootOrder,
+    selectedProjectId, selectedTaskId,
     setSelectedProjectId, setSelectedTaskId, switchToTask,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
-    reorderProjects, reorderTasks, getProjectDir
+    addFolder, removeFolder, renameFolder,
+    moveProjectToFolder, moveProjectToRoot,
+    reorderRootItems, reorderProjectsInFolder,
+    reorderTasks, getProjectDir
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
@@ -60,7 +75,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [setSelectedTaskId, tabStatusStore])
 
   const [contextMenu, setContextMenu] = useState<{
-    x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
+    x: number; y: number; type: 'project' | 'task' | 'folder'; projectId: string; taskId?: string
   } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -79,6 +94,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [dropTarget, setDropTarget] = useState<{ type: 'project' | 'task'; projectId?: string; index: number } | null>(null)
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+
+  const toggleFolderCollapse = useCallback((folderId: string) => {
+    setCollapsedFolders(prev => {
+      const next = new Set(prev)
+      if (next.has(folderId)) next.delete(folderId)
+      else next.add(folderId)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (switcherRequested) {
@@ -116,6 +141,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       })
     })
   }, [projects])
+
+  useEffect(() => {
+    if (!selectedProjectId) return
+    const folder = folders.find(f => f.projectIds.includes(selectedProjectId))
+    if (folder && collapsedFolders.has(folder.id)) {
+      setCollapsedFolders(prev => {
+        const next = new Set(prev)
+        next.delete(folder.id)
+        return next
+      })
+    }
+  }, [selectedProjectId, folders])
 
   const handleAddProject = async () => {
     const dir = await window.api.pickDirectory()
@@ -184,12 +221,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     removeTask(projectId, taskId)
   }
 
-  const handleRenameSubmit = (type: 'project' | 'task', projectId: string, taskId?: string) => {
+  const handleRenameSubmit = (type: 'project' | 'task' | 'folder', projectId: string, taskId?: string) => {
     if (!editValue.trim()) {
       setEditingId(null)
       return
     }
-    if (type === 'project') {
+    if (type === 'folder') {
+      renameFolder(projectId, editValue.trim())
+    } else if (type === 'project') {
       renameProject(projectId, editValue.trim())
     } else if (taskId) {
       renameTask(projectId, taskId, editValue.trim())
@@ -208,7 +247,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const handleDragMouseDown = useCallback((
     e: React.MouseEvent,
-    type: 'project' | 'task',
+    type: 'task',
     projectId: string,
     index: number
   ) => {
@@ -227,11 +266,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       const sidebarList = document.querySelector('.sidebar-list')
       if (!sidebarList) return
 
-      const items = type === 'project'
-        ? sidebarList.querySelectorAll<HTMLElement>('.sidebar-project')
-        : sidebarList.querySelectorAll<HTMLElement>(
-            `.sidebar-project:has(.sidebar-item.project-item.selected) .task-item`
-          )
+      const items = sidebarList.querySelectorAll<HTMLElement>(
+        `.sidebar-project:has(.sidebar-item.project-item.selected) .task-item`
+      )
 
       let bestIndex = 0
       for (let i = 0; i < items.length; i++) {
@@ -240,7 +277,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         if (ev.clientY > midY) bestIndex = i + 1
       }
 
-      setDropTarget({ type, projectId: type === 'task' ? projectId : undefined, index: bestIndex })
+      setDropTarget({ type, projectId, index: bestIndex })
     }
 
     const onMouseUp = () => {
@@ -253,11 +290,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           setDropTarget(dt => {
             if (prev && dt && dt.index !== prev.index && dt.index !== prev.index + 1) {
               const toIndex = dt.index > prev.index ? dt.index - 1 : dt.index
-              if (prev.type === 'project') {
-                reorderProjects(prev.index, toIndex)
-              } else {
-                reorderTasks(prev.projectId, prev.index, toIndex)
-              }
+              reorderTasks(prev.projectId, prev.index, toIndex)
             }
             return null
           })
@@ -268,7 +301,99 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [editingId, reorderProjects, reorderTasks])
+  }, [editingId, reorderTasks])
+
+  const renderProject = (project: Project, folderId: string | null) => (
+    <div className="sidebar-project" key={project.id}>
+      <div
+        className={`sidebar-item project-item ${selectedProjectId === project.id ? 'selected' : ''}`}
+        onClick={() => setSelectedProjectId(project.id)}
+        onContextMenu={(e) => handleContextMenu(e, 'project', project.id)}
+      >
+        {editingId === project.id ? (
+          <input
+            ref={editRef}
+            className="sidebar-edit"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={() => handleRenameSubmit('project', project.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleRenameSubmit('project', project.id)
+              if (e.key === 'Escape') setEditingId(null)
+            }}
+          />
+        ) : (
+          <>
+            {(() => {
+              const projectStatus = getProjectStatus(project.tasks, allStatuses)
+              return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
+            })()}
+            <span className="sidebar-label">{project.name}</span>
+            {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
+            {isShellCommandProject(project) && <span className="sidebar-ssh-badge">shell</span>}
+            {isRemoteProject(project) && (
+              <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
+            )}
+          </>
+        )}
+      </div>
+
+      {selectedProjectId === project.id && (
+        <div className="sidebar-tasks">
+          {project.tasks.map((task, tIdx) => (
+            <React.Fragment key={task.id}>
+              {dropTarget?.type === 'task' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
+                <div className="sidebar-drop-indicator task-drop-indicator" />
+              )}
+              <div
+                className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
+                onClick={() => handleSelectTask(task)}
+                onMouseDown={(e) => handleDragMouseDown(e, 'task', project.id, tIdx)}
+                onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
+              >
+                {editingId === task.id ? (
+                  <input
+                    ref={editRef}
+                    className="sidebar-edit"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => handleRenameSubmit('task', project.id, task.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleRenameSubmit('task', project.id, task.id)
+                      if (e.key === 'Escape') setEditingId(null)
+                    }}
+                  />
+                ) : (
+                  <>
+                    <TaskStatusDot task={task} allStatuses={allStatuses} />
+                    <span className="sidebar-label">{task.name}</span>
+                    {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
+                  </>
+                )}
+              </div>
+            </React.Fragment>
+          ))}
+          {dropTarget?.type === 'task' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
+            <div className="sidebar-drop-indicator task-drop-indicator" />
+          )}
+          <button
+            className="sidebar-btn add-task-btn"
+            onClick={() => handleAddTask(project.id)}
+          >
+            + Task
+          </button>
+          {!isShellCommandProject(project) && !isRemoteProject(project) && (
+            <button
+              className="sidebar-btn add-task-btn"
+              onClick={() => handleAddWorkspace(project.id)}
+            >
+              + Workspace
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="sidebar">
@@ -292,137 +417,108 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               <button onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
               <button onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
               <button onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
+              <button onClick={() => {
+                setAddMenuOpen(false)
+                const folderId = addFolder()
+                setEditingId(folderId)
+                setEditValue('New Folder')
+              }}>New Folder</button>
             </div>
           )}
         </div>
       </div>
 
       <div className="sidebar-list">
-        {projects.map((project, pIdx) => (
-          <React.Fragment key={project.id}>
-            {dropTarget?.type === 'project' && dropTarget.index === pIdx && (
-              <div className="sidebar-drop-indicator" />
-            )}
-          <div className="sidebar-project">
-            <div
-              className={`sidebar-item project-item ${selectedProjectId === project.id ? 'selected' : ''} ${dragState?.type === 'project' && dragState.index === pIdx ? 'dragging' : ''}`}
-              onClick={() => setSelectedProjectId(project.id)}
-              onMouseDown={(e) => handleDragMouseDown(e, 'project', project.id, pIdx)}
-              onContextMenu={(e) => handleContextMenu(e, 'project', project.id)}
-            >
-              {editingId === project.id ? (
-                <input
-                  ref={editRef}
-                  className="sidebar-edit"
-                  value={editValue}
-                  onChange={(e) => setEditValue(e.target.value)}
-                  onBlur={() => handleRenameSubmit('project', project.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRenameSubmit('project', project.id)
-                    if (e.key === 'Escape') setEditingId(null)
+        {rootOrder.map((itemId, rootIdx) => {
+          const folder = folders.find(f => f.id === itemId)
+          if (folder) {
+            const isCollapsed = collapsedFolders.has(folder.id)
+            const folderStatus = getFolderStatus(folder, projects, allStatuses)
+            return (
+              <React.Fragment key={folder.id}>
+                <div
+                  className="sidebar-folder-heading"
+                  onClick={() => toggleFolderCollapse(folder.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setContextMenu({ x: e.clientX, y: e.clientY, type: 'folder', projectId: folder.id })
                   }}
-                />
-              ) : (
-                <>
-                  {(() => {
-                    const projectStatus = getProjectStatus(project.tasks, allStatuses)
-                    return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
-                  })()}
-                  <span className="sidebar-label">{project.name}</span>
-                  {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
-                  {isShellCommandProject(project) && <span className="sidebar-ssh-badge">shell</span>}
-                  {isRemoteProject(project) && (
-                    <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
-                  )}
-                </>
-              )}
-            </div>
-
-            {selectedProjectId === project.id && (
-              <div className="sidebar-tasks">
-                {project.tasks.map((task, tIdx) => (
-                  <React.Fragment key={task.id}>
-                    {dropTarget?.type === 'task' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
-                      <div className="sidebar-drop-indicator task-drop-indicator" />
-                    )}
-                  <div
-                    className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
-                    onClick={() => handleSelectTask(task)}
-                    onMouseDown={(e) => handleDragMouseDown(e, 'task', project.id, tIdx)}
-                    onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
-                  >
-                    {editingId === task.id ? (
-                      <input
-                        ref={editRef}
-                        className="sidebar-edit"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onBlur={() => handleRenameSubmit('task', project.id, task.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleRenameSubmit('task', project.id, task.id)
-                          if (e.key === 'Escape') setEditingId(null)
-                        }}
-                      />
-                    ) : (
-                      <>
-                        <TaskStatusDot task={task} allStatuses={allStatuses} />
-                        <span className="sidebar-label">{task.name}</span>
-                        {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
-                      </>
-                    )}
-                  </div>
-                  </React.Fragment>
-                ))}
-                {dropTarget?.type === 'task' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
-                  <div className="sidebar-drop-indicator task-drop-indicator" />
-                )}
-                <button
-                  className="sidebar-btn add-task-btn"
-                  onClick={() => handleAddTask(project.id)}
                 >
-                  + Task
-                </button>
-                {!isShellCommandProject(project) && !isRemoteProject(project) && (
-                  <button
-                    className="sidebar-btn add-task-btn"
-                    onClick={() => handleAddWorkspace(project.id)}
-                  >
-                    + Workspace
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-          </React.Fragment>
-        ))}
-        {dropTarget?.type === 'project' && dropTarget.index === projects.length && (
-          <div className="sidebar-drop-indicator" />
-        )}
+                  {editingId === folder.id ? (
+                    <input
+                      ref={editRef}
+                      className="sidebar-edit"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => handleRenameSubmit('folder', folder.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRenameSubmit('folder', folder.id)
+                        if (e.key === 'Escape') setEditingId(null)
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="sidebar-folder-chevron">{isCollapsed ? '\u25B8' : '\u25BE'}</span>
+                      {folderStatus && <span className={`sidebar-status sidebar-status-${folderStatus}`} />}
+                      <span className="sidebar-folder-label">{folder.name}</span>
+                    </>
+                  )}
+                </div>
+                {!isCollapsed && folder.projectIds.map(pid => {
+                  const project = projects.find(p => p.id === pid)
+                  if (!project) return null
+                  return renderProject(project, folder.id)
+                })}
+              </React.Fragment>
+            )
+          }
+
+          const project = projects.find(p => p.id === itemId)
+          if (!project) return null
+          return <React.Fragment key={project.id}>{renderProject(project, null)}</React.Fragment>
+        })}
       </div>
       </>)}
 
       {contextMenu && (
         <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
-          <button onClick={() => {
-            const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
-            setEditingId(id)
-            const item = contextMenu.type === 'project'
-              ? projects.find((p) => p.id === id)
-              : projects.find((p) => p.id === contextMenu.projectId)?.tasks.find((t) => t.id === id)
-            setEditValue(item?.name ?? '')
-            setContextMenu(null)
-          }}>Rename</button>
-          {contextMenu.type === 'project' && (
-            <button onClick={() => {
-              setProjectSettingsId(contextMenu.projectId)
-              setContextMenu(null)
-            }}>Settings</button>
+          {contextMenu.type === 'folder' ? (
+            <>
+              <button onClick={() => {
+                setEditingId(contextMenu.projectId)
+                const folder = folders.find(f => f.id === contextMenu.projectId)
+                setEditValue(folder?.name ?? '')
+                setContextMenu(null)
+              }}>Rename</button>
+              <button onClick={() => {
+                removeFolder(contextMenu.projectId)
+                setContextMenu(null)
+              }}>Delete</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => {
+                const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
+                setEditingId(id)
+                const item = contextMenu.type === 'project'
+                  ? projects.find((p) => p.id === id)
+                  : projects.find((p) => p.id === contextMenu.projectId)?.tasks.find((t) => t.id === id)
+                setEditValue(item?.name ?? '')
+                setContextMenu(null)
+              }}>Rename</button>
+              {contextMenu.type === 'project' && (
+                <button onClick={() => {
+                  setProjectSettingsId(contextMenu.projectId)
+                  setContextMenu(null)
+                }}>Settings</button>
+              )}
+              <button onClick={() => {
+                if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
+                else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
+                setContextMenu(null)
+              }}>Delete</button>
+            </>
           )}
-          <button onClick={() => {
-            if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
-            else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
-            setContextMenu(null)
-          }}>Delete</button>
         </div>
       )}
 
