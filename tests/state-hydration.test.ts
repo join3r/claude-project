@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, type Project } from '../src/shared/types'
+import { DEFAULT_CONFIG, type Project, type ProjectsData } from '../src/shared/types'
 import { applyQueuedStateUpdates, resolveInitialSelection } from '../src/renderer/hooks/stateHydration'
 
 describe('state hydration', () => {
@@ -67,6 +67,26 @@ describe('state hydration', () => {
 
     expect(selection.projectId).toBe('new-project')
     expect(selection.taskId).toBe('new-task')
+  })
+
+  it('rebases queued ProjectsData mutations onto loaded data', () => {
+    const loaded: ProjectsData = {
+      projects: [{ id: 'existing', name: 'Existing', directory: '/tmp', tasks: [] }],
+      folders: [],
+      rootOrder: ['existing']
+    }
+
+    const hydrated = applyQueuedStateUpdates(loaded, [
+      (prev: ProjectsData) => ({
+        ...prev,
+        projects: [...prev.projects, { id: 'new', name: 'New', directory: '/tmp/new', tasks: [] }],
+        rootOrder: [...prev.rootOrder, 'new']
+      })
+    ])
+
+    expect(hydrated.projects).toHaveLength(2)
+    expect(hydrated.rootOrder).toEqual(['existing', 'new'])
+    expect(hydrated.folders).toEqual([])
   })
 
   it('restores the last valid project and task when nothing is selected yet', () => {
