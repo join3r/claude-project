@@ -75,8 +75,16 @@ export function isShellCommandProject(project: Project): boolean {
   return !!project.shellCommand
 }
 
+export interface Folder {
+  id: string
+  name: string
+  projectIds: string[]
+}
+
 export interface ProjectsData {
   projects: Project[]
+  folders: Folder[]
+  rootOrder: string[]
 }
 
 export interface AppConfig {
