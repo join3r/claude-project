@@ -295,6 +295,87 @@ export function useAppState() {
     persistProjects(prev => ({ ...prev, projects: prev.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)) }))
   }, [persistProjects])
 
+  // Folder CRUD
+  const addFolder = useCallback((): string => {
+    const id = uuid()
+    persistProjects(prev => ({
+      ...prev,
+      folders: [...prev.folders, { id, name: 'New Folder', projectIds: [] }],
+      rootOrder: [...prev.rootOrder, id]
+    }))
+    return id
+  }, [persistProjects])
+
+  const removeFolder = useCallback((folderId: string) => {
+    persistProjects(prev => {
+      const folder = prev.folders.find(f => f.id === folderId)
+      if (!folder) return prev
+      const folderIndex = prev.rootOrder.indexOf(folderId)
+      const newRootOrder = [...prev.rootOrder]
+      newRootOrder.splice(folderIndex, 1, ...folder.projectIds)
+      return {
+        ...prev,
+        folders: prev.folders.filter(f => f.id !== folderId),
+        rootOrder: newRootOrder
+      }
+    })
+  }, [persistProjects])
+
+  const renameFolder = useCallback((folderId: string, name: string) => {
+    persistProjects(prev => ({
+      ...prev,
+      folders: prev.folders.map(f => f.id === folderId ? { ...f, name } : f)
+    }))
+  }, [persistProjects])
+
+  const moveProjectToFolder = useCallback((projectId: string, folderId: string) => {
+    persistProjects(prev => ({
+      ...prev,
+      folders: prev.folders.map(f => f.id === folderId
+        ? { ...f, projectIds: [...f.projectIds.filter(pid => pid !== projectId), projectId] }
+        : { ...f, projectIds: f.projectIds.filter(pid => pid !== projectId) }
+      ),
+      rootOrder: prev.rootOrder.filter(id => id !== projectId)
+    }))
+  }, [persistProjects])
+
+  const moveProjectToRoot = useCallback((projectId: string, index: number) => {
+    persistProjects(prev => {
+      const newRootOrder = prev.rootOrder.filter(id => id !== projectId)
+      newRootOrder.splice(index, 0, projectId)
+      return {
+        ...prev,
+        folders: prev.folders.map(f => ({
+          ...f,
+          projectIds: f.projectIds.filter(pid => pid !== projectId)
+        })),
+        rootOrder: newRootOrder
+      }
+    })
+  }, [persistProjects])
+
+  const reorderRootItems = useCallback((fromIndex: number, toIndex: number) => {
+    persistProjects(prev => {
+      const newRootOrder = [...prev.rootOrder]
+      const [moved] = newRootOrder.splice(fromIndex, 1)
+      newRootOrder.splice(toIndex, 0, moved)
+      return { ...prev, rootOrder: newRootOrder }
+    })
+  }, [persistProjects])
+
+  const reorderProjectsInFolder = useCallback((folderId: string, fromIndex: number, toIndex: number) => {
+    persistProjects(prev => ({
+      ...prev,
+      folders: prev.folders.map(f => {
+        if (f.id !== folderId) return f
+        const newIds = [...f.projectIds]
+        const [moved] = newIds.splice(fromIndex, 1)
+        newIds.splice(toIndex, 0, moved)
+        return { ...f, projectIds: newIds }
+      })
+    }))
+  }, [persistProjects])
+
   // Task CRUD
   const addTask = useCallback((projectId: string, name: string) => {
     const task: Task = {
@@ -578,6 +659,13 @@ export function useAppState() {
     removeProject,
     renameProject,
     updateProject,
+    addFolder,
+    removeFolder,
+    renameFolder,
+    moveProjectToFolder,
+    moveProjectToRoot,
+    reorderRootItems,
+    reorderProjectsInFolder,
     addTask,
     addWorkspaceTask,
     removeTask,
