@@ -122,15 +122,6 @@ export function useAppState() {
     setProjectsData(prev => updater(prev))
   }, [])
 
-  const reorderProjects = useCallback((fromIndex: number, toIndex: number) => {
-    persistProjects(prev => {
-      const updated = [...prev.projects]
-      const [moved] = updated.splice(fromIndex, 1)
-      updated.splice(toIndex, 0, moved)
-      return { ...prev, projects: updated }
-    })
-  }, [persistProjects])
-
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
     persistProjects(prev => ({
       ...prev,
@@ -670,7 +661,6 @@ export function useAppState() {
     addWorkspaceTask,
     removeTask,
     renameTask,
-    reorderProjects,
     reorderTasks,
     addTab,
     removeTab,

@@ -153,8 +153,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   useEffect(() => {
     if (!selectedProjectId) return
     const folder = folders.find(f => f.projectIds.includes(selectedProjectId))
-    if (folder && collapsedFolders.has(folder.id)) {
+    if (folder) {
       setCollapsedFolders(prev => {
+        if (!prev.has(folder.id)) return prev
         const next = new Set(prev)
         next.delete(folder.id)
         return next
