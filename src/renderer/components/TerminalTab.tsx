@@ -3,6 +3,12 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SerializeAddon } from '@xterm/addon-serialize'
+import { ClipboardAddon } from '@xterm/addon-clipboard'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { SearchAddon } from '@xterm/addon-search'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { ImageAddon } from '@xterm/addon-image'
+import TerminalSearchBar from './TerminalSearchBar'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
 import type { SshConfig, ShellCommandConfig } from '../../shared/types'
@@ -17,7 +23,7 @@ interface Props {
   shellCommand?: ShellCommandConfig
 }
 
-const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; webglAddon: WebglAddon | null }>()
+const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; searchAddon: SearchAddon; webglAddon: WebglAddon | null }>()
 
 let ptyListenerRegistered = false
 function ensurePtyListener(): void {
@@ -69,6 +75,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
   projectDirRef.current = projectDir
   const [sshReady, setSshReady] = useState(!sshConfig)
   const prevSshReadyRef = useRef(sshReady)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   // Poll SSH status (tracks both connection and disconnection for remote tabs)
   useEffect(() => {
@@ -125,12 +132,23 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
 
     const fitAddon = new FitAddon()
     const serializeAddon = new SerializeAddon()
+    const searchAddon = new SearchAddon()
+    const clipboardAddon = new ClipboardAddon()
+    const webLinksAddon = new WebLinksAddon()
+    const unicode11Addon = new Unicode11Addon()
+    const imageAddon = new ImageAddon()
     term.loadAddon(fitAddon)
     term.loadAddon(serializeAddon)
+    term.loadAddon(searchAddon)
+    term.loadAddon(clipboardAddon)
+    term.loadAddon(webLinksAddon)
+    term.loadAddon(unicode11Addon)
+    term.unicode.activeVersion = '11'
+    term.loadAddon(imageAddon)
     term.open(containerRef.current)
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
-    terminals.set(tabId, { term, fitAddon, serializeAddon, webglAddon: null })
+    terminals.set(tabId, { term, fitAddon, serializeAddon, searchAddon, webglAddon: null })
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -257,12 +275,36 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     return () => window.removeEventListener('tab-removed', handler)
   }, [tabId])
 
+  // Cmd+F to open search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!visible) return
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [visible])
+
+  const entry = terminals.get(tabId)
+
   return (
     <div
       ref={containerRef}
       className="terminal-tab"
-      style={{ display: visible ? 'block' : 'none' }}
-    />
+      style={{ display: visible ? 'block' : 'none', position: 'relative' }}
+    >
+      {entry && (
+        <TerminalSearchBar
+          searchAddon={entry.searchAddon}
+          terminal={entry.term}
+          visible={searchOpen}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+    </div>
   )
 }
 

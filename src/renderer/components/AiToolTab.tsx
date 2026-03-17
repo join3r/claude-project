@@ -3,6 +3,12 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SerializeAddon } from '@xterm/addon-serialize'
+import { ClipboardAddon } from '@xterm/addon-clipboard'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { SearchAddon } from '@xterm/addon-search'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { ImageAddon } from '@xterm/addon-image'
+import TerminalSearchBar from './TerminalSearchBar'
 import { useApp } from '../context/AppContext'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
@@ -24,7 +30,7 @@ interface Props {
   extraArgs?: string
 }
 
-const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; webglAddon: WebglAddon | null }>()
+const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; searchAddon: SearchAddon; webglAddon: WebglAddon | null }>()
 
 let ptyListenerRegistered = false
 let exitListenerRegistered = false
@@ -106,6 +112,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   visibleRef.current = visible
   const [sshReady, setSshReady] = useState(!sshConfig)
   const prevSshReadyRef = useRef(sshReady)
+  const [searchOpen, setSearchOpen] = useState(false)
   const isClaudeTab = toolType === 'claude'
   const isCodexTab = toolType === 'codex'
   const codexSpawnTsRef = useRef(0)
@@ -212,12 +219,23 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
     const fitAddon = new FitAddon()
     const serializeAddon = new SerializeAddon()
+    const searchAddon = new SearchAddon()
+    const clipboardAddon = new ClipboardAddon()
+    const webLinksAddon = new WebLinksAddon()
+    const unicode11Addon = new Unicode11Addon()
+    const imageAddon = new ImageAddon()
     term.loadAddon(fitAddon)
     term.loadAddon(serializeAddon)
+    term.loadAddon(searchAddon)
+    term.loadAddon(clipboardAddon)
+    term.loadAddon(webLinksAddon)
+    term.loadAddon(unicode11Addon)
+    term.unicode.activeVersion = '11'
+    term.loadAddon(imageAddon)
     term.open(containerRef.current)
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
-    terminals.set(tabId, { term, fitAddon, serializeAddon, webglAddon: null })
+    terminals.set(tabId, { term, fitAddon, serializeAddon, searchAddon, webglAddon: null })
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -487,11 +505,35 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     return () => window.removeEventListener('tab-removed', handler)
   }, [tabId, isClaudeTab, projectDir])
 
+  // Cmd+F to open search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!visible) return
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [visible])
+
+  const entry = terminals.get(tabId)
+
   return (
     <div
       ref={containerRef}
       className="ai-tool-tab"
-      style={{ display: visible ? 'block' : 'none' }}
-    />
+      style={{ display: visible ? 'block' : 'none', position: 'relative' }}
+    >
+      {entry && (
+        <TerminalSearchBar
+          searchAddon={entry.searchAddon}
+          terminal={entry.term}
+          visible={searchOpen}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+    </div>
   )
 }

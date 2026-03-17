@@ -1,0 +1,22 @@
+.terminal-search-bar {
+  position: absolute;
+  top: 4px;
+  right: 16px;
+  z-index: 10;
+}
+
+.terminal-search-bar input {
+  background: var(--bg-secondary, #2d2d2d);
+  color: var(--text-primary, #cccccc);
+  border: 1px solid var(--border-color, #555);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  width: 200px;
+}
+
+.terminal-search-bar input:focus {
+  border-color: var(--accent-color, #007acc);
+}
