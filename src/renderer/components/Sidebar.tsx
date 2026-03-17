@@ -456,7 +456,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             {isRemoteProject(project) && (
               <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
             )}
-            {(() => {
+            {selectedProjectId !== project.id && (() => {
               const projectStatus = getProjectStatus(project.tasks, allStatuses)
               return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
             })()}
@@ -594,7 +594,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     <>
                       <span className="sidebar-folder-chevron">{isCollapsed ? '\u25B8' : '\u25BE'}</span>
                       <span className="sidebar-folder-label">{folder.name}</span>
-                      {folderStatus && <span className={`sidebar-status sidebar-status-${folderStatus}`} />}
+                      {isCollapsed && folderStatus && <span className={`sidebar-status sidebar-status-${folderStatus}`} />}
                     </>
                   )}
                 </div>
