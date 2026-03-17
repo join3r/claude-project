@@ -1,0 +1,97 @@
+<h2>How should tab number hints appear on CMD hold?</h2>
+<p class="subtitle">These hints would fade in when you hold the Command key and fade out when you release it</p>
+
+<div class="cards">
+  <!-- Option A: Badge overlay -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 16px; background: #1a1a2e;">
+      <!-- Mock tab bar -->
+      <div style="display: flex; align-items: center; background: #16162a; border-bottom: 1px solid #2a2a4a; height: 36px; border-radius: 6px 6px 0 0; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; background: #1e1e3a; color: #e0e0ff; border-right: 1px solid #2a2a4a; position: relative;">
+          <span style="position: absolute; left: 2px; top: 2px; background: #7c3aed; color: white; font-size: 9px; padding: 0px 4px; border-radius: 3px; font-weight: 600;">1</span>
+          <span style="font-size: 11px; margin-left: 14px;">&gt;</span>
+          <span>zsh</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; color: #888; border-right: 1px solid #2a2a4a; position: relative;">
+          <span style="position: absolute; left: 2px; top: 2px; background: #7c3aed; color: white; font-size: 9px; padding: 0px 4px; border-radius: 3px; font-weight: 600;">2</span>
+          <span style="font-size: 11px; margin-left: 14px;">✦</span>
+          <span>Claude</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; color: #888; border-right: 1px solid #2a2a4a; position: relative;">
+          <span style="position: absolute; left: 2px; top: 2px; background: #7c3aed; color: white; font-size: 9px; padding: 0px 4px; border-radius: 3px; font-weight: 600;">3</span>
+          <span style="font-size: 11px; margin-left: 14px;">◉</span>
+          <span>Browser</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Corner Badge</h3>
+      <p>Small numbered badge in the top-left corner of each tab. Accent colored, compact.</p>
+    </div>
+  </div>
+
+  <!-- Option B: Inline pill before icon -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 16px; background: #1a1a2e;">
+      <div style="display: flex; align-items: center; background: #16162a; border-bottom: 1px solid #2a2a4a; height: 36px; border-radius: 6px 6px 0 0; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; background: #1e1e3a; color: #e0e0ff; border-right: 1px solid #2a2a4a;">
+          <span style="background: rgba(124,58,237,0.25); color: #a78bfa; font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 500; font-family: system-ui;">⌘1</span>
+          <span style="font-size: 11px;">&gt;</span>
+          <span>zsh</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; color: #888; border-right: 1px solid #2a2a4a;">
+          <span style="background: rgba(124,58,237,0.25); color: #a78bfa; font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 500; font-family: system-ui;">⌘2</span>
+          <span style="font-size: 11px;">✦</span>
+          <span>Claude</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; color: #888; border-right: 1px solid #2a2a4a;">
+          <span style="background: rgba(124,58,237,0.25); color: #a78bfa; font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 500; font-family: system-ui;">⌘3</span>
+          <span style="font-size: 11px;">◉</span>
+          <span>Browser</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Inline Shortcut Pill</h3>
+      <p>Shows "⌘1", "⌘2" etc. as a subtle pill before the tab icon. Matches the existing ⌘P hint style.</p>
+    </div>
+  </div>
+
+  <!-- Option C: Replace icon with number -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 16px; background: #1a1a2e;">
+      <div style="display: flex; align-items: center; background: #16162a; border-bottom: 1px solid #2a2a4a; height: 36px; border-radius: 6px 6px 0 0; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; background: #1e1e3a; color: #e0e0ff; border-right: 1px solid #2a2a4a;">
+          <span style="font-size: 11px; color: #a78bfa; font-weight: 600;">1</span>
+          <span>zsh</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; color: #888; border-right: 1px solid #2a2a4a;">
+          <span style="font-size: 11px; color: #a78bfa; font-weight: 600;">2</span>
+          <span>Claude</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 36px; font-size: 12px; color: #888; border-right: 1px solid #2a2a4a;">
+          <span style="font-size: 11px; color: #a78bfa; font-weight: 600;">3</span>
+          <span>Browser</span>
+          <span style="font-size: 14px; color: #666;">×</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Replace Icon with Number</h3>
+      <p>The tab icon (>, ✦, ◉) swaps to the tab number while CMD is held. Minimal, no extra space needed.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <h3>Right-pane tabs</h3>
+  <p class="subtitle">For the right split pane, the hint would show ⇧1, ⇧2 etc. (since the shortcut is Cmd+Shift+N) using the same visual style as the left pane.</p>
+</div>

@@ -1,0 +1,70 @@
+<h2>How should folders appear in the sidebar?</h2>
+<p class="subtitle">Click the option that feels right for your app</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1e1e2e;border-radius:8px;padding:16px;font-family:system-ui;font-size:13px;color:#cdd6f4;">
+        <!-- Option A: Collapsible sections -->
+        <div style="text-transform:uppercase;font-size:10px;letter-spacing:1.5px;color:#6c7086;padding:4px 0;margin-bottom:4px;cursor:pointer;">
+          ▾ WORK PROJECTS
+        </div>
+        <div style="padding:6px 12px;background:#313244;border-radius:6px;margin-bottom:4px;color:#89b4fa;">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b;margin-right:8px;"></span>
+          api-server
+        </div>
+        <div style="padding:6px 12px;border-radius:6px;margin-bottom:4px;color:#cdd6f4;">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#a6e3a1;margin-right:8px;"></span>
+          frontend-app
+        </div>
+        <div style="padding:6px 12px;border-radius:6px;margin-bottom:12px;color:#cdd6f4;">
+          docs-site
+        </div>
+        <div style="text-transform:uppercase;font-size:10px;letter-spacing:1.5px;color:#6c7086;padding:4px 0;margin-bottom:4px;cursor:pointer;">
+          ▸ PERSONAL
+        </div>
+        <div style="height:2px;background:#45475a;border-radius:1px;margin:12px 0;"></div>
+        <div style="padding:6px 12px;border-radius:6px;margin-bottom:4px;color:#cdd6f4;">
+          random-script
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Collapsible Sections</h3>
+      <p>Folders are <strong>section headings</strong> — uppercase labels that group projects underneath. They feel like categories, not items. Ungrouped projects sit below a divider at root level.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1e1e2e;border-radius:8px;padding:16px;font-family:system-ui;font-size:13px;color:#cdd6f4;">
+        <!-- Option B: Indented tree -->
+        <div style="padding:6px 12px;border-radius:6px;margin-bottom:4px;color:#cdd6f4;cursor:pointer;">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b;margin-right:8px;"></span>
+          <span style="color:#f9e2af;">📁</span> Work Projects
+        </div>
+        <div style="padding:6px 12px 6px 32px;background:#313244;border-radius:6px;margin-bottom:4px;color:#89b4fa;border-left:2px solid #45475a;margin-left:20px;">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b;margin-right:8px;"></span>
+          api-server
+        </div>
+        <div style="padding:6px 12px 6px 32px;border-radius:6px;margin-bottom:4px;color:#cdd6f4;border-left:2px solid #45475a;margin-left:20px;">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#a6e3a1;margin-right:8px;"></span>
+          frontend-app
+        </div>
+        <div style="padding:6px 12px 6px 32px;border-radius:6px;margin-bottom:4px;color:#cdd6f4;border-left:2px solid #45475a;margin-left:20px;">
+          docs-site
+        </div>
+        <div style="padding:6px 12px;border-radius:6px;margin-bottom:4px;color:#cdd6f4;cursor:pointer;">
+          <span style="color:#f9e2af;">📁</span> Personal
+        </div>
+        <div style="padding:6px 12px;border-radius:6px;margin-bottom:4px;color:#cdd6f4;">
+          random-script
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Indented Tree</h3>
+      <p>Folders are <strong>regular items</strong> in the list, just like projects. Click to expand and see child projects indented underneath with a tree line. Folders live alongside ungrouped projects.</p>
+    </div>
+  </div>
+</div>

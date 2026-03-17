@@ -1,0 +1,99 @@
+<h2>Project Switcher — Final Design</h2>
+<p class="subtitle">Sidebar-anchored command palette with persistent search bar</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Inactive State (default)</div>
+    <div class="mockup-body" style="padding:0;">
+      <div style="background:#16213e;min-height:320px;border-radius:0 0 4px 4px;">
+        <!-- Persistent search bar -->
+        <div style="padding:8px;">
+          <div style="background:#1a1a3a;border:1px solid #333;border-radius:6px;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;">
+              <span style="color:#555;font-size:12px;margin-right:6px;">🔍</span>
+              <span style="color:#555;font-size:12px;">Search...</span>
+            </div>
+            <span style="background:#2a2a4a;color:#666;font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #3a3a5a;">⌘P</span>
+          </div>
+        </div>
+        <!-- Normal project list -->
+        <div style="padding:0 8px;">
+          <div style="color:#888;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:4px 8px;margin-bottom:2px;">Projects</div>
+          <div style="background:#1a1a4a;border-radius:4px;padding:6px 8px;margin-bottom:2px;">
+            <span style="color:#e0e0ff;font-size:12px;">API Server</span>
+          </div>
+          <div style="padding:6px 8px;margin-bottom:2px;">
+            <span style="color:#999;font-size:12px;">Frontend App</span>
+          </div>
+          <div style="padding:6px 8px;margin-bottom:2px;">
+            <span style="color:#999;font-size:12px;">DevOps Scripts</span>
+          </div>
+          <div style="padding:6px 8px;margin-bottom:2px;">
+            <span style="color:#999;font-size:12px;">Mobile App</span>
+          </div>
+        </div>
+        <div style="padding:0 8px;margin-top:8px;">
+          <div style="color:#888;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:4px 8px;margin-bottom:2px;">Tasks</div>
+          <div style="padding:6px 8px;margin-bottom:2px;">
+            <span style="color:#999;font-size:12px;">bug fix auth</span>
+          </div>
+          <div style="padding:6px 8px;">
+            <span style="color:#999;font-size:12px;">deploy pipeline</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Active State (after Cmd+P or click)</div>
+    <div class="mockup-body" style="padding:0;">
+      <div style="background:#16213e;min-height:320px;border-radius:0 0 4px 4px;">
+        <!-- Active search bar -->
+        <div style="padding:8px;">
+          <div style="background:#1a1a3a;border:1px solid #7c7cff;border-radius:6px;padding:7px 10px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 0 8px rgba(124,124,255,0.15);">
+            <div style="display:flex;align-items:center;">
+              <span style="color:#7c7cff;font-size:12px;margin-right:6px;">🔍</span>
+              <span style="color:#ccc;font-size:12px;">api</span>
+              <span style="display:inline-block;width:1px;height:14px;background:#7c7cff;animation:blink 1s infinite;margin-left:1px;"></span>
+            </div>
+            <span style="color:#555;font-size:10px;">esc to close</span>
+          </div>
+        </div>
+        <!-- Search results replacing project list -->
+        <div style="padding:0 8px;">
+          <div style="color:#888;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:4px 8px;margin-bottom:2px;">Results</div>
+          <div style="background:#2a2a5a;border-radius:4px;padding:8px;margin-bottom:2px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#e0e0ff;font-size:12px;font-weight:600;">API Server</span>
+              <span style="background:#2a2a4a;color:#888;font-size:9px;padding:1px 5px;border-radius:3px;">project</span>
+            </div>
+            <div style="color:#555;font-size:10px;margin-top:3px;">~/dev/api-server</div>
+          </div>
+          <div style="border-radius:4px;padding:8px;margin-bottom:2px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#b0b0d0;font-size:12px;">api refactor</span>
+              <span style="background:#2a2a4a;color:#888;font-size:9px;padding:1px 5px;border-radius:3px;">task</span>
+            </div>
+            <div style="color:#555;font-size:10px;margin-top:3px;">Frontend App</div>
+          </div>
+          <div style="border-radius:4px;padding:8px;margin-bottom:2px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#b0b0d0;font-size:12px;">api endpoints</span>
+              <span style="background:#2a2a4a;color:#888;font-size:9px;padding:1px 5px;border-radius:3px;">task</span>
+            </div>
+            <div style="color:#555;font-size:10px;margin-top:3px;">API Server</div>
+          </div>
+        </div>
+        <!-- Footer hints -->
+        <div style="position:absolute;bottom:8px;left:8px;right:8px;padding:6px 8px;border-top:1px solid #2a2a4a;">
+          <span style="color:#555;font-size:10px;">↑↓ navigate · ↵ switch · esc close</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes blink { 0%,50% { opacity:1; } 51%,100% { opacity:0; } }
+</style>

@@ -1,0 +1,180 @@
+<h2>Project Switcher — Approach Options</h2>
+<p class="subtitle">How should the command palette look and behave?</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <!-- Mockup A: Centered overlay -->
+      <div style="background:#1a1a2e;border-radius:8px;padding:0;overflow:hidden;min-height:280px;position:relative;">
+        <!-- Dimmed background -->
+        <div style="opacity:0.3;padding:12px;">
+          <div style="display:flex;height:250px;">
+            <div style="width:180px;background:#16213e;border-radius:4px;padding:8px;">
+              <div style="color:#888;font-size:10px;margin-bottom:8px;">PROJECTS</div>
+              <div style="background:#1a1a3e;border-radius:3px;padding:4px 8px;margin-bottom:4px;color:#aaa;font-size:11px;">API Server</div>
+              <div style="background:#1a1a3e;border-radius:3px;padding:4px 8px;margin-bottom:4px;color:#aaa;font-size:11px;">Frontend App</div>
+              <div style="background:#1a1a3e;border-radius:3px;padding:4px 8px;margin-bottom:4px;color:#aaa;font-size:11px;">DevOps Scripts</div>
+            </div>
+            <div style="flex:1;background:#0f0f23;border-radius:4px;margin-left:8px;padding:12px;">
+              <div style="color:#555;font-size:11px;">Terminal content...</div>
+            </div>
+          </div>
+        </div>
+        <!-- Centered palette -->
+        <div style="position:absolute;top:30px;left:50%;transform:translateX(-50%);width:340px;background:#1e1e3a;border:1px solid #444;border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.6);overflow:hidden;">
+          <div style="padding:10px 12px;border-bottom:1px solid #333;">
+            <div style="background:#2a2a4a;border-radius:6px;padding:6px 10px;display:flex;align-items:center;">
+              <span style="color:#666;font-size:12px;margin-right:6px;">🔍</span>
+              <span style="color:#aaa;font-size:12px;">api</span>
+              <span style="display:inline-block;width:1px;height:14px;background:#7c7cff;animation:blink 1s infinite;margin-left:1px;"></span>
+            </div>
+          </div>
+          <div style="padding:4px;">
+            <div style="background:#2a2a5a;border-radius:6px;padding:8px 10px;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <span style="color:#e0e0ff;font-size:12px;font-weight:600;">API Server</span>
+                <span style="color:#666;font-size:10px;margin-left:6px;">project</span>
+              </div>
+              <span style="color:#555;font-size:10px;">~/dev/api</span>
+            </div>
+            <div style="border-radius:6px;padding:8px 10px;margin-bottom:2px;display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <span style="color:#b0b0d0;font-size:12px;">api refactor</span>
+                <span style="color:#666;font-size:10px;margin-left:6px;">task</span>
+              </div>
+              <span style="color:#555;font-size:10px;">Frontend App</span>
+            </div>
+            <div style="border-radius:6px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <span style="color:#b0b0d0;font-size:12px;">api endpoints</span>
+                <span style="color:#666;font-size:10px;margin-left:6px;">task</span>
+              </div>
+              <span style="color:#555;font-size:10px;">API Server</span>
+            </div>
+          </div>
+          <div style="padding:6px 12px;border-top:1px solid #333;display:flex;justify-content:space-between;">
+            <span style="color:#555;font-size:10px;">↑↓ navigate</span>
+            <span style="color:#555;font-size:10px;">↵ switch  esc close</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Centered Overlay</h3>
+      <p>Classic command palette centered top of window. Dims background. Shows project/task type badges and parent project for tasks.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Familiar pattern (VS Code, Spotlight)</li><li>Maximum width for search results</li><li>Clear visual hierarchy</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Covers the content area</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <!-- Mockup B: Sidebar-anchored -->
+      <div style="background:#1a1a2e;border-radius:8px;padding:0;overflow:hidden;min-height:280px;position:relative;">
+        <div style="display:flex;height:280px;">
+          <!-- Sidebar with embedded palette -->
+          <div style="width:200px;background:#16213e;padding:0;position:relative;">
+            <!-- Search overlay on sidebar -->
+            <div style="background:#1e1e3a;border-right:1px solid #444;height:100%;box-shadow:4px 0 16px rgba(0,0,0,0.4);">
+              <div style="padding:10px 8px;border-bottom:1px solid #333;">
+                <div style="background:#2a2a4a;border-radius:6px;padding:6px 8px;display:flex;align-items:center;">
+                  <span style="color:#666;font-size:11px;margin-right:4px;">🔍</span>
+                  <span style="color:#aaa;font-size:11px;">api</span>
+                  <span style="display:inline-block;width:1px;height:12px;background:#7c7cff;margin-left:1px;"></span>
+                </div>
+              </div>
+              <div style="padding:4px 6px;">
+                <div style="background:#2a2a5a;border-radius:4px;padding:6px 8px;margin-bottom:2px;">
+                  <span style="color:#e0e0ff;font-size:11px;font-weight:600;">API Server</span>
+                  <div style="color:#555;font-size:9px;margin-top:2px;">project · ~/dev/api</div>
+                </div>
+                <div style="padding:6px 8px;margin-bottom:2px;">
+                  <span style="color:#b0b0d0;font-size:11px;">api refactor</span>
+                  <div style="color:#555;font-size:9px;margin-top:2px;">task · Frontend App</div>
+                </div>
+                <div style="padding:6px 8px;">
+                  <span style="color:#b0b0d0;font-size:11px;">api endpoints</span>
+                  <div style="color:#555;font-size:9px;margin-top:2px;">task · API Server</div>
+                </div>
+              </div>
+              <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 8px;border-top:1px solid #333;">
+                <span style="color:#555;font-size:9px;">↑↓ navigate · ↵ switch · esc close</span>
+              </div>
+            </div>
+          </div>
+          <!-- Content area stays visible -->
+          <div style="flex:1;background:#0f0f23;padding:12px;">
+            <div style="color:#555;font-size:11px;font-family:monospace;">$ npm run dev<br/>Server running on port 3000...<br/>GET /api/users 200 12ms<br/>GET /api/tasks 200 8ms</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Sidebar-Anchored</h3>
+      <p>Search replaces the sidebar content, keeping the main content area fully visible. Natural extension of existing sidebar navigation.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Content stays visible while searching</li><li>Feels integrated with existing sidebar</li><li>Natural spatial location for navigation</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Narrower search results area</li><li>Less visually prominent</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <!-- Mockup C: Top bar dropdown -->
+      <div style="background:#1a1a2e;border-radius:8px;padding:0;overflow:hidden;min-height:280px;">
+        <!-- Top search bar -->
+        <div style="background:#1e1e3a;border-bottom:1px solid #444;padding:0;">
+          <div style="padding:8px 12px;">
+            <div style="background:#2a2a4a;border-radius:6px;padding:6px 10px;display:flex;align-items:center;max-width:400px;margin:0 auto;">
+              <span style="color:#666;font-size:12px;margin-right:6px;">🔍</span>
+              <span style="color:#aaa;font-size:12px;">api</span>
+              <span style="display:inline-block;width:1px;height:14px;background:#7c7cff;margin-left:1px;"></span>
+            </div>
+          </div>
+          <!-- Dropdown results -->
+          <div style="max-width:400px;margin:0 auto;padding:0 12px 8px;">
+            <div style="background:#2a2a5a;border-radius:6px;padding:8px 10px;margin-bottom:2px;display:flex;justify-content:space-between;">
+              <div>
+                <span style="color:#e0e0ff;font-size:12px;font-weight:600;">API Server</span>
+                <span style="color:#666;font-size:10px;margin-left:6px;">project</span>
+              </div>
+              <span style="color:#555;font-size:10px;">~/dev/api</span>
+            </div>
+            <div style="padding:8px 10px;margin-bottom:2px;display:flex;justify-content:space-between;">
+              <span style="color:#b0b0d0;font-size:12px;">api refactor</span>
+              <span style="color:#555;font-size:10px;">Frontend App</span>
+            </div>
+            <div style="padding:8px 10px;display:flex;justify-content:space-between;">
+              <span style="color:#b0b0d0;font-size:12px;">api endpoints</span>
+              <span style="color:#555;font-size:10px;">API Server</span>
+            </div>
+          </div>
+        </div>
+        <!-- Content below -->
+        <div style="display:flex;height:200px;opacity:0.5;">
+          <div style="width:180px;background:#16213e;padding:8px;">
+            <div style="color:#555;font-size:10px;">Projects...</div>
+          </div>
+          <div style="flex:1;background:#0f0f23;padding:12px;">
+            <div style="color:#555;font-size:11px;">Terminal content...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Top Bar Dropdown</h3>
+      <p>Search bar appears at top of the window with results dropping down. Similar to browser address bar or Raycast.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Compact and unobtrusive</li><li>Familiar from browser URL bars</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Pushes content down or overlaps it</li><li>Less standard for desktop apps</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes blink { 0%,50% { opacity:1; } 51%,100% { opacity:0; } }
+</style>

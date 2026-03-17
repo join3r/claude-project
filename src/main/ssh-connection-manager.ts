@@ -98,6 +98,7 @@ export class SshConnectionManager extends EventEmitter {
   private buildBaseArgs(projectId: string, config: SshConfig): string[] {
     const args = [
       '-S', this.getSocketPath(projectId),
+      '-o', 'StrictHostKeyChecking=accept-new',
       '-p', String(config.port)
     ]
     if (config.keyFile) {
