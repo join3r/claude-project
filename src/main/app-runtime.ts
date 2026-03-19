@@ -10,8 +10,20 @@ import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import { WorkspaceManager } from './workspace-manager'
-import type { AppConfig, ProjectsData, SshConfig, WindowViewState } from '../shared/types'
-import { buildWindowViewState, cloneWindowViewState } from '../shared/types'
+import type {
+  AppConfig,
+  PersistedWindowState,
+  ProjectsData,
+  SshConfig,
+  WindowGeometry,
+  WindowViewState
+} from '../shared/types'
+import {
+  buildWindowViewState,
+  clonePersistedWindowState,
+  cloneWindowGeometry,
+  cloneWindowViewState
+} from '../shared/types'
 
 const CONFIG_DIR = path.join(os.homedir(), '.devtool')
 const MAX_SCROLLBACK_CHARS = 2_000_000
@@ -37,6 +49,17 @@ function trimScrollback(scrollback: string): string {
   return scrollback.slice(-MAX_SCROLLBACK_CHARS)
 }
 
+function getWindowGeometry(window: BrowserWindow): WindowGeometry {
+  const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds()
+  return {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    isMaximized: window.isMaximized()
+  }
+}
+
 export class AppRuntime {
   private readonly storage = new Storage(CONFIG_DIR)
   private readonly scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
@@ -45,17 +68,20 @@ export class AppRuntime {
   private readonly codexSessionManager = new CodexSessionManager()
   private readonly workspaceManager = new WorkspaceManager()
   private readonly windows = new Map<number, BrowserWindow>()
-  private readonly initialWindowStates = new Map<number, WindowViewState | null>()
+  private readonly windowStates = new Map<number, PersistedWindowState>()
   private readonly ptyRuntimes = new Map<string, PtyRuntime>()
   private hookInjector!: HookInjector
   private sshManager!: SshConnectionManager
   private started = false
+  private quitting = false
   private projectsData: ProjectsData
   private config: AppConfig
+  private startupWindowStates: PersistedWindowState[]
 
-  constructor(private readonly createWindow: (viewState?: WindowViewState | null) => BrowserWindow) {
+  constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
     this.projectsData = this.storage.loadProjects()
     this.config = this.storage.loadConfig()
+    this.startupWindowStates = this.storage.loadWindowSession(this.projectsData).windows
   }
 
   async start(): Promise<void> {
@@ -72,19 +98,43 @@ export class AppRuntime {
 
   registerWindow(window: BrowserWindow, initialViewState?: WindowViewState | null): void {
     this.windows.set(window.id, window)
-    this.initialWindowStates.set(window.id, initialViewState ? cloneWindowViewState(initialViewState) : null)
+    this.windowStates.set(window.id, {
+      geometry: getWindowGeometry(window),
+      viewState: initialViewState
+        ? cloneWindowViewState(initialViewState)
+        : buildWindowViewState(this.projectsData.projects, this.config)
+    })
     this.logDebug(`registerWindow windowId=${window.id}`)
+    const syncGeometry = () => {
+      this.updateWindowGeometry(window.id)
+    }
+    window.on('move', syncGeometry)
+    window.on('resize', syncGeometry)
+    window.on('maximize', syncGeometry)
+    window.on('unmaximize', syncGeometry)
     window.on('closed', () => {
       this.logDebug(`windowClosed windowId=${window.id}`)
       this.windows.delete(window.id)
-      this.initialWindowStates.delete(window.id)
+      if (!this.quitting) {
+        this.windowStates.delete(window.id)
+        this.persistWindowSession()
+      }
       for (const runtime of this.ptyRuntimes.values()) {
         runtime.attachedWindowIds.delete(window.id)
       }
     })
   }
 
+  getStartupWindowStates(): PersistedWindowState[] {
+    return this.startupWindowStates.map((state) => clonePersistedWindowState(state))
+  }
+
+  prepareForQuit(): void {
+    this.quitting = true
+  }
+
   async shutdown(): Promise<void> {
+    this.persistWindowSession()
     this.ptyManager.killAll()
     this.hookInjector.cleanupAll()
     await this.hookServer.stop()
@@ -137,15 +187,27 @@ export class AppRuntime {
 
     ipcMain.handle('load-window-state', (event) => {
       const window = BrowserWindow.fromWebContents(event.sender)
-      const seeded = window ? this.initialWindowStates.get(window.id) ?? null : null
-      return seeded
-        ? cloneWindowViewState(seeded)
+      const state = window ? this.windowStates.get(window.id) ?? null : null
+      return state
+        ? cloneWindowViewState(state.viewState)
         : buildWindowViewState(this.projectsData.projects, this.config)
+    })
+
+    ipcMain.handle('save-window-state', (event, viewState: WindowViewState) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      if (!window) return undefined
+      const current = this.windowStates.get(window.id)
+      this.windowStates.set(window.id, {
+        geometry: current ? cloneWindowGeometry(current.geometry) : getWindowGeometry(window),
+        viewState: cloneWindowViewState(viewState)
+      })
+      this.persistWindowSession()
+      return undefined
     })
 
     ipcMain.handle('open-window', (_event, viewState?: WindowViewState | null) => {
       this.logDebug(`openWindow seeded=${viewState ? 'yes' : 'no'}`)
-      this.createWindow(viewState ?? null)
+      this.createWindow(viewState ?? null, null)
     })
 
     ipcMain.handle('pick-directory', async (event) => {
@@ -420,6 +482,23 @@ export class AppRuntime {
     this.logDebug(`ptyKill id=${id}`)
     this.ptyManager.kill(id)
     this.ptyRuntimes.delete(id)
+  }
+
+  private updateWindowGeometry(windowId: number): void {
+    const window = this.windows.get(windowId)
+    const current = this.windowStates.get(windowId)
+    if (!window || window.isDestroyed() || !current) return
+
+    this.windowStates.set(windowId, {
+      geometry: getWindowGeometry(window),
+      viewState: cloneWindowViewState(current.viewState)
+    })
+  }
+
+  private persistWindowSession(): void {
+    this.storage.saveWindowSession({
+      windows: Array.from(this.windowStates.values()).map((state) => clonePersistedWindowState(state))
+    })
   }
 
   private logDebug(message: string): void {

@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu } from 'electron'
 import { join } from 'path'
 import { resolveShellEnv } from './shell-env'
 import { AppRuntime } from './app-runtime'
-import type { WindowViewState } from '../shared/types'
+import type { WindowGeometry, WindowViewState } from '../shared/types'
 
 let appRuntime: AppRuntime | null = null
 
@@ -121,10 +121,12 @@ function buildAppMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
-function createWindow(initialViewState?: WindowViewState | null): BrowserWindow {
+function createWindow(initialViewState?: WindowViewState | null, geometry?: WindowGeometry | null): BrowserWindow {
   const mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    x: geometry?.x,
+    y: geometry?.y,
+    width: geometry?.width ?? 1200,
+    height: geometry?.height ?? 800,
     minWidth: 800,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
@@ -137,6 +139,9 @@ function createWindow(initialViewState?: WindowViewState | null): BrowserWindow 
   })
 
   appRuntime?.registerWindow(mainWindow, initialViewState ?? null)
+  if (geometry?.isMaximized) {
+    mainWindow.maximize()
+  }
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -149,10 +154,17 @@ function createWindow(initialViewState?: WindowViewState | null): BrowserWindow 
 
 app.whenReady().then(async () => {
   await resolveShellEnv()
-  appRuntime = new AppRuntime((initialViewState) => createWindow(initialViewState))
+  appRuntime = new AppRuntime((initialViewState, geometry) => createWindow(initialViewState, geometry))
   await appRuntime.start()
   buildAppMenu()
-  createWindow()
+  const startupWindows = appRuntime.getStartupWindowStates()
+  if (startupWindows.length > 0) {
+    for (const state of startupWindows) {
+      createWindow(state.viewState, state.geometry)
+    }
+  } else {
+    createWindow()
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -163,5 +175,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  appRuntime?.prepareForQuit()
   void appRuntime?.shutdown()
 })

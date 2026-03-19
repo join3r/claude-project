@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Storage } from '../src/main/storage'
-import { isRemoteProject } from '../src/shared/types'
+import { isRemoteProject, type ProjectsData } from '../src/shared/types'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -177,5 +177,121 @@ describe('Storage', () => {
     storage.saveProjects(projects)
     const loaded = storage.loadProjects()
     expect(loaded.projects[0].tasks[0].tabs.left[0].sessionId).toBe('sess-abc-123')
+  })
+
+  it('saves and loads window session state', () => {
+    const projectsData: ProjectsData = {
+      projects: [{
+        id: 'project-1',
+        name: 'Project 1',
+        directory: '/tmp/project-1',
+        tasks: [{
+          id: 'task-1',
+          name: 'Task 1',
+          tabs: {
+            left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
+            right: []
+          },
+          activeTab: { left: 'left-1', right: null },
+          splitOpen: false,
+          splitRatio: 0.5
+        }]
+      }],
+      folders: [{ id: 'folder-1', name: 'Folder', projectIds: ['project-1'] }],
+      rootOrder: ['folder-1']
+    }
+    const session = {
+      windows: [{
+        geometry: { x: 100, y: 120, width: 1200, height: 800, isMaximized: true },
+        viewState: {
+          selectedProjectId: 'project-1',
+          selectedTaskId: 'task-1',
+          collapsedFolderIds: ['folder-1'],
+          taskStates: {
+            'task-1': {
+              activeTab: { left: 'left-1', right: null },
+              splitOpen: false,
+              splitRatio: 0.5
+            }
+          }
+        }
+      }]
+    }
+
+    storage.saveWindowSession(session)
+    const loaded = storage.loadWindowSession(projectsData)
+
+    expect(loaded).toEqual(session)
+  })
+
+  it('normalizes persisted window sessions against current projects and folders', () => {
+    const projectsData: ProjectsData = {
+      projects: [{
+        id: 'project-1',
+        name: 'Project 1',
+        directory: '/tmp/project-1',
+        tasks: [{
+          id: 'task-1',
+          name: 'Task 1',
+          tabs: {
+            left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
+            right: [{ id: 'right-1', type: 'browser', title: 'Browser', url: 'https://example.com' }]
+          },
+          activeTab: { left: 'left-1', right: 'right-1' },
+          splitOpen: true,
+          splitRatio: 0.6
+        }]
+      }],
+      folders: [{ id: 'folder-1', name: 'Folder', projectIds: ['project-1'] }],
+      rootOrder: ['folder-1']
+    }
+
+    fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({
+      windows: [
+        {
+          geometry: { x: 10, y: 20, width: 0, height: 800, isMaximized: false },
+          viewState: {
+            selectedProjectId: 'project-1',
+            selectedTaskId: 'task-1',
+            collapsedFolderIds: ['folder-1'],
+            taskStates: {}
+          }
+        },
+        {
+          geometry: { x: 50, y: 60, width: 1200, height: 800, isMaximized: false },
+          viewState: {
+            selectedProjectId: 'missing-project',
+            selectedTaskId: 'missing-task',
+            collapsedFolderIds: ['folder-1', 'missing-folder'],
+            taskStates: {
+              'task-1': {
+                activeTab: { left: 'missing-tab', right: 'right-1' },
+                splitOpen: true,
+                splitRatio: 0.75
+              }
+            }
+          }
+        }
+      ]
+    }))
+
+    const loaded = storage.loadWindowSession(projectsData)
+
+    expect(loaded.windows).toHaveLength(1)
+    expect(loaded.windows[0].geometry).toEqual({ x: 50, y: 60, width: 1200, height: 800, isMaximized: false })
+    expect(loaded.windows[0].viewState.selectedProjectId).toBeNull()
+    expect(loaded.windows[0].viewState.selectedTaskId).toBeNull()
+    expect(loaded.windows[0].viewState.collapsedFolderIds).toEqual(['folder-1'])
+    expect(loaded.windows[0].viewState.taskStates['task-1']).toEqual({
+      activeTab: { left: 'left-1', right: 'right-1' },
+      splitOpen: true,
+      splitRatio: 0.75
+    })
+  })
+
+  it('returns empty window session when the file contains no saved windows', () => {
+    fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({ windows: [] }))
+    const loaded = storage.loadWindowSession({ projects: [], folders: [], rootOrder: [] })
+    expect(loaded.windows).toEqual([])
   })
 })

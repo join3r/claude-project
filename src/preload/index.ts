@@ -22,6 +22,7 @@ const api = {
 
   // Window state
   loadWindowState: (): Promise<WindowViewState> => ipcRenderer.invoke('load-window-state'),
+  saveWindowState: (viewState: WindowViewState): Promise<void> => ipcRenderer.invoke('save-window-state', viewState),
   openWindow: (viewState?: WindowViewState): Promise<void> => ipcRenderer.invoke('open-window', viewState),
 
   // Directory picker

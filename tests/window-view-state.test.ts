@@ -85,4 +85,56 @@ describe('window view state', () => {
     expect(next.taskStates['task-1'].activeTab.right).toBe('right-1')
     expect(next.taskStates['deleted-task']).toBeUndefined()
   })
+
+  it('fills in default task state for tasks missing from the persisted seed', () => {
+    const nextProjects: Project[] = [
+      {
+        id: 'project-1',
+        name: 'Project 1',
+        directory: '/tmp/project-1',
+        tasks: [
+          {
+            id: 'task-1',
+            name: 'Task 1',
+            tabs: {
+              left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
+              right: []
+            },
+            activeTab: { left: 'left-1', right: null },
+            splitOpen: false,
+            splitRatio: 0.5
+          },
+          {
+            id: 'task-2',
+            name: 'Task 2',
+            tabs: {
+              left: [{ id: 'left-2', type: 'terminal', title: 'Terminal' }],
+              right: [{ id: 'right-2', type: 'browser', title: 'Browser', url: 'https://example.com' }]
+            },
+            activeTab: { left: 'left-2', right: 'right-2' },
+            splitOpen: true,
+            splitRatio: 0.7
+          }
+        ]
+      }
+    ]
+
+    const state = buildWindowViewState(nextProjects, DEFAULT_CONFIG, {
+      selectedProjectId: 'project-1',
+      selectedTaskId: 'task-1',
+      taskStates: {
+        'task-1': {
+          activeTab: { left: 'left-1', right: null },
+          splitOpen: false,
+          splitRatio: 0.5
+        }
+      }
+    })
+
+    expect(state.taskStates['task-2']).toEqual({
+      activeTab: { left: 'left-2', right: 'right-2' },
+      splitOpen: true,
+      splitRatio: 0.7
+    })
+  })
 })

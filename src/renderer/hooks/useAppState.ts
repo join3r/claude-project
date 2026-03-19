@@ -63,10 +63,12 @@ export function useAppState() {
   windowViewStateRef.current = windowViewState
   const projectsLoadedRef = useRef(false)
   const configLoadedRef = useRef(false)
+  const windowStateLoadedRef = useRef(false)
   const pendingProjectUpdatersRef = useRef<StateUpdater<ProjectsData>[]>([])
   const pendingConfigUpdatersRef = useRef<StateUpdater<AppConfig>[]>([])
   const lastSavedProjectsJsonRef = useRef<string | null>(null)
   const lastSavedConfigJsonRef = useRef<string | null>(null)
+  const lastSavedWindowStateJsonRef = useRef<string | null>(null)
 
   const updateWindowViewState = useCallback((updater: (prev: WindowViewState) => WindowViewState) => {
     setWindowViewState(prev => {
@@ -101,8 +103,10 @@ export function useAppState() {
       pendingConfigUpdatersRef.current = []
       lastSavedProjectsJsonRef.current = JSON.stringify(loadedProjectsData)
       lastSavedConfigJsonRef.current = JSON.stringify(loadedConfig)
+      lastSavedWindowStateJsonRef.current = JSON.stringify(hydratedWindowViewState)
       projectsLoadedRef.current = true
       configLoadedRef.current = true
+      windowStateLoadedRef.current = true
 
       setProjectsData(hydratedProjectsData)
       setConfig(hydratedConfig)
@@ -150,6 +154,16 @@ export function useAppState() {
     lastSavedConfigJsonRef.current = serialized
     void window.api.saveConfig(config)
   }, [config])
+
+  useEffect(() => {
+    if (!windowStateLoadedRef.current) return
+
+    const serialized = JSON.stringify(windowViewState)
+    if (serialized === lastSavedWindowStateJsonRef.current) return
+
+    lastSavedWindowStateJsonRef.current = serialized
+    void window.api.saveWindowState(windowViewState)
+  }, [windowViewState])
 
   useEffect(() => {
     const folderIds = new Set(folders.map(folder => folder.id))
@@ -550,8 +564,6 @@ export function useAppState() {
                   ? {
                       ...task,
                       tabs: { ...task.tabs, [pane]: [...task.tabs[pane], tab] }
-                      ,
-                      activeTab: { ...task.activeTab, [pane]: tab.id }
                     }
                   : task
               )
@@ -622,17 +634,11 @@ export function useAppState() {
               ...project,
               tasks: project.tasks.map(task => {
                 if (task.id !== taskId) return task
-                const nextTabs = task.tabs[pane].filter(tab => tab.id !== tabId)
-                const wasActive = task.activeTab[pane] === tabId
                 return {
                   ...task,
                   tabs: {
                     ...task.tabs,
-                    [pane]: nextTabs
-                  },
-                  activeTab: {
-                    ...task.activeTab,
-                    [pane]: wasActive ? (nextTabs[nextTabs.length - 1]?.id ?? null) : task.activeTab[pane]
+                    [pane]: task.tabs[pane].filter(tab => tab.id !== tabId)
                   }
                 }
               })
@@ -698,22 +704,6 @@ export function useAppState() {
     const task = project?.tasks.find(candidate => candidate.id === taskId)
     if (!task) return
 
-    persistProjects(prev => ({
-      ...prev,
-      projects: prev.projects.map(project =>
-        project.id === projectId
-          ? {
-              ...project,
-              tasks: project.tasks.map(task =>
-                task.id === taskId
-                  ? { ...task, activeTab: { ...task.activeTab, [pane]: tabId } }
-                  : task
-              )
-            }
-          : project
-      )
-    }))
-
     updateWindowViewState(prev => {
       const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
       return {
@@ -730,26 +720,12 @@ export function useAppState() {
         }
       }
     })
-  }, [persistProjects, updateWindowViewState])
+  }, [updateWindowViewState])
 
   const toggleSplit = useCallback((projectId: string, taskId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = project?.tasks.find(candidate => candidate.id === taskId)
     if (!task) return
-
-    persistProjects(prev => ({
-      ...prev,
-      projects: prev.projects.map(project =>
-        project.id === projectId
-          ? {
-              ...project,
-              tasks: project.tasks.map(task =>
-                task.id === taskId ? { ...task, splitOpen: !task.splitOpen } : task
-              )
-            }
-          : project
-      )
-    }))
 
     updateWindowViewState(prev => {
       const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
@@ -764,26 +740,12 @@ export function useAppState() {
         }
       }
     })
-  }, [persistProjects, updateWindowViewState])
+  }, [updateWindowViewState])
 
   const setSplitRatio = useCallback((projectId: string, taskId: string, ratio: number) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = project?.tasks.find(candidate => candidate.id === taskId)
     if (!task) return
-
-    persistProjects(prev => ({
-      ...prev,
-      projects: prev.projects.map(project =>
-        project.id === projectId
-          ? {
-              ...project,
-              tasks: project.tasks.map(task =>
-                task.id === taskId ? { ...task, splitRatio: ratio } : task
-              )
-            }
-          : project
-      )
-    }))
 
     updateWindowViewState(prev => {
       const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
@@ -798,7 +760,7 @@ export function useAppState() {
         }
       }
     })
-  }, [persistProjects, updateWindowViewState])
+  }, [updateWindowViewState])
 
   const toggleFolderCollapse = useCallback((folderId: string) => {
     updateWindowViewState(prev => ({

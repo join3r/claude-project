@@ -118,6 +118,23 @@ export interface WindowViewState {
   taskStates: Record<string, TaskViewState>
 }
 
+export interface WindowGeometry {
+  x: number
+  y: number
+  width: number
+  height: number
+  isMaximized: boolean
+}
+
+export interface PersistedWindowState {
+  geometry: WindowGeometry
+  viewState: WindowViewState
+}
+
+export interface WindowSessionState {
+  windows: PersistedWindowState[]
+}
+
 export const DEFAULT_CONFIG: AppConfig = {
   fontFamily: 'monospace',
   fontSize: 14,
@@ -142,6 +159,16 @@ export function createTaskViewState(task: Task): TaskViewState {
     splitOpen: task.splitOpen,
     splitRatio: task.splitRatio
   }
+}
+
+function createDefaultTaskStates(projects: Project[]): Record<string, TaskViewState> {
+  const taskStates: Record<string, TaskViewState> = {}
+  for (const project of projects) {
+    for (const task of project.tasks) {
+      taskStates[task.id] = createTaskViewState(task)
+    }
+  }
+  return taskStates
 }
 
 export function createDefaultWindowViewState(): WindowViewState {
@@ -172,6 +199,27 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
       ])
     )
   }
+}
+
+export function cloneWindowGeometry(geometry: WindowGeometry): WindowGeometry {
+  return {
+    x: geometry.x,
+    y: geometry.y,
+    width: geometry.width,
+    height: geometry.height,
+    isMaximized: geometry.isMaximized
+  }
+}
+
+export function clonePersistedWindowState(state: PersistedWindowState): PersistedWindowState {
+  return {
+    geometry: cloneWindowGeometry(state.geometry),
+    viewState: cloneWindowViewState(state.viewState)
+  }
+}
+
+export function createDefaultWindowSessionState(): WindowSessionState {
+  return { windows: [] }
 }
 
 export function resolveStoredSelection(projects: Project[], config: AppConfig): Pick<WindowViewState, 'selectedProjectId' | 'selectedTaskId'> {
@@ -255,17 +303,24 @@ export function buildWindowViewState(
   seed?: Partial<WindowViewState> | null
 ): WindowViewState {
   const storedSelection = resolveStoredSelection(projects, config)
+  const taskStates = createDefaultTaskStates(projects)
+  if (seed?.taskStates) {
+    for (const [taskId, taskState] of Object.entries(seed.taskStates)) {
+      taskStates[taskId] = {
+        activeTab: {
+          left: taskState.activeTab.left,
+          right: taskState.activeTab.right
+        },
+        splitOpen: taskState.splitOpen,
+        splitRatio: taskState.splitRatio
+      }
+    }
+  }
 
   return reconcileWindowViewState({
     selectedProjectId: seed?.selectedProjectId ?? storedSelection.selectedProjectId,
     selectedTaskId: seed?.selectedTaskId ?? storedSelection.selectedTaskId,
     collapsedFolderIds: seed?.collapsedFolderIds ? [...seed.collapsedFolderIds] : [...config.collapsedFolderIds],
-    taskStates: seed?.taskStates
-      ? cloneWindowViewState({
-          ...createDefaultWindowViewState(),
-          ...seed,
-          taskStates: seed.taskStates
-        }).taskStates
-      : {}
+    taskStates
   }, projects)
 }
