@@ -9,6 +9,8 @@ interface Props {
   tabs: Tab[]
   activeTabId: string | null
   pane: 'left' | 'right'
+  projectId: string
+  taskId: string
 }
 
 function tabIcon(type: TabType): string {
@@ -26,12 +28,12 @@ function TabStatusIndicator({ tabId }: { tabId: string }): React.ReactElement | 
   return <span className={`tab-status tab-status-${status}`} />
 }
 
-export default function TabBar({ tabs, activeTabId, pane }: Props): React.ReactElement {
-  const { selectedProject, selectedTask, addTab, removeTab, setActiveTab, config } = useApp()
-  if (!selectedProject || !selectedTask) return <div className="tab-bar" />
+export default function TabBar({ tabs, activeTabId, pane, projectId, taskId }: Props): React.ReactElement {
+  const { selectedProject, addTab, removeTab, setActiveTab, config } = useApp()
+  if (!selectedProject) return <div className="tab-bar" />
 
   const handleAdd = (type: TabType) => {
-    addTab(selectedProject.id, selectedTask.id, pane, type)
+    addTab(projectId, taskId, pane, type)
   }
 
   return (
@@ -41,7 +43,7 @@ export default function TabBar({ tabs, activeTabId, pane }: Props): React.ReactE
           <div
             key={tab.id}
             className={`tab ${tab.id === activeTabId ? 'tab-active' : ''}`}
-            onClick={() => setActiveTab(selectedProject.id, selectedTask.id, pane, tab.id)}
+            onClick={() => setActiveTab(projectId, taskId, pane, tab.id)}
           >
             {index < 9 && (
               <span className="tab-shortcut-hint">
@@ -55,7 +57,7 @@ export default function TabBar({ tabs, activeTabId, pane }: Props): React.ReactE
               className="tab-close"
               onClick={(e) => {
                 e.stopPropagation()
-                removeTab(selectedProject.id, selectedTask.id, pane, tab.id)
+                removeTab(projectId, taskId, pane, tab.id)
               }}
             >
               &times;

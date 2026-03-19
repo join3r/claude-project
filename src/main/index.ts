@@ -1,7 +1,10 @@
 import { app, BrowserWindow, Menu } from 'electron'
 import { join } from 'path'
-import { registerIpcHandlers } from './ipc-handlers'
 import { resolveShellEnv } from './shell-env'
+import { AppRuntime } from './app-runtime'
+import type { WindowViewState } from '../shared/types'
+
+let appRuntime: AppRuntime | null = null
 
 function buildAppMenu(): void {
   const isMac = process.platform === 'darwin'
@@ -33,6 +36,11 @@ function buildAppMenu(): void {
     {
       label: 'File',
       submenu: [
+        {
+          label: 'New Window',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => sendToRenderer('menu-new-window')
+        },
         {
           label: 'New Terminal Tab',
           accelerator: 'CmdOrCtrl+T',
@@ -113,7 +121,7 @@ function buildAppMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
-function createWindow(): void {
+function createWindow(initialViewState?: WindowViewState | null): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -128,17 +136,21 @@ function createWindow(): void {
     }
   })
 
-  registerIpcHandlers(mainWindow).then(() => {
-    if (process.env.ELECTRON_RENDERER_URL) {
-      mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-    } else {
-      mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-    }
-  })
+  appRuntime?.registerWindow(mainWindow, initialViewState ?? null)
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+  } else {
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  return mainWindow
 }
 
 app.whenReady().then(async () => {
   await resolveShellEnv()
+  appRuntime = new AppRuntime((initialViewState) => createWindow(initialViewState))
+  await appRuntime.start()
   buildAppMenu()
   createWindow()
   app.on('activate', () => {
@@ -148,4 +160,8 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  void appRuntime?.shutdown()
 })

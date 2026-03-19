@@ -30,7 +30,7 @@ export default function Pane({ tabs, activeTabId, pane, projectId, taskId, proje
       onMouseDownCapture={() => onPaneFocus?.(pane)}
       onFocusCapture={() => onPaneFocus?.(pane)}
     >
-      <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} />
+      <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} projectId={projectId} taskId={taskId} />
       <div className="pane-content">
         {tabs.length === 0 && (
           <div className="pane-empty">Open a terminal or browser tab</div>

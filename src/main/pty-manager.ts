@@ -6,10 +6,24 @@ interface PtyInstance {
   projectDir: string
 }
 
+interface PtySpawnCallbacks {
+  onData?: (data: string) => void
+  onExit?: (exitCode: number) => void
+}
+
 export class PtyManager {
   private instances: Map<string, PtyInstance> = new Map()
 
-  spawn(id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>): void {
+  spawn(
+    id: string,
+    shell: string,
+    cwd: string,
+    cols: number,
+    rows: number,
+    args?: string[],
+    extraEnv?: Record<string, string>,
+    callbacks?: PtySpawnCallbacks
+  ): void {
     if (this.instances.has(id)) {
       this.kill(id)
     }
@@ -20,6 +34,12 @@ export class PtyManager {
       cwd,
       env: { ...getShellEnv(), ...extraEnv }
     })
+    if (callbacks?.onData) {
+      proc.onData(callbacks.onData)
+    }
+    if (callbacks?.onExit) {
+      proc.onExit(({ exitCode }) => callbacks.onExit?.(exitCode))
+    }
     this.instances.set(id, { process: proc, projectDir: cwd })
   }
 

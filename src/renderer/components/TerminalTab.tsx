@@ -23,14 +23,30 @@ interface Props {
   shellCommand?: ShellCommandConfig
 }
 
-const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; searchAddon: SearchAddon; webglAddon: WebglAddon | null }>()
+interface TerminalEntry {
+  term: Terminal
+  fitAddon: FitAddon
+  serializeAddon: SerializeAddon
+  searchAddon: SearchAddon
+  webglAddon: WebglAddon | null
+  restoring: boolean
+  pendingData: string[]
+}
+
+const terminals = new Map<string, TerminalEntry>()
 
 let ptyListenerRegistered = false
 function ensurePtyListener(): void {
   if (ptyListenerRegistered) return
   ptyListenerRegistered = true
   window.api.onPtyData((id: string, data: string) => {
-    terminals.get(id)?.term.write(data)
+    const entry = terminals.get(id)
+    if (!entry) return
+    if (entry.restoring) {
+      entry.pendingData.push(data)
+      return
+    }
+    entry.term.write(data)
   })
 }
 
@@ -68,7 +84,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
 
 export default function TerminalTab({ tabId, visible, projectId, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { selectedProject, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
+  const { config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
   const projectDirRef = useRef(projectDir)
@@ -114,7 +130,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
   }, [sshReady, tabId, sshConfig])
 
   useEffect(() => {
-    if (!containerRef.current || !selectedProject || !config) return
+    if (!containerRef.current || !config) return
     if (initializedRef.current) return
     initializedRef.current = true
 
@@ -148,7 +164,15 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     term.open(containerRef.current)
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
-    terminals.set(tabId, { term, fitAddon, serializeAddon, searchAddon, webglAddon: null })
+    terminals.set(tabId, {
+      term,
+      fitAddon,
+      serializeAddon,
+      searchAddon,
+      webglAddon: null,
+      restoring: false,
+      pendingData: []
+    })
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -168,7 +192,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
 
     ensurePtyListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, selectedProject, config])
+  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
@@ -201,7 +225,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
 
   // Use ResizeObserver to fit terminal when container dimensions change.
   useEffect(() => {
-    if (!containerRef.current || !selectedProject || !config) return
+    if (!containerRef.current || !config) return
     const container = containerRef.current
     const ro = new ResizeObserver(() => {
       const entry = terminals.get(tabId)
@@ -210,29 +234,43 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
           spawnedRef.current = true
-          // Restore scrollback after first fit (correct terminal dimensions)
-          window.api.scrollbackLoad(tabId).then((data) => {
-            if (data) {
-              entry.term.write(data, () => {
-                // After xterm processes scrollback, re-sync viewport dimensions
-                entry.fitAddon.fit()
-                entry.term.scrollToBottom()
-              })
+          entry.restoring = true
+          entry.pendingData = []
+
+          const attachPromise = shellCommand
+            ? window.api.ptySpawn(tabId, '/bin/sh', '/', entry.term.cols, entry.term.rows, ['-c', shellCommand.command])
+            : sshConfig
+              ? window.api.ptySpawn(tabId, '$SHELL', '', entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
+              : window.api.ptySpawn(tabId, config.defaultShell, projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'])
+
+          void attachPromise.then(({ scrollback }) => {
+            const flushPending = () => {
+              entry.restoring = false
+              if (entry.pendingData.length > 0) {
+                entry.term.write(entry.pendingData.join(''))
+                entry.pendingData = []
+              }
+              entry.fitAddon.fit()
+              entry.term.scrollToBottom()
             }
+
+            if (!scrollback) {
+              flushPending()
+              return
+            }
+
+            entry.term.write(scrollback, flushPending)
+          }).catch(() => {
+            entry.restoring = false
+            entry.pendingData = []
+            spawnedRef.current = false
           })
-          if (shellCommand) {
-            window.api.ptySpawn(tabId, '/bin/sh', '/', entry.term.cols, entry.term.rows, ['-c', shellCommand.command])
-          } else if (sshConfig) {
-            window.api.ptySpawn(tabId, '$SHELL', '', entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
-          } else {
-            window.api.ptySpawn(tabId, config.defaultShell, projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'])
-          }
         }
       }
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, selectedProject, config, sshReady])
+  }, [tabId, config, sshReady, sshConfig, shellCommand, projectId])
 
   // Focus terminal on visibility change
   useEffect(() => {
@@ -275,6 +313,14 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     return () => window.removeEventListener('tab-removed', handler)
   }, [tabId])
 
+  useEffect(() => {
+    return () => {
+      initializedRef.current = false
+      spawnedRef.current = false
+      disposeTerminal(tabId, false)
+    }
+  }, [tabId])
+
   // Cmd+F to open search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -308,7 +354,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
   )
 }
 
-export function disposeTerminal(tabId: string): void {
+export function disposeTerminal(tabId: string, killRuntime = true): void {
   const entry = terminals.get(tabId)
   if (entry) {
     // Save scrollback before disposing
@@ -320,6 +366,8 @@ export function disposeTerminal(tabId: string): void {
     }
     entry.term.dispose()
     terminals.delete(tabId)
-    window.api.ptyKill(tabId)
+    if (killRuntime) {
+      window.api.ptyKill(tabId)
+    }
   }
 }

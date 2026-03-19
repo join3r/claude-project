@@ -1,14 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppConfig, ProjectsData, SshConfig } from '../shared/types'
+import type { AppConfig, ProjectsData, SshConfig, WindowViewState } from '../shared/types'
 
 const api = {
   // Projects
   loadProjects: (): Promise<ProjectsData> => ipcRenderer.invoke('load-projects'),
   saveProjects: (data: ProjectsData): Promise<void> => ipcRenderer.invoke('save-projects', data),
+  onProjectsUpdated: (callback: (data: ProjectsData) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: ProjectsData) => callback(data)
+    ipcRenderer.on('projects-updated', handler)
+    return () => ipcRenderer.removeListener('projects-updated', handler)
+  },
 
   // Config
   loadConfig: (): Promise<AppConfig> => ipcRenderer.invoke('load-config'),
   saveConfig: (config: AppConfig): Promise<void> => ipcRenderer.invoke('save-config', config),
+  onConfigUpdated: (callback: (config: AppConfig) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config)
+    ipcRenderer.on('config-updated', handler)
+    return () => ipcRenderer.removeListener('config-updated', handler)
+  },
+
+  // Window state
+  loadWindowState: (): Promise<WindowViewState> => ipcRenderer.invoke('load-window-state'),
+  openWindow: (viewState?: WindowViewState): Promise<void> => ipcRenderer.invoke('open-window', viewState),
 
   // Directory picker
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('pick-directory'),
@@ -65,7 +79,17 @@ const api = {
   },
 
   // PTY
-  ptySpawn: (id: string, shell: string, cwd: string, cols: number, rows: number, args?: string[], extraEnv?: Record<string, string>, projectId?: string, sshConfig?: SshConfig): Promise<void> =>
+  ptySpawn: (
+    id: string,
+    shell: string,
+    cwd: string,
+    cols: number,
+    rows: number,
+    args?: string[],
+    extraEnv?: Record<string, string>,
+    projectId?: string,
+    sshConfig?: SshConfig
+  ): Promise<{ scrollback: string; exitCode: number | null }> =>
     ipcRenderer.invoke('pty-spawn', id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig),
   ptyWrite: (id: string, data: string): void => ipcRenderer.send('pty-write', id, data),
   ptyResize: (id: string, cols: number, rows: number): void => ipcRenderer.send('pty-resize', id, cols, rows),
@@ -98,6 +122,11 @@ const api = {
     ipcRenderer.on('menu-new-terminal', handler)
     return () => ipcRenderer.removeListener('menu-new-terminal', handler)
   },
+  onMenuNewWindow: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-new-window', handler)
+    return () => ipcRenderer.removeListener('menu-new-window', handler)
+  },
   onMenuProjectSwitcher: (callback: () => void): (() => void) => {
     const handler = () => callback()
     ipcRenderer.on('menu-project-switcher', handler)
@@ -117,7 +146,26 @@ const api = {
     const handler = () => callback()
     ipcRenderer.on('menu-zoom-reset', handler)
     return () => ipcRenderer.removeListener('menu-zoom-reset', handler)
-  }
+  },
+
+  // Workspaces
+  workspaceListBranches: (projectDir: string): Promise<string[]> =>
+    ipcRenderer.invoke('workspace-list-branches', projectDir),
+  workspaceCreate: (projectDir: string, name: string, baseBranch: string): Promise<{
+    worktreePath: string
+    branchName: string
+    baseBranch: string
+    relativeProjectPath: string
+  }> => ipcRenderer.invoke('workspace-create', projectDir, name, baseBranch),
+  workspaceDelete: (
+    projectDir: string,
+    worktreePath: string,
+    branchName: string,
+    baseBranch: string,
+    force?: boolean,
+    keepBranch?: boolean
+  ): Promise<{ status: 'ok' | 'uncommitted' | 'unmerged' | 'uncommitted-and-unmerged'; baseBranch?: string }> =>
+    ipcRenderer.invoke('workspace-delete', projectDir, worktreePath, branchName, baseBranch, force, keepBranch)
 }
 
 contextBridge.exposeInMainWorld('api', api)

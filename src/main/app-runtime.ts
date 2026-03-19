@@ -1,0 +1,454 @@
+import { BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { Storage } from './storage'
+import { ScrollbackStorage } from './scrollback-storage'
+import { PtyManager } from './pty-manager'
+import { HookServer } from './hook-server'
+import { HookInjector } from './hook-injector'
+import { SshConnectionManager } from './ssh-connection-manager'
+import { CodexSessionManager } from './codex-session-manager'
+import { WorkspaceManager } from './workspace-manager'
+import type { AppConfig, ProjectsData, SshConfig, WindowViewState } from '../shared/types'
+import { buildWindowViewState, cloneWindowViewState } from '../shared/types'
+
+const CONFIG_DIR = path.join(os.homedir(), '.devtool')
+const MAX_SCROLLBACK_CHARS = 2_000_000
+const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
+
+interface PtyRuntime {
+  attachedWindowIds: Set<number>
+  scrollback: string
+  exitCode: number | null
+}
+
+interface PtyAttachResult {
+  scrollback: string
+  exitCode: number | null
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function trimScrollback(scrollback: string): string {
+  if (scrollback.length <= MAX_SCROLLBACK_CHARS) return scrollback
+  return scrollback.slice(-MAX_SCROLLBACK_CHARS)
+}
+
+export class AppRuntime {
+  private readonly storage = new Storage(CONFIG_DIR)
+  private readonly scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
+  private readonly ptyManager = new PtyManager()
+  private readonly hookServer = new HookServer()
+  private readonly codexSessionManager = new CodexSessionManager()
+  private readonly workspaceManager = new WorkspaceManager()
+  private readonly windows = new Map<number, BrowserWindow>()
+  private readonly initialWindowStates = new Map<number, WindowViewState | null>()
+  private readonly ptyRuntimes = new Map<string, PtyRuntime>()
+  private hookInjector!: HookInjector
+  private sshManager!: SshConnectionManager
+  private started = false
+  private projectsData: ProjectsData
+  private config: AppConfig
+
+  constructor(private readonly createWindow: (viewState?: WindowViewState | null) => BrowserWindow) {
+    this.projectsData = this.storage.loadProjects()
+    this.config = this.storage.loadConfig()
+  }
+
+  async start(): Promise<void> {
+    if (this.started) return
+    this.started = true
+
+    await this.hookServer.start()
+    this.logDebug(`start hookPort=${this.hookServer.getPort()}`)
+    this.hookInjector = new HookInjector(this.hookServer.getPort())
+    this.sshManager = new SshConnectionManager(path.join(CONFIG_DIR, 'ssh'), this.hookServer.getPort())
+    this.registerEventForwarders()
+    this.registerIpcHandlers()
+  }
+
+  registerWindow(window: BrowserWindow, initialViewState?: WindowViewState | null): void {
+    this.windows.set(window.id, window)
+    this.initialWindowStates.set(window.id, initialViewState ? cloneWindowViewState(initialViewState) : null)
+    this.logDebug(`registerWindow windowId=${window.id}`)
+    window.on('closed', () => {
+      this.logDebug(`windowClosed windowId=${window.id}`)
+      this.windows.delete(window.id)
+      this.initialWindowStates.delete(window.id)
+      for (const runtime of this.ptyRuntimes.values()) {
+        runtime.attachedWindowIds.delete(window.id)
+      }
+    })
+  }
+
+  async shutdown(): Promise<void> {
+    this.ptyManager.killAll()
+    this.hookInjector.cleanupAll()
+    await this.hookServer.stop()
+    await this.sshManager.disconnectAll().catch(() => {})
+  }
+
+  private registerEventForwarders(): void {
+    this.hookServer.on('session-start', (tabId: string, body: Record<string, unknown>) => {
+      this.broadcastToAttachedWindows(tabId, 'hook-session-start', tabId, body)
+    })
+
+    this.hookServer.on('working', (tabId: string) => {
+      this.broadcastToAttachedWindows(tabId, 'hook-working', tabId)
+    })
+
+    this.hookServer.on('stopped', (tabId: string) => {
+      this.broadcastToAttachedWindows(tabId, 'hook-stopped', tabId)
+    })
+
+    this.hookServer.on('notification', (tabId: string, body: Record<string, unknown>) => {
+      this.broadcastToAttachedWindows(tabId, 'hook-notification', tabId, body)
+    })
+
+    this.sshManager.on('status-changed', (projectId: string, status: string) => {
+      this.logDebug(`sshStatus projectId=${projectId} status=${status}`)
+      this.broadcastToAllWindows('ssh-status-changed', projectId, status)
+    })
+
+    nativeTheme.on('updated', () => {
+      this.broadcastToAllWindows('theme-changed', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+    })
+  }
+
+  private registerIpcHandlers(): void {
+    ipcMain.handle('load-projects', () => clone(this.projectsData))
+    ipcMain.handle('save-projects', (event, data: ProjectsData) => {
+      this.projectsData = Storage.normalizeProjectsData(data as unknown as Record<string, unknown>)
+      this.storage.saveProjects(this.projectsData)
+      this.broadcastToAllWindows('projects-updated', clone(this.projectsData))
+      return undefined
+    })
+
+    ipcMain.handle('load-config', () => clone(this.config))
+    ipcMain.handle('save-config', (_event, config: AppConfig) => {
+      this.config = { ...this.config, ...config }
+      this.storage.saveConfig(this.config)
+      this.broadcastToAllWindows('config-updated', clone(this.config))
+      return undefined
+    })
+
+    ipcMain.handle('load-window-state', (event) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const seeded = window ? this.initialWindowStates.get(window.id) ?? null : null
+      return seeded
+        ? cloneWindowViewState(seeded)
+        : buildWindowViewState(this.projectsData.projects, this.config)
+    })
+
+    ipcMain.handle('open-window', (_event, viewState?: WindowViewState | null) => {
+      this.logDebug(`openWindow seeded=${viewState ? 'yes' : 'no'}`)
+      this.createWindow(viewState ?? null)
+    })
+
+    ipcMain.handle('pick-directory', async (event) => {
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const result = await dialog.showOpenDialog(owner, {
+        properties: ['openDirectory']
+      })
+      return result.canceled ? null : result.filePaths[0]
+    })
+
+    ipcMain.handle('pick-file', async (event, title?: string) => {
+      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const result = await dialog.showOpenDialog(owner, {
+        title: title || 'Select file',
+        properties: ['openFile', 'showHiddenFiles']
+      })
+      return result.canceled ? null : result.filePaths[0]
+    })
+
+    ipcMain.handle('get-native-theme', () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+
+    ipcMain.handle('scrollback-save', (_event, tabId: string, data: string) => {
+      const scrollback = trimScrollback(data)
+      this.scrollbackStorage.save(tabId, scrollback)
+      const runtime = this.ptyRuntimes.get(tabId)
+      if (runtime) runtime.scrollback = scrollback
+      return undefined
+    })
+    ipcMain.handle('scrollback-load', (_event, tabId: string) => {
+      const runtime = this.ptyRuntimes.get(tabId)
+      return runtime ? runtime.scrollback : this.scrollbackStorage.load(tabId)
+    })
+    ipcMain.handle('scrollback-delete', (_event, tabId: string) => {
+      this.scrollbackStorage.delete(tabId)
+      return undefined
+    })
+    ipcMain.on('scrollback-save-sync', (event, tabId: string, data: string) => {
+      const scrollback = trimScrollback(data)
+      this.scrollbackStorage.save(tabId, scrollback)
+      const runtime = this.ptyRuntimes.get(tabId)
+      if (runtime) runtime.scrollback = scrollback
+      event.returnValue = true
+    })
+
+    ipcMain.handle('ssh-connect', async (_event, projectId: string, sshConfig: SshConfig) => {
+      await this.sshManager.connect(projectId, sshConfig)
+      this.sshManager.startHealthChecks(projectId, sshConfig)
+    })
+
+    ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
+      await this.sshManager.disconnect(projectId, sshConfig)
+    })
+
+    ipcMain.handle('ssh-status', (_event, projectId: string) => {
+      return this.sshManager.getStatus(projectId)
+    })
+
+    ipcMain.handle('hooks-inject', (_event, projectDir: string) => {
+      this.hookInjector.inject(projectDir)
+    })
+    ipcMain.handle('hooks-cleanup', (_event, projectDir: string) => {
+      this.hookInjector.cleanup(projectDir)
+    })
+    ipcMain.handle('hooks-cleanup-remote', async (_event, projectId: string, sshConfig: SshConfig) => {
+      const isLast = this.hookInjector.remoteCleanup(projectId)
+      if (!isLast) return
+
+      if (this.sshManager.getStatus(projectId) !== 'connected') return
+      const cleanupScript = this.hookInjector.buildRemoteCleanupScript(sshConfig.remoteDir)
+      const cleanupArgs = [
+        '-S', this.sshManager.getSocketPath(projectId),
+        `${sshConfig.username}@${sshConfig.host}`,
+        cleanupScript
+      ]
+      try {
+        const { execFile } = await import('child_process')
+        const { promisify } = await import('util')
+        await promisify(execFile)('ssh', cleanupArgs, { timeout: 5000 })
+      } catch {
+        // Best-effort cleanup
+      }
+    })
+
+    ipcMain.handle('codex-read-session', async (_event, cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig) => {
+      if (!sshConfig || !projectId) {
+        return { sessionId: await this.codexSessionManager.readLatestSessionId(cwd, afterTs) }
+      }
+
+      if (this.sshManager.getStatus(projectId) !== 'connected') {
+        throw new Error('SSH connection not established')
+      }
+
+      const readScript = this.codexSessionManager.buildRemoteReadSessionScript(cwd, afterTs)
+      const sshArgs = [
+        '-S', this.sshManager.getSocketPath(projectId),
+        `${sshConfig.username}@${sshConfig.host}`,
+        readScript
+      ]
+
+      try {
+        const { execFile: execFileCb } = await import('child_process')
+        const { promisify } = await import('util')
+        const { stdout } = await promisify(execFileCb)('ssh', sshArgs, { timeout: 5000 })
+        return JSON.parse(stdout.trim()) as { sessionId: string | null }
+      } catch (error) {
+        throw new Error(`Failed to read Codex session: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+
+    ipcMain.handle(
+      'pty-spawn',
+      async (
+        event,
+        id: string,
+        shell: string,
+        cwd: string,
+        cols: number,
+        rows: number,
+        args?: string[],
+        extraEnv?: Record<string, string>,
+        projectId?: string,
+        sshConfig?: SshConfig
+      ): Promise<PtyAttachResult> => {
+        const window = BrowserWindow.fromWebContents(event.sender)
+        if (!window) {
+          throw new Error('Unable to resolve window for PTY attach')
+        }
+        this.logDebug(`ptySpawnRequest windowId=${window.id} id=${id} shell=${shell} cwd=${cwd} cols=${cols} rows=${rows}`)
+        return this.attachOrCreatePty(window.id, id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig)
+      }
+    )
+
+    ipcMain.on('pty-write', (_event, id: string, data: string) => {
+      this.ptyManager.write(id, data)
+    })
+
+    ipcMain.on('pty-resize', (_event, id: string, cols: number, rows: number) => {
+      this.ptyManager.resize(id, cols, rows)
+    })
+
+    ipcMain.on('pty-kill', (_event, id: string) => {
+      this.killPty(id)
+    })
+
+    ipcMain.handle('workspace-list-branches', async (_event, projectDir: string) => {
+      return this.workspaceManager.listBranches(projectDir)
+    })
+
+    ipcMain.handle('workspace-create', async (_event, projectDir: string, name: string, baseBranch: string) => {
+      const result = await this.workspaceManager.create(projectDir, name, baseBranch)
+      return { ...result, baseBranch }
+    })
+
+    ipcMain.handle(
+      'workspace-delete',
+      async (
+        _event,
+        projectDir: string,
+        worktreePath: string,
+        branchName: string,
+        baseBranch: string,
+        force?: boolean,
+        keepBranch?: boolean
+      ) => {
+        return this.workspaceManager.delete({ projectDir, worktreePath, branchName, baseBranch, force, keepBranch })
+      }
+    )
+  }
+
+  private async attachOrCreatePty(
+    windowId: number,
+    id: string,
+    shell: string,
+    cwd: string,
+    cols: number,
+    rows: number,
+    args?: string[],
+    extraEnv?: Record<string, string>,
+    projectId?: string,
+    sshConfig?: SshConfig
+  ): Promise<PtyAttachResult> {
+    let runtime = this.ptyRuntimes.get(id)
+    if (!runtime) {
+      this.logDebug(`ptyAttach create windowId=${windowId} id=${id}`)
+      runtime = {
+        attachedWindowIds: new Set<number>(),
+        scrollback: this.scrollbackStorage.load(id) ?? '',
+        exitCode: null
+      }
+      this.ptyRuntimes.set(id, runtime)
+      runtime.attachedWindowIds.add(windowId)
+      this.spawnPty(id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig)
+    } else {
+      this.logDebug(`ptyAttach reuse windowId=${windowId} id=${id} scrollback=${runtime.scrollback.length} exit=${runtime.exitCode}`)
+      runtime.attachedWindowIds.add(windowId)
+    }
+    return {
+      scrollback: runtime.scrollback,
+      exitCode: runtime.exitCode
+    }
+  }
+
+  private spawnPty(
+    id: string,
+    shell: string,
+    cwd: string,
+    cols: number,
+    rows: number,
+    args?: string[],
+    extraEnv?: Record<string, string>,
+    projectId?: string,
+    sshConfig?: SshConfig
+  ): void {
+    this.logDebug(`ptySpawn start id=${id} shell=${shell} cwd=${cwd}`)
+    if (sshConfig && projectId) {
+      if (this.sshManager.getStatus(projectId) !== 'connected') {
+        throw new Error('SSH connection not established')
+      }
+
+      const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      let hookInjectPrefix = ''
+      if (isClaudeRemote) {
+        const remotePort = this.sshManager.getRemotePort(projectId)
+        if (remotePort) {
+          this.hookInjector.remoteInject(projectId)
+          hookInjectPrefix = this.hookInjector.buildRemoteInjectScript(sshConfig.remoteDir, remotePort) + ' && '
+        }
+      }
+
+      const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix)
+      this.ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs, undefined, {
+        onData: (data) => {
+          const runtime = this.ptyRuntimes.get(id)
+          if (!runtime) return
+          runtime.scrollback = trimScrollback(runtime.scrollback + data)
+          this.logDebug(`ptyData id=${id} len=${data.length} total=${runtime.scrollback.length}`)
+          this.broadcastToAttachedWindows(id, 'pty-data', id, data)
+        },
+        onExit: (exitCode) => {
+          const runtime = this.ptyRuntimes.get(id)
+          if (!runtime) return
+          runtime.exitCode = exitCode
+          this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
+          this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
+        }
+      })
+    } else {
+      const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      if (isClaudeLocal) {
+        this.hookInjector.inject(cwd)
+      }
+      this.ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv, {
+        onData: (data) => {
+          const runtime = this.ptyRuntimes.get(id)
+          if (!runtime) return
+          runtime.scrollback = trimScrollback(runtime.scrollback + data)
+          this.logDebug(`ptyData id=${id} len=${data.length} total=${runtime.scrollback.length}`)
+          this.broadcastToAttachedWindows(id, 'pty-data', id, data)
+        },
+        onExit: (exitCode) => {
+          const runtime = this.ptyRuntimes.get(id)
+          if (!runtime) return
+          runtime.exitCode = exitCode
+          this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
+          this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
+        }
+      })
+    }
+  }
+
+  private killPty(id: string): void {
+    this.logDebug(`ptyKill id=${id}`)
+    this.ptyManager.kill(id)
+    this.ptyRuntimes.delete(id)
+  }
+
+  private logDebug(message: string): void {
+    try {
+      if (!fs.existsSync(CONFIG_DIR)) {
+        fs.mkdirSync(CONFIG_DIR, { recursive: true })
+      }
+      fs.appendFileSync(DEBUG_LOG_PATH, `[${new Date().toISOString()}] ${message}\n`)
+    } catch {
+      // Best-effort logging only.
+    }
+  }
+
+  private broadcastToAllWindows(channel: string, ...args: unknown[]): void {
+    for (const window of this.windows.values()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(channel, ...args)
+      }
+    }
+  }
+
+  private broadcastToAttachedWindows(tabId: string, channel: string, ...args: unknown[]): void {
+    const runtime = this.ptyRuntimes.get(tabId)
+    if (!runtime) return
+    for (const windowId of runtime.attachedWindowIds) {
+      const window = this.windows.get(windowId)
+      if (window && !window.isDestroyed()) {
+        window.webContents.send(channel, ...args)
+      }
+    }
+  }
+}

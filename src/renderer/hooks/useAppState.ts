@@ -1,34 +1,66 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
-import { AI_TAB_META, AI_TAB_TYPES, isRemoteProject } from '../../shared/types'
-import type { Project, ProjectsData, Folder, Task, Tab, AppConfig, TabType, AiTabType, SshConfig, WorkspaceConfig } from '../../shared/types'
-import { applyQueuedStateUpdates, resolveInitialSelection, type StateUpdater } from './stateHydration'
+import {
+  AI_TAB_META,
+  AI_TAB_TYPES,
+  buildWindowViewState,
+  cloneWindowViewState,
+  createDefaultWindowViewState,
+  createTaskViewState,
+  isRemoteProject,
+  reconcileTaskViewState,
+  reconcileWindowViewState
+} from '../../shared/types'
+import type {
+  Project,
+  ProjectsData,
+  Task,
+  Tab,
+  AppConfig,
+  TabType,
+  AiTabType,
+  SshConfig,
+  WorkspaceConfig,
+  WindowViewState,
+  TaskViewState
+} from '../../shared/types'
+import { applyQueuedStateUpdates, type StateUpdater } from './stateHydration'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs'>>
+
+function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+function cloneTaskState(state: TaskViewState): TaskViewState {
+  return {
+    activeTab: {
+      left: state.activeTab.left,
+      right: state.activeTab.right
+    },
+    splitOpen: state.splitOpen,
+    splitRatio: state.splitRatio
+  }
+}
 
 export function useAppState() {
   const [projectsData, setProjectsData] = useState<ProjectsData>({ projects: [], folders: [], rootOrder: [] })
   const [config, setConfig] = useState<AppConfig | null>(null)
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [windowViewState, setWindowViewState] = useState<WindowViewState>(createDefaultWindowViewState())
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [terminalZoomDelta, setTerminalZoomDelta] = useState(0)
   const [browserZoomFactor, setBrowserZoomFactor] = useState(1.0)
 
-  // Convenience derived values
   const projects = projectsData.projects
   const folders = projectsData.folders
   const rootOrder = projectsData.rootOrder
 
-  // Refs for reading latest state in callbacks without stale closures
   const projectsDataRef = useRef(projectsData)
   projectsDataRef.current = projectsData
   const projectsRef = useRef(projects)
   projectsRef.current = projects
-  const selectedProjectIdRef = useRef(selectedProjectId)
-  selectedProjectIdRef.current = selectedProjectId
-  const selectedTaskIdRef = useRef(selectedTaskId)
-  selectedTaskIdRef.current = selectedTaskId
+  const windowViewStateRef = useRef(windowViewState)
+  windowViewStateRef.current = windowViewState
   const projectsLoadedRef = useRef(false)
   const configLoadedRef = useRef(false)
   const pendingProjectUpdatersRef = useRef<StateUpdater<ProjectsData>[]>([])
@@ -36,24 +68,33 @@ export function useAppState() {
   const lastSavedProjectsJsonRef = useRef<string | null>(null)
   const lastSavedConfigJsonRef = useRef<string | null>(null)
 
-  // Load initial data
+  const updateWindowViewState = useCallback((updater: (prev: WindowViewState) => WindowViewState) => {
+    setWindowViewState(prev => {
+      const next = updater(prev)
+      return areWindowStatesEqual(prev, next) ? prev : next
+    })
+  }, [])
+
+  const getTaskViewStateForTask = useCallback((task: Task): TaskViewState => {
+    return reconcileTaskViewState(task, windowViewStateRef.current.taskStates[task.id])
+  }, [])
+
   useEffect(() => {
     let cancelled = false
 
     Promise.all([
       window.api.loadProjects(),
-      window.api.loadConfig()
-    ]).then(([loadedProjectsData, loadedConfig]) => {
+      window.api.loadConfig(),
+      window.api.loadWindowState()
+    ]).then(([loadedProjectsData, loadedConfig, loadedWindowViewState]) => {
       if (cancelled) return
 
       const hydratedProjectsData = applyQueuedStateUpdates(loadedProjectsData, pendingProjectUpdatersRef.current)
-      const hydratedProjects = hydratedProjectsData.projects
       const hydratedConfig = applyQueuedStateUpdates(loadedConfig, pendingConfigUpdatersRef.current)
-      const restoredSelection = resolveInitialSelection(
-        hydratedProjects,
+      const hydratedWindowViewState = buildWindowViewState(
+        hydratedProjectsData.projects,
         hydratedConfig,
-        selectedProjectIdRef.current,
-        selectedTaskIdRef.current
+        loadedWindowViewState
       )
 
       pendingProjectUpdatersRef.current = []
@@ -65,19 +106,28 @@ export function useAppState() {
 
       setProjectsData(hydratedProjectsData)
       setConfig(hydratedConfig)
-
-      if (restoredSelection.projectId !== selectedProjectIdRef.current) {
-        setSelectedProjectId(restoredSelection.projectId)
-      }
-      if (restoredSelection.taskId !== selectedTaskIdRef.current) {
-        setSelectedTaskId(restoredSelection.taskId)
-      }
+      setWindowViewState(hydratedWindowViewState)
     })
-    window.api.getNativeTheme().then(setTheme)
+
+    void window.api.getNativeTheme().then(setTheme)
     window.api.onThemeChanged(setTheme)
+
+    const cleanupProjects = window.api.onProjectsUpdated((updatedProjectsData) => {
+      if (cancelled) return
+      lastSavedProjectsJsonRef.current = JSON.stringify(updatedProjectsData)
+      setProjectsData(updatedProjectsData)
+    })
+
+    const cleanupConfig = window.api.onConfigUpdated((updatedConfig) => {
+      if (cancelled) return
+      lastSavedConfigJsonRef.current = JSON.stringify(updatedConfig)
+      setConfig(updatedConfig)
+    })
 
     return () => {
       cancelled = true
+      cleanupProjects()
+      cleanupConfig()
     }
   }, [])
 
@@ -101,8 +151,22 @@ export function useAppState() {
     void window.api.saveConfig(config)
   }, [config])
 
-  // Auto-connect SSH for the restored remote project on startup.
   useEffect(() => {
+    const folderIds = new Set(folders.map(folder => folder.id))
+    updateWindowViewState((prev) => {
+      const next = reconcileWindowViewState(
+        {
+          ...prev,
+          collapsedFolderIds: prev.collapsedFolderIds.filter(folderId => folderIds.has(folderId))
+        },
+        projects
+      )
+      return next
+    })
+  }, [folders, projects, updateWindowViewState])
+
+  useEffect(() => {
+    const selectedProjectId = windowViewState.selectedProjectId
     if (!selectedProjectId || projects.length === 0) return
     const project = projects.find(p => p.id === selectedProjectId)
     if (project && isRemoteProject(project) && project.ssh) {
@@ -112,8 +176,7 @@ export function useAppState() {
         }
       })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects.length > 0 && selectedProjectId])
+  }, [projects, windowViewState.selectedProjectId])
 
   const persistProjects = useCallback((updater: (prev: ProjectsData) => ProjectsData) => {
     if (!projectsLoadedRef.current) {
@@ -121,19 +184,6 @@ export function useAppState() {
     }
     setProjectsData(prev => updater(prev))
   }, [])
-
-  const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
-    persistProjects(prev => ({
-      ...prev,
-      projects: prev.projects.map((p) => {
-        if (p.id !== projectId) return p
-        const tasks = [...p.tasks]
-        const [moved] = tasks.splice(fromIndex, 1)
-        tasks.splice(toIndex, 0, moved)
-        return { ...p, tasks }
-      })
-    }))
-  }, [persistProjects])
 
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
     const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, ...updates })
@@ -144,19 +194,24 @@ export function useAppState() {
   }, [])
 
   const selectProject = useCallback((id: string | null) => {
-    setSelectedProjectId(id)
-    // Restore per-project last task
-    const project = id ? projectsRef.current.find(p => p.id === id) : null
-    const restoredTaskId = project?.lastTaskId && project.tasks.some(t => t.id === project.lastTaskId)
-      ? project.lastTaskId!
-      : null
-    setSelectedTaskId(restoredTaskId)
-    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastProjectId: id, lastTaskId: restoredTaskId })
-    if (!configLoadedRef.current) {
-      pendingConfigUpdatersRef.current.push(updater)
-    }
-    setConfig(prev => (prev ? updater(prev) : prev))
-    // Auto-connect SSH for remote projects
+    updateWindowViewState(prev => {
+      if (!id) {
+        return { ...prev, selectedProjectId: null, selectedTaskId: null }
+      }
+
+      const project = projectsRef.current.find(candidate => candidate.id === id) ?? null
+      const restoredTaskId = project?.lastTaskId && project.tasks.some(task => task.id === project.lastTaskId)
+        ? project.lastTaskId
+        : null
+
+      return {
+        ...prev,
+        selectedProjectId: id,
+        selectedTaskId: restoredTaskId
+      }
+    })
+
+    const project = id ? projectsRef.current.find(candidate => candidate.id === id) ?? null : null
     if (id && project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(id).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
@@ -164,39 +219,20 @@ export function useAppState() {
         }
       })
     }
-  }, [])
+  }, [updateWindowViewState])
 
   const selectTask = useCallback((id: string | null) => {
-    setSelectedTaskId(id)
-    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastTaskId: id })
-    if (!configLoadedRef.current) {
-      pendingConfigUpdatersRef.current.push(updater)
-    }
-    setConfig(prev => (prev ? updater(prev) : prev))
-    // Persist last task per project
-    const projectId = selectedProjectIdRef.current
-    if (projectId && id) {
-      persistProjects(prev => ({
-        ...prev,
-        projects: prev.projects.map(p =>
-          p.id === projectId ? { ...p, lastTaskId: id } : p
-        )
-      }))
-    }
-  }, [persistProjects])
+    updateWindowViewState(prev => ({ ...prev, selectedTaskId: id }))
+  }, [updateWindowViewState])
 
   const switchToTask = useCallback((projectId: string, taskId: string) => {
-    // Sync the ref before state updates so persistence logic uses the correct project
-    selectedProjectIdRef.current = projectId
-    setSelectedProjectId(projectId)
-    setSelectedTaskId(taskId)
-    const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, lastProjectId: projectId, lastTaskId: taskId })
-    if (!configLoadedRef.current) {
-      pendingConfigUpdatersRef.current.push(updater)
-    }
-    setConfig(prev => (prev ? updater(prev) : prev))
-    // Auto-connect SSH for remote projects
-    const project = projectsRef.current.find(p => p.id === projectId)
+    updateWindowViewState(prev => ({
+      ...prev,
+      selectedProjectId: projectId,
+      selectedTaskId: taskId
+    }))
+
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
     if (project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
@@ -204,9 +240,21 @@ export function useAppState() {
         }
       })
     }
-  }, [])
+  }, [updateWindowViewState])
 
-  // Project CRUD
+  const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map((project) => {
+        if (project.id !== projectId) return project
+        const tasks = [...project.tasks]
+        const [moved] = tasks.splice(fromIndex, 1)
+        tasks.splice(toIndex, 0, moved)
+        return { ...project, tasks }
+      })
+    }))
+  }, [persistProjects])
+
   const addProject = useCallback((name: string, directory: string) => {
     const project: Project = { id: uuid(), name, directory, tasks: [] }
     persistProjects(prev => ({
@@ -226,9 +274,7 @@ export function useAppState() {
       rootOrder: [...prev.rootOrder, project.id]
     }))
     selectProject(project.id)
-    window.api.sshConnect(project.id, sshConfig).catch(() => {
-      // Connection failed — status change event will update UI
-    })
+    window.api.sshConnect(project.id, sshConfig).catch(() => {})
     return project
   }, [persistProjects, selectProject])
 
@@ -253,40 +299,51 @@ export function useAppState() {
       for (const task of project.tasks) {
         for (const tab of [...task.tabs.left, ...task.tabs.right]) {
           window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
-          window.api.scrollbackDelete(tab.id)
+          void window.api.scrollbackDelete(tab.id)
         }
         if (task.workspace) {
-          window.api.workspaceDelete(
-            project.directory, task.workspace.worktreePath,
-            task.workspace.branchName, task.workspace.baseBranch, true
-          ).catch(() => { /* Best effort cleanup */ })
+          void window.api.workspaceDelete(
+            project.directory,
+            task.workspace.worktreePath,
+            task.workspace.branchName,
+            task.workspace.baseBranch,
+            true
+          ).catch(() => {})
         }
       }
     }
+
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.filter((p) => p.id !== id),
-      rootOrder: prev.rootOrder.filter(rid => rid !== id),
-      folders: prev.folders.map(f => ({
-        ...f,
-        projectIds: f.projectIds.filter(pid => pid !== id)
+      projects: prev.projects.filter(project => project.id !== id),
+      rootOrder: prev.rootOrder.filter(rootId => rootId !== id),
+      folders: prev.folders.map(folder => ({
+        ...folder,
+        projectIds: folder.projectIds.filter(projectId => projectId !== id)
       }))
     }))
-    if (selectedProjectIdRef.current === id) {
-      selectProject(null)
-      selectTask(null)
-    }
-  }, [persistProjects, selectProject, selectTask])
+
+    updateWindowViewState(prev => ({
+      ...prev,
+      selectedProjectId: prev.selectedProjectId === id ? null : prev.selectedProjectId,
+      selectedTaskId: prev.selectedProjectId === id ? null : prev.selectedTaskId
+    }))
+  }, [persistProjects, updateWindowViewState])
 
   const renameProject = useCallback((id: string, name: string) => {
-    persistProjects(prev => ({ ...prev, projects: prev.projects.map((p) => (p.id === id ? { ...p, name } : p)) }))
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project => (project.id === id ? { ...project, name } : project))
+    }))
   }, [persistProjects])
 
   const updateProject = useCallback((id: string, updates: ProjectUpdate) => {
-    persistProjects(prev => ({ ...prev, projects: prev.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)) }))
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project => (project.id === id ? { ...project, ...updates } : project))
+    }))
   }, [persistProjects])
 
-  // Folder CRUD
   const addFolder = useCallback((): string => {
     const id = uuid()
     persistProjects(prev => ({
@@ -299,33 +356,38 @@ export function useAppState() {
 
   const removeFolder = useCallback((folderId: string) => {
     persistProjects(prev => {
-      const folder = prev.folders.find(f => f.id === folderId)
+      const folder = prev.folders.find(candidate => candidate.id === folderId)
       if (!folder) return prev
       const folderIndex = prev.rootOrder.indexOf(folderId)
       const newRootOrder = [...prev.rootOrder]
       newRootOrder.splice(folderIndex, 1, ...folder.projectIds)
       return {
         ...prev,
-        folders: prev.folders.filter(f => f.id !== folderId),
+        folders: prev.folders.filter(candidate => candidate.id !== folderId),
         rootOrder: newRootOrder
       }
     })
-  }, [persistProjects])
+    updateWindowViewState(prev => ({
+      ...prev,
+      collapsedFolderIds: prev.collapsedFolderIds.filter(id => id !== folderId)
+    }))
+  }, [persistProjects, updateWindowViewState])
 
   const renameFolder = useCallback((folderId: string, name: string) => {
     persistProjects(prev => ({
       ...prev,
-      folders: prev.folders.map(f => f.id === folderId ? { ...f, name } : f)
+      folders: prev.folders.map(folder => (folder.id === folderId ? { ...folder, name } : folder))
     }))
   }, [persistProjects])
 
   const moveProjectToFolder = useCallback((projectId: string, folderId: string) => {
     persistProjects(prev => ({
       ...prev,
-      folders: prev.folders.map(f => f.id === folderId
-        ? { ...f, projectIds: [...f.projectIds.filter(pid => pid !== projectId), projectId] }
-        : { ...f, projectIds: f.projectIds.filter(pid => pid !== projectId) }
-      ),
+      folders: prev.folders.map(folder => (
+        folder.id === folderId
+          ? { ...folder, projectIds: [...folder.projectIds.filter(id => id !== projectId), projectId] }
+          : { ...folder, projectIds: folder.projectIds.filter(id => id !== projectId) }
+      )),
       rootOrder: prev.rootOrder.filter(id => id !== projectId)
     }))
   }, [persistProjects])
@@ -336,9 +398,9 @@ export function useAppState() {
       newRootOrder.splice(index, 0, projectId)
       return {
         ...prev,
-        folders: prev.folders.map(f => ({
-          ...f,
-          projectIds: f.projectIds.filter(pid => pid !== projectId)
+        folders: prev.folders.map(folder => ({
+          ...folder,
+          projectIds: folder.projectIds.filter(id => id !== projectId)
         })),
         rootOrder: newRootOrder
       }
@@ -357,17 +419,16 @@ export function useAppState() {
   const reorderProjectsInFolder = useCallback((folderId: string, fromIndex: number, toIndex: number) => {
     persistProjects(prev => ({
       ...prev,
-      folders: prev.folders.map(f => {
-        if (f.id !== folderId) return f
-        const newIds = [...f.projectIds]
-        const [moved] = newIds.splice(fromIndex, 1)
-        newIds.splice(toIndex, 0, moved)
-        return { ...f, projectIds: newIds }
+      folders: prev.folders.map(folder => {
+        if (folder.id !== folderId) return folder
+        const projectIds = [...folder.projectIds]
+        const [moved] = projectIds.splice(fromIndex, 1)
+        projectIds.splice(toIndex, 0, moved)
+        return { ...folder, projectIds }
       })
     }))
   }, [persistProjects])
 
-  // Task CRUD
   const addTask = useCallback((projectId: string, name: string) => {
     const task: Task = {
       id: uuid(),
@@ -379,13 +440,21 @@ export function useAppState() {
     }
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId ? { ...p, tasks: [...p.tasks, task] } : p
+      projects: prev.projects.map(project =>
+        project.id === projectId ? { ...project, tasks: [...project.tasks, task] } : project
       )
     }))
-    selectTask(task.id)
+    updateWindowViewState(prev => ({
+      ...prev,
+      selectedProjectId: projectId,
+      selectedTaskId: task.id,
+      taskStates: {
+        ...prev.taskStates,
+        [task.id]: createTaskViewState(task)
+      }
+    }))
     return task
-  }, [persistProjects, selectTask])
+  }, [persistProjects, updateWindowViewState])
 
   const addWorkspaceTask = useCallback((projectId: string, name: string, workspace: WorkspaceConfig) => {
     const task: Task = {
@@ -399,128 +468,203 @@ export function useAppState() {
     }
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId ? { ...p, tasks: [...p.tasks, task] } : p
+      projects: prev.projects.map(project =>
+        project.id === projectId ? { ...project, tasks: [...project.tasks, task] } : project
       )
     }))
-    selectTask(task.id)
+    updateWindowViewState(prev => ({
+      ...prev,
+      selectedProjectId: projectId,
+      selectedTaskId: task.id,
+      taskStates: {
+        ...prev.taskStates,
+        [task.id]: createTaskViewState(task)
+      }
+    }))
     return task
-  }, [persistProjects, selectTask])
+  }, [persistProjects, updateWindowViewState])
 
   const removeTask = useCallback((projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => {
-    const project = projectsRef.current.find(p => p.id === projectId)
-    const task = project?.tasks.find(t => t.id === taskId)
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const task = project?.tasks.find(candidate => candidate.id === taskId)
     if (task) {
       for (const tab of [...task.tabs.left, ...task.tabs.right]) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
-        window.api.scrollbackDelete(tab.id)
+        void window.api.scrollbackDelete(tab.id)
       }
       if (task.workspace && project && !skipWorkspaceCleanup) {
-        window.api.workspaceDelete(
-          project.directory, task.workspace.worktreePath,
-          task.workspace.branchName, task.workspace.baseBranch, true
-        ).catch(() => { /* Workspace may already be cleaned up */ })
+        void window.api.workspaceDelete(
+          project.directory,
+          task.workspace.worktreePath,
+          task.workspace.branchName,
+          task.workspace.baseBranch,
+          true
+        ).catch(() => {})
       }
     }
+
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
-          ? { ...p, tasks: p.tasks.filter((t) => t.id !== taskId) }
-          : p
+      projects: prev.projects.map(project =>
+        project.id === projectId
+          ? { ...project, tasks: project.tasks.filter(task => task.id !== taskId) }
+          : project
       )
     }))
-    if (selectedTaskIdRef.current === taskId) selectTask(null)
-  }, [persistProjects, selectTask])
+
+    updateWindowViewState(prev => {
+      const taskStates = { ...prev.taskStates }
+      delete taskStates[taskId]
+      return {
+        ...prev,
+        selectedTaskId: prev.selectedTaskId === taskId ? null : prev.selectedTaskId,
+        taskStates
+      }
+    })
+  }, [persistProjects, updateWindowViewState])
 
   const renameTask = useCallback((projectId: string, taskId: string, name: string) => {
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
-          ? { ...p, tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, name } : t)) }
-          : p
+      projects: prev.projects.map(project =>
+        project.id === projectId
+          ? { ...project, tasks: project.tasks.map(task => (task.id === taskId ? { ...task, name } : task)) }
+          : project
       )
     }))
   }, [persistProjects])
 
-  // Tab management
   const addTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', type: TabType) => {
     const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
     const title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
     const tab: Tab = { id: uuid(), type, title }
+
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
+      projects: prev.projects.map(project =>
+        project.id === projectId
           ? {
-              ...p,
-              tasks: p.tasks.map((t) =>
-                t.id === taskId
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId
                   ? {
-                      ...t,
-                      tabs: { ...t.tabs, [pane]: [...t.tabs[pane], tab] },
-                      activeTab: { ...t.activeTab, [pane]: tab.id }
+                      ...task,
+                      tabs: { ...task.tabs, [pane]: [...task.tabs[pane], tab] }
+                      ,
+                      activeTab: { ...task.activeTab, [pane]: tab.id }
                     }
-                  : t
+                  : task
               )
             }
-          : p
+          : project
       )
     }))
+
+    updateWindowViewState(prev => {
+      const project = projectsRef.current.find(candidate => candidate.id === projectId)
+      const task = project?.tasks.find(candidate => candidate.id === taskId)
+      const currentState = task ? getTaskViewStateForTask(task) : createTaskViewState({
+        id: taskId,
+        name: '',
+        tabs: { left: [], right: [] },
+        activeTab: { left: null, right: null },
+        splitOpen: false,
+        splitRatio: 0.5
+      })
+      return {
+        ...prev,
+        taskStates: {
+          ...prev.taskStates,
+          [taskId]: {
+            ...cloneTaskState(currentState),
+            activeTab: {
+              ...currentState.activeTab,
+              [pane]: tab.id
+            }
+          }
+        }
+      }
+    })
+
     return tab
-  }, [persistProjects])
+  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const removeTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
+    updateWindowViewState(prev => {
+      const project = projectsRef.current.find(candidate => candidate.id === projectId)
+      const task = project?.tasks.find(candidate => candidate.id === taskId)
+      if (!task) return prev
+
+      const currentState = getTaskViewStateForTask(task)
+      const nextTabs = task.tabs[pane].filter(tab => tab.id !== tabId)
+      const wasActive = currentState.activeTab[pane] === tabId
+
+      return {
+        ...prev,
+        taskStates: {
+          ...prev.taskStates,
+          [taskId]: {
+            ...cloneTaskState(currentState),
+            activeTab: {
+              ...currentState.activeTab,
+              [pane]: wasActive ? (nextTabs[nextTabs.length - 1]?.id ?? null) : currentState.activeTab[pane]
+            }
+          }
+        }
+      }
+    })
+
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
+      projects: prev.projects.map(project =>
+        project.id === projectId
           ? {
-              ...p,
-              tasks: p.tasks.map((t) => {
-                if (t.id !== taskId) return t
-                const newTabs = t.tabs[pane].filter((tab) => tab.id !== tabId)
-                const wasActive = t.activeTab[pane] === tabId
+              ...project,
+              tasks: project.tasks.map(task => {
+                if (task.id !== taskId) return task
+                const nextTabs = task.tabs[pane].filter(tab => tab.id !== tabId)
+                const wasActive = task.activeTab[pane] === tabId
                 return {
-                  ...t,
-                  tabs: { ...t.tabs, [pane]: newTabs },
+                  ...task,
+                  tabs: {
+                    ...task.tabs,
+                    [pane]: nextTabs
+                  },
                   activeTab: {
-                    ...t.activeTab,
-                    [pane]: wasActive ? (newTabs[newTabs.length - 1]?.id ?? null) : t.activeTab[pane]
+                    ...task.activeTab,
+                    [pane]: wasActive ? (nextTabs[nextTabs.length - 1]?.id ?? null) : task.activeTab[pane]
                   }
                 }
               })
             }
-          : p
+          : project
       )
     }))
+
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-    window.api.scrollbackDelete(tabId)
-  }, [persistProjects])
+    void window.api.scrollbackDelete(tabId)
+  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const updateTabUrl = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, url: string) => {
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
+      projects: prev.projects.map(project =>
+        project.id === projectId
           ? {
-              ...p,
-              tasks: p.tasks.map((t) =>
-                t.id === taskId
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId
                   ? {
-                      ...t,
+                      ...task,
                       tabs: {
-                        ...t.tabs,
-                        [pane]: t.tabs[pane].map((tab) =>
-                          tab.id === tabId ? { ...tab, url } : tab
-                        )
+                        ...task.tabs,
+                        [pane]: task.tabs[pane].map(tab => (tab.id === tabId ? { ...tab, url } : tab))
                       }
                     }
-                  : t
+                  : task
               )
             }
-          : p
+          : project
       )
     }))
   }, [persistProjects])
@@ -528,78 +672,157 @@ export function useAppState() {
   const updateTabSessionId = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, sessionId: string) => {
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
+      projects: prev.projects.map(project =>
+        project.id === projectId
           ? {
-              ...p,
-              tasks: p.tasks.map((t) =>
-                t.id === taskId
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId
                   ? {
-                      ...t,
+                      ...task,
                       tabs: {
-                        ...t.tabs,
-                        [pane]: t.tabs[pane].map((tab) =>
-                          tab.id === tabId ? { ...tab, sessionId } : tab
-                        )
+                        ...task.tabs,
+                        [pane]: task.tabs[pane].map(tab => (tab.id === tabId ? { ...tab, sessionId } : tab))
                       }
                     }
-                  : t
+                  : task
               )
             }
-          : p
+          : project
       )
     }))
   }, [persistProjects])
 
   const setActiveTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    if (!task) return
+
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
+      projects: prev.projects.map(project =>
+        project.id === projectId
           ? {
-              ...p,
-              tasks: p.tasks.map((t) =>
-                t.id === taskId
-                  ? { ...t, activeTab: { ...t.activeTab, [pane]: tabId } }
-                  : t
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId
+                  ? { ...task, activeTab: { ...task.activeTab, [pane]: tabId } }
+                  : task
               )
             }
-          : p
+          : project
       )
     }))
-  }, [persistProjects])
+
+    updateWindowViewState(prev => {
+      const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
+      return {
+        ...prev,
+        taskStates: {
+          ...prev.taskStates,
+          [taskId]: {
+            ...cloneTaskState(currentState),
+            activeTab: {
+              ...currentState.activeTab,
+              [pane]: tabId
+            }
+          }
+        }
+      }
+    })
+  }, [persistProjects, updateWindowViewState])
 
   const toggleSplit = useCallback((projectId: string, taskId: string) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    if (!task) return
+
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
+      projects: prev.projects.map(project =>
+        project.id === projectId
           ? {
-              ...p,
-              tasks: p.tasks.map((t) =>
-                t.id === taskId ? { ...t, splitOpen: !t.splitOpen } : t
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId ? { ...task, splitOpen: !task.splitOpen } : task
               )
             }
-          : p
+          : project
       )
     }))
-  }, [persistProjects])
+
+    updateWindowViewState(prev => {
+      const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
+      return {
+        ...prev,
+        taskStates: {
+          ...prev.taskStates,
+          [taskId]: {
+            ...cloneTaskState(currentState),
+            splitOpen: !currentState.splitOpen
+          }
+        }
+      }
+    })
+  }, [persistProjects, updateWindowViewState])
 
   const setSplitRatio = useCallback((projectId: string, taskId: string, ratio: number) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    if (!task) return
+
     persistProjects(prev => ({
       ...prev,
-      projects: prev.projects.map((p) =>
-        p.id === projectId
+      projects: prev.projects.map(project =>
+        project.id === projectId
           ? {
-              ...p,
-              tasks: p.tasks.map((t) =>
-                t.id === taskId ? { ...t, splitRatio: ratio } : t
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId ? { ...task, splitRatio: ratio } : task
               )
             }
-          : p
+          : project
       )
     }))
-  }, [persistProjects])
+
+    updateWindowViewState(prev => {
+      const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
+      return {
+        ...prev,
+        taskStates: {
+          ...prev.taskStates,
+          [taskId]: {
+            ...cloneTaskState(currentState),
+            splitRatio: ratio
+          }
+        }
+      }
+    })
+  }, [persistProjects, updateWindowViewState])
+
+  const toggleFolderCollapse = useCallback((folderId: string) => {
+    updateWindowViewState(prev => ({
+      ...prev,
+      collapsedFolderIds: prev.collapsedFolderIds.includes(folderId)
+        ? prev.collapsedFolderIds.filter(id => id !== folderId)
+        : [...prev.collapsedFolderIds, folderId]
+    }))
+  }, [updateWindowViewState])
+
+  const setFolderCollapsed = useCallback((folderId: string, collapsed: boolean) => {
+    updateWindowViewState(prev => {
+      const isCollapsed = prev.collapsedFolderIds.includes(folderId)
+      if (isCollapsed === collapsed) return prev
+      return {
+        ...prev,
+        collapsedFolderIds: collapsed
+          ? [...prev.collapsedFolderIds, folderId]
+          : prev.collapsedFolderIds.filter(id => id !== folderId)
+      }
+    })
+  }, [updateWindowViewState])
+
+  const exportWindowViewState = useCallback(() => cloneWindowViewState(windowViewStateRef.current), [])
 
   const zoomTerminal = useCallback((direction: 'in' | 'out' | 'reset') => {
     setTerminalZoomDelta(prev => {
@@ -622,9 +845,10 @@ export function useAppState() {
     })
   }, [])
 
-  // Derived state
-  const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null
-  const selectedTask = selectedProject?.tasks.find((t) => t.id === selectedTaskId) ?? null
+  const selectedProjectId = windowViewState.selectedProjectId
+  const selectedTaskId = windowViewState.selectedTaskId
+  const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null
+  const selectedTask = selectedProject?.tasks.find(task => task.id === selectedTaskId) ?? null
 
   const effectiveTheme = config?.theme === 'system' || !config ? theme : config.theme
   const effectiveTerminalTheme = config?.terminalTheme === 'system' || !config ? theme : config.terminalTheme
@@ -638,6 +862,7 @@ export function useAppState() {
     selectedTask,
     selectedProjectId,
     selectedTaskId,
+    collapsedFolderIds: windowViewState.collapsedFolderIds,
     effectiveTheme,
     effectiveTerminalTheme,
     setSelectedProjectId: selectProject,
@@ -667,8 +892,12 @@ export function useAppState() {
     updateTabUrl,
     updateTabSessionId,
     setActiveTab,
+    getTaskViewState: getTaskViewStateForTask,
     toggleSplit,
     setSplitRatio,
+    toggleFolderCollapse,
+    setFolderCollapsed,
+    exportWindowViewState,
     updateConfig,
     terminalZoomDelta,
     browserZoomFactor,

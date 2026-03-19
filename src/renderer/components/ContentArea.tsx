@@ -11,7 +11,7 @@ function joinPath(...parts: string[]): string {
 }
 
 export default function ContentArea(): React.ReactElement {
-  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab, zoomTerminal, zoomBrowser } = useApp()
+  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab, zoomTerminal, zoomBrowser, getTaskViewState } = useApp()
   useMetaHeld()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const focusedPaneRef = useRef<{ projectId: string | null; taskId: string | null; pane: PaneSide }>({
@@ -57,6 +57,7 @@ export default function ContentArea(): React.ReactElement {
       const project = projects.find(p => p.id === selectedProjectId)
       const task = project?.tasks.find(t => t.id === selectedTaskId)
       if (!task) return
+      const taskView = getTaskViewState(task)
 
       const index = parseInt(digit, 10) - 1
       const pane: 'left' | 'right' = e.shiftKey ? 'right' : 'left'
@@ -72,7 +73,7 @@ export default function ContentArea(): React.ReactElement {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [projects, selectedProjectId, selectedTaskId, setActiveTab, rememberFocusedPane])
+  }, [projects, selectedProjectId, selectedTaskId, setActiveTab, rememberFocusedPane, getTaskViewState])
 
   // Menu shortcut handlers (Cmd+W, Cmd+R, Cmd+T)
   useEffect(() => {
@@ -98,8 +99,9 @@ export default function ContentArea(): React.ReactElement {
       const project = projects.find(p => p.id === selectedProjectId)
       const task = project?.tasks.find(t => t.id === selectedTaskId)
       if (!task) return null
-      const pane = resolvePaneForMenuAction(task.splitOpen, getActivePaneFromDom(), getRememberedPane())
-      const activeTabId = task.activeTab[pane]
+      const taskView = getTaskViewState(task)
+      const pane = resolvePaneForMenuAction(taskView.splitOpen, getActivePaneFromDom(), getRememberedPane())
+      const activeTabId = taskView.activeTab[pane]
       const activeTab = activeTabId ? task.tabs[pane].find(t => t.id === activeTabId) : null
       return { project, task, pane, activeTabId, activeTab }
     }
@@ -146,7 +148,7 @@ export default function ContentArea(): React.ReactElement {
       cleanupZoomOut()
       cleanupZoomReset()
     }
-  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, zoomTerminal, zoomBrowser, rememberFocusedPane])
+  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, zoomTerminal, zoomBrowser, rememberFocusedPane, getTaskViewState])
 
   const handleDividerMouseDown = useCallback(
     (projectId: string, taskId: string) => (e: React.MouseEvent) => {
@@ -187,7 +189,8 @@ export default function ContentArea(): React.ReactElement {
       {projects.flatMap((project) =>
         project.tasks.map((task) => {
           const isVisible = project.id === selectedProjectId && task.id === selectedTaskId
-          const ratio = dragRatio ?? task.splitRatio ?? 0.5
+          const taskView = getTaskViewState(task)
+          const ratio = dragRatio ?? taskView.splitRatio ?? 0.5
           const effectiveDir = task.workspace
             ? joinPath(task.workspace.worktreePath, task.workspace.relativeProjectPath)
             : getProjectDir(project)
@@ -228,7 +231,7 @@ export default function ContentArea(): React.ReactElement {
                 )}
                 <Pane
                   tabs={task.tabs.left}
-                  activeTabId={task.activeTab.left}
+                  activeTabId={taskView.activeTab.left}
                   pane="left"
                   projectId={project.id}
                   taskId={task.id}
@@ -239,7 +242,7 @@ export default function ContentArea(): React.ReactElement {
                   style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                   onPaneFocus={rememberFocusedPane}
                 />
-                {task.splitOpen && (
+                {taskView.splitOpen && (
                   <>
                     <div
                       className="pane-divider"
@@ -247,7 +250,7 @@ export default function ContentArea(): React.ReactElement {
                     />
                     <Pane
                       tabs={task.tabs.right}
-                      activeTabId={task.activeTab.right}
+                      activeTabId={taskView.activeTab.right}
                       pane="right"
                       projectId={project.id}
                       taskId={task.id}

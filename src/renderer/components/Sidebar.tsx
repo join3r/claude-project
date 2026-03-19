@@ -59,7 +59,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     moveProjectToFolder, moveProjectToRoot,
     reorderRootItems, reorderProjectsInFolder,
     reorderTasks, getProjectDir,
-    config, updateConfig
+    config, updateConfig,
+    collapsedFolderIds, toggleFolderCollapse, setFolderCollapsed
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
@@ -103,28 +104,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   >(null)
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
-
-  // Initialize collapsed state from config once loaded
-  const collapsedInitializedRef = useRef(false)
-  useEffect(() => {
-    if (config && !collapsedInitializedRef.current) {
-      collapsedInitializedRef.current = true
-      if (config.collapsedFolderIds.length > 0) {
-        setCollapsedFolders(new Set(config.collapsedFolderIds))
-      }
-    }
-  }, [config])
-
-  const toggleFolderCollapse = useCallback((folderId: string) => {
-    setCollapsedFolders(prev => {
-      const next = new Set(prev)
-      if (next.has(folderId)) next.delete(folderId)
-      else next.add(folderId)
-      updateConfig({ collapsedFolderIds: [...next] })
-      return next
-    })
-  }, [updateConfig])
+  const collapsedFolders = new Set(collapsedFolderIds)
 
   useEffect(() => {
     if (switcherRequested) {
@@ -167,15 +147,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     if (!selectedProjectId) return
     const folder = folders.find(f => f.projectIds.includes(selectedProjectId))
     if (folder) {
-      setCollapsedFolders(prev => {
-        if (!prev.has(folder.id)) return prev
-        const next = new Set(prev)
-        next.delete(folder.id)
-        updateConfig({ collapsedFolderIds: [...next] })
-        return next
-      })
+      setFolderCollapsed(folder.id, false)
     }
-  }, [selectedProjectId, folders, updateConfig])
+  }, [selectedProjectId, folders, setFolderCollapsed])
 
   const handleAddProject = async () => {
     const dir = await window.api.pickDirectory()

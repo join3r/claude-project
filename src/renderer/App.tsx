@@ -5,7 +5,7 @@ import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
 
 function AppInner(): React.ReactElement {
-  const { effectiveTheme } = useApp()
+  const { effectiveTheme, exportWindowViewState } = useApp()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [switcherRequested, setSwitcherRequested] = useState(false)
 
@@ -24,6 +24,12 @@ function AppInner(): React.ReactElement {
       // When sidebar is visible, the Sidebar's own listener handles it
     })
   }, [sidebarHidden])
+
+  useEffect(() => {
+    return window.api.onMenuNewWindow(() => {
+      void window.api.openWindow(exportWindowViewState())
+    })
+  }, [exportWindowViewState])
 
   return (
     <div className={`app ${effectiveTheme === 'light' ? 'theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}`}>

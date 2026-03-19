@@ -30,7 +30,17 @@ interface Props {
   extraArgs?: string
 }
 
-const terminals = new Map<string, { term: Terminal; fitAddon: FitAddon; serializeAddon: SerializeAddon; searchAddon: SearchAddon; webglAddon: WebglAddon | null }>()
+interface TerminalEntry {
+  term: Terminal
+  fitAddon: FitAddon
+  serializeAddon: SerializeAddon
+  searchAddon: SearchAddon
+  webglAddon: WebglAddon | null
+  restoring: boolean
+  pendingData: string[]
+}
+
+const terminals = new Map<string, TerminalEntry>()
 
 let ptyListenerRegistered = false
 let exitListenerRegistered = false
@@ -41,7 +51,13 @@ function ensurePtyListener(): void {
   if (ptyListenerRegistered) return
   ptyListenerRegistered = true
   window.api.onPtyData((id: string, data: string) => {
-    terminals.get(id)?.term.write(data)
+    const entry = terminals.get(id)
+    if (!entry) return
+    if (entry.restoring) {
+      entry.pendingData.push(data)
+      return
+    }
+    entry.term.write(data)
     activityCallbacks.get(id)?.()
   })
 }
@@ -235,7 +251,15 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     term.open(containerRef.current)
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
-    terminals.set(tabId, { term, fitAddon, serializeAddon, searchAddon, webglAddon: null })
+    terminals.set(tabId, {
+      term,
+      fitAddon,
+      serializeAddon,
+      searchAddon,
+      webglAddon: null,
+      restoring: false,
+      pendingData: []
+    })
 
     term.onData((data) => {
       window.api.ptyWrite(tabId, data)
@@ -374,29 +398,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           const startSession = async (): Promise<void> => {
             let resumeSessionId = sessionId
 
-            // Restore scrollback only for non-resume tabs (resume re-outputs content)
-            if (!resumeSessionId) {
-              const data = await window.api.scrollbackLoad(tabId)
-              if (data) {
-                await new Promise<void>(resolve => {
-                  entry.term.write(data, () => {
-                    entry.fitAddon.fit()
-                    entry.term.scrollToBottom()
-                    resolve()
-                  })
-                })
-              }
-            }
-
-            // Ensure hooks are injected before spawning Claude
-            if (isClaudeTab) {
-              if (sshConfig) {
-                // Remote hooks injected inline via SSH spawn args — skip local injection
-              } else {
-                await window.api.hooksInject(projectDir)
-              }
-            }
-
             const command = AI_TAB_META[toolType].command
             const parsedExtra = parseExtraArgs(extraArgs)
             const args = buildAiToolArgs(toolType, parsedExtra, resumeSessionId)
@@ -411,17 +412,47 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
               codexSpawnTsRef.current = Math.floor(Date.now() / 1000)
             }
 
-            if (sshConfig) {
-              await window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
+            entry.restoring = true
+            entry.pendingData = []
+
+            const attachResult = sshConfig
+              ? await window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
+              : await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+
+            const flushPending = () => {
+              entry.restoring = false
+              if (entry.pendingData.length > 0) {
+                entry.term.write(entry.pendingData.join(''))
+                entry.pendingData = []
+              }
+              entry.fitAddon.fit()
+              entry.term.scrollToBottom()
+            }
+
+            if (attachResult.scrollback) {
+              await new Promise<void>(resolve => {
+                entry.term.write(attachResult.scrollback, () => {
+                  flushPending()
+                  resolve()
+                })
+              })
             } else {
-              await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
+              flushPending()
+            }
+
+            if (attachResult.exitCode !== null) {
+              exitCallbacks.get(tabId)?.(attachResult.exitCode)
             }
 
             if (isCodexTab) {
               startCodexSessionPolling()
             }
           }
-          startSession()
+          void startSession().catch(() => {
+            entry.restoring = false
+            entry.pendingData = []
+            spawnedRef.current = false
+          })
         }
       }
     })
@@ -504,6 +535,28 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     window.addEventListener('tab-removed', handler)
     return () => window.removeEventListener('tab-removed', handler)
   }, [tabId, isClaudeTab, projectDir])
+
+  useEffect(() => {
+    return () => {
+      initializedRef.current = false
+      spawnedRef.current = false
+      const entry = terminals.get(tabId)
+      if (entry) {
+        try {
+          const data = entry.serializeAddon.serialize()
+          window.api.scrollbackSaveSync(tabId, data)
+        } catch {
+          // Terminal may already be in bad state
+        }
+        entry.term.dispose()
+        terminals.delete(tabId)
+      }
+      exitCallbacks.delete(tabId)
+      activityCallbacks.delete(tabId)
+      hookStatusCallbacks.delete(tabId)
+      stopCodexSessionPolling()
+    }
+  }, [tabId])
 
   // Cmd+F to open search
   useEffect(() => {
