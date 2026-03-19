@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 import { isRemoteProject } from '../../shared/types'
 import Pane from './Pane'
+import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import './ContentArea.css'
 
 function joinPath(...parts: string[]): string {
@@ -13,6 +14,11 @@ export default function ContentArea(): React.ReactElement {
   const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab, zoomTerminal, zoomBrowser } = useApp()
   useMetaHeld()
   const panesRef = useRef<HTMLDivElement | null>(null)
+  const focusedPaneRef = useRef<{ projectId: string | null; taskId: string | null; pane: PaneSide }>({
+    projectId: null,
+    taskId: null,
+    pane: 'left'
+  })
   const [dragRatio, setDragRatio] = useState<number | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
 
@@ -33,6 +39,14 @@ export default function ContentArea(): React.ReactElement {
 
   const hasSelection = selectedProjectId && selectedTaskId
 
+  const rememberFocusedPane = useCallback((pane: PaneSide) => {
+    focusedPaneRef.current = {
+      projectId: selectedProjectId,
+      taskId: selectedTaskId,
+      pane
+    }
+  }, [selectedProjectId, selectedTaskId])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!e.metaKey || !selectedProjectId || !selectedTaskId) return
@@ -52,23 +66,39 @@ export default function ContentArea(): React.ReactElement {
       if (tab) {
         e.preventDefault()
         setActiveTab(selectedProjectId, selectedTaskId, pane, tab.id)
+        rememberFocusedPane(pane)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [projects, selectedProjectId, selectedTaskId, setActiveTab])
+  }, [projects, selectedProjectId, selectedTaskId, setActiveTab, rememberFocusedPane])
 
   // Menu shortcut handlers (Cmd+W, Cmd+R, Cmd+T)
   useEffect(() => {
     if (!selectedProjectId || !selectedTaskId) return
 
+    const getActivePaneFromDom = (): PaneSide | null => {
+      const activeElement = typeof document !== 'undefined' ? document.activeElement : null
+      const paneElement = typeof Element !== 'undefined' && activeElement instanceof Element
+        ? activeElement.closest<HTMLElement>('[data-pane]')
+        : null
+      return getPaneFromValue(paneElement?.dataset.pane)
+    }
+
+    const getRememberedPane = (): PaneSide | null => {
+      const fallbackPane = focusedPaneRef.current
+      if (fallbackPane.projectId === selectedProjectId && fallbackPane.taskId === selectedTaskId) {
+        return fallbackPane.pane
+      }
+      return null
+    }
+
     const getActiveTabInfo = () => {
       const project = projects.find(p => p.id === selectedProjectId)
       const task = project?.tasks.find(t => t.id === selectedTaskId)
       if (!task) return null
-      // Use left pane's active tab by default
-      const pane: 'left' | 'right' = 'left'
+      const pane = resolvePaneForMenuAction(task.splitOpen, getActivePaneFromDom(), getRememberedPane())
       const activeTabId = task.activeTab[pane]
       const activeTab = activeTabId ? task.tabs[pane].find(t => t.id === activeTabId) : null
       return { project, task, pane, activeTabId, activeTab }
@@ -90,7 +120,9 @@ export default function ContentArea(): React.ReactElement {
     })
 
     const cleanupNewTerminal = window.api.onMenuNewTerminal(() => {
-      addTab(selectedProjectId!, selectedTaskId!, 'left', 'terminal')
+      const pane = getActiveTabInfo()?.pane ?? 'left'
+      addTab(selectedProjectId!, selectedTaskId!, pane, 'terminal')
+      rememberFocusedPane(pane)
     })
 
     const handleZoom = (direction: 'in' | 'out' | 'reset') => {
@@ -114,7 +146,7 @@ export default function ContentArea(): React.ReactElement {
       cleanupZoomOut()
       cleanupZoomReset()
     }
-  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, zoomTerminal, zoomBrowser])
+  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, zoomTerminal, zoomBrowser, rememberFocusedPane])
 
   const handleDividerMouseDown = useCallback(
     (projectId: string, taskId: string) => (e: React.MouseEvent) => {
@@ -205,6 +237,7 @@ export default function ContentArea(): React.ReactElement {
                   shellCommand={project.shellCommand}
                   aiToolArgs={project.aiToolArgs}
                   style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
+                  onPaneFocus={rememberFocusedPane}
                 />
                 {task.splitOpen && (
                   <>
@@ -223,6 +256,7 @@ export default function ContentArea(): React.ReactElement {
                       shellCommand={project.shellCommand}
                       aiToolArgs={project.aiToolArgs}
                       style={{ flex: 'none', width: `calc(${(1 - ratio) * 100}% - 1.5px)` }}
+                      onPaneFocus={rememberFocusedPane}
                     />
                   </>
                 )}

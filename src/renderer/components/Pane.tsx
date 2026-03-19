@@ -5,6 +5,7 @@ import BrowserTab from './BrowserTab'
 import AiToolTab from './AiToolTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import type { Tab, AiTabType, SshConfig, ShellCommandConfig } from '../../shared/types'
+import type { PaneSide } from './paneFocus'
 
 interface Props {
   tabs: Tab[]
@@ -17,11 +18,18 @@ interface Props {
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
   style?: React.CSSProperties
+  onPaneFocus?: (pane: PaneSide) => void
 }
 
-export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, sshConfig, shellCommand, aiToolArgs, style }: Props): React.ReactElement {
+export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, sshConfig, shellCommand, aiToolArgs, style, onPaneFocus }: Props): React.ReactElement {
   return (
-    <div className="pane" style={style}>
+    <div
+      className="pane"
+      style={style}
+      data-pane={pane}
+      onMouseDownCapture={() => onPaneFocus?.(pane)}
+      onFocusCapture={() => onPaneFocus?.(pane)}
+    >
       <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} />
       <div className="pane-content">
         {tabs.length === 0 && (
