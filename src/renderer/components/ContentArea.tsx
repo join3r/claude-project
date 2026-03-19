@@ -4,6 +4,7 @@ import { useMetaHeld } from '../hooks/useMetaHeld'
 import { isRemoteProject } from '../../shared/types'
 import Pane from './Pane'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
+import type { TabDragState, TabDropTarget } from './tabDrag'
 import './ContentArea.css'
 
 function joinPath(...parts: string[]): string {
@@ -20,6 +21,8 @@ export default function ContentArea(): React.ReactElement {
     pane: 'left'
   })
   const [dragRatio, setDragRatio] = useState<number | null>(null)
+  const [tabDragState, setTabDragState] = useState<TabDragState | null>(null)
+  const [tabDropTarget, setTabDropTarget] = useState<TabDropTarget | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -45,6 +48,11 @@ export default function ContentArea(): React.ReactElement {
       taskId: selectedTaskId,
       pane
     }
+  }, [selectedProjectId, selectedTaskId])
+
+  useEffect(() => {
+    setTabDragState(null)
+    setTabDropTarget(null)
   }, [selectedProjectId, selectedTaskId])
 
   useEffect(() => {
@@ -241,6 +249,11 @@ export default function ContentArea(): React.ReactElement {
                   aiToolArgs={project.aiToolArgs}
                   style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                   onPaneFocus={rememberFocusedPane}
+                  tabDragState={tabDragState}
+                  tabDropTarget={tabDropTarget}
+                  onTabDragStateChange={setTabDragState}
+                  onTabDropTargetChange={setTabDropTarget}
+                  onTabDragComplete={rememberFocusedPane}
                 />
                 {taskView.splitOpen && (
                   <>
@@ -260,6 +273,11 @@ export default function ContentArea(): React.ReactElement {
                       aiToolArgs={project.aiToolArgs}
                       style={{ flex: 'none', width: `calc(${(1 - ratio) * 100}% - 1.5px)` }}
                       onPaneFocus={rememberFocusedPane}
+                      tabDragState={tabDragState}
+                      tabDropTarget={tabDropTarget}
+                      onTabDragStateChange={setTabDragState}
+                      onTabDropTargetChange={setTabDropTarget}
+                      onTabDragComplete={rememberFocusedPane}
                     />
                   </>
                 )}

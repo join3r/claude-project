@@ -4,6 +4,11 @@
   padding: 4px;
 }
 
+.ai-tool-tab-host {
+  width: 100%;
+  height: 100%;
+}
+
 .ai-tool-tab .xterm {
   height: 100%;
 }

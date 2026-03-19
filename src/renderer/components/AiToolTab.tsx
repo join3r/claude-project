@@ -118,6 +118,7 @@ function ensureBeforeUnloadHandler(): void {
 
 export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
   const { config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta } = useApp()
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
@@ -217,7 +218,17 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   }, [sshReady, tabId, sshConfig])
 
   useEffect(() => {
-    if (!containerRef.current || !config) return
+    if (!hostRef.current || !config) return
+
+    const existingEntry = terminals.get(tabId)
+    if (existingEntry) {
+      const terminalElement = existingEntry.term.element
+      if (terminalElement && terminalElement.parentElement !== hostRef.current) {
+        hostRef.current.replaceChildren(terminalElement)
+        existingEntry.fitAddon.fit()
+      }
+      return
+    }
     if (initializedRef.current) return
     initializedRef.current = true
 
@@ -248,7 +259,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     term.loadAddon(unicode11Addon)
     term.unicode.activeVersion = '11'
     term.loadAddon(imageAddon)
-    term.open(containerRef.current)
+    term.open(hostRef.current)
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
     terminals.set(tabId, {
@@ -536,28 +547,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     return () => window.removeEventListener('tab-removed', handler)
   }, [tabId, isClaudeTab, projectDir])
 
-  useEffect(() => {
-    return () => {
-      initializedRef.current = false
-      spawnedRef.current = false
-      const entry = terminals.get(tabId)
-      if (entry) {
-        try {
-          const data = entry.serializeAddon.serialize()
-          window.api.scrollbackSaveSync(tabId, data)
-        } catch {
-          // Terminal may already be in bad state
-        }
-        entry.term.dispose()
-        terminals.delete(tabId)
-      }
-      exitCallbacks.delete(tabId)
-      activityCallbacks.delete(tabId)
-      hookStatusCallbacks.delete(tabId)
-      stopCodexSessionPolling()
-    }
-  }, [tabId])
-
   // Cmd+F to open search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -579,6 +568,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       className="ai-tool-tab"
       style={{ display: visible ? 'block' : 'none', position: 'relative' }}
     >
+      <div ref={hostRef} className="ai-tool-tab-host" />
       {entry && (
         <TerminalSearchBar
           searchAddon={entry.searchAddon}

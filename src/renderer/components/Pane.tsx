@@ -6,6 +6,7 @@ import AiToolTab from './AiToolTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import type { Tab, AiTabType, SshConfig, ShellCommandConfig } from '../../shared/types'
 import type { PaneSide } from './paneFocus'
+import type { TabDragState, TabDropTarget } from './tabDrag'
 
 interface Props {
   tabs: Tab[]
@@ -19,18 +20,55 @@ interface Props {
   aiToolArgs?: Partial<Record<AiTabType, string>>
   style?: React.CSSProperties
   onPaneFocus?: (pane: PaneSide) => void
+  tabDragState: TabDragState | null
+  tabDropTarget: TabDropTarget | null
+  onTabDragStateChange: (dragState: TabDragState | null) => void
+  onTabDropTargetChange: (dropTarget: TabDropTarget | null) => void
+  onTabDragComplete?: (pane: PaneSide) => void
 }
 
-export default function Pane({ tabs, activeTabId, pane, projectId, taskId, projectDir, sshConfig, shellCommand, aiToolArgs, style, onPaneFocus }: Props): React.ReactElement {
+export default function Pane({
+  tabs,
+  activeTabId,
+  pane,
+  projectId,
+  taskId,
+  projectDir,
+  sshConfig,
+  shellCommand,
+  aiToolArgs,
+  style,
+  onPaneFocus,
+  tabDragState,
+  tabDropTarget,
+  onTabDragStateChange,
+  onTabDropTargetChange,
+  onTabDragComplete
+}: Props): React.ReactElement {
+  const isEmptyDropTarget = tabs.length === 0 && tabDropTarget?.pane === pane
+
   return (
     <div
-      className="pane"
+      className={`pane ${isEmptyDropTarget ? 'pane-drop-active' : ''}`}
       style={style}
       data-pane={pane}
+      data-project-id={projectId}
+      data-task-id={taskId}
       onMouseDownCapture={() => onPaneFocus?.(pane)}
       onFocusCapture={() => onPaneFocus?.(pane)}
     >
-      <TabBar tabs={tabs} activeTabId={activeTabId} pane={pane} projectId={projectId} taskId={taskId} />
+      <TabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        pane={pane}
+        projectId={projectId}
+        taskId={taskId}
+        tabDragState={tabDragState}
+        tabDropTarget={tabDropTarget}
+        onTabDragStateChange={onTabDragStateChange}
+        onTabDropTargetChange={onTabDropTargetChange}
+        onTabDragComplete={onTabDragComplete}
+      />
       <div className="pane-content">
         {tabs.length === 0 && (
           <div className="pane-empty">Open a terminal or browser tab</div>

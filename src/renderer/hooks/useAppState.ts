@@ -25,6 +25,7 @@ import type {
   TaskViewState
 } from '../../shared/types'
 import { applyQueuedStateUpdates, type StateUpdater } from './stateHydration'
+import { moveTaskTab } from '../tabMove'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs'>>
 
@@ -722,6 +723,51 @@ export function useAppState() {
     })
   }, [updateWindowViewState])
 
+  const moveTab = useCallback((projectId: string, taskId: string, fromPane: 'left' | 'right', tabId: string, toPane: 'left' | 'right', toIndex: number) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    if (!task) return
+
+    const currentState = getTaskViewStateForTask(task)
+    const next = moveTaskTab({
+      tabs: task.tabs,
+      taskState: currentState,
+      fromPane,
+      tabId,
+      toPane,
+      toIndex
+    })
+
+    if (!next.moved) return
+
+    updateWindowViewState(prev => ({
+      ...prev,
+      taskStates: {
+        ...prev.taskStates,
+        [taskId]: cloneTaskState(next.taskState)
+      }
+    }))
+
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project =>
+        project.id === projectId
+          ? {
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId
+                  ? {
+                      ...task,
+                      tabs: next.tabs
+                    }
+                  : task
+              )
+            }
+          : project
+      )
+    }))
+  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask])
+
   const toggleSplit = useCallback((projectId: string, taskId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = project?.tasks.find(candidate => candidate.id === taskId)
@@ -854,6 +900,7 @@ export function useAppState() {
     updateTabUrl,
     updateTabSessionId,
     setActiveTab,
+    moveTab,
     getTaskViewState: getTaskViewStateForTask,
     toggleSplit,
     setSplitRatio,

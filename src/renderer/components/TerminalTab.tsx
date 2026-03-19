@@ -84,6 +84,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
 
 export default function TerminalTab({ tabId, visible, projectId, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
   const { config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
@@ -130,7 +131,17 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
   }, [sshReady, tabId, sshConfig])
 
   useEffect(() => {
-    if (!containerRef.current || !config) return
+    if (!hostRef.current || !config) return
+
+    const existingEntry = terminals.get(tabId)
+    if (existingEntry) {
+      const terminalElement = existingEntry.term.element
+      if (terminalElement && terminalElement.parentElement !== hostRef.current) {
+        hostRef.current.replaceChildren(terminalElement)
+        existingEntry.fitAddon.fit()
+      }
+      return
+    }
     if (initializedRef.current) return
     initializedRef.current = true
 
@@ -161,7 +172,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     term.loadAddon(unicode11Addon)
     term.unicode.activeVersion = '11'
     term.loadAddon(imageAddon)
-    term.open(containerRef.current)
+    term.open(hostRef.current)
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
     terminals.set(tabId, {
@@ -313,14 +324,6 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     return () => window.removeEventListener('tab-removed', handler)
   }, [tabId])
 
-  useEffect(() => {
-    return () => {
-      initializedRef.current = false
-      spawnedRef.current = false
-      disposeTerminal(tabId, false)
-    }
-  }, [tabId])
-
   // Cmd+F to open search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -342,6 +345,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
       className="terminal-tab"
       style={{ display: visible ? 'block' : 'none', position: 'relative' }}
     >
+      <div ref={hostRef} className="terminal-tab-host" />
       {entry && (
         <TerminalSearchBar
           searchAddon={entry.searchAddon}
