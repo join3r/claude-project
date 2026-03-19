@@ -9,7 +9,23 @@ import AddShellCommandProject from './AddShellCommandProject'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
+import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import './Sidebar.css'
+
+type DragState = {
+  type: 'project' | 'task' | 'folder'
+  id: string
+  sourceFolderId: string | null
+  index: number
+  projectId?: string
+}
+
+type DropTarget =
+  | { type: 'into-folder'; folderId: string }
+  | { type: 'between-root'; index: number }
+  | { type: 'between-folder-children'; folderId: string; index: number }
+  | { type: 'between-tasks'; projectId: string; index: number }
+  | null
 
 function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
   const aiTabIds = [...task.tabs.left, ...task.tabs.right]
@@ -88,20 +104,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
-  const [dragState, setDragState] = useState<{
-    type: 'project' | 'task' | 'folder'
-    id: string
-    sourceFolderId: string | null
-    index: number
-    projectId?: string
-  } | null>(null)
-  const [dropTarget, setDropTarget] = useState<
-    | { type: 'into-folder'; folderId: string }
-    | { type: 'between-root'; index: number }
-    | { type: 'between-folder-children'; folderId: string; index: number }
-    | { type: 'between-tasks'; projectId: string; index: number }
-    | null
-  >(null)
+  const [dragState, setDragState] = useState<DragState | null>(null)
+  const dragStateRef = useRef<DragState | null>(null)
+  const [dropTarget, setDropTarget] = useState<DropTarget>(null)
+  const dropTargetRef = useRef<DropTarget>(null)
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const collapsedFolders = new Set(collapsedFolderIds)
@@ -116,6 +122,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   useEffect(() => {
     if (editingId && editRef.current) editRef.current.focus()
   }, [editingId])
+
+  useEffect(() => {
+    dragStateRef.current = dragState
+  }, [dragState])
+
+  useEffect(() => {
+    dropTargetRef.current = dropTarget
+  }, [dropTarget])
 
   useEffect(() => {
     const dismiss = () => { setContextMenu(null); setAddMenuOpen(false) }
@@ -259,7 +273,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (!dragging) {
         if (Math.abs(ev.clientY - startY) + Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return
         dragging = true
-        setDragState({ type, id, sourceFolderId, index, projectId })
+        const nextDragState: DragState = { type, id, sourceFolderId, index, projectId }
+        dragStateRef.current = nextDragState
+        setDragState(nextDragState)
       }
 
       const sidebarList = document.querySelector('.sidebar-list')
@@ -269,12 +285,22 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         const items = sidebarList.querySelectorAll<HTMLElement>(
           `.sidebar-project[data-project-id="${projectId}"] .task-item`
         )
-        let bestIndex = 0
-        for (let i = 0; i < items.length; i++) {
-          const rect = items[i].getBoundingClientRect()
-          if (ev.clientY > rect.top + rect.height / 2) bestIndex = i + 1
-        }
-        setDropTarget({ type: 'between-tasks', projectId, index: bestIndex })
+        const bestIndex = getTaskDropIndex(
+          Array.from(items).map((item) => {
+            const rect = item.getBoundingClientRect()
+            return {
+              id: item.dataset.taskId ?? '',
+              index: Number(item.dataset.taskIndex ?? '-1'),
+              top: rect.top,
+              height: rect.height
+            }
+          }),
+          ev.clientY,
+          id
+        )
+        const nextDropTarget: DropTarget = { type: 'between-tasks', projectId, index: bestIndex }
+        dropTargetRef.current = nextDropTarget
+        setDropTarget(nextDropTarget)
         return
       }
 
@@ -326,6 +352,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         newTarget = { type: 'between-root', index: rootOrder.length }
       }
 
+      dropTargetRef.current = newTarget
       setDropTarget(newTarget)
     }
 
@@ -336,57 +363,57 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       if (!dragging) return
 
-      setDragState(ds => {
-        setDropTarget(dt => {
-          if (ds && dt) {
-            if (ds.type === 'task' && ds.projectId && dt.type === 'between-tasks') {
-              if (dt.index !== ds.index && dt.index !== ds.index + 1) {
-                const toIndex = dt.index > ds.index ? dt.index - 1 : dt.index
-                reorderTasks(ds.projectId, ds.index, toIndex)
-              }
-            } else if (ds.type === 'project') {
-              if (dt.type === 'into-folder') {
-                if (ds.sourceFolderId !== dt.folderId) {
-                  moveProjectToFolder(ds.id, dt.folderId)
-                }
-              } else if (dt.type === 'between-root') {
-                if (ds.sourceFolderId) {
-                  moveProjectToRoot(ds.id, dt.index)
-                } else {
-                  const fromIdx = rootOrder.indexOf(ds.id)
-                  if (fromIdx !== dt.index && fromIdx + 1 !== dt.index) {
-                    const toIdx = dt.index > fromIdx ? dt.index - 1 : dt.index
-                    reorderRootItems(fromIdx, toIdx)
-                  }
-                }
-              } else if (dt.type === 'between-folder-children') {
-                if (ds.sourceFolderId === dt.folderId) {
-                  const folder = folders.find(f => f.id === dt.folderId)
-                  if (folder) {
-                    const fromIdx = folder.projectIds.indexOf(ds.id)
-                    if (fromIdx !== dt.index && fromIdx + 1 !== dt.index) {
-                      const toIdx = dt.index > fromIdx ? dt.index - 1 : dt.index
-                      reorderProjectsInFolder(dt.folderId, fromIdx, toIdx)
-                    }
-                  }
-                } else {
-                  moveProjectToFolder(ds.id, dt.folderId)
-                }
-              }
-            } else if (ds.type === 'folder') {
-              if (dt.type === 'between-root') {
-                const fromIdx = rootOrder.indexOf(ds.id)
-                if (fromIdx !== dt.index && fromIdx + 1 !== dt.index) {
-                  const toIdx = dt.index > fromIdx ? dt.index - 1 : dt.index
-                  reorderRootItems(fromIdx, toIdx)
-                }
+      const currentDragState = dragStateRef.current
+      const currentDropTarget = dropTargetRef.current
+
+      if (currentDragState && currentDropTarget) {
+        if (currentDragState.type === 'task' && currentDragState.projectId && currentDropTarget.type === 'between-tasks') {
+          const toIndex = getReorderInsertIndex(currentDragState.index, currentDropTarget.index)
+          if (toIndex !== null) {
+            reorderTasks(currentDragState.projectId, currentDragState.index, toIndex)
+          }
+        } else if (currentDragState.type === 'project') {
+          if (currentDropTarget.type === 'into-folder') {
+            if (currentDragState.sourceFolderId !== currentDropTarget.folderId) {
+              moveProjectToFolder(currentDragState.id, currentDropTarget.folderId)
+            }
+          } else if (currentDropTarget.type === 'between-root') {
+            if (currentDragState.sourceFolderId) {
+              moveProjectToRoot(currentDragState.id, currentDropTarget.index)
+            } else {
+              const fromIdx = rootOrder.indexOf(currentDragState.id)
+              const toIdx = getReorderInsertIndex(fromIdx, currentDropTarget.index)
+              if (toIdx !== null) {
+                reorderRootItems(fromIdx, toIdx)
               }
             }
+          } else if (currentDropTarget.type === 'between-folder-children') {
+            if (currentDragState.sourceFolderId === currentDropTarget.folderId) {
+              const folder = folders.find(f => f.id === currentDropTarget.folderId)
+              if (folder) {
+                const fromIdx = folder.projectIds.indexOf(currentDragState.id)
+                const toIdx = getReorderInsertIndex(fromIdx, currentDropTarget.index)
+                if (toIdx !== null) {
+                  reorderProjectsInFolder(currentDropTarget.folderId, fromIdx, toIdx)
+                }
+              }
+            } else {
+              moveProjectToFolder(currentDragState.id, currentDropTarget.folderId)
+            }
           }
-          return null
-        })
-        return null
-      })
+        } else if (currentDragState.type === 'folder' && currentDropTarget.type === 'between-root') {
+          const fromIdx = rootOrder.indexOf(currentDragState.id)
+          const toIdx = getReorderInsertIndex(fromIdx, currentDropTarget.index)
+          if (toIdx !== null) {
+            reorderRootItems(fromIdx, toIdx)
+          }
+        }
+      }
+
+      dragStateRef.current = null
+      dropTargetRef.current = null
+      setDragState(null)
+      setDropTarget(null)
     }
 
     document.addEventListener('mousemove', onMouseMove)
@@ -447,6 +474,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               )}
               <div
                 className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
+                data-task-id={task.id}
+                data-task-index={tIdx}
                 onClick={() => handleSelectTask(task)}
                 onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, tIdx, null, project.id)}
                 onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
