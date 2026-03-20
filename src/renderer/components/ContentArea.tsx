@@ -198,6 +198,7 @@ export default function ContentArea(): React.ReactElement {
         project.tasks.map((task) => {
           const isVisible = project.id === selectedProjectId && task.id === selectedTaskId
           const taskView = getTaskViewState(task)
+          const isSplitOpen = taskView.splitOpen
           const ratio = dragRatio ?? taskView.splitRatio ?? 0.5
           const effectiveDir = task.workspace
             ? joinPath(task.workspace.worktreePath, task.workspace.relativeProjectPath)
@@ -212,9 +213,9 @@ export default function ContentArea(): React.ReactElement {
                 <button
                   className="split-btn"
                   onClick={() => toggleSplit(project.id, task.id)}
-                  title={task.splitOpen ? 'Close split' : 'Split right'}
+                  title={isSplitOpen ? 'Close split' : 'Split right'}
                 >
-                  {task.splitOpen ? '\u25E7' : '\u2B12'}
+                  {isSplitOpen ? '\u25E7' : '\u2B12'}
                 </button>
               </div>
               <div className="content-panes" ref={isVisible ? panesRef : undefined}>
@@ -247,7 +248,7 @@ export default function ContentArea(): React.ReactElement {
                   sshConfig={project.ssh}
                   shellCommand={project.shellCommand}
                   aiToolArgs={project.aiToolArgs}
-                  style={task.splitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
+                  style={isSplitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                   onPaneFocus={rememberFocusedPane}
                   tabDragState={tabDragState}
                   tabDropTarget={tabDropTarget}
@@ -255,7 +256,7 @@ export default function ContentArea(): React.ReactElement {
                   onTabDropTargetChange={setTabDropTarget}
                   onTabDragComplete={rememberFocusedPane}
                 />
-                {taskView.splitOpen && (
+                {isSplitOpen && (
                   <>
                     <div
                       className="pane-divider"

@@ -31,11 +31,24 @@ interface TerminalEntry {
   webglAddon: WebglAddon | null
   restoring: boolean
   pendingData: string[]
+  suppressResizeEvents: number
 }
 
 const terminals = new Map<string, TerminalEntry>()
 
 let ptyListenerRegistered = false
+let ptySizeListenerRegistered = false
+
+function resizeTerminal(entry: TerminalEntry, cols: number, rows: number): void {
+  if (entry.term.cols === cols && entry.term.rows === rows) return
+  entry.suppressResizeEvents += 1
+  try {
+    entry.term.resize(cols, rows)
+  } finally {
+    entry.suppressResizeEvents = Math.max(0, entry.suppressResizeEvents - 1)
+  }
+}
+
 function ensurePtyListener(): void {
   if (ptyListenerRegistered) return
   ptyListenerRegistered = true
@@ -47,6 +60,16 @@ function ensurePtyListener(): void {
       return
     }
     entry.term.write(data)
+  })
+}
+
+function ensurePtySizeListener(): void {
+  if (ptySizeListenerRegistered) return
+  ptySizeListenerRegistered = true
+  window.api.onPtySizeSync((id: string, cols: number, rows: number) => {
+    const entry = terminals.get(id)
+    if (!entry) return
+    resizeTerminal(entry, cols, rows)
   })
 }
 
@@ -88,6 +111,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
   const { config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
+  const focusClaimRef = useRef(false)
   const projectDirRef = useRef(projectDir)
   projectDirRef.current = projectDir
   const [sshReady, setSshReady] = useState(!sshConfig)
@@ -138,7 +162,10 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
       const terminalElement = existingEntry.term.element
       if (terminalElement && terminalElement.parentElement !== hostRef.current) {
         hostRef.current.replaceChildren(terminalElement)
-        existingEntry.fitAddon.fit()
+        if (visible && document.hasFocus()) {
+          existingEntry.fitAddon.fit()
+          window.api.ptyResize(tabId, existingEntry.term.cols, existingEntry.term.rows)
+        }
       }
       return
     }
@@ -182,7 +209,8 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
       searchAddon,
       webglAddon: null,
       restoring: false,
-      pendingData: []
+      pendingData: [],
+      suppressResizeEvents: 0
     })
 
     term.onData((data) => {
@@ -190,7 +218,21 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     })
 
     term.onResize(({ cols, rows }) => {
+      const currentEntry = terminals.get(tabId)
+      if (!currentEntry || currentEntry.suppressResizeEvents > 0) return
       window.api.ptyResize(tabId, cols, rows)
+    })
+
+    term.onFocus(() => {
+      focusClaimRef.current = true
+      const currentEntry = terminals.get(tabId)
+      if (!currentEntry) return
+      currentEntry.fitAddon.fit()
+      window.api.ptyResize(tabId, currentEntry.term.cols, currentEntry.term.rows)
+    })
+
+    term.onBlur(() => {
+      focusClaimRef.current = false
     })
 
     // Show scrollbar only while scrolling
@@ -202,6 +244,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     })
 
     ensurePtyListener()
+    ensurePtySizeListener()
     ensureBeforeUnloadHandler()
   }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta])
 
@@ -239,9 +282,12 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     if (!containerRef.current || !config) return
     const container = containerRef.current
     const ro = new ResizeObserver(() => {
+      if (container.clientWidth === 0 || container.clientHeight === 0) return
       const entry = terminals.get(tabId)
       if (entry) {
-        entry.fitAddon.fit()
+        if (!spawnedRef.current || (visible && document.hasFocus() && focusClaimRef.current)) {
+          entry.fitAddon.fit()
+        }
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
           spawnedRef.current = true
@@ -254,14 +300,15 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
               ? window.api.ptySpawn(tabId, '$SHELL', '', entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
               : window.api.ptySpawn(tabId, config.defaultShell, projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'])
 
-          void attachPromise.then(({ scrollback }) => {
+          void attachPromise.then(({ cols, rows, scrollback }) => {
+            resizeTerminal(entry, cols, rows)
+
             const flushPending = () => {
               entry.restoring = false
               if (entry.pendingData.length > 0) {
                 entry.term.write(entry.pendingData.join(''))
                 entry.pendingData = []
               }
-              entry.fitAddon.fit()
               entry.term.scrollToBottom()
             }
 
@@ -288,8 +335,15 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     if (visible) {
       const entry = terminals.get(tabId)
       if (entry) {
+        if (document.hasFocus()) {
+          focusClaimRef.current = true
+          entry.fitAddon.fit()
+          window.api.ptyResize(tabId, entry.term.cols, entry.term.rows)
+        }
         entry.term.focus()
       }
+    } else {
+      focusClaimRef.current = false
     }
   }, [visible, tabId])
 
@@ -300,9 +354,12 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     if (entry) {
       entry.term.options.fontFamily = config.fontFamily
       entry.term.options.fontSize = config.fontSize + terminalZoomDelta
-      entry.fitAddon.fit()
+      if (visible && document.hasFocus()) {
+        entry.fitAddon.fit()
+        window.api.ptyResize(tabId, entry.term.cols, entry.term.rows)
+      }
     }
-  }, [config?.fontFamily, config?.fontSize, terminalZoomDelta, tabId])
+  }, [config?.fontFamily, config?.fontSize, terminalZoomDelta, tabId, visible])
 
   // Update terminal theme when it changes
   useEffect(() => {
