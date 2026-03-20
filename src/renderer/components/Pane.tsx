@@ -14,6 +14,7 @@ import type { TabDragState, TabDropTarget } from './tabDrag'
 interface Props {
   tabs: Tab[]
   activeTabId: string | null
+  taskVisible: boolean
   pane: 'left' | 'right'
   projectId: string
   taskId: string
@@ -33,6 +34,7 @@ interface Props {
 export default function Pane({
   tabs,
   activeTabId,
+  taskVisible,
   pane,
   projectId,
   taskId,
@@ -83,7 +85,7 @@ export default function Pane({
               <TerminalTab
                 key={tab.id}
                 tabId={tab.id}
-                visible={tab.id === activeTabId}
+                visible={taskVisible && tab.id === activeTabId}
                 projectId={projectId}
                 projectDir={projectDir}
                 sshConfig={sshConfig}
@@ -96,7 +98,7 @@ export default function Pane({
               <BrowserTab
                 key={tab.id}
                 tabId={tab.id}
-                visible={tab.id === activeTabId}
+                visible={taskVisible && tab.id === activeTabId}
                 initialUrl={tab.url}
                 projectId={projectId}
                 taskId={taskId}
@@ -110,7 +112,7 @@ export default function Pane({
                 key={tab.id}
                 tabId={tab.id}
                 toolType={tab.type as AiTabType}
-                visible={tab.id === activeTabId}
+                visible={taskVisible && tab.id === activeTabId}
                 sessionId={tab.sessionId}
                 pane={pane}
                 projectId={projectId}
@@ -126,7 +128,7 @@ export default function Pane({
               <DiffTab
                 key={tab.id}
                 tabId={tab.id}
-                visible={tab.id === activeTabId}
+                visible={taskVisible && tab.id === activeTabId}
                 filePath={tab.filePath}
                 projectDir={projectDir}
                 effectiveTheme={effectiveTheme}
@@ -138,7 +140,7 @@ export default function Pane({
               <EditorTab
                 key={tab.id}
                 tabId={tab.id}
-                visible={tab.id === activeTabId}
+                visible={taskVisible && tab.id === activeTabId}
                 filePath={tab.filePath}
                 projectDir={projectDir}
                 projectId={projectId}

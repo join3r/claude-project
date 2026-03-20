@@ -322,6 +322,7 @@ export default function ContentArea(): React.ReactElement {
                 <Pane
                   tabs={task.tabs.left}
                   activeTabId={taskView.activeTab.left}
+                  taskVisible={isVisible}
                   pane="left"
                   projectId={project.id}
                   taskId={task.id}
@@ -346,6 +347,7 @@ export default function ContentArea(): React.ReactElement {
                     <Pane
                       tabs={task.tabs.right}
                       activeTabId={taskView.activeTab.right}
+                      taskVisible={isVisible}
                       pane="right"
                       projectId={project.id}
                       taskId={task.id}

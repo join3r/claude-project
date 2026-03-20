@@ -1,6 +1,5 @@
-import React, { useState, useEffect, Suspense } from 'react'
-
-const LazyDiffEditor = React.lazy(() => import('@monaco-editor/react').then(m => ({ default: m.DiffEditor })))
+import React, { useState, useEffect } from 'react'
+import { DiffEditor } from '@monaco-editor/react'
 
 interface Props {
   tabId: string
@@ -43,19 +42,17 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: visible ? 'block' : 'none' }}>
-      <Suspense fallback={<div className="tab-content-placeholder">Loading editor...</div>}>
-        <LazyDiffEditor
-          original={original}
-          modified={modified}
-          language={getLanguageFromPath(filePath)}
-          theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
-          options={{
-            readOnly: true,
-            automaticLayout: true,
-            minimap: { enabled: false }
-          }}
-        />
-      </Suspense>
+      <DiffEditor
+        original={original}
+        modified={modified}
+        language={getLanguageFromPath(filePath)}
+        theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
+        options={{
+          readOnly: true,
+          automaticLayout: true,
+          minimap: { enabled: false }
+        }}
+      />
     </div>
   )
 }

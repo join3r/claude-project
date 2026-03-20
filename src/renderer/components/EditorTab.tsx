@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, Suspense } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import Editor from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-
-const LazyEditor = React.lazy(() => import('@monaco-editor/react').then(m => ({ default: m.default })))
 
 interface Props {
   tabId: string
@@ -67,19 +66,17 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: visible ? 'block' : 'none' }}>
-      <Suspense fallback={<div className="tab-content-placeholder">Loading editor...</div>}>
-        <LazyEditor
-          defaultValue={content}
-          language={getLanguageFromPath(filePath)}
-          theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
-          options={{
-            automaticLayout: true,
-            minimap: { enabled: false }
-          }}
-          onMount={handleEditorDidMount}
-          onChange={handleChange}
-        />
-      </Suspense>
+      <Editor
+        defaultValue={content}
+        language={getLanguageFromPath(filePath)}
+        theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
+        options={{
+          automaticLayout: true,
+          minimap: { enabled: false }
+        }}
+        onMount={handleEditorDidMount}
+        onChange={handleChange}
+      />
       {dirty && <div style={{ position: 'absolute', top: 4, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />}
     </div>
   )

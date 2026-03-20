@@ -148,6 +148,16 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
     mainWindow.maximize()
   }
 
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    console.error(`[renderer-load-failed] code=${errorCode} mainFrame=${isMainFrame} url=${validatedURL} error=${errorDescription}`)
+  })
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[renderer-process-gone] reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    console.error(`[preload-error] path=${preloadPath}`, error)
+  })
+
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {

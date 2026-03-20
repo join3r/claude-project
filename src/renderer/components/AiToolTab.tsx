@@ -309,7 +309,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       window.api.ptyResize(tabId, cols, rows)
     })
 
-    term.onFocus(() => {
+    term.element?.addEventListener('focusin', () => {
       focusClaimRef.current = true
       const currentEntry = terminals.get(tabId)
       if (!currentEntry) return
@@ -317,7 +317,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       window.api.ptyResize(tabId, currentEntry.term.cols, currentEntry.term.rows)
     })
 
-    term.onBlur(() => {
+    term.element?.addEventListener('focusout', () => {
       focusClaimRef.current = false
     })
 
