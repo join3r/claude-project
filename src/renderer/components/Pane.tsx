@@ -1,8 +1,11 @@
 import React from 'react'
+import { useApp } from '../context/AppContext'
 import TabBar from './TabBar'
 import TerminalTab from './TerminalTab'
 import BrowserTab from './BrowserTab'
 import AiToolTab from './AiToolTab'
+import DiffTab from './DiffTab'
+import EditorTab from './EditorTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import type { Tab, AiTabType, SshConfig, ShellCommandConfig } from '../../shared/types'
 import type { PaneSide } from './paneFocus'
@@ -45,6 +48,7 @@ export default function Pane({
   onTabDropTargetChange,
   onTabDragComplete
 }: Props): React.ReactElement {
+  const { effectiveTheme } = useApp()
   const isEmptyDropTarget = tabs.length === 0 && tabDropTarget?.pane === pane
 
   return (
@@ -114,6 +118,33 @@ export default function Pane({
                 projectDir={projectDir}
                 sshConfig={sshConfig}
                 extraArgs={aiToolArgs?.[tab.type as AiTabType]}
+              />
+            )
+          }
+          if (tab.type === 'diff' && tab.filePath) {
+            return (
+              <DiffTab
+                key={tab.id}
+                tabId={tab.id}
+                visible={tab.id === activeTabId}
+                filePath={tab.filePath}
+                projectDir={projectDir}
+                effectiveTheme={effectiveTheme}
+              />
+            )
+          }
+          if (tab.type === 'editor' && tab.filePath) {
+            return (
+              <EditorTab
+                key={tab.id}
+                tabId={tab.id}
+                visible={tab.id === activeTabId}
+                filePath={tab.filePath}
+                projectDir={projectDir}
+                projectId={projectId}
+                taskId={taskId}
+                pane={pane}
+                effectiveTheme={effectiveTheme}
               />
             )
           }

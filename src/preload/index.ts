@@ -1,5 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppConfig, ProjectsData, SshConfig, TunnelConfig, TunnelState, WindowViewState } from '../shared/types'
+import type {
+  AppConfig,
+  DirectoryEntry,
+  GitStatusResult,
+  ProjectsData,
+  SshConfig,
+  TunnelConfig,
+  TunnelState,
+  WindowViewState
+} from '../shared/types'
 
 const api = {
   // Projects
@@ -154,6 +163,25 @@ const api = {
     const handler = () => callback()
     ipcRenderer.on('menu-zoom-reset', handler)
     return () => ipcRenderer.removeListener('menu-zoom-reset', handler)
+  },
+
+  // File browser
+  fbReadDirectory: (projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> =>
+    ipcRenderer.invoke('fb-read-directory', projectCwd, relativeDirPath),
+  fbReadFile: (projectCwd: string, relativeFilePath: string): Promise<string> =>
+    ipcRenderer.invoke('fb-read-file', projectCwd, relativeFilePath),
+  fbWriteFile: (projectCwd: string, relativeFilePath: string, content: string): Promise<void> =>
+    ipcRenderer.invoke('fb-write-file', projectCwd, relativeFilePath, content),
+  fbGitStatus: (projectCwd: string): Promise<GitStatusResult> =>
+    ipcRenderer.invoke('fb-git-status', projectCwd),
+  fbGitDiff: (projectCwd: string, relativeFilePath: string): Promise<string> =>
+    ipcRenderer.invoke('fb-git-diff', projectCwd, relativeFilePath),
+
+  // Menu: file browser toggle
+  onMenuToggleFileBrowser: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-toggle-file-browser', handler)
+    return () => ipcRenderer.removeListener('menu-toggle-file-browser', handler)
   },
 
   // Workspaces

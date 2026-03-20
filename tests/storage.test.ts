@@ -241,7 +241,18 @@ describe('Storage', () => {
     storage.saveWindowSession(session)
     const loaded = storage.loadWindowSession(projectsData)
 
-    expect(loaded).toEqual(session)
+    // reconcileWindowViewState adds default file browser fields
+    expect(loaded).toEqual({
+      windows: [{
+        geometry: session.windows[0].geometry,
+        viewState: {
+          ...session.windows[0].viewState,
+          fileBrowserOpen: false,
+          fileBrowserWidth: 250,
+          fileBrowserActiveTab: 'files'
+        }
+      }]
+    })
   })
 
   it('normalizes persisted window sessions against current projects and folders', () => {

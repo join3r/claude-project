@@ -1,4 +1,4 @@
-export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode' | 'diff' | 'editor'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'opencode'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -15,6 +15,7 @@ export interface Tab {
   title: string
   url?: string
   sessionId?: string
+  filePath?: string
 }
 
 export interface TaskViewState {
@@ -125,11 +126,35 @@ export interface AppConfig {
   collapsedFolderIds: string[]
 }
 
+export type FileBrowserTab = 'files' | 'git'
+
+export interface DirectoryEntry {
+  name: string
+  type: 'file' | 'directory'
+  relativePath: string
+}
+
+export type GitFileStatus = 'A' | 'M' | 'D' | 'R' | 'U' | '?'
+
+export interface GitStatusEntry {
+  relativePath: string
+  status: GitFileStatus
+}
+
+export interface GitStatusResult {
+  staged: GitStatusEntry[]
+  unstaged: GitStatusEntry[]
+  untracked: GitStatusEntry[]
+}
+
 export interface WindowViewState {
   selectedProjectId: string | null
   selectedTaskId: string | null
   collapsedFolderIds: string[]
   taskStates: Record<string, TaskViewState>
+  fileBrowserOpen: boolean
+  fileBrowserWidth: number
+  fileBrowserActiveTab: FileBrowserTab
 }
 
 export interface WindowGeometry {
@@ -190,7 +215,10 @@ export function createDefaultWindowViewState(): WindowViewState {
     selectedProjectId: null,
     selectedTaskId: null,
     collapsedFolderIds: [],
-    taskStates: {}
+    taskStates: {},
+    fileBrowserOpen: false,
+    fileBrowserWidth: 250,
+    fileBrowserActiveTab: 'files'
   }
 }
 
@@ -211,7 +239,10 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
           splitRatio: taskState.splitRatio
         }
       ])
-    )
+    ),
+    fileBrowserOpen: state.fileBrowserOpen,
+    fileBrowserWidth: state.fileBrowserWidth,
+    fileBrowserActiveTab: state.fileBrowserActiveTab
   }
 }
 
@@ -307,7 +338,10 @@ export function reconcileWindowViewState(
     selectedProjectId: selectedProject?.id ?? null,
     selectedTaskId: selectedTask?.id ?? null,
     collapsedFolderIds: collapsedFolderIds ? [...collapsedFolderIds] : [...state.collapsedFolderIds],
-    taskStates
+    taskStates,
+    fileBrowserOpen: state.fileBrowserOpen ?? false,
+    fileBrowserWidth: state.fileBrowserWidth ?? 250,
+    fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files'
   }
 }
 

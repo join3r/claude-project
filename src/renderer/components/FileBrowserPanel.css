@@ -1,0 +1,52 @@
+.filebrowser-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--sidebar-bg);
+  border-left: 1px solid var(--border);
+}
+
+.filebrowser-divider {
+  width: 3px;
+  flex-shrink: 0;
+  background: var(--border);
+  cursor: col-resize;
+}
+
+.filebrowser-divider:hover,
+.filebrowser-divider:active {
+  background: var(--accent);
+}
+
+.filebrowser-tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.filebrowser-tab {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+  line-height: 1;
+}
+
+.filebrowser-tab:hover {
+  color: var(--text-primary);
+}
+
+.filebrowser-tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.filebrowser-content {
+  flex: 1;
+  overflow: auto;
+}
