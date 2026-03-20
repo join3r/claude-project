@@ -3,8 +3,10 @@ import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 import { isRemoteProject } from '../../shared/types'
 import Pane from './Pane'
+import TunnelPopup from './TunnelPopup'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
+import type { TunnelConfig, TunnelState } from '../../shared/types'
 import './ContentArea.css'
 
 function joinPath(...parts: string[]): string {
@@ -12,7 +14,23 @@ function joinPath(...parts: string[]): string {
 }
 
 export default function ContentArea(): React.ReactElement {
-  const { projects, selectedProjectId, selectedTaskId, toggleSplit, setSplitRatio, getProjectDir, setActiveTab, addTab, removeTab, zoomTerminal, zoomBrowser, getTaskViewState } = useApp()
+  const {
+    projects,
+    selectedProject,
+    selectedTask,
+    selectedProjectId,
+    selectedTaskId,
+    toggleSplit,
+    setSplitRatio,
+    getProjectDir,
+    setActiveTab,
+    addTab,
+    removeTab,
+    zoomTerminal,
+    zoomBrowser,
+    getTaskViewState,
+    updateProject
+  } = useApp()
   useMetaHeld()
   const panesRef = useRef<HTMLDivElement | null>(null)
   const focusedPaneRef = useRef<{ projectId: string | null; taskId: string | null; pane: PaneSide }>({
@@ -24,6 +42,8 @@ export default function ContentArea(): React.ReactElement {
   const [tabDragState, setTabDragState] = useState<TabDragState | null>(null)
   const [tabDropTarget, setTabDropTarget] = useState<TabDropTarget | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
+  const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
+  const [tunnelPopupOpen, setTunnelPopupOpen] = useState(false)
 
   useEffect(() => {
     window.api.onSshStatusChanged((projectId: string, status: string) => {
@@ -32,15 +52,25 @@ export default function ContentArea(): React.ReactElement {
   }, [])
 
   useEffect(() => {
+    window.api.onSshTunnelStatusChanged((projectId: string, state: TunnelState) => {
+      setTunnelStates(prev => ({ ...prev, [projectId]: state }))
+    })
+  }, [])
+
+  useEffect(() => {
     projects.filter(isRemoteProject).forEach(p => {
       window.api.sshStatus(p.id).then(status => {
         setSshStatuses(prev => ({ ...prev, [p.id]: status }))
+      })
+      window.api.sshTunnelStatus(p.id).then(state => {
+        setTunnelStates(prev => ({ ...prev, [p.id]: state }))
       })
     })
   }, [projects])
   const isDragging = dragRatio !== null
 
-  const hasSelection = selectedProjectId && selectedTaskId
+  const hasProjectSelection = !!selectedProjectId
+  const hasTaskSelection = !!selectedProjectId && !!selectedTaskId
 
   const rememberFocusedPane = useCallback((pane: PaneSide) => {
     focusedPaneRef.current = {
@@ -189,9 +219,69 @@ export default function ContentArea(): React.ReactElement {
     [setSplitRatio]
   )
 
+  const handleTunnelSave = useCallback(async (tunnel: TunnelConfig) => {
+    if (!selectedProjectId || !selectedProject?.ssh) return
+    updateProject(selectedProjectId, { tunnel })
+    if (sshStatuses[selectedProjectId] === 'connected') {
+      await window.api.sshSetTunnel(selectedProjectId, selectedProject.ssh, tunnel)
+      return
+    }
+    setTunnelStates(prev => ({ ...prev, [selectedProjectId]: { status: 'inactive' } }))
+  }, [selectedProject, selectedProjectId, sshStatuses, updateProject])
+
+  const handleTunnelClear = useCallback(async () => {
+    if (!selectedProjectId || !selectedProject?.ssh) return
+    updateProject(selectedProjectId, { tunnel: undefined })
+    if (sshStatuses[selectedProjectId] === 'connected') {
+      await window.api.sshSetTunnel(selectedProjectId, selectedProject.ssh, null)
+      return
+    }
+    setTunnelStates(prev => ({ ...prev, [selectedProjectId]: { status: 'inactive' } }))
+  }, [selectedProject, selectedProjectId, sshStatuses, updateProject])
+
+  const selectedTunnelState = selectedProjectId ? tunnelStates[selectedProjectId] : undefined
+  const selectedTaskView = selectedTask ? getTaskViewState(selectedTask) : null
+  const tunnelButtonClassName = selectedProject && isRemoteProject(selectedProject)
+    ? [
+        'content-toolbar-btn',
+        'tunnel-btn',
+        selectedTunnelState?.status === 'error'
+          ? 'tunnel-btn-error'
+          : selectedProject.tunnel && selectedTunnelState?.status === 'active'
+            ? 'tunnel-btn-active'
+            : ''
+      ].filter(Boolean).join(' ')
+    : 'content-toolbar-btn tunnel-btn'
+
   return (
     <div className="content-area">
-      {!hasSelection && (
+      {selectedProject && (
+        <div className="content-toolbar">
+          {isRemoteProject(selectedProject) && (
+            <button
+              className={tunnelButtonClassName}
+              onClick={() => setTunnelPopupOpen(true)}
+              title="Tunnel"
+            >
+              &#8596;
+            </button>
+          )}
+          {selectedTask && (
+            <button
+              className="content-toolbar-btn split-btn"
+              onClick={() => toggleSplit(selectedProject.id, selectedTask.id)}
+              title={selectedTaskView?.splitOpen ? 'Close split' : 'Split right'}
+            >
+              {selectedTaskView?.splitOpen ? '\u25E7' : '\u2B12'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!hasProjectSelection && (
+        <div className="content-empty">Select or create a task to get started</div>
+      )}
+      {hasProjectSelection && !hasTaskSelection && (
         <div className="content-empty">Select or create a task to get started</div>
       )}
       {projects.flatMap((project) =>
@@ -208,15 +298,6 @@ export default function ContentArea(): React.ReactElement {
               className="content-task"
               style={{ display: isVisible ? 'flex' : 'none' }}
             >
-              <div className="content-toolbar">
-                <button
-                  className="split-btn"
-                  onClick={() => toggleSplit(project.id, task.id)}
-                  title={task.splitOpen ? 'Close split' : 'Split right'}
-                >
-                  {task.splitOpen ? '\u25E7' : '\u2B12'}
-                </button>
-              </div>
               <div className="content-panes" ref={isVisible ? panesRef : undefined}>
                 {isDragging && <div className="pane-drag-overlay" />}
                 {isRemoteProject(project) && sshStatuses[project.id] !== 'connected' && (
@@ -285,6 +366,15 @@ export default function ContentArea(): React.ReactElement {
             </div>
           )
         })
+      )}
+      {tunnelPopupOpen && selectedProject && isRemoteProject(selectedProject) && (
+        <TunnelPopup
+          project={selectedProject}
+          tunnelState={selectedTunnelState}
+          onSave={handleTunnelSave}
+          onClear={handleTunnelClear}
+          onClose={() => setTunnelPopupOpen(false)}
+        />
       )}
     </div>
   )

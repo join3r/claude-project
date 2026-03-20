@@ -2,16 +2,9 @@ import { EventEmitter } from 'events'
 import { execFile } from 'child_process'
 import fs from 'fs'
 import path from 'path'
+import type { SshConfig, TunnelConfig, TunnelState, TunnelStatus } from '../shared/types'
 
 export type SshStatus = 'disconnected' | 'connecting' | 'connected'
-
-interface SshConfig {
-  host: string
-  port: number
-  username: string
-  keyFile?: string
-  remoteDir: string
-}
 
 export class SshConnectionManager extends EventEmitter {
   private socketDir: string
@@ -19,6 +12,8 @@ export class SshConnectionManager extends EventEmitter {
   private statuses = new Map<string, SshStatus>()
   private remotePorts = new Map<string, number>()
   private configs = new Map<string, SshConfig>()
+  private tunnels = new Map<string, TunnelConfig>()
+  private tunnelStates = new Map<string, TunnelState>()
 
   /** Promisified execFile that always returns { stdout, stderr } */
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
@@ -57,10 +52,32 @@ export class SshConnectionManager extends EventEmitter {
     this.remotePorts.set(projectId, port)
   }
 
+  getTunnel(projectId: string): TunnelConfig | undefined {
+    return this.tunnels.get(projectId)
+  }
+
+  getTunnelState(projectId: string): TunnelState {
+    return this.tunnelStates.get(projectId) ?? { status: 'inactive' }
+  }
+
+  private setTunnelState(projectId: string, status: TunnelStatus, error?: string): void {
+    const state = error ? { status, error } : { status }
+    this.tunnelStates.set(projectId, state)
+    this.emit('tunnel-status-changed', projectId, status, error)
+  }
+
+  private clearTunnelRuntime(projectId: string): void {
+    this.tunnels.delete(projectId)
+    this.tunnelStates.delete(projectId)
+    this.emit('tunnel-status-changed', projectId, 'inactive', undefined)
+  }
+
   clearProject(projectId: string): void {
     this.statuses.delete(projectId)
     this.remotePorts.delete(projectId)
     this.configs.delete(projectId)
+    this.tunnels.delete(projectId)
+    this.tunnelStates.delete(projectId)
   }
 
   /** Args to establish the ControlMaster connection (no port forwarding yet). */
@@ -85,6 +102,28 @@ export class SshConnectionManager extends EventEmitter {
       '-S', this.getSocketPath(projectId),
       '-O', 'forward',
       '-R', `0:localhost:${this.hookPort}`,
+      `${config.username}@${config.host}`
+    ]
+  }
+
+  private formatTunnelSpec(tunnel: TunnelConfig): string {
+    return `${tunnel.sourcePort}:${tunnel.host}:${tunnel.destinationPort}`
+  }
+
+  buildTunnelForwardArgs(projectId: string, config: SshConfig, tunnel: TunnelConfig): string[] {
+    return [
+      ...this.buildBaseArgs(projectId, config),
+      '-O', 'forward',
+      '-L', this.formatTunnelSpec(tunnel),
+      `${config.username}@${config.host}`
+    ]
+  }
+
+  buildTunnelCancelArgs(projectId: string, config: SshConfig, tunnel: TunnelConfig): string[] {
+    return [
+      ...this.buildBaseArgs(projectId, config),
+      '-O', 'cancel',
+      '-L', this.formatTunnelSpec(tunnel),
       `${config.username}@${config.host}`
     ]
   }
@@ -195,6 +234,8 @@ export class SshConnectionManager extends EventEmitter {
   }
 
   async disconnect(projectId: string, config: SshConfig): Promise<void> {
+    this.stopHealthCheck(projectId)
+    this.clearTunnelRuntime(projectId)
     const args = this.buildExitArgs(projectId, config)
     try {
       await this.execFileAsync('ssh', args, { timeout: 5000 })
@@ -204,6 +245,37 @@ export class SshConnectionManager extends EventEmitter {
     const socketPath = this.getSocketPath(projectId)
     try { fs.unlinkSync(socketPath) } catch { /* may not exist */ }
     this.clearProject(projectId)
+  }
+
+  async setTunnel(projectId: string, config: SshConfig, tunnel: TunnelConfig | null): Promise<void> {
+    if (this.getStatus(projectId) !== 'connected') {
+      throw new Error('SSH connection not established')
+    }
+
+    const previousTunnel = this.tunnels.get(projectId)
+    if (previousTunnel) {
+      try {
+        await this.execFileAsync('ssh', this.buildTunnelCancelArgs(projectId, config, previousTunnel), { timeout: 5000 })
+      } catch {
+        // Best-effort cleanup before replacing the forward.
+      }
+      this.tunnels.delete(projectId)
+    }
+
+    if (!tunnel) {
+      this.clearTunnelRuntime(projectId)
+      return
+    }
+
+    try {
+      await this.execFileAsync('ssh', this.buildTunnelForwardArgs(projectId, config, tunnel), { timeout: 10000 })
+      this.tunnels.set(projectId, tunnel)
+      this.setTunnelState(projectId, 'active')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.setTunnelState(projectId, 'error', message)
+      throw new Error(`Failed to establish tunnel: ${message}`)
+    }
   }
 
   async checkConnection(projectId: string, config: SshConfig): Promise<boolean> {
@@ -227,6 +299,7 @@ export class SshConnectionManager extends EventEmitter {
       }
       const ok = await this.checkConnection(projectId, config)
       if (!ok) {
+        this.clearTunnelRuntime(projectId)
         this.setStatus(projectId, 'disconnected')
         this.stopHealthCheck(projectId)
       }

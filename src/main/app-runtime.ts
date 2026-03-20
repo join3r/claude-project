@@ -15,6 +15,7 @@ import type {
   PersistedWindowState,
   ProjectsData,
   SshConfig,
+  TunnelConfig,
   WindowGeometry,
   WindowViewState
 } from '../shared/types'
@@ -163,6 +164,11 @@ export class AppRuntime {
       this.broadcastToAllWindows('ssh-status-changed', projectId, status)
     })
 
+    this.sshManager.on('tunnel-status-changed', (projectId: string, status: string, error?: string) => {
+      this.logDebug(`tunnelStatus projectId=${projectId} status=${status}${error ? ` error=${error}` : ''}`)
+      this.broadcastToAllWindows('ssh-tunnel-status-changed', projectId, status, error)
+    })
+
     nativeTheme.on('updated', () => {
       this.broadcastToAllWindows('theme-changed', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
     })
@@ -255,6 +261,14 @@ export class AppRuntime {
     ipcMain.handle('ssh-connect', async (_event, projectId: string, sshConfig: SshConfig) => {
       await this.sshManager.connect(projectId, sshConfig)
       this.sshManager.startHealthChecks(projectId, sshConfig)
+      const tunnel = this.getProjectTunnel(projectId)
+      if (tunnel) {
+        try {
+          await this.sshManager.setTunnel(projectId, sshConfig, tunnel)
+        } catch {
+          // Keep SSH connected even when restoring the tunnel fails.
+        }
+      }
     })
 
     ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
@@ -263,6 +277,14 @@ export class AppRuntime {
 
     ipcMain.handle('ssh-status', (_event, projectId: string) => {
       return this.sshManager.getStatus(projectId)
+    })
+
+    ipcMain.handle('ssh-set-tunnel', async (_event, projectId: string, sshConfig: SshConfig, tunnel: TunnelConfig | null) => {
+      await this.sshManager.setTunnel(projectId, sshConfig, tunnel)
+    })
+
+    ipcMain.handle('ssh-tunnel-status', (_event, projectId: string) => {
+      return clone(this.sshManager.getTunnelState(projectId))
     })
 
     ipcMain.handle('hooks-inject', (_event, projectDir: string) => {
@@ -518,6 +540,10 @@ export class AppRuntime {
         window.webContents.send(channel, ...args)
       }
     }
+  }
+
+  private getProjectTunnel(projectId: string): TunnelConfig | undefined {
+    return this.projectsData.projects.find((project) => project.id === projectId)?.tunnel
   }
 
   private broadcastToAttachedWindows(tabId: string, channel: string, ...args: unknown[]): void {

@@ -60,6 +60,7 @@ export interface Project {
   tasks: Task[]
   lastTaskId?: string
   ssh?: SshConfig
+  tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
 }
@@ -74,6 +75,19 @@ export interface SshConfig {
   username: string
   keyFile?: string
   remoteDir: string
+}
+
+export interface TunnelConfig {
+  host: string
+  sourcePort: number
+  destinationPort: number
+}
+
+export type TunnelStatus = 'inactive' | 'active' | 'error'
+
+export interface TunnelState {
+  status: TunnelStatus
+  error?: string
 }
 
 export interface ShellCommandConfig {

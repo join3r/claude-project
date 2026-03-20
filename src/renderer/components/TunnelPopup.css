@@ -1,0 +1,19 @@
+.tunnel-popup-panel {
+  width: 420px;
+}
+
+.tunnel-popup-ports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tunnel-popup-preview {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text-secondary);
+  font-size: 12px;
+}

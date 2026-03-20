@@ -27,7 +27,7 @@ import type {
 import { applyQueuedStateUpdates, type StateUpdater } from './stateHydration'
 import { moveTaskTab } from '../tabMove'
 
-export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs'>>
+export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel'>>
 
 function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
@@ -311,6 +311,9 @@ export function useAppState() {
   const removeProject = useCallback((id: string) => {
     const project = projectsRef.current.find(p => p.id === id)
     if (project) {
+      if (project.ssh) {
+        void window.api.sshDisconnect(id, project.ssh).catch(() => {})
+      }
       for (const task of project.tasks) {
         for (const tab of [...task.tabs.left, ...task.tabs.right]) {
           window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))

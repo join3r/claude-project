@@ -15,13 +15,14 @@
 .content-toolbar {
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
   padding: 2px 8px;
   background: var(--toolbar-bg);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
 }
 
-.split-btn {
+.content-toolbar-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
@@ -32,9 +33,22 @@
   -webkit-app-region: no-drag;
 }
 
-.split-btn:hover {
+.content-toolbar-btn:hover {
   background: var(--hover);
   color: var(--text-primary);
+}
+
+.tunnel-btn {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.tunnel-btn-active {
+  color: var(--accent);
+}
+
+.tunnel-btn-error {
+  color: #f87171;
 }
 
 .content-panes {

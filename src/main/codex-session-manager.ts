@@ -74,17 +74,16 @@ export class CodexSessionManager {
 
   buildRemoteReadSessionScript(cwd: string, afterTs = 0): string {
     const safeAfterTs = Number.isFinite(afterTs) ? Math.floor(afterTs) : 0
-    const payload = JSON.stringify({ cwd, afterTs: safeAfterTs })
+    const payloadB64 = Buffer.from(JSON.stringify({ cwd, afterTs: safeAfterTs }), 'utf8').toString('base64')
+    const script = `
+import base64, glob, json, os, re, sqlite3
 
-    return `python3 -c "
-import glob, json, os, re, sqlite3
-
-data = json.loads(${this.shellQuote(payload)})
+data = json.loads(base64.b64decode('${payloadB64}').decode())
 home = os.path.expanduser('~/.codex')
 dbs = glob.glob(os.path.join(home, 'state_*.sqlite'))
 
 def db_num(p):
-    m = re.search(r'state_(\\\\d+)\\\\.sqlite$', p)
+    m = re.search(r'state_(\\d+)\\.sqlite$', p)
     return int(m.group(1)) if m else -1
 
 dbs.sort(key=db_num, reverse=True)
@@ -105,7 +104,9 @@ for db in dbs:
         continue
 
 print(json.dumps({'sessionId': sessionId}))
-"`
+`.trim()
+
+    return `python3 -c ${this.shellQuote(script)}`
   }
 
   private shellQuote(value: string): string {

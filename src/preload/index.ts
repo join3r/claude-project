@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AppConfig, ProjectsData, SshConfig, WindowViewState } from '../shared/types'
+import type { AppConfig, ProjectsData, SshConfig, TunnelConfig, TunnelState, WindowViewState } from '../shared/types'
 
 const api = {
   // Projects
@@ -41,6 +41,13 @@ const api = {
     ipcRenderer.invoke('ssh-status', projectId),
   onSshStatusChanged: (callback: (projectId: string, status: string) => void): void => {
     ipcRenderer.on('ssh-status-changed', (_e, projectId, status) => callback(projectId, status))
+  },
+  sshSetTunnel: (projectId: string, sshConfig: SshConfig, tunnel: TunnelConfig | null): Promise<void> =>
+    ipcRenderer.invoke('ssh-set-tunnel', projectId, sshConfig, tunnel),
+  sshTunnelStatus: (projectId: string): Promise<TunnelState> =>
+    ipcRenderer.invoke('ssh-tunnel-status', projectId),
+  onSshTunnelStatusChanged: (callback: (projectId: string, state: TunnelState) => void): void => {
+    ipcRenderer.on('ssh-tunnel-status-changed', (_e, projectId, status, error) => callback(projectId, error ? { status, error } : { status }))
   },
 
   // Theme

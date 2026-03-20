@@ -93,6 +93,26 @@ describe('Storage', () => {
     expect(loaded.projects[0].ssh!.port).toBe(2222)
   })
 
+  it('saves and loads projects with tunnel config', () => {
+    const projects = {
+      projects: [{
+        id: '1',
+        name: 'Remote Tunnel',
+        directory: '',
+        tasks: [],
+        ssh: { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/opt/app' },
+        tunnel: { host: 'localhost', sourcePort: 3000, destinationPort: 8080 }
+      }]
+    }
+    storage.saveProjects(projects)
+    const loaded = storage.loadProjects()
+    expect(loaded.projects[0].tunnel).toEqual({
+      host: 'localhost',
+      sourcePort: 3000,
+      destinationPort: 8080
+    })
+  })
+
   it('isRemoteProject returns true for projects with ssh config', () => {
     expect(isRemoteProject({ id: '1', name: 'R', directory: '', tasks: [], ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/d' } })).toBe(true)
     expect(isRemoteProject({ id: '2', name: 'L', directory: '/local', tasks: [] })).toBe(false)

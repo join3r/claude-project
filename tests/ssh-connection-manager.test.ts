@@ -79,6 +79,40 @@ describe('SshConnectionManager', () => {
     expect(args).toContain('forward')
   })
 
+  it('builds tunnel forward args', () => {
+    const args = manager.buildTunnelForwardArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, {
+      host: 'localhost',
+      sourcePort: 3000,
+      destinationPort: 3000
+    })
+    expect(args).toContain('-O')
+    expect(args).toContain('forward')
+    expect(args).toContain('-L')
+    expect(args).toContain('3000:localhost:3000')
+  })
+
+  it('builds tunnel cancel args', () => {
+    const args = manager.buildTunnelCancelArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, {
+      host: 'localhost',
+      sourcePort: 3000,
+      destinationPort: 3000
+    })
+    expect(args).toContain('-O')
+    expect(args).toContain('cancel')
+    expect(args).toContain('-L')
+    expect(args).toContain('3000:localhost:3000')
+  })
+
   it('builds correct spawn-through args for terminal', () => {
     const args = manager.buildSpawnArgs('proj-1', {
       host: 'dev.example.com',
@@ -281,6 +315,73 @@ describe('SshConnectionManager connect/disconnect', () => {
 
     expect(manager.getStatus('proj-1')).toBe('disconnected')
     expect(manager.getRemotePort('proj-1')).toBeUndefined()
+    expect(manager.getTunnelState('proj-1')).toEqual({ status: 'inactive' })
+  })
+
+  it('setTunnel replaces an existing local forward', async () => {
+    const config = { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app' }
+    manager.setStatus('proj-1', 'connected')
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        ;(cb as (err: null, stdout?: string, stderr?: string) => void)(null, '', '')
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await manager.setTunnel('proj-1', config, {
+      host: 'localhost',
+      sourcePort: 3000,
+      destinationPort: 3000
+    })
+    expect(manager.getTunnel('proj-1')).toEqual({
+      host: 'localhost',
+      sourcePort: 3000,
+      destinationPort: 3000
+    })
+    expect(manager.getTunnelState('proj-1')).toEqual({ status: 'active' })
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
+
+    await manager.setTunnel('proj-1', config, {
+      host: 'localhost',
+      sourcePort: 4000,
+      destinationPort: 8080
+    })
+
+    expect(mockExecFile).toHaveBeenCalledTimes(3)
+    expect(mockExecFile.mock.calls[1][1]).toContain('cancel')
+    expect(mockExecFile.mock.calls[1][1]).toContain('3000:localhost:3000')
+    expect(mockExecFile.mock.calls[2][1]).toContain('forward')
+    expect(mockExecFile.mock.calls[2][1]).toContain('4000:localhost:8080')
+    expect(manager.getTunnel('proj-1')).toEqual({
+      host: 'localhost',
+      sourcePort: 4000,
+      destinationPort: 8080
+    })
+  })
+
+  it('setTunnel clears the existing forward when null is passed', async () => {
+    const config = { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app' }
+    manager.setStatus('proj-1', 'connected')
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        ;(cb as (err: null, stdout?: string, stderr?: string) => void)(null, '', '')
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await manager.setTunnel('proj-1', config, {
+      host: 'localhost',
+      sourcePort: 3000,
+      destinationPort: 3000
+    })
+    await manager.setTunnel('proj-1', config, null)
+
+    expect(mockExecFile).toHaveBeenCalledTimes(2)
+    expect(mockExecFile.mock.calls[1][1]).toContain('cancel')
+    expect(manager.getTunnel('proj-1')).toBeUndefined()
+    expect(manager.getTunnelState('proj-1')).toEqual({ status: 'inactive' })
   })
 
   it('disconnectAll sends ssh -O exit for each stored config', async () => {

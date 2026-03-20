@@ -168,12 +168,20 @@ describe('CodexSessionManager', () => {
       const script = manager.buildRemoteReadSessionScript('/srv/app', 1710000000)
 
       expect(script).toContain('python3')
-      expect(script).toContain('/srv/app')
-      expect(script).toContain('1710000000')
+      expect(script).toContain('base64.b64decode')
       expect(script).toContain('state_')
       expect(script).toContain('sqlite3')
       expect(script).toContain('sessionId')
       expect(script).toContain('threads')
+      expect(script).toMatch(/^python3 -c '/)
+    })
+
+    it('shell-quotes the remote python script instead of embedding raw JSON in double quotes', () => {
+      const script = manager.buildRemoteReadSessionScript("/srv/user's app", 1710000000)
+
+      expect(script).not.toContain(`json.loads('{"cwd"`)
+      expect(script).toContain("python3 -c '")
+      expect(script).toContain("base64.b64decode('\\''")
     })
   })
 })
