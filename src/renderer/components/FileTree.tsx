@@ -1,12 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
 import './FileTree.css'
 
 interface Props {
   projectDir: string
   gitStatus: GitStatusResult | null
-  onFileClick: (filePath: string, hasGitChanges: boolean) => void
-  onFileDoubleClick: (filePath: string) => void
+  onFileClick: (filePath: string) => void
 }
 
 type StatusColor = '#f44747' | '#e5c07b' | '#4ec9b0' | undefined
@@ -76,8 +75,7 @@ interface TreeNodeProps {
   loadingDirs: Set<string>
   gitMap: Map<string, GitFileStatus>
   onToggleDir: (relativePath: string) => void
-  onFileClick: (filePath: string, hasGitChanges: boolean) => void
-  onFileDoubleClick: (filePath: string) => void
+  onFileClick: (filePath: string) => void
 }
 
 function TreeNode({
@@ -90,10 +88,7 @@ function TreeNode({
   gitMap,
   onToggleDir,
   onFileClick,
-  onFileDoubleClick,
 }: TreeNodeProps) {
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const isDirectory = entry.type === 'directory'
   const isExpanded = expandedDirs.has(entry.relativePath)
   const children = childrenCache[entry.relativePath]
@@ -107,32 +102,13 @@ function TreeNode({
     color = status ? statusToColor(status) : undefined
   }
 
-  const hasGitChanges = gitMap.has(entry.relativePath)
-
   const handleClick = useCallback(() => {
     if (isDirectory) {
       onToggleDir(entry.relativePath)
       return
     }
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current)
-      clickTimerRef.current = null
-      return
-    }
-    clickTimerRef.current = setTimeout(() => {
-      clickTimerRef.current = null
-      onFileClick(entry.relativePath, hasGitChanges)
-    }, 250)
-  }, [isDirectory, entry.relativePath, hasGitChanges, onToggleDir, onFileClick])
-
-  const handleDoubleClick = useCallback(() => {
-    if (isDirectory) return
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current)
-      clickTimerRef.current = null
-    }
-    onFileDoubleClick(entry.relativePath)
-  }, [isDirectory, entry.relativePath, onFileDoubleClick])
+    onFileClick(entry.relativePath)
+  }, [isDirectory, entry.relativePath, onToggleDir, onFileClick])
 
   return (
     <>
@@ -140,7 +116,6 @@ function TreeNode({
         className="filetree-node"
         style={{ paddingLeft: 8 + level * 16, color: color || 'var(--text-primary)' }}
         onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
       >
         <span className="filetree-caret">
           {isDirectory ? (isExpanded ? '▾' : '▸') : ''}
@@ -167,7 +142,6 @@ function TreeNode({
                 gitMap={gitMap}
                 onToggleDir={onToggleDir}
                 onFileClick={onFileClick}
-                onFileDoubleClick={onFileDoubleClick}
               />
             ))}
         </>
@@ -176,7 +150,7 @@ function TreeNode({
   )
 }
 
-export default function FileTree({ projectDir, gitStatus, onFileClick, onFileDoubleClick }: Props) {
+export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Record<string, DirectoryEntry[]>>({})
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
@@ -246,7 +220,6 @@ export default function FileTree({ projectDir, gitStatus, onFileClick, onFileDou
             gitMap={gitMap}
             onToggleDir={handleToggleDir}
             onFileClick={onFileClick}
-            onFileDoubleClick={onFileDoubleClick}
           />
         ))}
     </div>

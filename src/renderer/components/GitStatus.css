@@ -41,6 +41,7 @@
   padding: 2px 8px 2px 24px;
   cursor: pointer;
   gap: 8px;
+  user-select: none;
 }
 
 .gitstatus-file:hover {

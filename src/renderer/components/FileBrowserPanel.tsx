@@ -100,18 +100,6 @@ export default function FileBrowserPanel(): React.ReactElement | null {
   )
 
   const handleFileClick = useCallback(
-    (filePath: string, hasGitChanges: boolean) => {
-      if (!selectedProjectId || !selectedTaskId) return
-      if (hasGitChanges) {
-        openOrFocusDiffTab(selectedProjectId, selectedTaskId, focusedPane, filePath)
-      } else {
-        openOrFocusEditorTab(selectedProjectId, selectedTaskId, focusedPane, filePath)
-      }
-    },
-    [selectedProjectId, selectedTaskId, openOrFocusDiffTab, openOrFocusEditorTab]
-  )
-
-  const handleFileDoubleClick = useCallback(
     (filePath: string) => {
       if (!selectedProjectId || !selectedTaskId) return
       openOrFocusEditorTab(selectedProjectId, selectedTaskId, focusedPane, filePath)
@@ -125,14 +113,6 @@ export default function FileBrowserPanel(): React.ReactElement | null {
       openOrFocusDiffTab(selectedProjectId, selectedTaskId, focusedPane, filePath)
     },
     [selectedProjectId, selectedTaskId, openOrFocusDiffTab]
-  )
-
-  const handleGitFileDoubleClick = useCallback(
-    (filePath: string) => {
-      if (!selectedProjectId || !selectedTaskId) return
-      openOrFocusEditorTab(selectedProjectId, selectedTaskId, focusedPane, filePath)
-    },
-    [selectedProjectId, selectedTaskId, openOrFocusEditorTab]
   )
 
   if (!fileBrowserOpen || !isLocalProject) return null
@@ -165,13 +145,11 @@ export default function FileBrowserPanel(): React.ReactElement | null {
               projectDir={effectiveDir}
               gitStatus={gitStatus}
               onFileClick={handleFileClick}
-              onFileDoubleClick={handleFileDoubleClick}
             />
           ) : (
             <GitStatus
               gitStatus={gitStatus}
               onFileClick={handleGitFileClick}
-              onFileDoubleClick={handleGitFileDoubleClick}
             />
           )}
         </div>

@@ -9,6 +9,7 @@
   padding: 2px 8px;
   cursor: pointer;
   white-space: nowrap;
+  user-select: none;
 }
 
 .filetree-node:hover {

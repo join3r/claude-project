@@ -5,7 +5,6 @@ import './GitStatus.css'
 interface Props {
   gitStatus: GitStatusResult | null
   onFileClick: (filePath: string) => void
-  onFileDoubleClick: (filePath: string) => void
 }
 
 const BADGE_COLORS = {
@@ -22,7 +21,7 @@ const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: 'untracked', label: 'Untracked' },
 ]
 
-export default function GitStatus({ gitStatus, onFileClick, onFileDoubleClick }: Props) {
+export default function GitStatus({ gitStatus, onFileClick }: Props) {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
 
   const toggleSection = useCallback((key: string) => {
@@ -71,7 +70,6 @@ export default function GitStatus({ gitStatus, onFileClick, onFileDoubleClick }:
                   entry={entry}
                   sectionKey={key}
                   onFileClick={onFileClick}
-                  onFileDoubleClick={onFileDoubleClick}
                 />
               ))}
           </div>
@@ -85,45 +83,15 @@ interface FileRowProps {
   entry: GitStatusEntry
   sectionKey: SectionKey
   onFileClick: (filePath: string) => void
-  onFileDoubleClick: (filePath: string) => void
 }
 
-function FileRow({ entry, sectionKey, onFileClick, onFileDoubleClick }: FileRowProps) {
-  const clickTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (clickTimer.current) {
-        clearTimeout(clickTimer.current)
-        clickTimer.current = null
-        return
-      }
-      clickTimer.current = setTimeout(() => {
-        clickTimer.current = null
-        onFileClick(entry.relativePath)
-      }, 250)
-    },
-    [entry.relativePath, onFileClick]
-  )
-
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      if (clickTimer.current) {
-        clearTimeout(clickTimer.current)
-        clickTimer.current = null
-      }
-      onFileDoubleClick(entry.relativePath)
-    },
-    [entry.relativePath, onFileDoubleClick]
-  )
-
+function FileRow({ entry, sectionKey, onFileClick }: FileRowProps) {
   const colors = BADGE_COLORS[sectionKey]
 
   return (
     <div
       className="gitstatus-file"
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
+      onClick={() => onFileClick(entry.relativePath)}
     >
       <span
         className="gitstatus-badge"
