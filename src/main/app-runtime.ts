@@ -41,11 +41,16 @@ const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
 
 interface PtyRuntime {
   attachedWindowIds: Set<number>
+  controllerWindowId: number | null
+  cols: number
+  rows: number
   scrollback: string
   exitCode: number | null
 }
 
 interface PtyAttachResult {
+  cols: number
+  rows: number
   scrollback: string
   exitCode: number | null
 }
@@ -129,8 +134,13 @@ export class AppRuntime {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
       }
-      for (const runtime of this.ptyRuntimes.values()) {
+      for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
         runtime.attachedWindowIds.delete(window.id)
+        if (runtime.controllerWindowId === window.id) {
+          const nextController = runtime.attachedWindowIds.values().next().value ?? null
+          runtime.controllerWindowId = nextController
+          this.logDebug(`ptyControllerReassigned id=${tabId} windowId=${nextController ?? 'none'}`)
+        }
       }
     })
   }
@@ -371,11 +381,26 @@ export class AppRuntime {
       }
     )
 
-    ipcMain.on('pty-write', (_event, id: string, data: string) => {
+    ipcMain.on('pty-write', (event, id: string, data: string) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const runtime = this.ptyRuntimes.get(id)
+      if (!window || !runtime || !runtime.attachedWindowIds.has(window.id)) return
+      this.claimPtyControl(id, window.id)
       this.ptyManager.write(id, data)
     })
 
-    ipcMain.on('pty-resize', (_event, id: string, cols: number, rows: number) => {
+    ipcMain.on('pty-resize', (event, id: string, cols: number, rows: number) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const runtime = this.ptyRuntimes.get(id)
+      if (!window || !runtime || !runtime.attachedWindowIds.has(window.id)) return
+      if (!window.isFocused() && runtime.controllerWindowId !== window.id) {
+        this.logDebug(`ptyResizeIgnored id=${id} windowId=${window.id} cols=${cols} rows=${rows}`)
+        return
+      }
+      this.claimPtyControl(id, window.id)
+      runtime.cols = cols
+      runtime.rows = rows
+      this.broadcastToAttachedWindows(id, 'pty-size-sync', id, cols, rows)
       this.ptyManager.resize(id, cols, rows)
     })
 
@@ -502,6 +527,9 @@ export class AppRuntime {
       this.logDebug(`ptyAttach create windowId=${windowId} id=${id}`)
       runtime = {
         attachedWindowIds: new Set<number>(),
+        controllerWindowId: windowId,
+        cols,
+        rows,
         scrollback: this.scrollbackStorage.load(id) ?? '',
         exitCode: null
       }
@@ -513,6 +541,8 @@ export class AppRuntime {
       runtime.attachedWindowIds.add(windowId)
     }
     return {
+      cols: runtime.cols,
+      rows: runtime.rows,
       scrollback: runtime.scrollback,
       exitCode: runtime.exitCode
     }
@@ -590,6 +620,15 @@ export class AppRuntime {
     this.logDebug(`ptyKill id=${id}`)
     this.ptyManager.kill(id)
     this.ptyRuntimes.delete(id)
+  }
+
+  private claimPtyControl(tabId: string, windowId: number): void {
+    const runtime = this.ptyRuntimes.get(tabId)
+    if (!runtime) return
+    if (runtime.controllerWindowId !== windowId) {
+      runtime.controllerWindowId = windowId
+      this.logDebug(`ptyController id=${tabId} windowId=${windowId}`)
+    }
   }
 
   private updateWindowGeometry(windowId: number): void {

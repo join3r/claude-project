@@ -106,13 +106,16 @@ const api = {
     extraEnv?: Record<string, string>,
     projectId?: string,
     sshConfig?: SshConfig
-  ): Promise<{ scrollback: string; exitCode: number | null }> =>
+  ): Promise<{ cols: number; rows: number; scrollback: string; exitCode: number | null }> =>
     ipcRenderer.invoke('pty-spawn', id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig),
   ptyWrite: (id: string, data: string): void => ipcRenderer.send('pty-write', id, data),
   ptyResize: (id: string, cols: number, rows: number): void => ipcRenderer.send('pty-resize', id, cols, rows),
   ptyKill: (id: string): void => ipcRenderer.send('pty-kill', id),
   onPtyData: (callback: (id: string, data: string) => void): void => {
     ipcRenderer.on('pty-data', (_e, id, data) => callback(id, data))
+  },
+  onPtySizeSync: (callback: (id: string, cols: number, rows: number) => void): void => {
+    ipcRenderer.on('pty-size-sync', (_e, id, cols, rows) => callback(id, cols, rows))
   },
   onPtyExit: (callback: (id: string, exitCode: number) => void): void => {
     ipcRenderer.on('pty-exit', (_e, id, exitCode) => callback(id, exitCode))

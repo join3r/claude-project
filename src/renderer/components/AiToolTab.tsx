@@ -38,12 +38,24 @@ interface TerminalEntry {
   webglAddon: WebglAddon | null
   restoring: boolean
   pendingData: string[]
+  suppressResizeEvents: number
 }
 
 const terminals = new Map<string, TerminalEntry>()
 
 let ptyListenerRegistered = false
 let exitListenerRegistered = false
+let ptySizeListenerRegistered = false
+
+function resizeTerminal(entry: TerminalEntry, cols: number, rows: number): void {
+  if (entry.term.cols === cols && entry.term.rows === rows) return
+  entry.suppressResizeEvents += 1
+  try {
+    entry.term.resize(cols, rows)
+  } finally {
+    entry.suppressResizeEvents = Math.max(0, entry.suppressResizeEvents - 1)
+  }
+}
 
 const activityCallbacks = new Map<string, () => void>()
 
@@ -59,6 +71,16 @@ function ensurePtyListener(): void {
     }
     entry.term.write(data)
     activityCallbacks.get(id)?.()
+  })
+}
+
+function ensurePtySizeListener(): void {
+  if (ptySizeListenerRegistered) return
+  ptySizeListenerRegistered = true
+  window.api.onPtySizeSync((id: string, cols: number, rows: number) => {
+    const entry = terminals.get(id)
+    if (!entry) return
+    resizeTerminal(entry, cols, rows)
   })
 }
 
@@ -123,6 +145,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
+  const focusClaimRef = useRef(false)
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressUntilRef = useRef(0)
   const visibleRef = useRef(visible)
@@ -225,7 +248,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       const terminalElement = existingEntry.term.element
       if (terminalElement && terminalElement.parentElement !== hostRef.current) {
         hostRef.current.replaceChildren(terminalElement)
-        existingEntry.fitAddon.fit()
+        if (visible && document.hasFocus()) {
+          existingEntry.fitAddon.fit()
+          window.api.ptyResize(tabId, existingEntry.term.cols, existingEntry.term.rows)
+        }
       }
       return
     }
@@ -269,7 +295,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       searchAddon,
       webglAddon: null,
       restoring: false,
-      pendingData: []
+      pendingData: [],
+      suppressResizeEvents: 0
     })
 
     term.onData((data) => {
@@ -277,7 +304,21 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
 
     term.onResize(({ cols, rows }) => {
+      const currentEntry = terminals.get(tabId)
+      if (!currentEntry || currentEntry.suppressResizeEvents > 0) return
       window.api.ptyResize(tabId, cols, rows)
+    })
+
+    term.onFocus(() => {
+      focusClaimRef.current = true
+      const currentEntry = terminals.get(tabId)
+      if (!currentEntry) return
+      currentEntry.fitAddon.fit()
+      window.api.ptyResize(tabId, currentEntry.term.cols, currentEntry.term.rows)
+    })
+
+    term.onBlur(() => {
+      focusClaimRef.current = false
     })
 
     // Show scrollbar only while scrolling
@@ -349,6 +390,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
 
     ensurePtyListener()
+    ensurePtySizeListener()
     ensureExitListener()
     ensureBeforeUnloadHandler()
   }, [tabId, toolType, config])
@@ -401,7 +443,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       if (container.clientWidth === 0 || container.clientHeight === 0) return
       const entry = terminals.get(tabId)
       if (entry) {
-        entry.fitAddon.fit()
+        if (!spawnedRef.current || (visible && document.hasFocus() && focusClaimRef.current)) {
+          entry.fitAddon.fit()
+        }
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
           spawnedRef.current = true
@@ -430,13 +474,14 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
               ? await window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
               : await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
 
+            resizeTerminal(entry, attachResult.cols, attachResult.rows)
+
             const flushPending = () => {
               entry.restoring = false
               if (entry.pendingData.length > 0) {
                 entry.term.write(entry.pendingData.join(''))
                 entry.pendingData = []
               }
-              entry.fitAddon.fit()
               entry.term.scrollToBottom()
             }
 
@@ -479,13 +524,19 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       }
       const entry = terminals.get(tabId)
       if (entry) {
-        entry.fitAddon.fit()
+        if (document.hasFocus()) {
+          entry.fitAddon.fit()
+          focusClaimRef.current = true
+          window.api.ptyResize(tabId, entry.term.cols, entry.term.rows)
+        }
         entry.term.focus()
         const current = statusStore.getStatus(tabId)
         if (current === 'attention') {
           statusStore.setStatus(tabId, null)
         }
       }
+    } else {
+      focusClaimRef.current = false
     }
   }, [visible, tabId])
 
@@ -496,9 +547,12 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     if (entry) {
       entry.term.options.fontFamily = config.fontFamily
       entry.term.options.fontSize = config.fontSize + terminalZoomDelta
-      entry.fitAddon.fit()
+      if (visible && document.hasFocus()) {
+        entry.fitAddon.fit()
+        window.api.ptyResize(tabId, entry.term.cols, entry.term.rows)
+      }
     }
-  }, [config?.fontFamily, config?.fontSize, terminalZoomDelta, tabId])
+  }, [config?.fontFamily, config?.fontSize, terminalZoomDelta, tabId, visible])
 
   // Update terminal theme
   useEffect(() => {
