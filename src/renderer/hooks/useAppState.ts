@@ -30,6 +30,16 @@ import { moveTaskTab } from '../tabMove'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel'>>
 
+export function buildWindowTitle(projectName: string | null, taskName: string | null): string {
+  if (projectName && taskName) {
+    return `${projectName} / ${taskName}`
+  }
+  if (projectName) {
+    return projectName
+  }
+  return 'DevTool'
+}
+
 function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
@@ -916,6 +926,10 @@ export function useAppState() {
 
   const effectiveTheme = config?.theme === 'system' || !config ? theme : config.theme
   const effectiveTerminalTheme = config?.terminalTheme === 'system' || !config ? theme : config.terminalTheme
+
+  useEffect(() => {
+    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
+  }, [selectedProject?.name, selectedTask?.name])
 
   return {
     projects,

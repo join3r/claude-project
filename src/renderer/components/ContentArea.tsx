@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
-import { isRemoteProject } from '../../shared/types'
+import { buildWindowTitle } from '../hooks/useAppState'
+import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
@@ -26,6 +27,8 @@ export default function ContentArea(): React.ReactElement {
     setActiveTab,
     addTab,
     removeTab,
+    fileBrowserOpen,
+    toggleFileBrowser,
     zoomTerminal,
     zoomBrowser,
     getTaskViewState,
@@ -241,6 +244,11 @@ export default function ContentArea(): React.ReactElement {
 
   const selectedTunnelState = selectedProjectId ? tunnelStates[selectedProjectId] : undefined
   const selectedTaskView = selectedTask ? getTaskViewState(selectedTask) : null
+  const windowBarTitle = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
+  const canToggleFileBrowser = !!selectedProject
+    && !isRemoteProject(selectedProject)
+    && !isShellCommandProject(selectedProject)
+    && !!selectedProject.directory
   const tunnelButtonClassName = selectedProject && isRemoteProject(selectedProject)
     ? [
         'content-toolbar-btn',
@@ -257,6 +265,16 @@ export default function ContentArea(): React.ReactElement {
     <div className="content-area">
       {selectedProject && (
         <div className="content-toolbar">
+          <div className="content-toolbar-title" title={windowBarTitle}>
+            <span className="content-toolbar-project">{selectedProject.name}</span>
+            {selectedTask && (
+              <>
+                <span className="content-toolbar-separator"> / </span>
+                <span className="content-toolbar-task">{selectedTask.name}</span>
+              </>
+            )}
+          </div>
+          <div className="content-toolbar-actions">
           {isRemoteProject(selectedProject) && (
             <button
               className={tunnelButtonClassName}
@@ -264,6 +282,15 @@ export default function ContentArea(): React.ReactElement {
               title="Tunnel"
             >
               &#8596;
+            </button>
+          )}
+          {canToggleFileBrowser && (
+            <button
+              className={`content-toolbar-btn file-browser-btn${fileBrowserOpen ? ' content-toolbar-btn-active' : ''}`}
+              onClick={() => toggleFileBrowser()}
+              title={fileBrowserOpen ? 'Close file browser' : 'Open file browser'}
+            >
+              &#9636;
             </button>
           )}
           {selectedTask && (
@@ -275,6 +302,7 @@ export default function ContentArea(): React.ReactElement {
               {selectedTaskView?.splitOpen ? '\u25E7' : '\u2B12'}
             </button>
           )}
+          </div>
         </div>
       )}
 
