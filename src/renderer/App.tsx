@@ -3,9 +3,10 @@ import { AppProvider, useApp } from './context/AppContext'
 import { TabStatusProvider } from './context/TabStatusContext'
 import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
+import FileBrowserPanel from './components/FileBrowserPanel'
 
 function AppInner(): React.ReactElement {
-  const { effectiveTheme, exportWindowViewState } = useApp()
+  const { effectiveTheme, exportWindowViewState, toggleFileBrowser } = useApp()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [switcherRequested, setSwitcherRequested] = useState(false)
 
@@ -26,6 +27,12 @@ function AppInner(): React.ReactElement {
   }, [sidebarHidden])
 
   useEffect(() => {
+    return window.api.onMenuToggleFileBrowser(() => {
+      toggleFileBrowser()
+    })
+  }, [toggleFileBrowser])
+
+  useEffect(() => {
     return window.api.onMenuNewWindow(() => {
       void window.api.openWindow(exportWindowViewState())
     })
@@ -40,6 +47,7 @@ function AppInner(): React.ReactElement {
         />
       )}
       <ContentArea />
+      <FileBrowserPanel />
     </div>
   )
 }

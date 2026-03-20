@@ -22,7 +22,8 @@ import type {
   SshConfig,
   WorkspaceConfig,
   WindowViewState,
-  TaskViewState
+  TaskViewState,
+  FileBrowserTab
 } from '../../shared/types'
 import { applyQueuedStateUpdates, type StateUpdater } from './stateHydration'
 import { moveTaskTab } from '../tabMove'
@@ -549,10 +550,16 @@ export function useAppState() {
     }))
   }, [persistProjects])
 
-  const addTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', type: TabType) => {
+  const addTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', type: TabType, filePath?: string) => {
     const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
-    const title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
-    const tab: Tab = { id: uuid(), type, title }
+    let title: string
+    if (filePath) {
+      const fileName = filePath.split('/').pop() ?? filePath
+      title = type === 'diff' ? `${fileName} (diff)` : fileName
+    } else {
+      title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
+    }
+    const tab: Tab = { id: uuid(), type, title, ...(filePath ? { filePath } : {}) }
 
     persistProjects(prev => ({
       ...prev,
@@ -853,6 +860,52 @@ export function useAppState() {
     })
   }, [])
 
+  const toggleFileBrowser = useCallback(() => {
+    updateWindowViewState(prev => ({ ...prev, fileBrowserOpen: !prev.fileBrowserOpen }))
+  }, [updateWindowViewState])
+
+  const setFileBrowserWidth = useCallback((width: number) => {
+    updateWindowViewState(prev => ({ ...prev, fileBrowserWidth: Math.min(400, Math.max(150, width)) }))
+  }, [updateWindowViewState])
+
+  const setFileBrowserActiveTab = useCallback((tab: FileBrowserTab) => {
+    updateWindowViewState(prev => ({ ...prev, fileBrowserActiveTab: tab }))
+  }, [updateWindowViewState])
+
+  const openOrFocusDiffTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', filePath: string) => {
+    const project = projectsRef.current.find(p => p.id === projectId)
+    const task = project?.tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    const existingTab = [...task.tabs.left, ...task.tabs.right].find(
+      t => t.type === 'diff' && t.filePath === filePath
+    )
+    if (existingTab) {
+      const existingPane = task.tabs.left.includes(existingTab) ? 'left' : 'right'
+      setActiveTab(projectId, taskId, existingPane, existingTab.id)
+      return
+    }
+
+    addTab(projectId, taskId, pane, 'diff', filePath)
+  }, [addTab, setActiveTab])
+
+  const openOrFocusEditorTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', filePath: string) => {
+    const project = projectsRef.current.find(p => p.id === projectId)
+    const task = project?.tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    const existingTab = [...task.tabs.left, ...task.tabs.right].find(
+      t => t.type === 'editor' && t.filePath === filePath
+    )
+    if (existingTab) {
+      const existingPane = task.tabs.left.includes(existingTab) ? 'left' : 'right'
+      setActiveTab(projectId, taskId, existingPane, existingTab.id)
+      return
+    }
+
+    addTab(projectId, taskId, pane, 'editor', filePath)
+  }, [addTab, setActiveTab])
+
   const selectedProjectId = windowViewState.selectedProjectId
   const selectedTaskId = windowViewState.selectedTaskId
   const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null
@@ -911,7 +964,15 @@ export function useAppState() {
     terminalZoomDelta,
     browserZoomFactor,
     zoomTerminal,
-    zoomBrowser
+    zoomBrowser,
+    fileBrowserOpen: windowViewState.fileBrowserOpen,
+    fileBrowserWidth: windowViewState.fileBrowserWidth,
+    fileBrowserActiveTab: windowViewState.fileBrowserActiveTab,
+    toggleFileBrowser,
+    setFileBrowserWidth,
+    setFileBrowserActiveTab,
+    openOrFocusDiffTab,
+    openOrFocusEditorTab
   }
 }
 

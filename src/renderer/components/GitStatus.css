@@ -1,0 +1,74 @@
+.gitstatus {
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.gitstatus-section {
+  margin-bottom: 4px;
+}
+
+.gitstatus-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.gitstatus-header:hover {
+  background: var(--hover);
+}
+
+.gitstatus-count {
+  margin-left: 6px;
+  font-weight: normal;
+  opacity: 0.7;
+}
+
+.gitstatus-caret {
+  width: 16px;
+  text-align: center;
+  font-size: 10px;
+}
+
+.gitstatus-file {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px 2px 24px;
+  cursor: pointer;
+  gap: 8px;
+}
+
+.gitstatus-file:hover {
+  background: var(--hover);
+}
+
+.gitstatus-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.gitstatus-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitstatus-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-secondary);
+}

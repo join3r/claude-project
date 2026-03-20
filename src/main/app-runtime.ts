@@ -12,6 +12,10 @@ import { CodexSessionManager } from './codex-session-manager'
 import { WorkspaceManager } from './workspace-manager'
 import type {
   AppConfig,
+  DirectoryEntry,
+  GitStatusResult,
+  GitStatusEntry,
+  GitFileStatus,
   PersistedWindowState,
   ProjectsData,
   SshConfig,
@@ -24,6 +28,11 @@ import {
   cloneWindowGeometry,
   cloneWindowViewState
 } from '../shared/types'
+import fsPromises from 'fs/promises'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 const CONFIG_DIR = path.join(os.homedir(), '.devtool')
 const MAX_SCROLLBACK_CHARS = 2_000_000
@@ -375,6 +384,83 @@ export class AppRuntime {
         return this.workspaceManager.delete({ projectDir, worktreePath, branchName, baseBranch, force, keepBranch })
       }
     )
+
+    // File browser
+    const validatePath = (projectCwd: string, relativePath: string): string => {
+      const resolved = path.resolve(projectCwd, relativePath)
+      if (!resolved.startsWith(path.resolve(projectCwd) + path.sep) && resolved !== path.resolve(projectCwd)) {
+        throw new Error('Path traversal not allowed')
+      }
+      return resolved
+    }
+
+    ipcMain.handle('fb-read-directory', async (_event, projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> => {
+      const fullPath = validatePath(projectCwd, relativeDirPath)
+      const entries = await fsPromises.readdir(fullPath, { withFileTypes: true })
+      return entries
+        .filter(entry => !entry.name.startsWith('.'))
+        .map(entry => ({
+          name: entry.name,
+          type: entry.isDirectory() ? 'directory' as const : 'file' as const,
+          relativePath: path.join(relativeDirPath, entry.name)
+        }))
+        .sort((a, b) => {
+          if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+    })
+
+    ipcMain.handle('fb-read-file', async (_event, projectCwd: string, relativeFilePath: string): Promise<string> => {
+      const fullPath = validatePath(projectCwd, relativeFilePath)
+      return fsPromises.readFile(fullPath, 'utf-8')
+    })
+
+    ipcMain.handle('fb-write-file', async (_event, projectCwd: string, relativeFilePath: string, content: string): Promise<void> => {
+      const fullPath = validatePath(projectCwd, relativeFilePath)
+      await fsPromises.writeFile(fullPath, content, 'utf-8')
+    })
+
+    ipcMain.handle('fb-git-status', async (_event, projectCwd: string): Promise<GitStatusResult> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      try {
+        const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: resolvedCwd })
+        const staged: GitStatusEntry[] = []
+        const unstaged: GitStatusEntry[] = []
+        const untracked: GitStatusEntry[] = []
+
+        for (const line of stdout.split('\n')) {
+          if (!line) continue
+          const indexStatus = line[0]
+          const workTreeStatus = line[1]
+          const filePath = line.slice(3).trim()
+
+          if (indexStatus === '?' && workTreeStatus === '?') {
+            untracked.push({ relativePath: filePath, status: '?' })
+          } else {
+            if (indexStatus && indexStatus !== ' ' && indexStatus !== '?') {
+              staged.push({ relativePath: filePath, status: indexStatus as GitFileStatus })
+            }
+            if (workTreeStatus && workTreeStatus !== ' ' && workTreeStatus !== '?') {
+              unstaged.push({ relativePath: filePath, status: workTreeStatus as GitFileStatus })
+            }
+          }
+        }
+
+        return { staged, unstaged, untracked }
+      } catch {
+        return { staged: [], unstaged: [], untracked: [] }
+      }
+    })
+
+    ipcMain.handle('fb-git-diff', async (_event, projectCwd: string, relativeFilePath: string): Promise<string> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      try {
+        const { stdout } = await execFileAsync('git', ['show', `HEAD:${relativeFilePath}`], { cwd: resolvedCwd })
+        return stdout
+      } catch {
+        return ''
+      }
+    })
   }
 
   private async attachOrCreatePty(

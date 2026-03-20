@@ -1,0 +1,35 @@
+.filetree {
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.filetree-node {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filetree-node:hover {
+  background: var(--hover);
+}
+
+.filetree-caret {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.filetree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filetree-loading {
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  font-style: italic;
+}

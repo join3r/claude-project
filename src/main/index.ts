@@ -80,6 +80,11 @@ function buildAppMenu(): void {
           accelerator: 'CmdOrCtrl+B',
           click: () => sendToRenderer('menu-toggle-sidebar')
         },
+        {
+          label: 'Toggle File Browser',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: () => sendToRenderer('menu-toggle-file-browser')
+        },
         { type: 'separator' },
         {
           label: 'Reload Tab',
