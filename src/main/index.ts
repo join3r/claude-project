@@ -52,6 +52,11 @@ function buildAppMenu(): void {
           click: () => sendToRenderer('menu-close-tab')
         },
         {
+          label: 'Reopen Closed Tab',
+          accelerator: 'CmdOrCtrl+Shift+T',
+          click: () => sendToRenderer('menu-reopen-closed-tab')
+        },
+        {
           label: 'Project Switcher',
           accelerator: 'CmdOrCtrl+P',
           click: () => sendToRenderer('menu-project-switcher')

@@ -27,6 +27,7 @@ export default function ContentArea(): React.ReactElement {
     setActiveTab,
     addTab,
     removeTab,
+    reopenClosedTab,
     fileBrowserOpen,
     toggleFileBrowser,
     zoomTerminal,
@@ -116,10 +117,8 @@ export default function ContentArea(): React.ReactElement {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [projects, selectedProjectId, selectedTaskId, setActiveTab, rememberFocusedPane, getTaskViewState])
 
-  // Menu shortcut handlers (Cmd+W, Cmd+R, Cmd+T)
+  // Menu shortcut handlers (Cmd+W, Cmd+Shift+T, Cmd+R, Cmd+T)
   useEffect(() => {
-    if (!selectedProjectId || !selectedTaskId) return
-
     const getActivePaneFromDom = (): PaneSide | null => {
       const activeElement = typeof document !== 'undefined' ? document.activeElement : null
       const paneElement = typeof Element !== 'undefined' && activeElement instanceof Element
@@ -137,6 +136,7 @@ export default function ContentArea(): React.ReactElement {
     }
 
     const getActiveTabInfo = () => {
+      if (!selectedProjectId || !selectedTaskId) return null
       const project = projects.find(p => p.id === selectedProjectId)
       const task = project?.tasks.find(t => t.id === selectedTaskId)
       if (!task) return null
@@ -149,8 +149,15 @@ export default function ContentArea(): React.ReactElement {
 
     const cleanupClose = window.api.onMenuCloseTab(() => {
       const info = getActiveTabInfo()
-      if (info?.activeTabId) {
-        removeTab(selectedProjectId!, selectedTaskId!, info.pane, info.activeTabId)
+      if (selectedProjectId && selectedTaskId && info?.activeTabId) {
+        removeTab(selectedProjectId, selectedTaskId, info.pane, info.activeTabId)
+      }
+    })
+
+    const cleanupReopenClosed = window.api.onMenuReopenClosedTab(() => {
+      const restoredPane = reopenClosedTab()
+      if (restoredPane) {
+        rememberFocusedPane(restoredPane)
       }
     })
 
@@ -163,8 +170,9 @@ export default function ContentArea(): React.ReactElement {
     })
 
     const cleanupNewTerminal = window.api.onMenuNewTerminal(() => {
+      if (!selectedProjectId || !selectedTaskId) return
       const pane = getActiveTabInfo()?.pane ?? 'left'
-      addTab(selectedProjectId!, selectedTaskId!, pane, 'terminal')
+      addTab(selectedProjectId, selectedTaskId, pane, 'terminal')
       rememberFocusedPane(pane)
     })
 
@@ -183,13 +191,14 @@ export default function ContentArea(): React.ReactElement {
 
     return () => {
       cleanupClose()
+      cleanupReopenClosed()
       cleanupReload()
       cleanupNewTerminal()
       cleanupZoomIn()
       cleanupZoomOut()
       cleanupZoomReset()
     }
-  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, zoomTerminal, zoomBrowser, rememberFocusedPane, getTaskViewState])
+  }, [projects, selectedProjectId, selectedTaskId, addTab, removeTab, reopenClosedTab, zoomTerminal, zoomBrowser, rememberFocusedPane, getTaskViewState])
 
   const handleDividerMouseDown = useCallback(
     (projectId: string, taskId: string) => (e: React.MouseEvent) => {

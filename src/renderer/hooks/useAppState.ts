@@ -27,6 +27,11 @@ import type {
 } from '../../shared/types'
 import { applyQueuedStateUpdates, type StateUpdater } from './stateHydration'
 import { moveTaskTab } from '../tabMove'
+import {
+  pushRecentlyClosedTab,
+  shiftRestorableClosedTab,
+  type RecentlyClosedTab
+} from '../recentlyClosedTabs'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel'>>
 
@@ -81,6 +86,7 @@ export function useAppState() {
   const lastSavedProjectsJsonRef = useRef<string | null>(null)
   const lastSavedConfigJsonRef = useRef<string | null>(null)
   const lastSavedWindowStateJsonRef = useRef<string | null>(null)
+  const recentlyClosedTabsRef = useRef<RecentlyClosedTab[]>([])
 
   const updateWindowViewState = useCallback((updater: (prev: WindowViewState) => WindowViewState) => {
     setWindowViewState(prev => {
@@ -210,6 +216,18 @@ export function useAppState() {
     }
     setProjectsData(prev => updater(prev))
   }, [])
+
+  const cleanupClosedTabHistory = useCallback((entries: RecentlyClosedTab[]) => {
+    for (const entry of entries) {
+      void window.api.scrollbackDelete(entry.tab.id)
+    }
+  }, [])
+
+  const rememberClosedTab = useCallback((entry: RecentlyClosedTab) => {
+    const next = pushRecentlyClosedTab(recentlyClosedTabsRef.current, entry)
+    recentlyClosedTabsRef.current = next.history
+    cleanupClosedTabHistory(next.evicted)
+  }, [cleanupClosedTabHistory])
 
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
     const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, ...updates })
@@ -623,9 +641,22 @@ export function useAppState() {
   }, [persistProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const removeTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    const tabIndex = task?.tabs[pane].findIndex(tab => tab.id === tabId) ?? -1
+    const removedTab = tabIndex >= 0 ? task?.tabs[pane][tabIndex] ?? null : null
+
+    if (removedTab && tabIndex >= 0) {
+      rememberClosedTab({
+        projectId,
+        taskId,
+        pane,
+        index: tabIndex,
+        tab: removedTab
+      })
+    }
+
     updateWindowViewState(prev => {
-      const project = projectsRef.current.find(candidate => candidate.id === projectId)
-      const task = project?.tasks.find(candidate => candidate.id === taskId)
       if (!task) return prev
 
       const currentState = getTaskViewStateForTask(task)
@@ -669,8 +700,78 @@ export function useAppState() {
     }))
 
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-    void window.api.scrollbackDelete(tabId)
-  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask])
+  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask, rememberClosedTab])
+
+  const reopenClosedTab = useCallback((): 'left' | 'right' | null => {
+    const next = shiftRestorableClosedTab(recentlyClosedTabsRef.current, projectsRef.current)
+    recentlyClosedTabsRef.current = next.history
+    cleanupClosedTabHistory(next.stale)
+
+    if (!next.entry) return null
+
+    const { projectId, taskId, pane, index, tab } = next.entry
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    if (!project || !task) {
+      cleanupClosedTabHistory([next.entry])
+      return null
+    }
+
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project =>
+        project.id === projectId
+          ? {
+              ...project,
+              tasks: project.tasks.map(task => {
+                if (task.id !== taskId) return task
+                if (task.tabs[pane].some(existingTab => existingTab.id === tab.id)) return task
+
+                const nextTabs = [...task.tabs[pane]]
+                nextTabs.splice(Math.min(Math.max(index, 0), nextTabs.length), 0, tab)
+
+                return {
+                  ...task,
+                  tabs: {
+                    ...task.tabs,
+                    [pane]: nextTabs
+                  }
+                }
+              })
+            }
+          : project
+      )
+    }))
+
+    updateWindowViewState(prev => {
+      const currentState = getTaskViewStateForTask(task)
+      return {
+        ...prev,
+        selectedProjectId: projectId,
+        selectedTaskId: taskId,
+        taskStates: {
+          ...prev.taskStates,
+          [taskId]: {
+            ...cloneTaskState(currentState),
+            activeTab: {
+              ...currentState.activeTab,
+              [pane]: tab.id
+            }
+          }
+        }
+      }
+    })
+
+    if (isRemoteProject(project) && project.ssh) {
+      window.api.sshStatus(projectId).then(status => {
+        if (status !== 'connected' && status !== 'connecting') {
+          window.api.sshConnect(projectId, project.ssh!).catch(() => {})
+        }
+      })
+    }
+
+    return pane
+  }, [cleanupClosedTabHistory, persistProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const updateTabUrl = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, url: string) => {
     persistProjects(prev => ({
@@ -967,6 +1068,7 @@ export function useAppState() {
     reorderTasks,
     addTab,
     removeTab,
+    reopenClosedTab,
     updateTabUrl,
     updateTabSessionId,
     setActiveTab,

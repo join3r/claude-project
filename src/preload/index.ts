@@ -132,6 +132,11 @@ const api = {
     ipcRenderer.on('menu-close-tab', handler)
     return () => ipcRenderer.removeListener('menu-close-tab', handler)
   },
+  onMenuReopenClosedTab: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-reopen-closed-tab', handler)
+    return () => ipcRenderer.removeListener('menu-reopen-closed-tab', handler)
+  },
   onMenuReloadTab: (callback: () => void): (() => void) => {
     const handler = () => callback()
     ipcRenderer.on('menu-reload-tab', handler)
