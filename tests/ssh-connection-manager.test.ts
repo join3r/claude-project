@@ -199,6 +199,28 @@ describe('SshConnectionManager', () => {
     expect(args).toContain('-S')
   })
 
+  it('builds SOCKS proxy args as standalone connection (no ControlMaster socket)', () => {
+    const args = manager.buildSocksProxyArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 2222,
+      username: 'deploy',
+      keyFile: '/home/user/.ssh/id_ed25519',
+      remoteDir: '/home/deploy/app'
+    }, 12345)
+    // Must NOT use ControlMaster socket — slave exits immediately with -D
+    expect(args).not.toContain('-S')
+    expect(args).not.toContain(path.join(socketDir, 'proj-1.sock'))
+    expect(args).toContain('-p')
+    expect(args).toContain('2222')
+    expect(args).toContain('-i')
+    expect(args).toContain('/home/user/.ssh/id_ed25519')
+    expect(args).toContain('-D')
+    expect(args).toContain('12345')
+    expect(args).toContain('-N')
+    expect(args).toContain('ExitOnForwardFailure=yes')
+    expect(args).toContain('deploy@dev.example.com')
+  })
+
   it('emits status-changed events', () => {
     const handler = vi.fn()
     manager.on('status-changed', handler)
@@ -466,5 +488,56 @@ describe('SshConnectionManager health checks', () => {
     await vi.advanceTimersByTimeAsync(20000)
     expect(checkSpy).not.toHaveBeenCalled()
     checkSpy.mockRestore()
+  })
+})
+
+describe('SshConnectionManager SOCKS proxy', () => {
+  let manager: SshConnectionManager
+  let socketDir: string
+
+  beforeEach(() => {
+    socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-test-'))
+    manager = new SshConnectionManager(socketDir, 9999)
+  })
+
+  afterEach(() => {
+    manager.disconnectAll()
+    fs.rmSync(socketDir, { recursive: true })
+  })
+
+  it('getSocksProxy returns undefined when no proxy exists', () => {
+    expect(manager.getSocksProxy('proj-1')).toBeUndefined()
+  })
+
+  it('getConfig returns stored config', () => {
+    ;(manager as any).configs.set('proj-1', { host: 'h', port: 22, username: 'u', remoteDir: '/d' })
+    expect(manager.getConfig('proj-1')).toEqual({ host: 'h', port: 22, username: 'u', remoteDir: '/d' })
+  })
+
+  it('clearProject removes SOCKS proxy entry', () => {
+    ;(manager as any).socksProxies.set('proj-1', { port: 12345, process: { kill: vi.fn() } })
+    manager.clearProject('proj-1')
+    expect(manager.getSocksProxy('proj-1')).toBeUndefined()
+  })
+
+  it('startSocksProxy returns existing port when proxy already running (idempotent)', async () => {
+    ;(manager as any).socksProxies.set('proj-1', { port: 54321, process: { kill: vi.fn() } })
+    manager.setStatus('proj-1', 'connected')
+
+    const port = await manager.startSocksProxy('proj-1', {
+      host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+    })
+    expect(port).toBe(54321)
+  })
+
+  it('startSocksProxy throws when SSH is not connected', async () => {
+    await expect(manager.startSocksProxy('proj-1', {
+      host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app'
+    })).rejects.toThrow('SSH connection not established')
+  })
+
+  it('stopSocksProxy is a no-op when no proxy exists', async () => {
+    await manager.stopSocksProxy('proj-1')
+    expect(manager.getSocksProxy('proj-1')).toBeUndefined()
   })
 })

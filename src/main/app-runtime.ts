@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron'
+import { BrowserWindow, dialog, ipcMain, nativeTheme, session } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -89,6 +89,8 @@ export class AppRuntime {
   private sshManager!: SshConnectionManager
   private started = false
   private quitting = false
+  private socksProxyEnabled = new Map<string, boolean>()
+  private socksProxyStarting = new Map<string, Promise<number>>()
   private projectsData: ProjectsData
   private config: AppConfig
   private startupWindowStates: PersistedWindowState[]
@@ -178,14 +180,45 @@ export class AppRuntime {
       this.broadcastToAttachedWindows(tabId, 'hook-notification', tabId, body)
     })
 
-    this.sshManager.on('status-changed', (projectId: string, status: string) => {
+    this.sshManager.on('status-changed', async (projectId: string, status: string) => {
       this.logDebug(`sshStatus projectId=${projectId} status=${status}`)
       this.broadcastToAllWindows('ssh-status-changed', projectId, status)
+
+      if (status === 'disconnected' && this.socksProxyEnabled.get(projectId)) {
+        const ses = session.fromPartition(`persist:browser-${projectId}`)
+        await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
+        await ses.closeAllConnections().catch(() => {})
+        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+      }
     })
 
     this.sshManager.on('tunnel-status-changed', (projectId: string, status: string, error?: string) => {
       this.logDebug(`tunnelStatus projectId=${projectId} status=${status}${error ? ` error=${error}` : ''}`)
       this.broadcastToAllWindows('ssh-tunnel-status-changed', projectId, status, error)
+    })
+
+    this.sshManager.on('socks-proxy-status-changed', async (projectId: string, enabled: boolean) => {
+      if (!enabled) {
+        const ses = session.fromPartition(`persist:browser-${projectId}`)
+        await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
+        await ses.closeAllConnections().catch(() => {})
+        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+
+        const config = this.sshManager.getConfig(projectId)
+        if (this.socksProxyEnabled.get(projectId) && config && this.sshManager.getStatus(projectId) === 'connected') {
+          try {
+            const port = await this.sshManager.startSocksProxy(projectId, config)
+            await ses.setProxy({
+              proxyRules: `socks5://127.0.0.1:${port}`,
+              proxyBypassRules: '<-loopback>'
+            })
+            await ses.closeAllConnections()
+            this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
+          } catch {
+            // Auto-restart failed — stay in direct mode
+          }
+        }
+      }
     })
 
     nativeTheme.on('updated', () => {
@@ -288,9 +321,30 @@ export class AppRuntime {
           // Keep SSH connected even when restoring the tunnel fails.
         }
       }
+      if (this.socksProxyEnabled.get(projectId)) {
+        try {
+          const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
+          const ses = session.fromPartition(`persist:browser-${projectId}`)
+          await ses.setProxy({
+            proxyRules: `socks5://127.0.0.1:${port}`,
+            proxyBypassRules: '<-loopback>'
+          })
+          await ses.closeAllConnections()
+          this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
+        } catch {
+          // Keep SSH connected even when restoring SOCKS proxy fails.
+        }
+      }
     })
 
     ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
+      // Reset session proxy before disconnect since stopSocksProxy suppresses the exit event
+      if (this.socksProxyEnabled.get(projectId)) {
+        const ses = session.fromPartition(`persist:browser-${projectId}`)
+        await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
+        await ses.closeAllConnections().catch(() => {})
+        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+      }
       await this.sshManager.disconnect(projectId, sshConfig)
     })
 
@@ -304,6 +358,67 @@ export class AppRuntime {
 
     ipcMain.handle('ssh-tunnel-status', (_event, projectId: string) => {
       return clone(this.sshManager.getTunnelState(projectId))
+    })
+
+    ipcMain.handle('socks-proxy-enable', async (_event, projectId: string, sshConfig: SshConfig) => {
+      this.logDebug(`socksProxyEnable projectId=${projectId} sshStatus=${this.sshManager.getStatus(projectId)}`)
+      this.socksProxyEnabled.set(projectId, true)
+
+      const pending = this.socksProxyStarting.get(projectId)
+      if (pending) {
+        const port = await pending
+        return { port }
+      }
+
+      const startPromise = (async () => {
+        this.logDebug(`socksProxyEnable starting proxy for ${projectId}`)
+        const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
+        this.logDebug(`socksProxyEnable proxy started on port ${port}`)
+        // Re-check desired state after async startup — a disable may have raced us
+        if (!this.socksProxyEnabled.get(projectId)) {
+          await this.sshManager.stopSocksProxy(projectId)
+          throw new Error('SOCKS proxy was disabled during startup')
+        }
+        const ses = session.fromPartition(`persist:browser-${projectId}`)
+        await ses.setProxy({
+          proxyRules: `socks5://127.0.0.1:${port}`,
+          proxyBypassRules: '<-loopback>'
+        })
+        await ses.closeAllConnections()
+        this.logDebug(`socksProxyEnable session configured for ${projectId} port=${port}`)
+        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
+        return port
+      })()
+
+      this.socksProxyStarting.set(projectId, startPromise)
+      try {
+        const port = await startPromise
+        this.logDebug(`socksProxyEnable success projectId=${projectId} port=${port}`)
+        return { port }
+      } catch (err) {
+        this.logDebug(`socksProxyEnable FAILED projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
+        this.socksProxyEnabled.set(projectId, false)
+        throw err
+      } finally {
+        this.socksProxyStarting.delete(projectId)
+      }
+    })
+
+    ipcMain.handle('socks-proxy-disable', async (_event, projectId: string) => {
+      this.socksProxyEnabled.set(projectId, false)
+      await this.sshManager.stopSocksProxy(projectId)
+      const ses = session.fromPartition(`persist:browser-${projectId}`)
+      await ses.setProxy({ proxyRules: 'direct://' })
+      await ses.closeAllConnections()
+      this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+    })
+
+    ipcMain.handle('socks-proxy-status', (_event, projectId: string) => {
+      const hasEntry = this.socksProxyEnabled.has(projectId)
+      const enabled = hasEntry ? this.socksProxyEnabled.get(projectId)! : undefined
+      const proxy = this.sshManager.getSocksProxy(projectId)
+      this.logDebug(`socksProxyStatus projectId=${projectId} hasEntry=${hasEntry} enabled=${enabled} port=${proxy?.port}`)
+      return { enabled, port: proxy?.port }
     })
 
     ipcMain.handle('hooks-inject', (_event, projectDir: string) => {
