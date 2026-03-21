@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
-import { execFile } from 'child_process'
+import { execFile, spawn, type ChildProcess } from 'child_process'
 import fs from 'fs'
+import net from 'net'
 import path from 'path'
 import type { SshConfig, TunnelConfig, TunnelState, TunnelStatus } from '../shared/types'
 
@@ -14,6 +15,8 @@ export class SshConnectionManager extends EventEmitter {
   private configs = new Map<string, SshConfig>()
   private tunnels = new Map<string, TunnelConfig>()
   private tunnelStates = new Map<string, TunnelState>()
+  private socksProxies = new Map<string, { port: number; process: ChildProcess }>()
+  private socksStartPromises = new Map<string, Promise<number>>()
 
   /** Promisified execFile that always returns { stdout, stderr } */
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
@@ -78,6 +81,12 @@ export class SshConnectionManager extends EventEmitter {
     this.configs.delete(projectId)
     this.tunnels.delete(projectId)
     this.tunnelStates.delete(projectId)
+    this.socksStartPromises.delete(projectId)
+    const socksEntry = this.socksProxies.get(projectId)
+    if (socksEntry) {
+      try { socksEntry.process.kill() } catch { /* best-effort */ }
+      this.socksProxies.delete(projectId)
+    }
   }
 
   /** Args to establish the ControlMaster connection (no port forwarding yet). */
@@ -186,6 +195,127 @@ export class SshConnectionManager extends EventEmitter {
     ]
   }
 
+  buildSocksProxyArgs(projectId: string, config: SshConfig, localPort: number): string[] {
+    return [
+      ...this.buildBaseArgs(projectId, config),
+      '-D', String(localPort),
+      '-N',
+      '-o', 'ExitOnForwardFailure=yes',
+      `${config.username}@${config.host}`
+    ]
+  }
+
+  getConfig(projectId: string): SshConfig | undefined {
+    return this.configs.get(projectId)
+  }
+
+  getSocksProxy(projectId: string): { port: number } | undefined {
+    const entry = this.socksProxies.get(projectId)
+    return entry ? { port: entry.port } : undefined
+  }
+
+  private findFreePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer()
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address()
+        const port = (addr as net.AddressInfo).port
+        server.close(() => resolve(port))
+      })
+      server.on('error', reject)
+    })
+  }
+
+  private waitForPort(port: number, timeoutMs = 5000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + timeoutMs
+      const tryConnect = () => {
+        if (Date.now() > deadline) {
+          reject(new Error(`SOCKS proxy did not become ready on port ${port} within ${timeoutMs}ms`))
+          return
+        }
+        const sock = net.createConnection({ host: '127.0.0.1', port }, () => {
+          sock.destroy()
+          resolve()
+        })
+        sock.on('error', () => {
+          setTimeout(tryConnect, 100)
+        })
+      }
+      tryConnect()
+    })
+  }
+
+  async startSocksProxy(projectId: string, config: SshConfig): Promise<number> {
+    const existing = this.socksProxies.get(projectId)
+    if (existing) return existing.port
+
+    const pending = this.socksStartPromises.get(projectId)
+    if (pending) return pending
+
+    if (this.getStatus(projectId) !== 'connected') {
+      throw new Error('SSH connection not established')
+    }
+
+    const startPromise = this.doStartSocksProxy(projectId, config, 0)
+    this.socksStartPromises.set(projectId, startPromise)
+
+    try {
+      const port = await startPromise
+      return port
+    } finally {
+      this.socksStartPromises.delete(projectId)
+    }
+  }
+
+  private async doStartSocksProxy(projectId: string, config: SshConfig, attempt: number): Promise<number> {
+    const port = await this.findFreePort()
+    const args = this.buildSocksProxyArgs(projectId, config, port)
+    const child = spawn('ssh', args, { stdio: ['ignore', 'ignore', 'pipe'] })
+
+    let stderr = ''
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+
+    try {
+      await this.waitForPort(port)
+    } catch {
+      child.kill()
+      if (attempt < 1 && !stderr.includes('Permission denied') && !stderr.includes('Connection refused')) {
+        return this.doStartSocksProxy(projectId, config, attempt + 1)
+      }
+      throw new Error(`SOCKS proxy failed to start on port ${port}${stderr ? ': ' + stderr.slice(0, 200) : ''}`)
+    }
+
+    child.on('exit', () => {
+      if (this.socksProxies.has(projectId)) {
+        this.socksProxies.delete(projectId)
+        this.emit('socks-proxy-status-changed', projectId, false)
+      }
+    })
+
+    this.socksProxies.set(projectId, { port, process: child })
+    return port
+  }
+
+  async stopSocksProxy(projectId: string): Promise<void> {
+    const entry = this.socksProxies.get(projectId)
+    if (!entry) return
+
+    this.socksProxies.delete(projectId)
+    entry.process.kill('SIGTERM')
+
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        try { entry.process.kill('SIGKILL') } catch { /* already dead */ }
+        resolve()
+      }, 3000)
+      entry.process.on('exit', () => {
+        clearTimeout(timeout)
+        resolve()
+      })
+    })
+  }
+
   /** Return all currently-connected project configs (used for cleanup on shutdown). */
   getConnectedProjects(): Map<string, SshConfig> {
     const connected = new Map<string, SshConfig>()
@@ -235,6 +365,7 @@ export class SshConnectionManager extends EventEmitter {
 
   async disconnect(projectId: string, config: SshConfig): Promise<void> {
     this.stopHealthCheck(projectId)
+    await this.stopSocksProxy(projectId)
     this.clearTunnelRuntime(projectId)
     const args = this.buildExitArgs(projectId, config)
     try {
