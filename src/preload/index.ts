@@ -59,6 +59,19 @@ const api = {
     ipcRenderer.on('ssh-tunnel-status-changed', (_e, projectId, status, error) => callback(projectId, error ? { status, error } : { status }))
   },
 
+  // SOCKS proxy
+  socksProxyEnable: (projectId: string, sshConfig: SshConfig): Promise<{ port: number }> =>
+    ipcRenderer.invoke('socks-proxy-enable', projectId, sshConfig),
+  socksProxyDisable: (projectId: string): Promise<void> =>
+    ipcRenderer.invoke('socks-proxy-disable', projectId),
+  socksProxyStatus: (projectId: string): Promise<{ enabled: boolean | undefined; port?: number }> =>
+    ipcRenderer.invoke('socks-proxy-status', projectId),
+  onSocksProxyStatusChanged: (callback: (projectId: string, enabled: boolean, port?: number) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, projectId: string, enabled: boolean, port?: number) => callback(projectId, enabled, port)
+    ipcRenderer.on('socks-proxy-status-changed', handler)
+    return () => ipcRenderer.removeListener('socks-proxy-status-changed', handler)
+  },
+
   // Theme
   getNativeTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('get-native-theme'),
   onThemeChanged: (callback: (theme: 'dark' | 'light') => void): void => {
