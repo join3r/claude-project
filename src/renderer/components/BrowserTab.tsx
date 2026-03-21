@@ -75,8 +75,28 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
 
     let cancelled = false
 
+    const waitForSsh = async (): Promise<boolean> => {
+      // Poll SSH status — on app restore SSH may be 'disconnected' briefly before
+      // the connection starts, so don't give up on the first 'disconnected'.
+      for (let i = 0; i < 50; i++) {
+        if (cancelled) return false
+        const sshStatus = await window.api.sshStatus(projectId)
+        if (sshStatus === 'connected') return true
+        await new Promise(r => setTimeout(r, 200))
+      }
+      return false
+    }
+
     const initProxy = async () => {
       try {
+        // Wait for SSH to connect before setting up proxy
+        const sshReady = await waitForSsh()
+        if (cancelled || !sshReady) {
+          setProxyEnabled(false)
+          setProxyReady(true)
+          return
+        }
+
         const status = await window.api.socksProxyStatus(projectId)
         if (cancelled) return
 
@@ -96,10 +116,13 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
           setProxyEnabled(true)
           setProxyReady(true)
           setProxyLoading(false)
+          // Kick the webview after it mounts — the initial src load can get stuck
+          // when the partition session was just configured.
+          setTimeout(() => { if (!cancelled) webviewRef.current?.reload() }, 100)
         }
       } catch {
         if (cancelled) return
-        // SSH not connected or proxy failed — fall back to direct
+        // Proxy failed — fall back to direct
         setProxyEnabled(false)
         setProxyReady(true)
         setProxyLoading(false)

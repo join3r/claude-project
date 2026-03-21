@@ -199,7 +199,7 @@ describe('SshConnectionManager', () => {
     expect(args).toContain('-S')
   })
 
-  it('builds SOCKS proxy args with base args and ExitOnForwardFailure', () => {
+  it('builds SOCKS proxy args as standalone connection (no ControlMaster socket)', () => {
     const args = manager.buildSocksProxyArgs('proj-1', {
       host: 'dev.example.com',
       port: 2222,
@@ -207,8 +207,9 @@ describe('SshConnectionManager', () => {
       keyFile: '/home/user/.ssh/id_ed25519',
       remoteDir: '/home/deploy/app'
     }, 12345)
-    expect(args).toContain('-S')
-    expect(args).toContain(path.join(socketDir, 'proj-1.sock'))
+    // Must NOT use ControlMaster socket — slave exits immediately with -D
+    expect(args).not.toContain('-S')
+    expect(args).not.toContain(path.join(socketDir, 'proj-1.sock'))
     expect(args).toContain('-p')
     expect(args).toContain('2222')
     expect(args).toContain('-i')

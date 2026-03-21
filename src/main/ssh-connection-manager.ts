@@ -195,14 +195,23 @@ export class SshConnectionManager extends EventEmitter {
     ]
   }
 
-  buildSocksProxyArgs(projectId: string, config: SshConfig, localPort: number): string[] {
-    return [
-      ...this.buildBaseArgs(projectId, config),
+  buildSocksProxyArgs(_projectId: string, config: SshConfig, localPort: number): string[] {
+    // NOTE: Do NOT use buildBaseArgs/ControlMaster socket here.
+    // SSH -D through a ControlMaster slave exits immediately because the master
+    // handles the forwarding setup and the slave has nothing to keep it alive.
+    // We need a standalone SSH connection that stays alive to keep the SOCKS port bound.
+    const args = [
+      '-o', 'StrictHostKeyChecking=accept-new',
+      '-p', String(config.port),
       '-D', String(localPort),
       '-N',
-      '-o', 'ExitOnForwardFailure=yes',
-      `${config.username}@${config.host}`
+      '-o', 'ExitOnForwardFailure=yes'
     ]
+    if (config.keyFile) {
+      args.push('-i', config.keyFile)
+    }
+    args.push(`${config.username}@${config.host}`)
+    return args
   }
 
   getConfig(projectId: string): SshConfig | undefined {

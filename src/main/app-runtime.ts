@@ -361,6 +361,7 @@ export class AppRuntime {
     })
 
     ipcMain.handle('socks-proxy-enable', async (_event, projectId: string, sshConfig: SshConfig) => {
+      this.logDebug(`socksProxyEnable projectId=${projectId} sshStatus=${this.sshManager.getStatus(projectId)}`)
       this.socksProxyEnabled.set(projectId, true)
 
       const pending = this.socksProxyStarting.get(projectId)
@@ -370,7 +371,9 @@ export class AppRuntime {
       }
 
       const startPromise = (async () => {
+        this.logDebug(`socksProxyEnable starting proxy for ${projectId}`)
         const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
+        this.logDebug(`socksProxyEnable proxy started on port ${port}`)
         // Re-check desired state after async startup — a disable may have raced us
         if (!this.socksProxyEnabled.get(projectId)) {
           await this.sshManager.stopSocksProxy(projectId)
@@ -382,6 +385,7 @@ export class AppRuntime {
           proxyBypassRules: '<-loopback>'
         })
         await ses.closeAllConnections()
+        this.logDebug(`socksProxyEnable session configured for ${projectId} port=${port}`)
         this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
         return port
       })()
@@ -389,8 +393,10 @@ export class AppRuntime {
       this.socksProxyStarting.set(projectId, startPromise)
       try {
         const port = await startPromise
+        this.logDebug(`socksProxyEnable success projectId=${projectId} port=${port}`)
         return { port }
       } catch (err) {
+        this.logDebug(`socksProxyEnable FAILED projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
         this.socksProxyEnabled.set(projectId, false)
         throw err
       } finally {
@@ -411,6 +417,7 @@ export class AppRuntime {
       const hasEntry = this.socksProxyEnabled.has(projectId)
       const enabled = hasEntry ? this.socksProxyEnabled.get(projectId)! : undefined
       const proxy = this.sshManager.getSocksProxy(projectId)
+      this.logDebug(`socksProxyStatus projectId=${projectId} hasEntry=${hasEntry} enabled=${enabled} port=${proxy?.port}`)
       return { enabled, port: proxy?.port }
     })
 
