@@ -276,15 +276,27 @@ export class SshConnectionManager extends EventEmitter {
     let stderr = ''
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
 
+    // Catch spawn errors (e.g. ENOENT if ssh binary not found) to prevent
+    // unhandled error events from crashing the Electron main process.
+    let spawnError: Error | null = null
+    child.on('error', (err: Error) => { spawnError = err })
+
     try {
       await this.waitForPort(port)
     } catch {
       child.kill()
+      if (spawnError) {
+        throw new Error(`Failed to spawn ssh: ${spawnError.message}`)
+      }
       if (attempt < 1 && !stderr.includes('Permission denied') && !stderr.includes('Connection refused')) {
         return this.doStartSocksProxy(projectId, config, attempt + 1)
       }
       throw new Error(`SOCKS proxy failed to start on port ${port}${stderr ? ': ' + stderr.slice(0, 200) : ''}`)
     }
+
+    // Set map entry before attaching exit listener so the listener always
+    // finds the entry (avoids narrow race if child dies between these lines).
+    this.socksProxies.set(projectId, { port, process: child })
 
     child.on('exit', () => {
       if (this.socksProxies.has(projectId)) {
@@ -293,7 +305,6 @@ export class SshConnectionManager extends EventEmitter {
       }
     })
 
-    this.socksProxies.set(projectId, { port, process: child })
     return port
   }
 

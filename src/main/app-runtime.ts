@@ -338,6 +338,13 @@ export class AppRuntime {
     })
 
     ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
+      // Reset session proxy before disconnect since stopSocksProxy suppresses the exit event
+      if (this.socksProxyEnabled.get(projectId)) {
+        const ses = session.fromPartition(`persist:browser-${projectId}`)
+        await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
+        await ses.closeAllConnections().catch(() => {})
+        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+      }
       await this.sshManager.disconnect(projectId, sshConfig)
     })
 
@@ -364,6 +371,11 @@ export class AppRuntime {
 
       const startPromise = (async () => {
         const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
+        // Re-check desired state after async startup — a disable may have raced us
+        if (!this.socksProxyEnabled.get(projectId)) {
+          await this.sshManager.stopSocksProxy(projectId)
+          throw new Error('SOCKS proxy was disabled during startup')
+        }
         const ses = session.fromPartition(`persist:browser-${projectId}`)
         await ses.setProxy({
           proxyRules: `socks5://127.0.0.1:${port}`,
