@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
+import type { SshConfig } from '../../shared/types'
 import './BrowserTab.css'
 
 interface Props {
@@ -9,14 +10,21 @@ interface Props {
   projectId: string
   taskId: string
   pane: 'left' | 'right'
+  sshConfig?: SshConfig
 }
 
-export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane }: Props): React.ReactElement {
+export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane, sshConfig }: Props): React.ReactElement {
   const { updateTabUrl, browserZoomFactor } = useApp()
   const [url, setUrl] = useState(initialUrl || 'https://www.google.com')
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
+  const [proxyEnabled, setProxyEnabled] = useState(!!sshConfig)
+  const [proxyLoading, setProxyLoading] = useState(false)
+  const [proxyReady, setProxyReady] = useState(!sshConfig)
   const webviewRef = useRef<Electron.WebviewTag>(null)
+
+  const isRemote = !!sshConfig
+  const partition = isRemote ? `persist:browser-${projectId}` : undefined
 
   useEffect(() => {
     const webview = webviewRef.current
@@ -61,6 +69,60 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     return () => webview.removeEventListener('dom-ready', applyZoom)
   }, [browserZoomFactor])
 
+  // Initialize SOCKS proxy for remote projects
+  useEffect(() => {
+    if (!isRemote) return
+
+    let cancelled = false
+
+    const initProxy = async () => {
+      try {
+        const status = await window.api.socksProxyStatus(projectId)
+        if (cancelled) return
+
+        if (status.enabled && status.port) {
+          // Proxy already running — use it
+          setProxyEnabled(true)
+          setProxyReady(true)
+        } else if (status.enabled === false) {
+          // User explicitly disabled — respect that choice
+          setProxyEnabled(false)
+          setProxyReady(true)
+        } else {
+          // First browser tab for this project — enable proxy by default
+          setProxyLoading(true)
+          await window.api.socksProxyEnable(projectId, sshConfig!)
+          if (cancelled) return
+          setProxyEnabled(true)
+          setProxyReady(true)
+          setProxyLoading(false)
+        }
+      } catch {
+        if (cancelled) return
+        // SSH not connected or proxy failed — fall back to direct
+        setProxyEnabled(false)
+        setProxyReady(true)
+        setProxyLoading(false)
+      }
+    }
+
+    void initProxy()
+    return () => { cancelled = true }
+  }, [isRemote, projectId])
+
+  // Listen for proxy status changes (cross-tab sync)
+  useEffect(() => {
+    if (!isRemote) return
+
+    const cleanup = window.api.onSocksProxyStatusChanged((changedProjectId, enabled) => {
+      if (changedProjectId === projectId) {
+        setProxyEnabled(enabled)
+      }
+    })
+
+    return cleanup
+  }, [isRemote, projectId])
+
   const navigate = (targetUrl: string) => {
     let normalized = targetUrl.trim()
     if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
@@ -77,19 +139,49 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     }
   }
 
+  const handleProxyToggle = async () => {
+    if (proxyLoading || !sshConfig) return
+    setProxyLoading(true)
+    try {
+      if (proxyEnabled) {
+        await window.api.socksProxyDisable(projectId)
+      } else {
+        await window.api.socksProxyEnable(projectId, sshConfig)
+      }
+      webviewRef.current?.reload()
+    } catch {
+      // Toggle failed — state will be updated by the status listener
+    } finally {
+      setProxyLoading(false)
+    }
+  }
+
   return (
     <div className="browser-tab" style={{ display: visible ? 'flex' : 'none' }}>
       <div className="browser-toolbar">
         <button className="browser-nav-btn" onClick={() => webviewRef.current?.goBack()}>&larr;</button>
         <button className="browser-nav-btn" onClick={() => webviewRef.current?.goForward()}>&rarr;</button>
         <button className="browser-nav-btn" onClick={() => webviewRef.current?.reload()}>&#8635;</button>
-        <input
-          className="browser-url"
-          value={inputUrl}
-          onChange={(e) => setInputUrl(e.target.value)}
-          onKeyDown={handleKeyDown}
-          spellCheck={false}
-        />
+        <div className="browser-url-wrapper">
+          {isRemote && proxyEnabled && <span className="browser-remote-badge">Remote</span>}
+          <input
+            className="browser-url"
+            value={inputUrl}
+            onChange={(e) => setInputUrl(e.target.value)}
+            onKeyDown={handleKeyDown}
+            spellCheck={false}
+          />
+        </div>
+        {isRemote && (
+          <button
+            className={`browser-nav-btn proxy-toggle-btn ${proxyEnabled ? 'active' : ''}`}
+            onClick={() => void handleProxyToggle()}
+            disabled={proxyLoading}
+            title={proxyEnabled ? 'Routing through remote host (click to use direct)' : 'Direct connection (click to route through remote host)'}
+          >
+            &#127760;
+          </button>
+        )}
         <button
           className={`browser-nav-btn devtools-btn ${devToolsOpen ? 'active' : ''}`}
           onClick={() => {
@@ -106,11 +198,16 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
         </button>
       </div>
       <div className="browser-content">
-        <webview
-          ref={webviewRef}
-          src={url}
-          className="browser-webview"
-        />
+        {proxyReady ? (
+          <webview
+            ref={webviewRef}
+            src={url}
+            className="browser-webview"
+            {...(partition ? { partition } : {})}
+          />
+        ) : (
+          <div className="browser-proxy-loading">Connecting to remote host...</div>
+        )}
       </div>
     </div>
   )

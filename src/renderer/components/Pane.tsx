@@ -103,6 +103,7 @@ export default function Pane({
                 projectId={projectId}
                 taskId={taskId}
                 pane={pane}
+                sshConfig={sshConfig}
               />
             )
           }
