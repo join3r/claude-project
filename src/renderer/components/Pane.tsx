@@ -87,6 +87,8 @@ export default function Pane({
                 tabId={tab.id}
                 visible={taskVisible && tab.id === activeTabId}
                 projectId={projectId}
+                taskId={taskId}
+                pane={pane}
                 projectDir={projectDir}
                 sshConfig={sshConfig}
                 shellCommand={shellCommand}

@@ -12,12 +12,15 @@ import TerminalSearchBar from './TerminalSearchBar'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
 import type { SshConfig, ShellCommandConfig } from '../../shared/types'
+import { normalizeBrowserUrl } from '../browserUrl'
 import './TerminalTab.css'
 
 interface Props {
   tabId: string
   visible: boolean
   projectId: string
+  taskId: string
+  pane: 'left' | 'right'
   projectDir: string
   sshConfig?: SshConfig
   shellCommand?: ShellCommandConfig
@@ -105,10 +108,10 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
   }
 }
 
-export default function TerminalTab({ tabId, visible, projectId, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
+export default function TerminalTab({ tabId, visible, projectId, taskId, pane, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const { config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
+  const { addTab, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
   const focusClaimRef = useRef(false)
@@ -188,7 +191,11 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     const serializeAddon = new SerializeAddon()
     const searchAddon = new SearchAddon()
     const clipboardAddon = new ClipboardAddon()
-    const webLinksAddon = new WebLinksAddon()
+    const webLinksAddon = new WebLinksAddon((event, uri) => {
+      event.preventDefault()
+      event.stopPropagation()
+      addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(uri) })
+    })
     const unicode11Addon = new Unicode11Addon()
     const imageAddon = new ImageAddon()
     term.loadAddon(fitAddon)
@@ -246,7 +253,7 @@ export default function TerminalTab({ tabId, visible, projectId, projectDir, ssh
     ensurePtyListener()
     ensurePtySizeListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta])
+  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {

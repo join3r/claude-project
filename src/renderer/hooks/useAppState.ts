@@ -34,6 +34,10 @@ import {
 } from '../recentlyClosedTabs'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel'>>
+type AddTabOptions = {
+  filePath?: string
+  url?: string
+}
 
 export function buildWindowTitle(projectName: string | null, taskName: string | null): string {
   if (projectName && taskName) {
@@ -605,7 +609,15 @@ export function useAppState() {
     }))
   }, [persistProjects])
 
-  const addTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', type: TabType, filePath?: string) => {
+  const addTab = useCallback((
+    projectId: string,
+    taskId: string,
+    pane: 'left' | 'right',
+    type: TabType,
+    arg?: string | AddTabOptions
+  ) => {
+    const options = typeof arg === 'string' ? { filePath: arg } : (arg ?? {})
+    const { filePath, url } = options
     const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
     let title: string
     if (filePath) {
@@ -614,7 +626,13 @@ export function useAppState() {
     } else {
       title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
     }
-    const tab: Tab = { id: uuid(), type, title, ...(filePath ? { filePath } : {}) }
+    const tab: Tab = {
+      id: uuid(),
+      type,
+      title,
+      ...(filePath ? { filePath } : {}),
+      ...(url ? { url } : {})
+    }
 
     persistProjects(prev => ({
       ...prev,

@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useRef } from 'react'
 import { useApp } from '../context/AppContext'
+import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
-import type { FileBrowserTab, GitStatusResult } from '../../shared/types'
 import FileTree from './FileTree'
 import GitStatus from './GitStatus'
 import './FileBrowserPanel.css'
@@ -11,7 +11,6 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     fileBrowserOpen,
     fileBrowserWidth,
     fileBrowserActiveTab,
-    toggleFileBrowser,
     setFileBrowserWidth,
     setFileBrowserActiveTab,
     selectedProjectId,
@@ -21,8 +20,6 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     openOrFocusDiffTab,
     openOrFocusEditorTab
   } = useApp()
-
-  const [gitStatus, setGitStatus] = useState<GitStatusResult | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
   const effectiveDir = selectedTask?.workspace
@@ -33,42 +30,9 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
     && !!selectedProject.directory
+  const gitStatus = useGitStatus(effectiveDir, fileBrowserOpen && isLocalProject)
 
   const focusedPane = 'left' as const
-
-  const fetchGitStatus = useCallback(() => {
-    if (!effectiveDir) return
-    window.api.fbGitStatus(effectiveDir).then(setGitStatus).catch(() => setGitStatus(null))
-  }, [effectiveDir])
-
-  // Refresh git status on panel open
-  useEffect(() => {
-    if (fileBrowserOpen && isLocalProject) {
-      fetchGitStatus()
-    }
-  }, [fileBrowserOpen, isLocalProject, fetchGitStatus])
-
-  // Refresh git status on window focus
-  useEffect(() => {
-    const handleFocus = () => {
-      if (fileBrowserOpen && isLocalProject) {
-        fetchGitStatus()
-      }
-    }
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
-  }, [fileBrowserOpen, isLocalProject, fetchGitStatus])
-
-  // Refresh git status when a file is saved
-  useEffect(() => {
-    const handleFileSaved = () => {
-      if (fileBrowserOpen && isLocalProject) {
-        fetchGitStatus()
-      }
-    }
-    window.addEventListener('file-saved', handleFileSaved)
-    return () => window.removeEventListener('file-saved', handleFileSaved)
-  }, [fileBrowserOpen, isLocalProject, fetchGitStatus])
 
   const handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {

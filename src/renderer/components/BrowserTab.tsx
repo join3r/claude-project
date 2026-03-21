@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
 import type { SshConfig } from '../../shared/types'
+import { normalizeBrowserUrl } from '../browserUrl'
 import './BrowserTab.css'
 
 interface Props {
@@ -147,10 +148,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   }, [isRemote, projectId])
 
   const navigate = (targetUrl: string) => {
-    let normalized = targetUrl.trim()
-    if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
-      normalized = 'https://' + normalized
-    }
+    const normalized = normalizeBrowserUrl(targetUrl)
     setUrl(normalized)
     setInputUrl(normalized)
     updateTabUrl(projectId, taskId, pane, tabId, normalized)

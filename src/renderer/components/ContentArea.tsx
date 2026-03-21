@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
+import { useGitStatus } from '../hooks/useGitStatus'
 import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
-import type { GitDiffSummary, TunnelConfig, TunnelState } from '../../shared/types'
+import type { TunnelConfig, TunnelState } from '../../shared/types'
 import './ContentArea.css'
 
 function joinPath(...parts: string[]): string {
@@ -48,7 +49,6 @@ export default function ContentArea(): React.ReactElement {
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
   const [tunnelPopupOpen, setTunnelPopupOpen] = useState(false)
-  const [gitSummary, setGitSummary] = useState<GitDiffSummary | null>(null)
 
   useEffect(() => {
     window.api.onSshStatusChanged((projectId: string, status: string) => {
@@ -266,6 +266,8 @@ export default function ContentArea(): React.ReactElement {
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
     && !!selectedProjectDir
+  const gitStatus = useGitStatus(selectedProjectDir, shouldShowGitSummary)
+  const gitSummary = gitStatus?.summary ?? null
   const hasGitSummary = !!gitSummary && (gitSummary.added > 0 || gitSummary.deleted > 0)
   const tunnelButtonClassName = selectedProject && isRemoteProject(selectedProject)
     ? [
@@ -278,43 +280,6 @@ export default function ContentArea(): React.ReactElement {
             : ''
       ].filter(Boolean).join(' ')
     : 'content-toolbar-btn tunnel-btn'
-
-  useEffect(() => {
-    if (!shouldShowGitSummary) {
-      setGitSummary(null)
-      return
-    }
-
-    let cancelled = false
-
-    const fetchGitSummary = () => {
-      window.api.fbGitStatus(selectedProjectDir)
-        .then((status) => {
-          if (!cancelled) {
-            setGitSummary(status.summary)
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setGitSummary(null)
-          }
-        })
-    }
-
-    fetchGitSummary()
-
-    const handleFocus = () => fetchGitSummary()
-    const handleFileSaved = () => fetchGitSummary()
-
-    window.addEventListener('focus', handleFocus)
-    window.addEventListener('file-saved', handleFileSaved)
-
-    return () => {
-      cancelled = true
-      window.removeEventListener('focus', handleFocus)
-      window.removeEventListener('file-saved', handleFileSaved)
-    }
-  }, [selectedProjectDir, shouldShowGitSummary])
 
   return (
     <div className="content-area">

@@ -14,6 +14,7 @@ import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
 import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
+import { normalizeBrowserUrl } from '../browserUrl'
 import '@xterm/xterm/css/xterm.css'
 import './AiToolTab.css'
 
@@ -141,7 +142,7 @@ function ensureBeforeUnloadHandler(): void {
 export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const { config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta } = useApp()
+  const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta } = useApp()
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
@@ -274,7 +275,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     const serializeAddon = new SerializeAddon()
     const searchAddon = new SearchAddon()
     const clipboardAddon = new ClipboardAddon()
-    const webLinksAddon = new WebLinksAddon()
+    const webLinksAddon = new WebLinksAddon((event, uri) => {
+      event.preventDefault()
+      event.stopPropagation()
+      addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(uri) })
+    })
     const unicode11Addon = new Unicode11Addon()
     const imageAddon = new ImageAddon()
     term.loadAddon(fitAddon)
@@ -393,7 +398,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     ensurePtySizeListener()
     ensureExitListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, toolType, config])
+  }, [tabId, toolType, config, addTab, pane, projectId, taskId])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
