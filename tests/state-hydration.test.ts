@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type Project, type ProjectsData } from '../src/shared/types'
-import { applyQueuedStateUpdates, resolveInitialSelection } from '../src/renderer/hooks/stateHydration'
+import {
+  applyQueuedStateUpdates,
+  persistSelectionState,
+  resolveInitialSelection
+} from '../src/renderer/hooks/stateHydration'
 
 describe('state hydration', () => {
   it('rebases queued project mutations onto loaded projects', () => {
@@ -115,5 +119,92 @@ describe('state hydration', () => {
 
     expect(selection.projectId).toBe('loaded-project')
     expect(selection.taskId).toBe('loaded-task')
+  })
+
+  it('persists the selected task onto both config and the owning project', () => {
+    const projectsData: ProjectsData = {
+      projects: [
+        {
+          id: 'local-project',
+          name: 'Local',
+          directory: '/tmp/local',
+          tasks: [
+            {
+              id: 'task-1',
+              name: 'Task 1',
+              tabs: { left: [], right: [] },
+              activeTab: { left: null, right: null },
+              splitOpen: false,
+              splitRatio: 0.5
+            },
+            {
+              id: 'task-2',
+              name: 'Task 2',
+              tabs: { left: [], right: [] },
+              activeTab: { left: null, right: null },
+              splitOpen: false,
+              splitRatio: 0.5
+            }
+          ]
+        }
+      ],
+      folders: [],
+      rootOrder: ['local-project']
+    }
+
+    const next = persistSelectionState(
+      projectsData,
+      DEFAULT_CONFIG,
+      'local-project',
+      'task-2'
+    )
+
+    expect(next.config.lastProjectId).toBe('local-project')
+    expect(next.config.lastTaskId).toBe('task-2')
+    expect(next.projectsData.projects[0].lastTaskId).toBe('task-2')
+  })
+
+  it('keeps a project lastTaskId when only the project remains selected', () => {
+    const projectsData: ProjectsData = {
+      projects: [
+        {
+          id: 'local-project',
+          name: 'Local',
+          directory: '/tmp/local',
+          lastTaskId: 'task-2',
+          tasks: [
+            {
+              id: 'task-1',
+              name: 'Task 1',
+              tabs: { left: [], right: [] },
+              activeTab: { left: null, right: null },
+              splitOpen: false,
+              splitRatio: 0.5
+            },
+            {
+              id: 'task-2',
+              name: 'Task 2',
+              tabs: { left: [], right: [] },
+              activeTab: { left: null, right: null },
+              splitOpen: false,
+              splitRatio: 0.5
+            }
+          ]
+        }
+      ],
+      folders: [],
+      rootOrder: ['local-project']
+    }
+
+    const next = persistSelectionState(
+      projectsData,
+      { ...DEFAULT_CONFIG, lastProjectId: 'local-project', lastTaskId: 'task-2' },
+      'local-project',
+      null
+    )
+
+    expect(next.config.lastProjectId).toBe('local-project')
+    expect(next.config.lastTaskId).toBeNull()
+    expect(next.projectsData.projects[0].lastTaskId).toBe('task-2')
   })
 })

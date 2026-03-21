@@ -10,9 +10,11 @@ import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import { WorkspaceManager } from './workspace-manager'
+import { countTextLines, parseNumstat } from './git-diff-summary'
 import type {
   AppConfig,
   DirectoryEntry,
+  GitDiffSummary,
   GitStatusResult,
   GitStatusEntry,
   GitFileStatus,
@@ -62,6 +64,54 @@ function clone<T>(value: T): T {
 function trimScrollback(scrollback: string): string {
   if (scrollback.length <= MAX_SCROLLBACK_CHARS) return scrollback
   return scrollback.slice(-MAX_SCROLLBACK_CHARS)
+}
+
+async function hasHeadCommit(resolvedCwd: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], { cwd: resolvedCwd })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function readUntrackedSummary(resolvedCwd: string): Promise<GitDiffSummary> {
+  try {
+    const { stdout } = await execFileAsync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: resolvedCwd })
+    const relativePaths = stdout.split('\0').filter(Boolean)
+    let added = 0
+
+    for (const relativePath of relativePaths) {
+      try {
+        const content = await fsPromises.readFile(path.join(resolvedCwd, relativePath), 'utf-8')
+        added += countTextLines(content)
+      } catch {
+        // Ignore unreadable and binary files for the summary badge.
+      }
+    }
+
+    return { added, deleted: 0 }
+  } catch {
+    return { added: 0, deleted: 0 }
+  }
+}
+
+async function readGitDiffSummary(resolvedCwd: string): Promise<GitDiffSummary> {
+  const untrackedSummary = await readUntrackedSummary(resolvedCwd)
+
+  try {
+    const diffArgs = await hasHeadCommit(resolvedCwd)
+      ? ['diff', '--numstat', 'HEAD', '--']
+      : ['diff', '--numstat', '--cached', '--']
+    const { stdout } = await execFileAsync('git', diffArgs, { cwd: resolvedCwd })
+    const trackedSummary = parseNumstat(stdout)
+    return {
+      added: trackedSummary.added + untrackedSummary.added,
+      deleted: trackedSummary.deleted + untrackedSummary.deleted
+    }
+  } catch {
+    return untrackedSummary
+  }
 }
 
 function getWindowGeometry(window: BrowserWindow): WindowGeometry {
@@ -585,7 +635,10 @@ export class AppRuntime {
     ipcMain.handle('fb-git-status', async (_event, projectCwd: string): Promise<GitStatusResult> => {
       const resolvedCwd = path.resolve(projectCwd)
       try {
-        const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: resolvedCwd })
+        const [{ stdout }, summary] = await Promise.all([
+          execFileAsync('git', ['status', '--porcelain'], { cwd: resolvedCwd }),
+          readGitDiffSummary(resolvedCwd)
+        ])
         const staged: GitStatusEntry[] = []
         const unstaged: GitStatusEntry[] = []
         const untracked: GitStatusEntry[] = []
@@ -608,9 +661,14 @@ export class AppRuntime {
           }
         }
 
-        return { staged, unstaged, untracked }
+        return { staged, unstaged, untracked, summary }
       } catch {
-        return { staged: [], unstaged: [], untracked: [] }
+        return {
+          staged: [],
+          unstaged: [],
+          untracked: [],
+          summary: { added: 0, deleted: 0 }
+        }
       }
     })
 

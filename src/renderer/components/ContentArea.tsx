@@ -7,7 +7,7 @@ import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
-import type { TunnelConfig, TunnelState } from '../../shared/types'
+import type { GitDiffSummary, TunnelConfig, TunnelState } from '../../shared/types'
 import './ContentArea.css'
 
 function joinPath(...parts: string[]): string {
@@ -48,6 +48,7 @@ export default function ContentArea(): React.ReactElement {
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
   const [tunnelPopupOpen, setTunnelPopupOpen] = useState(false)
+  const [gitSummary, setGitSummary] = useState<GitDiffSummary | null>(null)
 
   useEffect(() => {
     window.api.onSshStatusChanged((projectId: string, status: string) => {
@@ -254,10 +255,18 @@ export default function ContentArea(): React.ReactElement {
   const selectedTunnelState = selectedProjectId ? tunnelStates[selectedProjectId] : undefined
   const selectedTaskView = selectedTask ? getTaskViewState(selectedTask) : null
   const windowBarTitle = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
+  const selectedProjectDir = selectedTask?.workspace
+    ? joinPath(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
+    : selectedProject?.directory ?? ''
   const canToggleFileBrowser = !!selectedProject
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
     && !!selectedProject.directory
+  const shouldShowGitSummary = !!selectedProject
+    && !isRemoteProject(selectedProject)
+    && !isShellCommandProject(selectedProject)
+    && !!selectedProjectDir
+  const hasGitSummary = !!gitSummary && (gitSummary.added > 0 || gitSummary.deleted > 0)
   const tunnelButtonClassName = selectedProject && isRemoteProject(selectedProject)
     ? [
         'content-toolbar-btn',
@@ -270,6 +279,43 @@ export default function ContentArea(): React.ReactElement {
       ].filter(Boolean).join(' ')
     : 'content-toolbar-btn tunnel-btn'
 
+  useEffect(() => {
+    if (!shouldShowGitSummary) {
+      setGitSummary(null)
+      return
+    }
+
+    let cancelled = false
+
+    const fetchGitSummary = () => {
+      window.api.fbGitStatus(selectedProjectDir)
+        .then((status) => {
+          if (!cancelled) {
+            setGitSummary(status.summary)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setGitSummary(null)
+          }
+        })
+    }
+
+    fetchGitSummary()
+
+    const handleFocus = () => fetchGitSummary()
+    const handleFileSaved = () => fetchGitSummary()
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('file-saved', handleFileSaved)
+
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('file-saved', handleFileSaved)
+    }
+  }, [selectedProjectDir, shouldShowGitSummary])
+
   return (
     <div className="content-area">
       {selectedProject && (
@@ -281,6 +327,19 @@ export default function ContentArea(): React.ReactElement {
                 <span className="content-toolbar-separator"> / </span>
                 <span className="content-toolbar-task">{selectedTask.name}</span>
               </>
+            )}
+            {hasGitSummary && gitSummary && (
+              <span
+                className="content-toolbar-git-summary"
+                title={`${gitSummary.added} added, ${gitSummary.deleted} removed`}
+              >
+                {gitSummary.added > 0 && (
+                  <span className="content-toolbar-git-added">+{gitSummary.added}</span>
+                )}
+                {gitSummary.deleted > 0 && (
+                  <span className="content-toolbar-git-deleted">-{gitSummary.deleted}</span>
+                )}
+              </span>
             )}
           </div>
           <div className="content-toolbar-actions">

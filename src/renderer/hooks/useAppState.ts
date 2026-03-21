@@ -25,7 +25,7 @@ import type {
   TaskViewState,
   FileBrowserTab
 } from '../../shared/types'
-import { applyQueuedStateUpdates, type StateUpdater } from './stateHydration'
+import { applyQueuedStateUpdates, persistSelectionState, type StateUpdater } from './stateHydration'
 import { moveTaskTab } from '../tabMove'
 import {
   pushRecentlyClosedTab,
@@ -196,6 +196,30 @@ export function useAppState() {
       return next
     })
   }, [folders, projects, updateWindowViewState])
+
+  useEffect(() => {
+    if (!projectsLoadedRef.current || !configLoadedRef.current || !config) return
+
+    const selection = persistSelectionState(
+      projectsData,
+      config,
+      windowViewState.selectedProjectId,
+      windowViewState.selectedTaskId
+    )
+
+    if (selection.projectsData !== projectsData) {
+      setProjectsData(selection.projectsData)
+    }
+
+    if (selection.config !== config) {
+      setConfig(selection.config)
+    }
+  }, [
+    config,
+    projectsData,
+    windowViewState.selectedProjectId,
+    windowViewState.selectedTaskId
+  ])
 
   useEffect(() => {
     const selectedProjectId = windowViewState.selectedProjectId

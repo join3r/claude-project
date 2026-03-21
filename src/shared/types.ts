@@ -141,10 +141,16 @@ export interface GitStatusEntry {
   status: GitFileStatus
 }
 
+export interface GitDiffSummary {
+  added: number
+  deleted: number
+}
+
 export interface GitStatusResult {
   staged: GitStatusEntry[]
   unstaged: GitStatusEntry[]
   untracked: GitStatusEntry[]
+  summary: GitDiffSummary
 }
 
 export interface WindowViewState {
