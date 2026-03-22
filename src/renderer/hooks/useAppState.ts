@@ -69,6 +69,7 @@ export function useAppState() {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [windowViewState, setWindowViewState] = useState<WindowViewState>(createDefaultWindowViewState())
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [windowFocused, setWindowFocused] = useState(() => (typeof document === 'undefined' ? true : document.hasFocus()))
   const [terminalZoomDelta, setTerminalZoomDelta] = useState(0)
   const [browserZoomFactor, setBrowserZoomFactor] = useState(1.0)
 
@@ -158,6 +159,17 @@ export function useAppState() {
   }, [])
 
   useEffect(() => {
+    const handleFocus = () => setWindowFocused(true)
+    const handleBlur = () => setWindowFocused(false)
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('blur', handleBlur)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('blur', handleBlur)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!projectsLoadedRef.current) return
 
     const serialized = JSON.stringify(projectsData)
@@ -203,6 +215,7 @@ export function useAppState() {
 
   useEffect(() => {
     if (!projectsLoadedRef.current || !configLoadedRef.current || !config) return
+    if (!windowFocused) return
 
     const selection = persistSelectionState(
       projectsData,
@@ -221,6 +234,7 @@ export function useAppState() {
   }, [
     config,
     projectsData,
+    windowFocused,
     windowViewState.selectedProjectId,
     windowViewState.selectedTaskId
   ])

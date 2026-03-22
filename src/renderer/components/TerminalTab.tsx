@@ -15,6 +15,8 @@ import type { SshConfig, ShellCommandConfig } from '../../shared/types'
 import { normalizeBrowserUrl } from '../browserUrl'
 import './TerminalTab.css'
 
+const ENABLE_XTERM_WEBGL = false
+
 interface Props {
   tabId: string
   visible: boolean
@@ -121,6 +123,17 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   const prevSshReadyRef = useRef(sshReady)
   const [searchOpen, setSearchOpen] = useState(false)
 
+  // Release the renderer-side xterm instance while hidden. The PTY keeps
+  // running in main and will be reattached from runtime scrollback on show.
+  useEffect(() => {
+    if (visible) return
+    focusClaimRef.current = false
+    if (!terminals.has(tabId)) return
+    disposeTerminal(tabId, { killRuntime: false, persistScrollback: false })
+    initializedRef.current = false
+    spawnedRef.current = false
+  }, [visible, tabId])
+
   // Poll SSH status (tracks both connection and disconnection for remote tabs)
   useEffect(() => {
     if (!sshConfig) return
@@ -158,7 +171,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   }, [sshReady, tabId, sshConfig])
 
   useEffect(() => {
-    if (!hostRef.current || !config) return
+    if (!hostRef.current || !config || !visible) return
 
     const existingEntry = terminals.get(tabId)
     if (existingEntry) {
@@ -253,13 +266,13 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     ensurePtyListener()
     ensurePtySizeListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId])
+  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId, visible])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
     const entry = terminals.get(tabId)
     if (!entry) return
-    if (visible) {
+    if (visible && ENABLE_XTERM_WEBGL) {
       // Attach WebGL when tab becomes visible (if not already attached)
       if (!entry.webglAddon) {
         entry.webglAddon = attachWebgl(tabId, entry.term)
@@ -422,20 +435,27 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   )
 }
 
-export function disposeTerminal(tabId: string, killRuntime = true): void {
+export function disposeTerminal(
+  tabId: string,
+  { killRuntime = true, persistScrollback = true }: { killRuntime?: boolean; persistScrollback?: boolean } = {}
+): void {
   const entry = terminals.get(tabId)
   if (entry) {
-    // Save scrollback before disposing
-    try {
-      const data = entry.serializeAddon.serialize()
-      window.api.scrollbackSaveSync(tabId, data)
-    } catch {
-      // Terminal may already be in bad state
+    if (persistScrollback) {
+      try {
+        const data = entry.serializeAddon.serialize()
+        window.api.scrollbackSaveSync(tabId, data)
+      } catch {
+        // Terminal may already be in bad state
+      }
+    }
+    if (entry.webglAddon) {
+      try { entry.webglAddon.dispose() } catch { /* already gone */ }
     }
     entry.term.dispose()
     terminals.delete(tabId)
-    if (killRuntime) {
-      window.api.ptyKill(tabId)
-    }
+  }
+  if (killRuntime) {
+    window.api.ptyKill(tabId)
   }
 }

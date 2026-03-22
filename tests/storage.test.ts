@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Storage } from '../src/main/storage'
-import { isRemoteProject, type ProjectsData } from '../src/shared/types'
+import { DEFAULT_CONFIG, isRemoteProject, type ProjectsData } from '../src/shared/types'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -26,13 +26,28 @@ describe('Storage', () => {
     const config = storage.loadConfig()
     expect(config.fontFamily).toBe('monospace')
     expect(config.theme).toBe('system')
+    expect(config.editorWordWrap).toBe('off')
+    expect(config.diffRenderSideBySide).toBe(true)
   })
 
   it('saves and loads config', () => {
-    storage.saveConfig({ fontFamily: 'MesloLGS NF', fontSize: 16, theme: 'dark', terminalTheme: 'dark', defaultShell: '/bin/bash' })
+    storage.saveConfig({
+      ...DEFAULT_CONFIG,
+      fontFamily: 'MesloLGS NF',
+      fontSize: 16,
+      theme: 'dark',
+      terminalTheme: 'dark',
+      defaultShell: '/bin/bash',
+      editorFontFamily: 'JetBrains Mono',
+      editorWordWrap: 'bounded',
+      diffRenderSideBySide: false
+    })
     const config = storage.loadConfig()
     expect(config.fontFamily).toBe('MesloLGS NF')
     expect(config.fontSize).toBe(16)
+    expect(config.editorFontFamily).toBe('JetBrains Mono')
+    expect(config.editorWordWrap).toBe('bounded')
+    expect(config.diffRenderSideBySide).toBe(false)
   })
 
   it('returns empty projects when no projects file exists', () => {

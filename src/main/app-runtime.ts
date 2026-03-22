@@ -207,6 +207,9 @@ export class AppRuntime {
 
   async shutdown(): Promise<void> {
     this.persistWindowSession()
+    for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
+      this.scrollbackStorage.save(tabId, runtime.scrollback)
+    }
     this.ptyManager.killAll()
     this.hookInjector.cleanupAll()
     await this.hookServer.stop()
@@ -754,7 +757,6 @@ export class AppRuntime {
           const runtime = this.ptyRuntimes.get(id)
           if (!runtime) return
           runtime.scrollback = trimScrollback(runtime.scrollback + data)
-          this.logDebug(`ptyData id=${id} len=${data.length} total=${runtime.scrollback.length}`)
           this.broadcastToAttachedWindows(id, 'pty-data', id, data)
         },
         onExit: (exitCode) => {
@@ -775,7 +777,6 @@ export class AppRuntime {
           const runtime = this.ptyRuntimes.get(id)
           if (!runtime) return
           runtime.scrollback = trimScrollback(runtime.scrollback + data)
-          this.logDebug(`ptyData id=${id} len=${data.length} total=${runtime.scrollback.length}`)
           this.broadcastToAttachedWindows(id, 'pty-data', id, data)
         },
         onExit: (exitCode) => {
@@ -791,6 +792,10 @@ export class AppRuntime {
 
   private killPty(id: string): void {
     this.logDebug(`ptyKill id=${id}`)
+    const runtime = this.ptyRuntimes.get(id)
+    if (runtime) {
+      this.scrollbackStorage.save(id, runtime.scrollback)
+    }
     this.ptyManager.kill(id)
     this.ptyRuntimes.delete(id)
   }

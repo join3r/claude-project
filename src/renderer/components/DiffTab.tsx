@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { loader, type Monaco } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { DEFAULT_CONFIG } from '../../shared/types'
+import { useApp } from '../context/AppContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
+import { buildMonacoDiffOptions, getLanguageFromPath } from './monacoOptions'
 
 interface Props {
   tabId: string
@@ -11,21 +14,8 @@ interface Props {
   effectiveTheme: 'dark' | 'light'
 }
 
-function getLanguageFromPath(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    json: 'json', md: 'markdown', css: 'css', html: 'html', py: 'python',
-    rs: 'rust', go: 'go', java: 'java', yml: 'yaml', yaml: 'yaml',
-    sh: 'shell', bash: 'shell', toml: 'toml', xml: 'xml', sql: 'sql',
-    rb: 'ruby', php: 'php', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
-    swift: 'swift', kt: 'kotlin', scala: 'scala', r: 'r',
-    lua: 'lua', dart: 'dart', graphql: 'graphql', scss: 'scss', less: 'less'
-  }
-  return map[ext] ?? 'plaintext'
-}
-
 export default function DiffTab({ tabId, visible, filePath, projectDir, effectiveTheme }: Props): React.ReactElement {
+  const { config } = useApp()
   const [original, setOriginal] = useState<string | null>(null)
   const [modified, setModified] = useState<string | null>(null)
   const [editorReady, setEditorReady] = useState(false)
@@ -40,6 +30,7 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
     modified: null
   })
   const requestIdRef = useRef(0)
+  const monacoConfig = config ?? DEFAULT_CONFIG
 
   const clearEditorModel = () => {
     try {
@@ -121,11 +112,7 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
       if (cancelled || !containerRef.current || editorRef.current) return
 
       monacoRef.current = monaco
-      editorRef.current = monaco.editor.createDiffEditor(containerRef.current, {
-        readOnly: true,
-        automaticLayout: true,
-        minimap: { enabled: false }
-      })
+      editorRef.current = monaco.editor.createDiffEditor(containerRef.current, buildMonacoDiffOptions(monacoConfig))
       monaco.editor.setTheme(effectiveTheme === 'dark' ? 'vs-dark' : 'vs')
       setEditorReady(true)
     }).catch((error) => {
@@ -179,6 +166,12 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
     if (!editorReady || !monaco) return
     monaco.editor.setTheme(effectiveTheme === 'dark' ? 'vs-dark' : 'vs')
   }, [editorReady, effectiveTheme])
+
+  useEffect(() => {
+    if (!editorReady || !editorRef.current) return
+    editorRef.current.updateOptions(buildMonacoDiffOptions(monacoConfig))
+    editorRef.current.layout()
+  }, [config, editorReady, monacoConfig])
 
   useEffect(() => {
     if (!visible) return

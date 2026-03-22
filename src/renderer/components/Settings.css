@@ -15,7 +15,7 @@
   background: var(--sidebar-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  width: 400px;
+  width: 460px;
   max-height: 80vh;
   overflow-y: auto;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -57,6 +57,28 @@
   margin-bottom: 16px;
 }
 
+.settings-section + .settings-section {
+  border-top: 1px solid var(--border);
+  margin-top: 20px;
+  padding-top: 20px;
+}
+
+.settings-section-title {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+
+.settings-help {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+
 .settings-label {
   display: block;
   font-size: 12px;
@@ -78,6 +100,16 @@
 
 .settings-input:focus {
   border-color: var(--border-focus);
+}
+
+.settings-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-grid .settings-group {
+  margin-bottom: 0;
 }
 
 .settings-checkboxes {
@@ -115,4 +147,14 @@
 
 .project-settings-tool-row .settings-input {
   flex: 1;
+}
+
+@media (max-width: 720px) {
+  .settings-panel {
+    width: calc(100vw - 32px);
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
 }

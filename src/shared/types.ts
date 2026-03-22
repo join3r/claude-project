@@ -118,6 +118,15 @@ export interface AppConfig {
   terminalTheme: 'system' | 'dark' | 'light'
   defaultShell: string
   copyOnSelect: boolean
+  editorFontFamily: string
+  editorFontSize: number
+  editorWordWrap: EditorWordWrap
+  editorLineNumbers: EditorLineNumbers
+  editorRenderWhitespace: EditorRenderWhitespace
+  editorMinimap: boolean
+  editorTabSize: number
+  diffRenderSideBySide: boolean
+  diffIgnoreTrimWhitespace: boolean
   enableClaude: boolean
   enableCodex: boolean
   enableOpencode: boolean
@@ -125,6 +134,12 @@ export interface AppConfig {
   lastTaskId: string | null
   collapsedFolderIds: string[]
 }
+
+export type EditorWordWrap = 'off' | 'on' | 'bounded'
+
+export type EditorLineNumbers = 'off' | 'on' | 'relative' | 'interval'
+
+export type EditorRenderWhitespace = 'none' | 'boundary' | 'selection' | 'trailing' | 'all'
 
 export type FileBrowserTab = 'files' | 'git'
 
@@ -187,6 +202,15 @@ export const DEFAULT_CONFIG: AppConfig = {
   terminalTheme: 'system',
   defaultShell: typeof process !== 'undefined' && process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh',
   copyOnSelect: false,
+  editorFontFamily: 'monospace',
+  editorFontSize: 14,
+  editorWordWrap: 'off',
+  editorLineNumbers: 'on',
+  editorRenderWhitespace: 'selection',
+  editorMinimap: false,
+  editorTabSize: 4,
+  diffRenderSideBySide: true,
+  diffIgnoreTrimWhitespace: true,
   enableClaude: false,
   enableCodex: false,
   enableOpencode: false,

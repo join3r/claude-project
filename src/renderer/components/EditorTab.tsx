@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Editor from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { DEFAULT_CONFIG } from '../../shared/types'
+import { useApp } from '../context/AppContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
+import { buildMonacoEditorOptions, getLanguageFromPath } from './monacoOptions'
 
 interface Props {
   tabId: string
@@ -14,21 +17,8 @@ interface Props {
   effectiveTheme: 'dark' | 'light'
 }
 
-function getLanguageFromPath(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    json: 'json', md: 'markdown', css: 'css', html: 'html', py: 'python',
-    rs: 'rust', go: 'go', java: 'java', yml: 'yaml', yaml: 'yaml',
-    sh: 'shell', bash: 'shell', toml: 'toml', xml: 'xml', sql: 'sql',
-    rb: 'ruby', php: 'php', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
-    swift: 'swift', kt: 'kotlin', scala: 'scala', r: 'r',
-    lua: 'lua', dart: 'dart', graphql: 'graphql', scss: 'scss', less: 'less'
-  }
-  return map[ext] ?? 'plaintext'
-}
-
 export default function EditorTab({ tabId, visible, filePath, projectDir, projectId, taskId, pane, effectiveTheme }: Props): React.ReactElement {
+  const { config } = useApp()
   const [content, setContent] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -37,6 +27,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
   const currentContentRef = useRef<string>('')
   const dirtyRef = useRef(false)
   const requestIdRef = useRef(0)
+  const monacoConfig = config ?? DEFAULT_CONFIG
 
   const refreshContent = useCallback((force = false) => {
     const requestId = requestIdRef.current + 1
@@ -110,6 +101,12 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     }
   }, [refreshContent, tabId, visible])
 
+  useEffect(() => {
+    if (!editorRef.current) return
+    editorRef.current.updateOptions(buildMonacoEditorOptions(monacoConfig))
+    editorRef.current.layout()
+  }, [config, monacoConfig])
+
   const handleEditorDidMount = (ed: editor.IStandaloneCodeEditor) => {
     editorRef.current = ed
     // Bind Cmd+S / Ctrl+S to save
@@ -148,10 +145,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
         defaultValue={content}
         language={getLanguageFromPath(filePath)}
         theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
-        options={{
-          automaticLayout: true,
-          minimap: { enabled: false }
-        }}
+        options={buildMonacoEditorOptions(monacoConfig)}
         onMount={handleEditorDidMount}
         onChange={handleChange}
       />

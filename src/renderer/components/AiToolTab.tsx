@@ -18,6 +18,8 @@ import { normalizeBrowserUrl } from '../browserUrl'
 import '@xterm/xterm/css/xterm.css'
 import './AiToolTab.css'
 
+const ENABLE_XTERM_WEBGL = false
+
 interface Props {
   tabId: string
   toolType: AiTabType
@@ -65,7 +67,10 @@ function ensurePtyListener(): void {
   ptyListenerRegistered = true
   window.api.onPtyData((id: string, data: string) => {
     const entry = terminals.get(id)
-    if (!entry) return
+    if (!entry) {
+      activityCallbacks.get(id)?.()
+      return
+    }
     if (entry.restoring) {
       entry.pendingData.push(data)
       return
@@ -160,6 +165,17 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const latestSessionIdRef = useRef<string | null>(sessionId ?? null)
 
+  // Release the renderer-side xterm instance while hidden. The PTY keeps
+  // running in main and will be reattached from runtime scrollback on show.
+  useEffect(() => {
+    if (visible) return
+    focusClaimRef.current = false
+    if (!terminals.has(tabId)) return
+    disposeAiToolTerminal(tabId, { killRuntime: false, persistScrollback: false })
+    initializedRef.current = false
+    spawnedRef.current = false
+  }, [visible, tabId])
+
   function startCodexSessionPolling(): void {
     if (codexSessionPollRef.current) return
     codexSessionPollRef.current = setInterval(refreshCodexSessionId, 2000)
@@ -242,7 +258,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   }, [sshReady, tabId, sshConfig])
 
   useEffect(() => {
-    if (!hostRef.current || !config) return
+    if (!hostRef.current || !config || !visible) return
 
     const existingEntry = terminals.get(tabId)
     if (existingEntry) {
@@ -398,13 +414,13 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     ensurePtySizeListener()
     ensureExitListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, toolType, config, addTab, pane, projectId, taskId])
+  }, [tabId, toolType, config, addTab, pane, projectId, taskId, visible])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
     const entry = terminals.get(tabId)
     if (!entry) return
-    if (visible) {
+    if (visible && ENABLE_XTERM_WEBGL) {
       // Attach WebGL when tab becomes visible (if not already attached)
       if (!entry.webglAddon) {
         try {
@@ -574,19 +590,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     const handler = (e: Event) => {
       const { tabId: removedId } = (e as CustomEvent).detail
       if (removedId === tabId) {
-        const entry = terminals.get(tabId)
-        if (entry) {
-          // Save scrollback before disposing (sync for reliability)
-          try {
-            const data = entry.serializeAddon.serialize()
-            window.api.scrollbackSaveSync(tabId, data)
-          } catch {
-            // Terminal may already be in bad state
-          }
-          entry.term.dispose()
-          terminals.delete(tabId)
-          window.api.ptyKill(tabId)
-        }
+        disposeAiToolTerminal(tabId)
         exitCallbacks.delete(tabId)
         activityCallbacks.delete(tabId)
         hookStatusCallbacks.delete(tabId)
@@ -638,4 +642,29 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       )}
     </div>
   )
+}
+
+function disposeAiToolTerminal(
+  tabId: string,
+  { killRuntime = true, persistScrollback = true }: { killRuntime?: boolean; persistScrollback?: boolean } = {}
+): void {
+  const entry = terminals.get(tabId)
+  if (entry) {
+    if (persistScrollback) {
+      try {
+        const data = entry.serializeAddon.serialize()
+        window.api.scrollbackSaveSync(tabId, data)
+      } catch {
+        // Terminal may already be in bad state
+      }
+    }
+    if (entry.webglAddon) {
+      try { entry.webglAddon.dispose() } catch { /* already gone */ }
+    }
+    entry.term.dispose()
+    terminals.delete(tabId)
+  }
+  if (killRuntime) {
+    window.api.ptyKill(tabId)
+  }
 }
