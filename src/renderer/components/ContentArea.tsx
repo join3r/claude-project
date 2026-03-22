@@ -166,8 +166,11 @@ export default function ContentArea(): React.ReactElement {
       const info = getActiveTabInfo()
       if (info?.activeTab?.type === 'browser' && info.activeTabId) {
         window.dispatchEvent(new CustomEvent('reload-browser-tab', { detail: { tabId: info.activeTabId } }))
+        return
       }
-      // Do nothing for terminal/AI tabs
+      if ((info?.activeTab?.type === 'diff' || info?.activeTab?.type === 'editor') && info.activeTabId) {
+        window.dispatchEvent(new CustomEvent('reload-file-tab', { detail: { tabId: info.activeTabId } }))
+      }
     })
 
     const cleanupNewTerminal = window.api.onMenuNewTerminal(() => {

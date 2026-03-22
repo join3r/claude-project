@@ -1,0 +1,1 @@
+export const FILE_BROWSER_REFRESH_MS = 2000

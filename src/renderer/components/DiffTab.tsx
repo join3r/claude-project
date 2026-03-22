@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { loader, type Monaco } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 
 interface Props {
   tabId: string
@@ -38,6 +39,7 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
     original: null,
     modified: null
   })
+  const requestIdRef = useRef(0)
 
   const clearEditorModel = () => {
     try {
@@ -55,23 +57,62 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
   }
 
   useEffect(() => {
-    let cancelled = false
     setOriginal(null)
     setModified(null)
+    requestIdRef.current += 1
+  }, [filePath, projectDir])
 
-    Promise.all([
-      window.api.fbGitDiff(projectDir, filePath),
-      window.api.fbReadFile(projectDir, filePath)
-    ]).then(([orig, mod]) => {
-      if (cancelled) return
-      setOriginal(orig)
-      setModified(mod)
-    })
+  useEffect(() => {
+    if (!visible) return
+
+    const refreshDiff = () => {
+      const requestId = requestIdRef.current + 1
+      requestIdRef.current = requestId
+
+      Promise.all([
+        window.api.fbGitDiff(projectDir, filePath),
+        window.api.fbReadFile(projectDir, filePath).catch(() => '')
+      ]).then(([orig, mod]) => {
+        if (requestId !== requestIdRef.current) return
+        setOriginal(orig)
+        setModified(mod)
+      }).catch(() => {
+        if (requestId !== requestIdRef.current) return
+        setOriginal('')
+        setModified('')
+      })
+    }
+
+    refreshDiff()
+
+    const intervalId = window.setInterval(() => {
+      refreshDiff()
+    }, FILE_BROWSER_REFRESH_MS)
+
+    const handleFocus = () => refreshDiff()
+    const handleFileSaved = (event: Event) => {
+      const detail = (event as CustomEvent<{ filePath?: string }>).detail
+      if (detail?.filePath && detail.filePath !== filePath) return
+      refreshDiff()
+    }
+    const handleReload = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string }>).detail
+      if (detail?.tabId && detail.tabId !== tabId) return
+      refreshDiff()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('file-saved', handleFileSaved)
+    window.addEventListener('reload-file-tab', handleReload)
 
     return () => {
-      cancelled = true
+      requestIdRef.current += 1
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('file-saved', handleFileSaved)
+      window.removeEventListener('reload-file-tab', handleReload)
     }
-  }, [projectDir, filePath])
+  }, [filePath, projectDir, tabId, visible])
 
   useEffect(() => {
     let cancelled = false

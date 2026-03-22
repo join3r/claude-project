@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Editor from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 
 interface Props {
   tabId: string
@@ -30,15 +31,84 @@ function getLanguageFromPath(filePath: string): string {
 export default function EditorTab({ tabId, visible, filePath, projectDir, projectId, taskId, pane, effectiveTheme }: Props): React.ReactElement {
   const [content, setContent] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const savedContentRef = useRef<string>('')
+  const currentContentRef = useRef<string>('')
+  const dirtyRef = useRef(false)
+  const requestIdRef = useRef(0)
+
+  const refreshContent = useCallback((force = false) => {
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+
+    window.api.fbReadFile(projectDir, filePath).then(text => {
+      if (requestId !== requestIdRef.current) return
+      setError(null)
+
+      if (!force && dirtyRef.current) return
+      if (!force && text === savedContentRef.current) return
+
+      savedContentRef.current = text
+      currentContentRef.current = text
+      dirtyRef.current = false
+      setDirty(false)
+      setContent(text)
+
+      if (editorRef.current && editorRef.current.getValue() !== text) {
+        editorRef.current.setValue(text)
+      }
+    }).catch(() => {
+      if (requestId !== requestIdRef.current) return
+      if (!force && dirtyRef.current) return
+
+      setError('Unable to read file.')
+      setContent(null)
+      savedContentRef.current = ''
+      currentContentRef.current = ''
+      dirtyRef.current = false
+      setDirty(false)
+    })
+  }, [filePath, projectDir])
 
   useEffect(() => {
-    window.api.fbReadFile(projectDir, filePath).then(text => {
-      setContent(text)
-      savedContentRef.current = text
-    })
-  }, [projectDir, filePath])
+    setContent(null)
+    setError(null)
+    savedContentRef.current = ''
+    currentContentRef.current = ''
+    dirtyRef.current = false
+    setDirty(false)
+    refreshContent(true)
+    return () => {
+      requestIdRef.current += 1
+    }
+  }, [refreshContent])
+
+  useEffect(() => {
+    if (!visible) return
+
+    refreshContent()
+
+    const intervalId = window.setInterval(() => {
+      refreshContent()
+    }, FILE_BROWSER_REFRESH_MS)
+
+    const handleFocus = () => refreshContent()
+    const handleReload = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string }>).detail
+      if (detail?.tabId && detail.tabId !== tabId) return
+      refreshContent(true)
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('reload-file-tab', handleReload)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('reload-file-tab', handleReload)
+    }
+  }, [refreshContent, tabId, visible])
 
   const handleEditorDidMount = (ed: editor.IStandaloneCodeEditor) => {
     editorRef.current = ed
@@ -50,18 +120,26 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
         const value = ed.getValue()
         window.api.fbWriteFile(projectDir, filePath, value).then(() => {
           savedContentRef.current = value
+          currentContentRef.current = value
+          dirtyRef.current = false
           setDirty(false)
-          window.dispatchEvent(new CustomEvent('file-saved', { detail: { filePath } }))
+          setContent(value)
+          setError(null)
+          window.dispatchEvent(new CustomEvent('file-saved', { detail: { filePath, projectDir } }))
         })
       }
     )
   }
 
   const handleChange = (value: string | undefined) => {
-    setDirty(value !== savedContentRef.current)
+    const nextValue = value ?? ''
+    currentContentRef.current = nextValue
+    dirtyRef.current = nextValue !== savedContentRef.current
+    setDirty(dirtyRef.current)
   }
 
   if (!visible) return <div style={{ display: 'none' }} />
+  if (error !== null) return <div className="tab-content-placeholder">{error}</div>
   if (content === null) return <div className="tab-content-placeholder">Loading...</div>
 
   return (

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitStatusResult } from '../../shared/types'
-
-const GIT_STATUS_REFRESH_MS = 2000
+import { FILE_BROWSER_REFRESH_MS } from './fileBrowserRefresh'
 
 export function useGitStatus(projectDir: string, enabled: boolean): GitStatusResult | null {
   const [gitStatus, setGitStatus] = useState<GitStatusResult | null>(null)
@@ -39,7 +38,7 @@ export function useGitStatus(projectDir: string, enabled: boolean): GitStatusRes
 
     const intervalId = window.setInterval(() => {
       fetchGitStatus()
-    }, GIT_STATUS_REFRESH_MS)
+    }, FILE_BROWSER_REFRESH_MS)
 
     const handleFocus = () => fetchGitStatus()
     const handleFileSaved = () => fetchGitStatus()
