@@ -9,6 +9,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { ImageAddon } from '@xterm/addon-image'
 import TerminalSearchBar from './TerminalSearchBar'
+import { bindCopyOnSelect } from './copyOnSelect'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
 import type { SshConfig, ShellCommandConfig } from '../../shared/types'
@@ -290,12 +291,9 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   useEffect(() => {
     const entry = terminals.get(tabId)
     if (!entry || !config?.copyOnSelect) return
-    const disposable = entry.term.onSelectionChange(() => {
-      const selection = entry.term.getSelection()
-      if (selection) navigator.clipboard.writeText(selection)
-    })
+    const disposable = bindCopyOnSelect(entry.term)
     return () => disposable.dispose()
-  }, [tabId, config?.copyOnSelect])
+  }, [tabId, visible, config?.copyOnSelect])
 
   // Use ResizeObserver to fit terminal when container dimensions change.
   useEffect(() => {

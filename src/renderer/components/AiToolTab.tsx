@@ -9,6 +9,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { ImageAddon } from '@xterm/addon-image'
 import TerminalSearchBar from './TerminalSearchBar'
+import { bindCopyOnSelect } from './copyOnSelect'
 import { useApp } from '../context/AppContext'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
@@ -449,12 +450,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   useEffect(() => {
     const entry = terminals.get(tabId)
     if (!entry || !config?.copyOnSelect) return
-    const disposable = entry.term.onSelectionChange(() => {
-      const selection = entry.term.getSelection()
-      if (selection) navigator.clipboard.writeText(selection)
-    })
+    const disposable = bindCopyOnSelect(entry.term)
     return () => disposable.dispose()
-  }, [tabId, config?.copyOnSelect])
+  }, [tabId, visible, config?.copyOnSelect])
 
   // ResizeObserver for fitting + spawning
   useEffect(() => {

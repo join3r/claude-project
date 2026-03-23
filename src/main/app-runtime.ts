@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, nativeTheme, session } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -339,6 +339,10 @@ export class AppRuntime {
     })
 
     ipcMain.handle('get-native-theme', () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+    ipcMain.handle('clipboard-write-text', (_event, text: string) => {
+      clipboard.writeText(text)
+      return undefined
+    })
 
     ipcMain.handle('scrollback-save', (_event, tabId: string, data: string) => {
       const scrollback = trimScrollback(data)
