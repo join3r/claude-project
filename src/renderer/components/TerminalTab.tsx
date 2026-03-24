@@ -14,6 +14,7 @@ import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
 import type { SshConfig, ShellCommandConfig } from '../../shared/types'
 import { normalizeBrowserUrl } from '../browserUrl'
+import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import './TerminalTab.css'
 
 const ENABLE_XTERM_WEBGL = false
@@ -235,6 +236,8 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     })
 
     term.onData((data) => {
+      const currentEntry = terminals.get(tabId)
+      if (!currentEntry || currentEntry.restoring) return
       window.api.ptyWrite(tabId, data)
     })
 
@@ -320,6 +323,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
 
           void attachPromise.then(({ cols, rows, scrollback }) => {
             resizeTerminal(entry, cols, rows)
+            const restoredScrollback = sanitizeRestoredScrollback(scrollback)
 
             const flushPending = () => {
               entry.restoring = false
@@ -330,12 +334,12 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
               entry.term.scrollToBottom()
             }
 
-            if (!scrollback) {
+            if (!restoredScrollback) {
               flushPending()
               return
             }
 
-            entry.term.write(scrollback, flushPending)
+            entry.term.write(restoredScrollback, flushPending)
           }).catch(() => {
             entry.restoring = false
             entry.pendingData = []

@@ -16,6 +16,7 @@ import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
 import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
 import { normalizeBrowserUrl } from '../browserUrl'
+import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import '@xterm/xterm/css/xterm.css'
 import './AiToolTab.css'
 
@@ -322,6 +323,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
 
     term.onData((data) => {
+      const currentEntry = terminals.get(tabId)
+      if (!currentEntry || currentEntry.restoring) return
       window.api.ptyWrite(tabId, data)
     })
 
@@ -504,9 +507,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
               entry.term.scrollToBottom()
             }
 
-            if (attachResult.scrollback) {
+            const restoredScrollback = sanitizeRestoredScrollback(attachResult.scrollback)
+
+            if (restoredScrollback) {
               await new Promise<void>(resolve => {
-                entry.term.write(attachResult.scrollback, () => {
+                entry.term.write(restoredScrollback, () => {
                   flushPending()
                   resolve()
                 })
