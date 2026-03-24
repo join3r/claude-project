@@ -11,6 +11,11 @@
 
 .terminal-tab .xterm {
   height: 100%;
+  background-color: var(--terminal-background, #1e1e1e);
+}
+
+.terminal-tab .xterm .xterm-viewport {
+  background-color: var(--terminal-background, #1e1e1e) !important;
 }
 
 .terminal-tab .xterm-scrollable-element > .scrollbar.vertical {
@@ -20,6 +25,10 @@
 }
 
 .terminal-tab.is-scrolling .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1 !important;
+}
+
+.terminal-tab:hover .xterm-scrollable-element > .scrollbar.vertical {
   opacity: 1 !important;
 }
 

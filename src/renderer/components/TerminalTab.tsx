@@ -10,6 +10,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { ImageAddon } from '@xterm/addon-image'
 import TerminalSearchBar from './TerminalSearchBar'
 import { bindCopyOnSelect } from './copyOnSelect'
+import { bindTransientScrollbar } from './transientScrollbar'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
 import type { SshConfig, ShellCommandConfig } from '../../shared/types'
@@ -36,6 +37,7 @@ interface TerminalEntry {
   serializeAddon: SerializeAddon
   searchAddon: SearchAddon
   webglAddon: WebglAddon | null
+  scrollbarBinding: { dispose(): void } | null
   restoring: boolean
   pendingData: string[]
   suppressResizeEvents: number
@@ -222,6 +224,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     term.unicode.activeVersion = '11'
     term.loadAddon(imageAddon)
     term.open(hostRef.current)
+    term.element?.style.setProperty('--terminal-background', termTheme.background ?? '#1e1e1e')
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
     terminals.set(tabId, {
@@ -230,6 +233,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       serializeAddon,
       searchAddon,
       webglAddon: null,
+      scrollbarBinding: null,
       restoring: false,
       pendingData: [],
       suppressResizeEvents: 0
@@ -259,13 +263,12 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       focusClaimRef.current = false
     })
 
-    // Show scrollbar only while scrolling
-    let scrollTimer: ReturnType<typeof setTimeout> | null = null
-    term.onScroll(() => {
-      containerRef.current?.classList.add('is-scrolling')
-      if (scrollTimer) clearTimeout(scrollTimer)
-      scrollTimer = setTimeout(() => containerRef.current?.classList.remove('is-scrolling'), 800)
-    })
+    if (containerRef.current) {
+      const currentEntry = terminals.get(tabId)
+      if (currentEntry) {
+        currentEntry.scrollbarBinding = bindTransientScrollbar(containerRef.current, term)
+      }
+    }
 
     ensurePtyListener()
     ensurePtySizeListener()
@@ -387,9 +390,11 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   useEffect(() => {
     const entry = terminals.get(tabId)
     if (entry) {
-      entry.term.options.theme = effectiveTerminalTheme === 'light'
+      const theme = effectiveTerminalTheme === 'light'
         ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', selectionBackground: 'rgba(0, 120, 215, 0.3)', selectionInactiveBackground: 'rgba(0, 120, 215, 0.15)', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
         : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: 'rgba(255, 255, 255, 0.3)', selectionInactiveBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
+      entry.term.options.theme = theme
+      entry.term.element?.style.setProperty('--terminal-background', theme.background ?? '#1e1e1e')
     }
   }, [effectiveTerminalTheme, tabId])
 
@@ -454,6 +459,7 @@ export function disposeTerminal(
     if (entry.webglAddon) {
       try { entry.webglAddon.dispose() } catch { /* already gone */ }
     }
+    entry.scrollbarBinding?.dispose()
     entry.term.dispose()
     terminals.delete(tabId)
   }

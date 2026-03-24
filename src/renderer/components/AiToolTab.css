@@ -11,6 +11,11 @@
 
 .ai-tool-tab .xterm {
   height: 100%;
+  background-color: var(--terminal-background, #1e1e1e);
+}
+
+.ai-tool-tab .xterm .xterm-viewport {
+  background-color: var(--terminal-background, #1e1e1e) !important;
 }
 
 .ai-tool-tab .xterm-scrollable-element > .scrollbar.vertical {
@@ -20,6 +25,10 @@
 }
 
 .ai-tool-tab.is-scrolling .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1 !important;
+}
+
+.ai-tool-tab:hover .xterm-scrollable-element > .scrollbar.vertical {
   opacity: 1 !important;
 }
 
