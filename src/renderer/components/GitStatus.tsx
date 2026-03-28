@@ -85,6 +85,33 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     }
   }, [busy, projectDir, showFeedback, refreshStatus])
 
+  const handleDiscard = useCallback(async (files: string[]) => {
+    if (busy || files.length === 0) return
+    setBusy(true)
+    try {
+      const result = await window.api.fbGitDiscard(projectDir, files)
+      if (result.success) {
+        showFeedback('success', result.message)
+      } else {
+        showFeedback('error', result.message)
+      }
+      refreshStatus()
+    } catch {
+      showFeedback('error', 'Discard failed')
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, projectDir, showFeedback, refreshStatus])
+
+  const handleStageAll = useCallback(() => {
+    if (!gitStatus) return
+    const files = [
+      ...gitStatus.unstaged.map(e => e.relativePath),
+      ...gitStatus.untracked.map(e => e.relativePath),
+    ]
+    handleStage(files)
+  }, [gitStatus, handleStage])
+
   const handlePull = useCallback(async () => {
     if (busy) return
     setBusy(true)
@@ -137,6 +164,8 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
       gitStatus.untracked.length === 0)
 
   const hasStagedFiles = gitStatus && gitStatus.staged.length > 0
+  const hasUnstagedOrUntracked = gitStatus &&
+    (gitStatus.unstaged.length > 0 || gitStatus.untracked.length > 0)
 
   const handleSectionAction = useCallback((key: SectionKey) => {
     if (!gitStatus) return
@@ -166,6 +195,16 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
           <button className="gitstatus-btn" onClick={handlePush} disabled={busy} title="Git Push">
             Push
           </button>
+          {hasUnstagedOrUntracked && (
+            <button
+              className="gitstatus-btn gitstatus-btn-stage-all"
+              onClick={handleStageAll}
+              disabled={busy}
+              title="Stage all unstaged and untracked files"
+            >
+              Stage All
+            </button>
+          )}
         </div>
         <div className="gitstatus-commit-row">
           <input
@@ -223,6 +262,7 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
                     busy={busy}
                     onFileClick={onFileClick}
                     onAction={handleFileAction}
+                    onDiscard={key === 'unstaged' ? handleDiscard : undefined}
                   />
                 ))}
             </div>
@@ -239,10 +279,33 @@ interface FileRowProps {
   busy: boolean
   onFileClick: (filePath: string) => void
   onAction: (sectionKey: SectionKey, filePath: string) => void
+  onDiscard?: (files: string[]) => void
 }
 
-function FileRow({ entry, sectionKey, busy, onFileClick, onAction }: FileRowProps) {
+function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: FileRowProps) {
   const colors = BADGE_COLORS[sectionKey]
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+    }
+  }, [])
+
+  const handleDiscardClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!onDiscard) return
+    if (!confirmDiscard) {
+      setConfirmDiscard(true)
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+      confirmTimerRef.current = setTimeout(() => setConfirmDiscard(false), 3000)
+    } else {
+      setConfirmDiscard(false)
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+      onDiscard([entry.relativePath])
+    }
+  }, [onDiscard, confirmDiscard, entry.relativePath])
 
   return (
     <div
@@ -256,6 +319,16 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction }: FileRowProp
         {entry.status}
       </span>
       <span className="gitstatus-path">{entry.relativePath}</span>
+      {onDiscard && (
+        <button
+          className={`gitstatus-discard-btn gitstatus-file-action${confirmDiscard ? ' gitstatus-discard-confirm' : ''}`}
+          title={confirmDiscard ? 'Click again to confirm discard' : 'Discard changes'}
+          disabled={busy}
+          onClick={handleDiscardClick}
+        >
+          {confirmDiscard ? '?' : '\u2715'}
+        </button>
+      )}
       <button
         className="gitstatus-stage-btn gitstatus-file-action"
         title={sectionKey === 'staged' ? 'Unstage' : 'Stage'}

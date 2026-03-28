@@ -206,6 +206,8 @@ const api = {
     ipcRenderer.invoke('fb-git-stage', projectCwd, files),
   fbGitUnstage: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
     ipcRenderer.invoke('fb-git-unstage', projectCwd, files),
+  fbGitDiscard: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-discard', projectCwd, files),
   fbGitPull: (projectCwd: string): Promise<GitOperationResult> =>
     ipcRenderer.invoke('fb-git-pull', projectCwd),
   fbGitCommit: (projectCwd: string, message: string): Promise<GitOperationResult> =>

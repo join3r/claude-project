@@ -185,3 +185,48 @@
   opacity: 0 !important;
   cursor: default;
 }
+
+.gitstatus-btn-stage-all {
+  margin-left: auto;
+}
+
+.gitstatus-discard-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.gitstatus-file:hover .gitstatus-discard-btn {
+  opacity: 1;
+}
+
+.gitstatus-discard-btn:hover:not(:disabled) {
+  background: #f4877140;
+  color: #f48771;
+  border-color: #f48771;
+}
+
+.gitstatus-discard-confirm {
+  opacity: 1 !important;
+  background: #f4877140;
+  color: #f48771;
+  border-color: #f48771;
+  font-weight: 700;
+}
+
+.gitstatus-discard-btn:disabled {
+  opacity: 0 !important;
+  cursor: default;
+}

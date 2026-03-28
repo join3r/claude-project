@@ -739,6 +739,18 @@ export class AppRuntime {
       }
     })
 
+    ipcMain.handle('fb-git-discard', async (_event, projectCwd: string, files: string[]): Promise<GitOperationResult> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      try {
+        await execFileAsync('git', ['checkout', '--', ...files], { cwd: resolvedCwd, timeout: 10000 })
+        return { success: true, message: `Discarded changes in ${files.length} file(s)` }
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string })?.stderr?.trim()
+        const msg = stderr || (err instanceof Error ? err.message : String(err))
+        return { success: false, message: msg }
+      }
+    })
+
     ipcMain.handle('fb-git-pull', async (_event, projectCwd: string): Promise<GitOperationResult> => {
       const resolvedCwd = path.resolve(projectCwd)
       try {
