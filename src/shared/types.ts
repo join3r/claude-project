@@ -50,6 +50,27 @@ export interface WorkspaceConfig {
   relativeProjectPath: string
 }
 
+export interface WorkspaceTarget {
+  projectDir: string
+  projectId?: string
+  sshConfig?: SshConfig
+}
+
+export interface WorkspaceListBranchesRequest extends WorkspaceTarget {}
+
+export interface WorkspaceCreateRequest extends WorkspaceTarget {
+  name: string
+  baseBranch: string
+}
+
+export interface WorkspaceDeleteRequest extends WorkspaceTarget {
+  worktreePath: string
+  branchName: string
+  baseBranch: string
+  force?: boolean
+  keepBranch?: boolean
+}
+
 export function isWorkspaceTask(task: Task): boolean {
   return !!task.workspace
 }

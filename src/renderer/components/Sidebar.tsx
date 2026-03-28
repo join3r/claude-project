@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
 import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject, isWorkspaceTask } from '../../shared/types'
-import type { Tab, Task, Project, Folder, WorkspaceConfig } from '../../shared/types'
+import type { Tab, Task, Project, Folder } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -192,8 +192,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       let keepBranch = false
       try {
         const result = await window.api.workspaceDelete(
-          project.directory, task.workspace.worktreePath,
-          task.workspace.branchName, task.workspace.baseBranch
+          {
+            projectDir: getProjectDir(project),
+            projectId: isRemoteProject(project) ? project.id : undefined,
+            sshConfig: project.ssh,
+            worktreePath: task.workspace.worktreePath,
+            branchName: task.workspace.branchName,
+            baseBranch: task.workspace.baseBranch
+          }
         )
         if (result.status === 'uncommitted') {
           if (!window.confirm('This workspace has uncommitted changes that will be lost. Delete anyway?')) return
@@ -217,8 +223,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       // Step 2: Now safe to remove worktree and branch
       try {
         await window.api.workspaceDelete(
-          project.directory, task.workspace.worktreePath,
-          task.workspace.branchName, task.workspace.baseBranch, true, keepBranch
+          {
+            projectDir: getProjectDir(project),
+            projectId: isRemoteProject(project) ? project.id : undefined,
+            sshConfig: project.ssh,
+            worktreePath: task.workspace.worktreePath,
+            branchName: task.workspace.branchName,
+            baseBranch: task.workspace.baseBranch,
+            force: true,
+            keepBranch
+          }
         )
       } catch {
         // Worktree may already be cleaned up
@@ -511,7 +525,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           >
             + Task
           </button>
-          {!isShellCommandProject(project) && !isRemoteProject(project) && (
+          {!isShellCommandProject(project) && (
             <button
               className="sidebar-btn add-task-btn"
               onClick={() => handleAddWorkspace(project.id)}
@@ -727,6 +741,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         return (
           <CreateWorkspaceModal
             projectDir={getProjectDir(project)}
+            projectId={isRemoteProject(project) ? project.id : undefined}
+            sshConfig={project.ssh}
             onAdd={(name, workspace) => {
               addWorkspaceTask(workspaceModalProjectId, name, workspace)
               setWorkspaceModalProjectId(null)

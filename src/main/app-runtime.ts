@@ -9,8 +9,9 @@ import { HookServer } from './hook-server'
 import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
+import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
-import { countTextLines, parseNumstat } from './git-diff-summary'
+import { parseNumstat } from './git-diff-summary'
 import type {
   AppConfig,
   DirectoryEntry,
@@ -22,6 +23,9 @@ import type {
   ProjectsData,
   SshConfig,
   TunnelConfig,
+  WorkspaceCreateRequest,
+  WorkspaceDeleteRequest,
+  WorkspaceListBranchesRequest,
   WindowGeometry,
   WindowViewState
 } from '../shared/types'
@@ -77,19 +81,15 @@ async function hasHeadCommit(resolvedCwd: string): Promise<boolean> {
 
 async function readUntrackedSummary(resolvedCwd: string): Promise<GitDiffSummary> {
   try {
-    const { stdout } = await execFileAsync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: resolvedCwd })
-    const relativePaths = stdout.split('\0').filter(Boolean)
-    let added = 0
-
-    for (const relativePath of relativePaths) {
-      try {
-        const content = await fsPromises.readFile(path.join(resolvedCwd, relativePath), 'utf-8')
-        added += countTextLines(content)
-      } catch {
-        // Ignore unreadable and binary files for the summary badge.
-      }
-    }
-
+    // Count lines via a shell pipeline instead of reading every untracked file
+    // into Node.js — projects with hundreds of untracked files (e.g. vendored
+    // dependencies) would otherwise cause 100% CPU on the 2-second poll.
+    const { stdout } = await execFileAsync(
+      '/bin/sh',
+      ['-c', 'git ls-files --others --exclude-standard -z | xargs -0 wc -l 2>/dev/null | tail -1'],
+      { cwd: resolvedCwd, timeout: 5000 }
+    )
+    const added = parseInt(stdout.trim(), 10) || 0
     return { added, deleted: 0 }
   } catch {
     return { added: 0, deleted: 0 }
@@ -132,6 +132,7 @@ export class AppRuntime {
   private readonly hookServer = new HookServer()
   private readonly codexSessionManager = new CodexSessionManager()
   private readonly workspaceManager = new WorkspaceManager()
+  private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
   private readonly windows = new Map<number, BrowserWindow>()
   private readonly windowStates = new Map<number, PersistedWindowState>()
   private readonly ptyRuntimes = new Map<string, PtyRuntime>()
@@ -277,6 +278,12 @@ export class AppRuntime {
     nativeTheme.on('updated', () => {
       this.broadcastToAllWindows('theme-changed', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
     })
+  }
+
+  private async ensureSshConnected(projectId: string, sshConfig: SshConfig): Promise<void> {
+    if (this.sshManager.getStatus(projectId) === 'connected') return
+    await this.sshManager.connect(projectId, sshConfig)
+    this.sshManager.startHealthChecks(projectId, sshConfig)
   }
 
   private registerIpcHandlers(): void {
@@ -484,12 +491,13 @@ export class AppRuntime {
     ipcMain.handle('hooks-cleanup', (_event, projectDir: string) => {
       this.hookInjector.cleanup(projectDir)
     })
-    ipcMain.handle('hooks-cleanup-remote', async (_event, projectId: string, sshConfig: SshConfig) => {
-      const isLast = this.hookInjector.remoteCleanup(projectId)
+    ipcMain.handle('hooks-cleanup-remote', async (_event, projectId: string, sshConfig: SshConfig, remoteDir?: string) => {
+      const effectiveRemoteDir = remoteDir || sshConfig.remoteDir
+      const isLast = this.hookInjector.remoteCleanup(projectId, effectiveRemoteDir)
       if (!isLast) return
 
       if (this.sshManager.getStatus(projectId) !== 'connected') return
-      const cleanupScript = this.hookInjector.buildRemoteCleanupScript(sshConfig.remoteDir)
+      const cleanupScript = this.hookInjector.buildRemoteCleanupScript(effectiveRemoteDir)
       const cleanupArgs = [
         '-S', this.sshManager.getSocketPath(projectId),
         `${sshConfig.username}@${sshConfig.host}`,
@@ -580,27 +588,44 @@ export class AppRuntime {
       this.killPty(id)
     })
 
-    ipcMain.handle('workspace-list-branches', async (_event, projectDir: string) => {
-      return this.workspaceManager.listBranches(projectDir)
+    ipcMain.handle('workspace-list-branches', async (_event, request: WorkspaceListBranchesRequest) => {
+      if (request.sshConfig && request.projectId) {
+        await this.ensureSshConnected(request.projectId, request.sshConfig)
+        return this.remoteWorkspaceManager.listBranches(this.sshManager.getSocketPath(request.projectId), {
+          ...request,
+          projectId: request.projectId,
+          sshConfig: request.sshConfig
+        })
+      }
+      return this.workspaceManager.listBranches(request.projectDir)
     })
 
-    ipcMain.handle('workspace-create', async (_event, projectDir: string, name: string, baseBranch: string) => {
-      const result = await this.workspaceManager.create(projectDir, name, baseBranch)
-      return { ...result, baseBranch }
+    ipcMain.handle('workspace-create', async (_event, request: WorkspaceCreateRequest) => {
+      const result = request.sshConfig && request.projectId
+        ? await (async () => {
+            await this.ensureSshConnected(request.projectId!, request.sshConfig!)
+            return this.remoteWorkspaceManager.create(this.sshManager.getSocketPath(request.projectId!), {
+              ...request,
+              projectId: request.projectId!,
+              sshConfig: request.sshConfig!
+            })
+          })()
+        : await this.workspaceManager.create(request.projectDir, request.name, request.baseBranch)
+      return { ...result, baseBranch: request.baseBranch }
     })
 
     ipcMain.handle(
       'workspace-delete',
-      async (
-        _event,
-        projectDir: string,
-        worktreePath: string,
-        branchName: string,
-        baseBranch: string,
-        force?: boolean,
-        keepBranch?: boolean
-      ) => {
-        return this.workspaceManager.delete({ projectDir, worktreePath, branchName, baseBranch, force, keepBranch })
+      async (_event, request: WorkspaceDeleteRequest) => {
+        if (request.sshConfig && request.projectId) {
+          await this.ensureSshConnected(request.projectId, request.sshConfig)
+          return this.remoteWorkspaceManager.delete(this.sshManager.getSocketPath(request.projectId), {
+            ...request,
+            projectId: request.projectId,
+            sshConfig: request.sshConfig
+          })
+        }
+        return this.workspaceManager.delete(request)
       }
     )
 
@@ -745,17 +770,18 @@ export class AppRuntime {
         throw new Error('SSH connection not established')
       }
 
+      const remoteCwd = cwd || sshConfig.remoteDir
       const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       let hookInjectPrefix = ''
       if (isClaudeRemote) {
         const remotePort = this.sshManager.getRemotePort(projectId)
         if (remotePort) {
-          this.hookInjector.remoteInject(projectId)
-          hookInjectPrefix = this.hookInjector.buildRemoteInjectScript(sshConfig.remoteDir, remotePort) + ' && '
+          this.hookInjector.remoteInject(projectId, remoteCwd)
+          hookInjectPrefix = this.hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
         }
       }
 
-      const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix)
+      const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix, remoteCwd)
       this.ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs, undefined, {
         onData: (data) => {
           const runtime = this.ptyRuntimes.get(id)

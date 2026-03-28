@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react'
-import type { WorkspaceConfig } from '../../shared/types'
+import type { SshConfig, WorkspaceConfig } from '../../shared/types'
 import './CreateWorkspaceModal.css'
 
 interface Props {
   projectDir: string
+  projectId?: string
+  sshConfig?: SshConfig
   onAdd: (name: string, workspace: WorkspaceConfig) => void
   onCancel: () => void
 }
 
-export default function CreateWorkspaceModal({ projectDir, onAdd, onCancel }: Props): React.ReactElement {
+export default function CreateWorkspaceModal({ projectDir, projectId, sshConfig, onAdd, onCancel }: Props): React.ReactElement {
   const [name, setName] = useState('')
   const [branches, setBranches] = useState<string[]>([])
   const [selectedBranch, setSelectedBranch] = useState('')
@@ -17,7 +19,7 @@ export default function CreateWorkspaceModal({ projectDir, onAdd, onCancel }: Pr
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    window.api.workspaceListBranches(projectDir)
+    window.api.workspaceListBranches({ projectDir, projectId, sshConfig })
       .then(branchList => {
         setBranches(branchList)
         const defaultBranch = branchList.find(b => b === 'main') ?? branchList.find(b => b === 'master') ?? branchList[0] ?? ''
@@ -26,7 +28,7 @@ export default function CreateWorkspaceModal({ projectDir, onAdd, onCancel }: Pr
       .catch(err => {
         setError(err instanceof Error ? err.message : 'Failed to list branches. Is this a git repository?')
       })
-  }, [projectDir])
+  }, [projectDir, projectId, sshConfig])
 
   const filteredBranches = filter
     ? branches.filter(b => b.toLowerCase().includes(filter.toLowerCase()))
@@ -37,7 +39,13 @@ export default function CreateWorkspaceModal({ projectDir, onAdd, onCancel }: Pr
     setCreating(true)
     setError('')
     try {
-      const result = await window.api.workspaceCreate(projectDir, name.trim(), selectedBranch)
+      const result = await window.api.workspaceCreate({
+        projectDir,
+        projectId,
+        sshConfig,
+        name: name.trim(),
+        baseBranch: selectedBranch
+      })
       onAdd(name.trim(), {
         worktreePath: result.worktreePath,
         branchName: result.branchName,

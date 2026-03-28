@@ -321,7 +321,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
           const attachPromise = shellCommand
             ? window.api.ptySpawn(tabId, '/bin/sh', '/', entry.term.cols, entry.term.rows, ['-c', shellCommand.command])
             : sshConfig
-              ? window.api.ptySpawn(tabId, '$SHELL', '', entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
+              ? window.api.ptySpawn(tabId, '$SHELL', projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
               : window.api.ptySpawn(tabId, config.defaultShell, projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'])
 
           void attachPromise.then(({ cols, rows, scrollback }) => {

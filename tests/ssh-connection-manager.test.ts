@@ -161,6 +161,18 @@ describe('SshConnectionManager', () => {
     expect(lastArg).toContain('claude')
   })
 
+  it('uses cwd override when provided', () => {
+    const args = manager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, '/bin/zsh', undefined, undefined, undefined, '/home/deploy/app/.worktrees/feature-a')
+    const lastArg = args[args.length - 1]
+    expect(lastArg).toContain('/home/deploy/app/.worktrees/feature-a')
+    expect(lastArg).not.toContain("cd '/home/deploy/app' &&")
+  })
+
   it('shell-quotes paths with spaces and special chars', () => {
     const args = manager.buildSpawnArgs('proj-1', {
       host: 'dev.example.com',
@@ -172,6 +184,18 @@ describe('SshConnectionManager', () => {
     expect(lastArg).toMatch(/^bash -l -c /)
     expect(lastArg).toContain("my project")
     expect(lastArg).toContain("s dir")
+  })
+
+  it('shell-quotes cwd overrides with spaces and special chars', () => {
+    const args = manager.buildSpawnArgs('proj-1', {
+      host: 'dev.example.com',
+      port: 22,
+      username: 'deploy',
+      remoteDir: '/home/deploy/app'
+    }, '/bin/zsh', undefined, undefined, undefined, "/home/deploy/my project's dir/.worktrees/ws one")
+    const lastArg = args[args.length - 1]
+    expect(lastArg).toContain("my project")
+    expect(lastArg).toContain('ws one')
   })
 
   it('builds check args', () => {

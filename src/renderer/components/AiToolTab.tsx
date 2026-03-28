@@ -202,7 +202,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     }
 
     try {
-      const cwd = sshConfig ? sshConfig.remoteDir : projectDir
+      const cwd = projectDir
       const { sessionId: latestSessionId } = await window.api.codexReadSession(
         cwd,
         codexSpawnTsRef.current,
@@ -496,7 +496,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             entry.pendingData = []
 
             const attachResult = sshConfig
-              ? await window.api.ptySpawn(tabId, command, '', entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
+              ? await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv, projectId, sshConfig)
               : await window.api.ptySpawn(tabId, command, projectDir, entry.term.cols, entry.term.rows, args, extraEnv)
 
             resizeTerminal(entry, attachResult.cols, attachResult.rows)
@@ -607,7 +607,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         // Cleanup hooks when Claude tab is removed (ref-counted)
         if (isClaudeTab) {
           if (sshConfig) {
-            window.api.hooksCleanupRemote(projectId, sshConfig)
+            window.api.hooksCleanupRemote(projectId, sshConfig, projectDir)
           } else {
             window.api.hooksCleanup(projectDir)
           }
@@ -616,7 +616,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     }
     window.addEventListener('tab-removed', handler)
     return () => window.removeEventListener('tab-removed', handler)
-  }, [tabId, isClaudeTab, projectDir])
+  }, [tabId, isClaudeTab, projectDir, projectId, sshConfig])
 
   // Cmd+F to open search
   useEffect(() => {

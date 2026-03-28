@@ -161,7 +161,8 @@ export class SshConnectionManager extends EventEmitter {
     command: string,
     commandArgs?: string[],
     envVars?: Record<string, string>,
-    commandPrefix?: string
+    commandPrefix?: string,
+    cwdOverride?: string
   ): string[] {
     const args = [
       ...this.buildBaseArgs(projectId, config),
@@ -173,8 +174,9 @@ export class SshConnectionManager extends EventEmitter {
       : ''
     const cmdSuffix = commandArgs?.length ? ' ' + commandArgs.map(a => this.shellQuote(a)).join(' ') : ''
     const prefix = commandPrefix || ''
+    const cwd = cwdOverride || config.remoteDir
     // Wrap in login shell so the user's profile is sourced (PATH, etc.)
-    const innerCmd = `${prefix}cd ${this.shellQuote(config.remoteDir)} && ${envPrefix}exec ${command}${cmdSuffix}`
+    const innerCmd = `${prefix}cd ${this.shellQuote(cwd)} && ${envPrefix}exec ${command}${cmdSuffix}`
     args.push(`bash -l -c ${this.shellQuote(innerCmd)}`)
     return args
   }

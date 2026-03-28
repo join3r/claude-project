@@ -127,12 +127,13 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   ipcMain.handle('hooks-cleanup', (_e, projectDir: string) => {
     hookInjector.cleanup(projectDir)
   })
-  ipcMain.handle('hooks-cleanup-remote', async (_e, projectId: string, sshConfig: SshConfig) => {
-    const isLast = hookInjector.remoteCleanup(projectId)
+  ipcMain.handle('hooks-cleanup-remote', async (_e, projectId: string, sshConfig: SshConfig, remoteDir?: string) => {
+    const effectiveRemoteDir = remoteDir || sshConfig.remoteDir
+    const isLast = hookInjector.remoteCleanup(projectId, effectiveRemoteDir)
     if (!isLast) return
 
     if (sshManager.getStatus(projectId) !== 'connected') return
-    const cleanupScript = hookInjector.buildRemoteCleanupScript(sshConfig.remoteDir)
+    const cleanupScript = hookInjector.buildRemoteCleanupScript(effectiveRemoteDir)
     const cleanupArgs = [
       '-S', sshManager.getSocketPath(projectId),
       `${sshConfig.username}@${sshConfig.host}`,
@@ -185,15 +186,16 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       // For Claude tabs on remote, inject hooks via the spawn command (ref-counted)
       const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       let hookInjectPrefix = ''
+      const remoteCwd = cwd || sshConfig.remoteDir
       if (isClaudeRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {
-          hookInjector.remoteInject(projectId)
-          hookInjectPrefix = hookInjector.buildRemoteInjectScript(sshConfig.remoteDir, remotePort) + ' && '
+          hookInjector.remoteInject(projectId, remoteCwd)
+          hookInjectPrefix = hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
         }
       }
 
-      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix)
+      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix, remoteCwd)
       ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs)
     } else {
       // Local spawn (existing behavior)

@@ -133,26 +133,32 @@ export class HookInjector {
 
   private remoteRefCounts = new Map<string, number>()
 
+  private remoteKey(projectId: string, remoteDir: string): string {
+    return `${projectId}:${remoteDir}`
+  }
+
   /** Shell-quote a value for safe interpolation into a remote shell command */
   private shellQuote(s: string): string {
     return "'" + s.replace(/'/g, "'\\''") + "'"
   }
 
-  /** Track remote inject ref-count keyed by projectId. Returns true on first inject. */
-  remoteInject(projectId: string): boolean {
-    const count = this.remoteRefCounts.get(projectId) ?? 0
-    this.remoteRefCounts.set(projectId, count + 1)
+  /** Track remote inject ref-count keyed by projectId + remoteDir. Returns true on first inject. */
+  remoteInject(projectId: string, remoteDir: string): boolean {
+    const key = this.remoteKey(projectId, remoteDir)
+    const count = this.remoteRefCounts.get(key) ?? 0
+    this.remoteRefCounts.set(key, count + 1)
     return count === 0
   }
 
   /** Track remote cleanup ref-count. Returns true when last ref removed. */
-  remoteCleanup(projectId: string): boolean {
-    const count = this.remoteRefCounts.get(projectId) ?? 0
+  remoteCleanup(projectId: string, remoteDir: string): boolean {
+    const key = this.remoteKey(projectId, remoteDir)
+    const count = this.remoteRefCounts.get(key) ?? 0
     if (count <= 1) {
-      this.remoteRefCounts.delete(projectId)
+      this.remoteRefCounts.delete(key)
       return true
     }
-    this.remoteRefCounts.set(projectId, count - 1)
+    this.remoteRefCounts.set(key, count - 1)
     return false
   }
 

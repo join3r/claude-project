@@ -7,6 +7,9 @@ import type {
   SshConfig,
   TunnelConfig,
   TunnelState,
+  WorkspaceCreateRequest,
+  WorkspaceDeleteRequest,
+  WorkspaceListBranchesRequest,
   WindowViewState
 } from '../shared/types'
 
@@ -88,8 +91,8 @@ const api = {
   // Hook injection
   hooksInject: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-inject', projectDir),
   hooksCleanup: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-cleanup', projectDir),
-  hooksCleanupRemote: (projectId: string, sshConfig: SshConfig): Promise<void> =>
-    ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig),
+  hooksCleanupRemote: (projectId: string, sshConfig: SshConfig, remoteDir?: string): Promise<void> =>
+    ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig, remoteDir),
 
   // Codex session reading
   codexReadSession: (cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig): Promise<{ sessionId: string | null }> =>
@@ -207,23 +210,18 @@ const api = {
   },
 
   // Workspaces
-  workspaceListBranches: (projectDir: string): Promise<string[]> =>
-    ipcRenderer.invoke('workspace-list-branches', projectDir),
-  workspaceCreate: (projectDir: string, name: string, baseBranch: string): Promise<{
+  workspaceListBranches: (request: WorkspaceListBranchesRequest): Promise<string[]> =>
+    ipcRenderer.invoke('workspace-list-branches', request),
+  workspaceCreate: (request: WorkspaceCreateRequest): Promise<{
     worktreePath: string
     branchName: string
     baseBranch: string
     relativeProjectPath: string
-  }> => ipcRenderer.invoke('workspace-create', projectDir, name, baseBranch),
+  }> => ipcRenderer.invoke('workspace-create', request),
   workspaceDelete: (
-    projectDir: string,
-    worktreePath: string,
-    branchName: string,
-    baseBranch: string,
-    force?: boolean,
-    keepBranch?: boolean
+    request: WorkspaceDeleteRequest
   ): Promise<{ status: 'ok' | 'uncommitted' | 'unmerged' | 'uncommitted-and-unmerged'; baseBranch?: string }> =>
-    ipcRenderer.invoke('workspace-delete', projectDir, worktreePath, branchName, baseBranch, force, keepBranch)
+    ipcRenderer.invoke('workspace-delete', request)
 }
 
 contextBridge.exposeInMainWorld('api', api)

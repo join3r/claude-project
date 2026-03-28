@@ -170,24 +170,32 @@ describe('HookInjector', () => {
     expect(script).not.toMatch(/rm\s.*settings\.local\.json/)
   })
 
-  it('ref-counts remote inject/cleanup per projectId', () => {
+  it('ref-counts remote inject/cleanup per projectId and remoteDir', () => {
     const injector = new HookInjector(3456)
     // First inject increments refcount
-    injector.remoteInject('proj-1')
-    injector.remoteInject('proj-1')
+    injector.remoteInject('proj-1', '/home/deploy/app')
+    injector.remoteInject('proj-1', '/home/deploy/app')
     // First cleanup decrements but hooks stay
-    expect(injector.remoteCleanup('proj-1')).toBe(false) // not last ref
+    expect(injector.remoteCleanup('proj-1', '/home/deploy/app')).toBe(false) // not last ref
     // Second cleanup is last ref — returns true (caller should run remote cleanup script)
-    expect(injector.remoteCleanup('proj-1')).toBe(true)
+    expect(injector.remoteCleanup('proj-1', '/home/deploy/app')).toBe(true)
   })
 
   it('does not collide ref-counts across different projects with same remoteDir', () => {
     const injector = new HookInjector(3456)
-    injector.remoteInject('proj-1')
-    injector.remoteInject('proj-2')
+    injector.remoteInject('proj-1', '/home/deploy/app')
+    injector.remoteInject('proj-2', '/home/deploy/app')
     // Cleaning up proj-1 should not affect proj-2
-    expect(injector.remoteCleanup('proj-1')).toBe(true)
-    expect(injector.remoteCleanup('proj-2')).toBe(true)
+    expect(injector.remoteCleanup('proj-1', '/home/deploy/app')).toBe(true)
+    expect(injector.remoteCleanup('proj-2', '/home/deploy/app')).toBe(true)
+  })
+
+  it('does not collide ref-counts across different directories in the same project', () => {
+    const injector = new HookInjector(3456)
+    injector.remoteInject('proj-1', '/home/deploy/app/.worktrees/ws-a')
+    injector.remoteInject('proj-1', '/home/deploy/app/.worktrees/ws-b')
+    expect(injector.remoteCleanup('proj-1', '/home/deploy/app/.worktrees/ws-a')).toBe(true)
+    expect(injector.remoteCleanup('proj-1', '/home/deploy/app/.worktrees/ws-b')).toBe(true)
   })
 
   it('ref-counts inject/cleanup per directory', () => {

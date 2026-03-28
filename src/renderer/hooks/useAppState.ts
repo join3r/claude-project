@@ -379,26 +379,30 @@ export function useAppState() {
     return project.ssh ? project.ssh.remoteDir : project.directory
   }, [])
 
-  const removeProject = useCallback((id: string) => {
+  const removeProject = useCallback(async (id: string) => {
     const project = projectsRef.current.find(p => p.id === id)
     if (project) {
-      if (project.ssh) {
-        void window.api.sshDisconnect(id, project.ssh).catch(() => {})
-      }
       for (const task of project.tasks) {
         for (const tab of [...task.tabs.left, ...task.tabs.right]) {
           window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
           void window.api.scrollbackDelete(tab.id)
         }
         if (task.workspace) {
-          void window.api.workspaceDelete(
-            project.directory,
-            task.workspace.worktreePath,
-            task.workspace.branchName,
-            task.workspace.baseBranch,
-            true
+          await window.api.workspaceDelete(
+            {
+              projectDir: getProjectDir(project),
+              projectId: project.ssh ? id : undefined,
+              sshConfig: project.ssh,
+              worktreePath: task.workspace.worktreePath,
+              branchName: task.workspace.branchName,
+              baseBranch: task.workspace.baseBranch,
+              force: true
+            }
           ).catch(() => {})
         }
+      }
+      if (project.ssh) {
+        await window.api.sshDisconnect(id, project.ssh).catch(() => {})
       }
     }
 
@@ -417,7 +421,7 @@ export function useAppState() {
       selectedProjectId: prev.selectedProjectId === id ? null : prev.selectedProjectId,
       selectedTaskId: prev.selectedProjectId === id ? null : prev.selectedTaskId
     }))
-  }, [persistProjects, updateWindowViewState])
+  }, [getProjectDir, persistProjects, updateWindowViewState])
 
   const renameProject = useCallback((id: string, name: string) => {
     persistProjects(prev => ({
@@ -460,7 +464,7 @@ export function useAppState() {
       ...prev,
       collapsedFolderIds: prev.collapsedFolderIds.filter(id => id !== folderId)
     }))
-  }, [persistProjects, updateWindowViewState])
+  }, [getProjectDir, persistProjects, updateWindowViewState])
 
   const renameFolder = useCallback((folderId: string, name: string) => {
     persistProjects(prev => ({
@@ -583,11 +587,15 @@ export function useAppState() {
       }
       if (task.workspace && project && !skipWorkspaceCleanup) {
         void window.api.workspaceDelete(
-          project.directory,
-          task.workspace.worktreePath,
-          task.workspace.branchName,
-          task.workspace.baseBranch,
-          true
+          {
+            projectDir: getProjectDir(project),
+            projectId: project.ssh ? projectId : undefined,
+            sshConfig: project.ssh,
+            worktreePath: task.workspace.worktreePath,
+            branchName: task.workspace.branchName,
+            baseBranch: task.workspace.baseBranch,
+            force: true
+          }
         ).catch(() => {})
       }
     }
