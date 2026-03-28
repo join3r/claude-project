@@ -113,6 +113,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
           ) : (
             <GitStatus
               gitStatus={gitStatus}
+              projectDir={effectiveDir}
               onFileClick={handleGitFileClick}
             />
           )}

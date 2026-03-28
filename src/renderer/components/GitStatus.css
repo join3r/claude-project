@@ -73,3 +73,115 @@
   padding: 24px;
   color: var(--text-secondary);
 }
+
+.gitstatus-actions {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gitstatus-actions-row {
+  display: flex;
+  gap: 4px;
+}
+
+.gitstatus-commit-row {
+  display: flex;
+  gap: 4px;
+}
+
+.gitstatus-btn {
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.gitstatus-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.gitstatus-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gitstatus-commit-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+}
+
+.gitstatus-commit-input:focus {
+  border-color: var(--accent);
+}
+
+.gitstatus-commit-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.gitstatus-feedback {
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitstatus-feedback-success {
+  color: #4ec9b0;
+}
+
+.gitstatus-feedback-error {
+  color: #f48771;
+}
+
+.gitstatus-stage-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.gitstatus-header:hover .gitstatus-stage-btn,
+.gitstatus-file:hover .gitstatus-file-action {
+  opacity: 1;
+}
+
+.gitstatus-stage-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.gitstatus-stage-btn:disabled {
+  opacity: 0 !important;
+  cursor: default;
+}

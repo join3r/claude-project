@@ -19,6 +19,7 @@ import type {
   GitStatusResult,
   GitStatusEntry,
   GitFileStatus,
+  GitOperationResult,
   PersistedWindowState,
   ProjectsData,
   SshConfig,
@@ -711,6 +712,69 @@ export class AppRuntime {
         return stdout
       } catch {
         return ''
+      }
+    })
+
+    ipcMain.handle('fb-git-stage', async (_event, projectCwd: string, files: string[]): Promise<GitOperationResult> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      try {
+        await execFileAsync('git', ['add', '--', ...files], { cwd: resolvedCwd, timeout: 10000 })
+        return { success: true, message: `Staged ${files.length} file(s)` }
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string })?.stderr?.trim()
+        const msg = stderr || (err instanceof Error ? err.message : String(err))
+        return { success: false, message: msg }
+      }
+    })
+
+    ipcMain.handle('fb-git-unstage', async (_event, projectCwd: string, files: string[]): Promise<GitOperationResult> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      try {
+        await execFileAsync('git', ['reset', 'HEAD', '--', ...files], { cwd: resolvedCwd, timeout: 10000 })
+        return { success: true, message: `Unstaged ${files.length} file(s)` }
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string })?.stderr?.trim()
+        const msg = stderr || (err instanceof Error ? err.message : String(err))
+        return { success: false, message: msg }
+      }
+    })
+
+    ipcMain.handle('fb-git-pull', async (_event, projectCwd: string): Promise<GitOperationResult> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      try {
+        const { stdout, stderr } = await execFileAsync('git', ['pull'], { cwd: resolvedCwd, timeout: 60000 })
+        return { success: true, message: stdout.trim() || stderr.trim() || 'Pull complete' }
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string })?.stderr?.trim()
+        const msg = stderr || (err instanceof Error ? err.message : String(err))
+        return { success: false, message: msg }
+      }
+    })
+
+    ipcMain.handle('fb-git-commit', async (_event, projectCwd: string, commitMessage: string): Promise<GitOperationResult> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      if (!commitMessage || !commitMessage.trim()) {
+        return { success: false, message: 'Commit message cannot be empty' }
+      }
+      try {
+        const { stdout } = await execFileAsync('git', ['commit', '-m', commitMessage.trim()], { cwd: resolvedCwd, timeout: 30000 })
+        return { success: true, message: stdout.trim() || 'Committed' }
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string })?.stderr?.trim()
+        const msg = stderr || (err instanceof Error ? err.message : String(err))
+        return { success: false, message: msg }
+      }
+    })
+
+    ipcMain.handle('fb-git-push', async (_event, projectCwd: string): Promise<GitOperationResult> => {
+      const resolvedCwd = path.resolve(projectCwd)
+      try {
+        const { stdout, stderr } = await execFileAsync('git', ['push'], { cwd: resolvedCwd, timeout: 60000 })
+        return { success: true, message: stdout.trim() || stderr.trim() || 'Push complete' }
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string })?.stderr?.trim()
+        const msg = stderr || (err instanceof Error ? err.message : String(err))
+        return { success: false, message: msg }
       }
     })
   }

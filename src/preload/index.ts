@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppConfig,
   DirectoryEntry,
+  GitOperationResult,
   GitStatusResult,
   ProjectsData,
   SshConfig,
@@ -201,6 +202,16 @@ const api = {
     ipcRenderer.invoke('fb-git-status', projectCwd),
   fbGitDiff: (projectCwd: string, relativeFilePath: string): Promise<string> =>
     ipcRenderer.invoke('fb-git-diff', projectCwd, relativeFilePath),
+  fbGitStage: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-stage', projectCwd, files),
+  fbGitUnstage: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-unstage', projectCwd, files),
+  fbGitPull: (projectCwd: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-pull', projectCwd),
+  fbGitCommit: (projectCwd: string, message: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-commit', projectCwd, message),
+  fbGitPush: (projectCwd: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-push', projectCwd),
 
   // Menu: file browser toggle
   onMenuToggleFileBrowser: (callback: () => void): (() => void) => {

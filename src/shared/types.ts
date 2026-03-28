@@ -189,6 +189,11 @@ export interface GitStatusResult {
   summary: GitDiffSummary
 }
 
+export interface GitOperationResult {
+  success: boolean
+  message: string
+}
+
 export interface WindowViewState {
   selectedProjectId: string | null
   selectedTaskId: string | null
