@@ -32,27 +32,6 @@ Built with Electron, React, and TypeScript.
 
 **Multi-Window** -- Open multiple application windows with independent state.
 
-## Tech Stack
-
-| Component | Technology |
-|---|---|
-| Desktop shell | Electron 35 |
-| UI framework | React 19 |
-| Language | TypeScript 5.9 |
-| Build tool | Vite 7 via electron-vite |
-| Terminal | xterm.js 6 + node-pty |
-| Code editor | Monaco Editor |
-| Testing | Vitest |
-| Packaging | electron-builder |
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js (LTS recommended)
-- npm
-- macOS (primary target)
-
 ### Install
 
 ```bash
@@ -82,55 +61,3 @@ npm run build:mac      # Package macOS app
 npm test               # Run tests
 npm run test:watch     # Run tests in watch mode
 ```
-
-## Project Structure
-
-```
-src/
-  main/                 Electron main process
-    index.ts            Entry point, app lifecycle, menus
-    app-runtime.ts      Core runtime, IPC handler registration
-    pty-manager.ts      PTY spawning and lifecycle
-    storage.ts          JSON-based persistence (~/.devtool/)
-    ssh-connection-manager.ts   SSH connection pooling and tunneling
-    hook-server.ts      HTTP server for AI tool hooks
-    workspace-manager.ts        Git worktree operations
-
-  renderer/             React UI (renderer process)
-    App.tsx             Root component
-    context/            React context providers
-    hooks/              State management and utilities
-    components/
-      Sidebar.tsx       Project and task navigation
-      ContentArea.tsx   Main content with split panes
-      TabBar.tsx        Tab management
-      TerminalTab.tsx   Terminal emulation
-      EditorTab.tsx     Monaco editor
-      BrowserTab.tsx    Embedded browser
-      DiffTab.tsx       Git diff viewer
-      AiToolTab.tsx     AI tool integration
-      FileBrowserPanel.tsx   File tree
-
-  preload/              IPC bridge between main and renderer
-  shared/               Shared TypeScript types
-```
-
-## Configuration
-
-Application data is stored in `~/.devtool/`:
-
-- `config.json` -- App settings (fonts, theme, shell, editor preferences)
-- `projects.json` -- Projects, tasks, tabs, and view state
-- `window-session.json` -- Multi-window layout state
-- `scrollback/` -- Terminal scrollback history
-
-### Settings
-
-- **Theme** -- System, dark, or light
-- **Terminal** -- Font family (Nerd Font support), font size, shell selection
-- **Editor** -- Font, size, word wrap, line numbers, minimap, tab size
-- **Diff** -- Side-by-side mode, whitespace handling
-
-## License
-
-Private.
