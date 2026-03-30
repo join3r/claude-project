@@ -226,7 +226,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   fontSize: 14,
   theme: 'system',
   terminalTheme: 'system',
-  defaultShell: typeof process !== 'undefined' && process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh',
+  defaultShell: '',
   copyOnSelect: false,
   editorFontFamily: 'monospace',
   editorFontSize: 14,

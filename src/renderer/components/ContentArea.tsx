@@ -92,7 +92,7 @@ export default function ContentArea(): React.ReactElement {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!e.metaKey || !selectedProjectId || !selectedTaskId) return
+      if ((!e.metaKey && !e.ctrlKey) || !selectedProjectId || !selectedTaskId) return
 
       const digit = e.code.match(/^Digit([1-9])$/)?.[1]
       if (!digit) return

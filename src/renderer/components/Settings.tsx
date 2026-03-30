@@ -114,7 +114,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 className="settings-input"
                 value={config.defaultShell}
                 onChange={(e) => updateConfig({ defaultShell: e.target.value })}
-                placeholder="/bin/zsh"
+                placeholder="$SHELL (system default)"
               />
             </div>
 

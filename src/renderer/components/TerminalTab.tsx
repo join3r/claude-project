@@ -13,7 +13,7 @@ import { bindCopyOnSelect } from './copyOnSelect'
 import { bindTransientScrollbar } from './transientScrollbar'
 import { useApp } from '../context/AppContext'
 import '@xterm/xterm/css/xterm.css'
-import type { SshConfig, ShellCommandConfig } from '../../shared/types'
+import { DEFAULT_CONFIG, type SshConfig, type ShellCommandConfig } from '../../shared/types'
 import { normalizeBrowserUrl } from '../browserUrl'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import './TerminalTab.css'
@@ -322,7 +322,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
             ? window.api.ptySpawn(tabId, '/bin/sh', '/', entry.term.cols, entry.term.rows, ['-c', shellCommand.command])
             : sshConfig
               ? window.api.ptySpawn(tabId, '$SHELL', projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'], undefined, projectId, sshConfig)
-              : window.api.ptySpawn(tabId, config.defaultShell, projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'])
+              : window.api.ptySpawn(tabId, config.defaultShell || DEFAULT_CONFIG.defaultShell, projectDirRef.current, entry.term.cols, entry.term.rows, ['-l'])
 
           void attachPromise.then(({ cols, rows, scrollback }) => {
             resizeTerminal(entry, cols, rows)

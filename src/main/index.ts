@@ -163,6 +163,41 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
     console.error(`[preload-error] path=${preloadPath}`, error)
   })
 
+  // On Linux, menu accelerators may not fire when titleBarStyle hides the menu bar.
+  // Manually dispatch shortcuts via before-input-event as a reliable fallback.
+  if (process.platform === 'linux') {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !input.control) return
+
+      const send = (channel: string) => {
+        mainWindow.webContents.send(channel)
+        event.preventDefault()
+      }
+
+      const key = input.key.toLowerCase()
+
+      if (input.shift) {
+        if (key === 'n') send('menu-new-window')
+        else if (key === 't') send('menu-reopen-closed-tab')
+        else if (key === 'e') send('menu-toggle-file-browser')
+        else if (key === 'v') { mainWindow.webContents.paste(); event.preventDefault() }
+        else if (key === 'c') { mainWindow.webContents.copy(); event.preventDefault() }
+      } else if (input.alt) {
+        if (key === 'i') { mainWindow.webContents.toggleDevTools(); event.preventDefault() }
+      } else {
+        if (key === 't') send('menu-new-terminal')
+        else if (key === 'w') send('menu-close-tab')
+        else if (key === 'p') send('menu-project-switcher')
+        else if (key === 'b') send('menu-toggle-sidebar')
+        else if (key === 'r') send('menu-reload-tab')
+        else if (key === '=') send('menu-zoom-in')
+        else if (key === '-') send('menu-zoom-out')
+        else if (key === '0') send('menu-zoom-reset')
+        else if (key === 'q') { app.quit() }
+      }
+    })
+  }
+
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {

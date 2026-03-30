@@ -557,8 +557,9 @@ export class AppRuntime {
         if (!window) {
           throw new Error('Unable to resolve window for PTY attach')
         }
-        this.logDebug(`ptySpawnRequest windowId=${window.id} id=${id} shell=${shell} cwd=${cwd} cols=${cols} rows=${rows}`)
-        return this.attachOrCreatePty(window.id, id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig)
+        const resolvedShell = shell || process.env.SHELL || '/bin/sh'
+        this.logDebug(`ptySpawnRequest windowId=${window.id} id=${id} shell=${resolvedShell} cwd=${cwd} cols=${cols} rows=${rows}`)
+        return this.attachOrCreatePty(window.id, id, resolvedShell, cwd, cols, rows, args, extraEnv, projectId, sshConfig)
       }
     )
 

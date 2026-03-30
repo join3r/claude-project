@@ -1,3 +1,5 @@
+// Legacy IPC handlers — kept for single-window fallback.
+// The primary IPC registration (including pty-spawn) lives in AppRuntime (app-runtime.ts).
 import { ipcMain, dialog, BrowserWindow, nativeTheme } from 'electron'
 import { Storage } from './storage'
 import { ScrollbackStorage } from './scrollback-storage'

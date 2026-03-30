@@ -8,11 +8,11 @@ export function useMetaHeld(): void {
     const remove = () => document.body.classList.remove(CLASS_NAME)
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Meta') add()
+      if (e.key === 'Meta' || e.key === 'Control') add()
     }
 
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Meta' || !e.metaKey) remove()
+      if (e.key === 'Meta' || e.key === 'Control' || (!e.metaKey && !e.ctrlKey)) remove()
     }
 
     window.addEventListener('keydown', onKeyDown)
