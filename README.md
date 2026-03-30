@@ -53,7 +53,16 @@ Starts the app in development mode with hot reload.
 ```bash
 npm run build          # Production build
 npm run build:mac      # Package macOS app
+npm run build:linux    # Package Linux app
 ```
+
+### Install (build + system install)
+
+```bash
+./scripts/install.sh
+```
+
+Builds and installs the app system-wide. Supports macOS (arm64) and Linux (x86_64, arm64). On macOS it copies to `/Applications`, on Linux it installs to `/opt/DevTool` with a desktop entry and `/usr/local/bin/devtool` symlink.
 
 ### Test
 
