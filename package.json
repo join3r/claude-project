@@ -8,6 +8,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "build:mac": "electron-vite build && electron-builder --mac --dir",
+    "build:linux": "electron-vite build && electron-builder --linux --dir",
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "npx @electron/rebuild -m ."
@@ -26,7 +27,12 @@
     "mac": {
       "target": "dir",
       "category": "public.app-category.developer-tools"
-    }
+    },
+    "linux": {
+      "target": "dir",
+      "category": "Development"
+    },
+    "electronDist": "node_modules/electron/dist"
   },
   "keywords": [],
   "author": "",
