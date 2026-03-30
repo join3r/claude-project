@@ -692,6 +692,28 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
                 setContextMenu(null)
               }}>Delete</button>
+              {contextMenu.type === 'project' && (() => {
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                if (!project) return null
+                const details: { label: string; value: string }[] = []
+                if (isShellCommandProject(project)) {
+                  details.push({ label: 'Command', value: project.shellCommand!.command })
+                } else if (isRemoteProject(project)) {
+                  details.push({ label: 'Connection', value: `${project.ssh!.username}@${project.ssh!.host}:${project.ssh!.port}` })
+                  details.push({ label: 'Dir', value: project.ssh!.remoteDir })
+                } else {
+                  details.push({ label: 'Dir', value: project.directory })
+                }
+                return (
+                  <div className="context-menu-details">
+                    {details.map(d => (
+                      <div key={d.label} className="context-menu-detail" title={d.value}>
+                        <span className="context-menu-detail-label">{d.label}:</span> {d.value}
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
             </>
           )}
         </div>
