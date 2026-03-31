@@ -61,7 +61,7 @@ elif [ "$OS" = "Linux" ]; then
   npm run build:linux
 
   # Find the actual binary name from build output (electron-builder lowercases it)
-  BIN_NAME=$(find "$DIST_DIR" -maxdepth 1 -type f -executable ! -name "*.so" ! -name "chrome-*" ! -name "lib*" | head -1)
+  BIN_NAME=$(find "$DIST_DIR" -maxdepth 1 -type f -executable ! -name "*.so" ! -name "chrome-*" ! -name "chrome_*" ! -name "lib*" | head -1)
   BIN_NAME=$(basename "$BIN_NAME")
   if [ -z "$BIN_NAME" ]; then
     echo "Error: could not find executable in $DIST_DIR"
