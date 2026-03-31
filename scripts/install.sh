@@ -27,6 +27,9 @@ if pgrep -x "$APP_NAME" > /dev/null 2>&1; then
   sleep 1
 fi
 
+echo "Installing dependencies..."
+npm install
+
 if [ "$OS" = "Darwin" ]; then
   DIST_PATH="dist/mac-arm64/${APP_NAME}.app"
   INSTALL_PATH="/Applications/${APP_NAME}.app"
