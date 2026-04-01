@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { buildMonacoEditorOptions, getLanguageFromPath } from './monacoOptions'
+import MarkdownPreview from './MarkdownPreview'
 
 interface Props {
   tabId: string
@@ -28,6 +29,27 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
   const dirtyRef = useRef(false)
   const requestIdRef = useRef(0)
   const monacoConfig = config ?? DEFAULT_CONFIG
+
+  const isMarkdown = getLanguageFromPath(filePath) === 'markdown'
+  const [viewMode, setViewMode] = useState<'source' | 'preview'>(isMarkdown ? 'preview' : 'source')
+  const [previewContent, setPreviewContent] = useState('')
+
+  const handleToggleView = useCallback(() => {
+    setViewMode(prev => {
+      const next = prev === 'source' ? 'preview' : 'source'
+      if (next === 'preview') {
+        setPreviewContent(currentContentRef.current)
+      }
+      return next
+    })
+  }, [])
+
+  // Keep preview content in sync when file refreshes from disk
+  useEffect(() => {
+    if (viewMode === 'preview' && content !== null) {
+      setPreviewContent(dirtyRef.current ? currentContentRef.current : content)
+    }
+  }, [viewMode, content])
 
   const refreshContent = useCallback((force = false) => {
     const requestId = requestIdRef.current + 1
@@ -126,6 +148,13 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
         })
       }
     )
+    // Bind Cmd+Shift+V / Ctrl+Shift+V to toggle markdown preview
+    if (isMarkdown) {
+      ed.addCommand(
+        2048 | 1024 | 52, // CtrlCmd + Shift + V
+        () => handleToggleView()
+      )
+    }
   }
 
   const handleChange = (value: string | undefined) => {
@@ -141,15 +170,29 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: visible ? 'block' : 'none' }}>
-      <Editor
-        defaultValue={content}
-        language={getLanguageFromPath(filePath)}
-        theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
-        options={buildMonacoEditorOptions(monacoConfig)}
-        onMount={handleEditorDidMount}
-        onChange={handleChange}
-      />
-      {dirty && <div style={{ position: 'absolute', top: 4, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />}
+      <div style={{ position: 'absolute', inset: 0, display: (!isMarkdown || viewMode === 'source') ? 'block' : 'none' }}>
+        <Editor
+          defaultValue={content}
+          language={getLanguageFromPath(filePath)}
+          theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
+          options={buildMonacoEditorOptions(monacoConfig)}
+          onMount={handleEditorDidMount}
+          onChange={handleChange}
+        />
+      </div>
+      {isMarkdown && viewMode === 'preview' && (
+        <MarkdownPreview content={previewContent} effectiveTheme={effectiveTheme} />
+      )}
+      {isMarkdown && (
+        <button
+          className="md-view-toggle"
+          onClick={handleToggleView}
+          title={viewMode === 'source' ? 'Show preview (⌘⇧V)' : 'Show source (⌘⇧V)'}
+        >
+          {viewMode === 'source' ? 'Preview' : 'Source'}
+        </button>
+      )}
+      {dirty && <div style={{ position: 'absolute', top: 4, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', zIndex: 5 }} />}
     </div>
   )
 }
