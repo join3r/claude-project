@@ -842,6 +842,30 @@ export class AppRuntime {
     sshConfig?: SshConfig
   ): void {
     this.logDebug(`ptySpawn start id=${id} shell=${shell} cwd=${cwd}`)
+
+    // Capture the current runtime so callbacks can verify they belong to the
+    // right generation.  After a kill+respawn cycle the same `id` maps to a
+    // different runtime object — without this check the OLD process's delayed
+    // onData/onExit would pollute the NEW runtime (setting exitCode, pushing
+    // stale "Shared connection closed" output, etc.).
+    const expectedRuntime = this.ptyRuntimes.get(id)
+
+    const callbacks = {
+      onData: (data: string) => {
+        const runtime = this.ptyRuntimes.get(id)
+        if (!runtime || runtime !== expectedRuntime) return
+        runtime.scrollback = trimScrollback(runtime.scrollback + data)
+        this.broadcastToAttachedWindows(id, 'pty-data', id, data)
+      },
+      onExit: (exitCode: number) => {
+        const runtime = this.ptyRuntimes.get(id)
+        if (!runtime || runtime !== expectedRuntime) return
+        runtime.exitCode = exitCode
+        this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
+        this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
+      }
+    }
+
     if (sshConfig && projectId) {
       if (this.sshManager.getStatus(projectId) !== 'connected') {
         throw new Error('SSH connection not established')
@@ -859,41 +883,13 @@ export class AppRuntime {
       }
 
       const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix, remoteCwd)
-      this.ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs, undefined, {
-        onData: (data) => {
-          const runtime = this.ptyRuntimes.get(id)
-          if (!runtime) return
-          runtime.scrollback = trimScrollback(runtime.scrollback + data)
-          this.broadcastToAttachedWindows(id, 'pty-data', id, data)
-        },
-        onExit: (exitCode) => {
-          const runtime = this.ptyRuntimes.get(id)
-          if (!runtime) return
-          runtime.exitCode = exitCode
-          this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
-          this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
-        }
-      })
+      this.ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       if (isClaudeLocal) {
         this.hookInjector.inject(cwd)
       }
-      this.ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv, {
-        onData: (data) => {
-          const runtime = this.ptyRuntimes.get(id)
-          if (!runtime) return
-          runtime.scrollback = trimScrollback(runtime.scrollback + data)
-          this.broadcastToAttachedWindows(id, 'pty-data', id, data)
-        },
-        onExit: (exitCode) => {
-          const runtime = this.ptyRuntimes.get(id)
-          if (!runtime) return
-          runtime.exitCode = exitCode
-          this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
-          this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
-        }
-      })
+      this.ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv, callbacks)
     }
   }
 
