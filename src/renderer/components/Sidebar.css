@@ -311,7 +311,7 @@
 
 .sidebar-folder-children {
   border-left: 1px solid var(--border);
-  margin-left: 11px;
+  margin-left: 18px;
 }
 
 .sidebar-folder-children .project-item {

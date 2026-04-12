@@ -61,8 +61,8 @@ export default function CreateWorkspaceModal({ projectDir, projectId, sshConfig,
   const isValid = name.trim().length > 0 && selectedBranch.length > 0
 
   return (
-    <div className="settings-overlay" onClick={onCancel}>
-      <div className="settings-panel create-workspace-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="settings-overlay">
+      <div className="settings-panel create-workspace-panel">
         <div className="settings-header">
           <h2>Create Workspace</h2>
           <button className="settings-close" onClick={onCancel}>&times;</button>

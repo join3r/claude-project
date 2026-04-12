@@ -32,7 +32,7 @@ export class PtyManager {
       cols,
       rows,
       cwd,
-      env: { ...getShellEnv(), ...extraEnv }
+      env: { ...getShellEnv(), COLORTERM: 'truecolor', ...extraEnv }
     })
     if (callbacks?.onData) {
       proc.onData(callbacks.onData)
