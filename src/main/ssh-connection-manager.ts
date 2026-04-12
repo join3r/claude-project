@@ -354,6 +354,16 @@ export class SshConnectionManager extends EventEmitter {
       fs.mkdirSync(this.socketDir, { recursive: true })
     }
 
+    // Clean up stale ControlMaster socket from a previous (dead) connection.
+    // Without this, ssh -M will refuse to create a new master or connect
+    // through the dead socket, leaving the session stuck.
+    this.stopHealthCheck(projectId)
+    const socketPath = this.getSocketPath(projectId)
+    try {
+      await this.execFileAsync('ssh', this.buildExitArgs(projectId, config), { timeout: 5000 })
+    } catch { /* master may already be dead */ }
+    try { fs.unlinkSync(socketPath) } catch { /* may not exist */ }
+
     this.setStatus(projectId, 'connecting')
     this.configs.set(projectId, config)
 
