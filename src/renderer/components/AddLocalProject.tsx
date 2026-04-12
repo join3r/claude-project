@@ -2,30 +2,35 @@ import React, { useState } from 'react'
 import './AddRemoteProject.css'
 
 interface Props {
-  onAdd: (name: string, command: string) => void
+  onAdd: (name: string, directory: string) => void
   onCancel: () => void
-  initialValues?: {
+  initialValues: {
     name: string
-    command: string
+    directory: string
   }
 }
 
-export default function AddShellCommandProject({ onAdd, onCancel, initialValues }: Props): React.ReactElement {
-  const [name, setName] = useState(initialValues?.name ?? '')
-  const [command, setCommand] = useState(initialValues?.command ?? '')
+export default function AddLocalProject({ onAdd, onCancel, initialValues }: Props): React.ReactElement {
+  const [name, setName] = useState(initialValues.name)
+  const [directory, setDirectory] = useState(initialValues.directory)
 
-  const isValid = name.trim() && command.trim()
+  const isValid = name.trim() && directory.trim()
 
   const handleAdd = () => {
     if (!isValid) return
-    onAdd(name.trim(), command.trim())
+    onAdd(name.trim(), directory.trim())
+  }
+
+  const handlePickDir = async () => {
+    const picked = await window.api.pickDirectory()
+    if (picked) setDirectory(picked)
   }
 
   return (
     <div className="settings-overlay">
       <div className="settings-panel add-remote-panel">
         <div className="settings-header">
-          <h2>{initialValues ? 'Duplicate' : 'Add'} Custom Shell Project</h2>
+          <h2>Duplicate Local Project</h2>
           <button className="settings-close" onClick={onCancel}>&times;</button>
         </div>
 
@@ -36,24 +41,21 @@ export default function AddShellCommandProject({ onAdd, onCancel, initialValues 
               className="settings-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My Container"
+              placeholder="My Project"
               autoFocus
             />
           </div>
 
           <div className="settings-group">
-            <label className="settings-label">Shell Command</label>
-            <input
-              className="settings-input"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder="docker exec -it mycontainer /bin/bash"
-            />
-            <div className="add-remote-help">
-              <p>Examples:</p>
-              <code>docker exec -it mycontainer /bin/bash</code>
-              <code>docker exec -w /app -it mycontainer /bin/sh</code>
-              <code>orb shell -m vm-name bash -c &quot;cd dir &amp;&amp; bash&quot;</code>
+            <label className="settings-label">Directory</label>
+            <div className="add-remote-keyfile">
+              <input
+                className="settings-input"
+                value={directory}
+                onChange={(e) => setDirectory(e.target.value)}
+                placeholder="/path/to/project"
+              />
+              <button className="sidebar-btn" onClick={handlePickDir} title="Browse">...</button>
             </div>
           </div>
 

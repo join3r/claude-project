@@ -6,6 +6,7 @@ import type { Tab, Task, Project, Folder } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
+import AddLocalProject from './AddLocalProject'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
@@ -109,6 +110,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [dropTarget, setDropTarget] = useState<DropTarget>(null)
   const dropTargetRef = useRef<DropTarget>(null)
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
+  const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const collapsedFolders = new Set(collapsedFolderIds)
 
@@ -133,8 +135,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   useEffect(() => {
     const dismiss = () => { setContextMenu(null); setAddMenuOpen(false) }
-    window.addEventListener('click', dismiss)
-    return () => window.removeEventListener('click', dismiss)
+    window.addEventListener('mousedown', dismiss)
+    return () => window.removeEventListener('mousedown', dismiss)
   }, [])
 
   useEffect(() => {
@@ -554,9 +556,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       <div className="sidebar-header">
         <span className="sidebar-title">Projects</span>
         <div className="sidebar-add-wrapper">
-          <button className="sidebar-btn" onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }} title="Add project">+</button>
+          <button className="sidebar-btn" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }} title="Add project">+</button>
           {addMenuOpen && (
-            <div className="sidebar-add-menu">
+            <div className="sidebar-add-menu" onMouseDown={(e) => e.stopPropagation()}>
               <button onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
               <button onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
               <button onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
@@ -656,7 +658,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       </>)}
 
       {contextMenu && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
+        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
           {contextMenu.type === 'folder' ? (
             <>
               <button onClick={() => {
@@ -681,6 +683,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 setEditValue(item?.name ?? '')
                 setContextMenu(null)
               }}>Rename</button>
+              {contextMenu.type === 'project' && (
+                <button onClick={() => {
+                  setDuplicateProjectId(contextMenu.projectId)
+                  setContextMenu(null)
+                }}>Duplicate</button>
+              )}
               {contextMenu.type === 'project' && (
                 <button onClick={() => {
                   setProjectSettingsId(contextMenu.projectId)
@@ -753,6 +761,58 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             project={project}
             onSave={(aiToolArgs) => updateProject(projectSettingsId, { aiToolArgs })}
             onClose={() => setProjectSettingsId(null)}
+          />
+        )
+      })()}
+
+      {duplicateProjectId && (() => {
+        const project = projects.find(p => p.id === duplicateProjectId)
+        if (!project) return null
+        if (isRemoteProject(project)) {
+          return (
+            <AddRemoteProject
+              initialValues={{
+                host: project.ssh!.host,
+                port: project.ssh!.port,
+                username: project.ssh!.username,
+                keyFile: project.ssh!.keyFile,
+                remoteDir: project.ssh!.remoteDir,
+                aiToolArgs: project.aiToolArgs
+              }}
+              onAdd={(name, ssh, aiToolArgs) => {
+                addRemoteProject(name, ssh, aiToolArgs)
+                setDuplicateProjectId(null)
+              }}
+              onCancel={() => setDuplicateProjectId(null)}
+            />
+          )
+        }
+        if (isShellCommandProject(project)) {
+          return (
+            <AddShellCommandProject
+              initialValues={{
+                name: project.name,
+                command: project.shellCommand!.command
+              }}
+              onAdd={(name, command) => {
+                addShellCommandProject(name, command)
+                setDuplicateProjectId(null)
+              }}
+              onCancel={() => setDuplicateProjectId(null)}
+            />
+          )
+        }
+        return (
+          <AddLocalProject
+            initialValues={{
+              name: project.name,
+              directory: project.directory
+            }}
+            onAdd={(name, directory) => {
+              addProject(name, directory)
+              setDuplicateProjectId(null)
+            }}
+            onCancel={() => setDuplicateProjectId(null)}
           />
         )
       })()}

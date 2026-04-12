@@ -6,15 +6,23 @@ import './AddRemoteProject.css'
 interface Props {
   onAdd: (name: string, ssh: { host: string; port: number; username: string; keyFile?: string; remoteDir: string }, aiToolArgs?: Partial<Record<AiTabType, string>>) => void
   onCancel: () => void
+  initialValues?: {
+    host: string
+    port: number
+    username: string
+    keyFile?: string
+    remoteDir: string
+    aiToolArgs?: Partial<Record<AiTabType, string>>
+  }
 }
 
-export default function AddRemoteProject({ onAdd, onCancel }: Props): React.ReactElement {
-  const [host, setHost] = useState('')
-  const [port, setPort] = useState(22)
-  const [username, setUsername] = useState('')
-  const [keyFile, setKeyFile] = useState('')
-  const [remoteDir, setRemoteDir] = useState('')
-  const [aiArgs, setAiArgs] = useState<Partial<Record<AiTabType, string>>>({})
+export default function AddRemoteProject({ onAdd, onCancel, initialValues }: Props): React.ReactElement {
+  const [host, setHost] = useState(initialValues?.host ?? '')
+  const [port, setPort] = useState(initialValues?.port ?? 22)
+  const [username, setUsername] = useState(initialValues?.username ?? '')
+  const [keyFile, setKeyFile] = useState(initialValues?.keyFile ?? '')
+  const [remoteDir, setRemoteDir] = useState(initialValues?.remoteDir ?? '')
+  const [aiArgs, setAiArgs] = useState<Partial<Record<AiTabType, string>>>(initialValues?.aiToolArgs ?? {})
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'fail' | null>(null)
   const [error, setError] = useState('')
@@ -73,10 +81,10 @@ export default function AddRemoteProject({ onAdd, onCancel }: Props): React.Reac
   }
 
   return (
-    <div className="settings-overlay" onClick={onCancel}>
-      <div className="settings-panel add-remote-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="settings-overlay">
+      <div className="settings-panel add-remote-panel">
         <div className="settings-header">
-          <h2>Add Remote Project (SSH)</h2>
+          <h2>{initialValues ? 'Duplicate' : 'Add'} Remote Project (SSH)</h2>
           <button className="settings-close" onClick={onCancel}>&times;</button>
         </div>
 
