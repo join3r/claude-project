@@ -17,6 +17,7 @@ export class SshConnectionManager extends EventEmitter {
   private tunnelStates = new Map<string, TunnelState>()
   private socksProxies = new Map<string, { port: number; process: ChildProcess }>()
   private socksStartPromises = new Map<string, Promise<number>>()
+  private connectLocks = new Map<string, Promise<void>>()
 
   /** Promisified execFile that always returns { stdout, stderr } */
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
@@ -350,6 +351,28 @@ export class SshConnectionManager extends EventEmitter {
   }
 
   async connect(projectId: string, config: SshConfig): Promise<void> {
+    // Serialize per-project: if a connect is already in progress, wait for it
+    // then check status — avoids a second call's cleanup killing the master
+    // that the first call just established (race on app startup with multiple
+    // windows sharing the same remote project).
+    const existing = this.connectLocks.get(projectId)
+    if (existing) {
+      await existing.catch(() => {})
+      if (this.getStatus(projectId) === 'connected') return
+    }
+
+    const promise = this.doConnect(projectId, config)
+    this.connectLocks.set(projectId, promise)
+    try {
+      await promise
+    } finally {
+      if (this.connectLocks.get(projectId) === promise) {
+        this.connectLocks.delete(projectId)
+      }
+    }
+  }
+
+  private async doConnect(projectId: string, config: SshConfig): Promise<void> {
     if (!fs.existsSync(this.socketDir)) {
       fs.mkdirSync(this.socketDir, { recursive: true })
     }
