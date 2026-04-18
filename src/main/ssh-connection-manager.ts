@@ -491,6 +491,22 @@ export class SshConnectionManager extends EventEmitter {
 
   private healthCheckTimers = new Map<string, ReturnType<typeof setInterval>>()
 
+  /** Short-circuit the 10s health check poll when we have direct evidence the
+   *  tunnel is dead (e.g., a slave PTY printed "Shared connection to ... closed").
+   *  `ssh -O check` can falsely report the master as alive when the master
+   *  process survives but its TCP connection to the server has died, so we
+   *  don't rely on it here — we just tear everything down and let Layer 2
+   *  auto-reconnect take over immediately. */
+  triggerReconnect(projectId: string, config: SshConfig): void {
+    if (this.getStatus(projectId) !== 'connected') return
+    this.stopHealthCheck(projectId)
+    this.clearTunnelRuntime(projectId)
+    this.setStatus(projectId, 'disconnected')
+    if (this.autoReconnectEnabled.has(projectId)) {
+      this.scheduleAutoReconnect(projectId, config)
+    }
+  }
+
   startHealthChecks(projectId: string, config: SshConfig, intervalMs = 10000): void {
     this.stopHealthCheck(projectId)
     const timer = setInterval(async () => {

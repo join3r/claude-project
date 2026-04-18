@@ -695,6 +695,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   setContextMenu(null)
                 }}>Settings</button>
               )}
+              {contextMenu.type === 'project' && (() => {
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                if (!project || !isRemoteProject(project)) return null
+                return (
+                  <button onClick={() => {
+                    window.api.sshConnect(project.id, project.ssh!).catch(() => {})
+                    setContextMenu(null)
+                  }}>Reconnect SSH</button>
+                )
+              })()}
               <button onClick={() => {
                 if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
                 else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)

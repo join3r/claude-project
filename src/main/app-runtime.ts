@@ -856,6 +856,14 @@ export class AppRuntime {
         if (!runtime || runtime !== expectedRuntime) return
         runtime.scrollback = trimScrollback(runtime.scrollback + data)
         this.broadcastToAttachedWindows(id, 'pty-data', id, data)
+        // Layer 3: a slave printing "Shared connection to <host> closed" means
+        // the master's tunnel is dead — force an immediate reconnect instead
+        // of waiting for the next health-check tick (up to 10s) and without
+        // trusting `-O check` (which returns true when the master process is
+        // alive but its TCP to the server has died).
+        if (sshConfig && projectId && /Shared connection to \S+ closed/.test(data)) {
+          this.sshManager.triggerReconnect(projectId, sshConfig)
+        }
       },
       onExit: (exitCode: number) => {
         const runtime = this.ptyRuntimes.get(id)
