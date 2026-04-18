@@ -180,9 +180,9 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   return (
     <div className="browser-tab" style={{ display: visible ? 'flex' : 'none' }}>
       <div className="browser-toolbar">
-        <button className="browser-nav-btn" onClick={() => webviewRef.current?.goBack()}>&larr;</button>
-        <button className="browser-nav-btn" onClick={() => webviewRef.current?.goForward()}>&rarr;</button>
-        <button className="browser-nav-btn" onClick={() => webviewRef.current?.reload()}>&#8635;</button>
+        <button className="browser-nav-btn" onClick={() => webviewRef.current?.goBack()} title="Back">&larr;</button>
+        <button className="browser-nav-btn" onClick={() => webviewRef.current?.goForward()} title="Forward">&rarr;</button>
+        <button className="browser-nav-btn" onClick={() => webviewRef.current?.reload()} title="Reload (⌘R)">&#8635;</button>
         <div className="browser-url-wrapper">
           {isRemote && proxyEnabled && <span className="browser-remote-badge">Remote</span>}
           <input
@@ -213,7 +213,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
             }
             setDevToolsOpen(!devToolsOpen)
           }}
-          title="Toggle DevTools"
+          title="Toggle DevTools (⌘⌥I)"
         >
           &#9874;
         </button>

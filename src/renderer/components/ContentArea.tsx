@@ -324,7 +324,7 @@ export default function ContentArea(): React.ReactElement {
             <button
               className={`content-toolbar-btn file-browser-btn${fileBrowserOpen ? ' content-toolbar-btn-active' : ''}`}
               onClick={() => toggleFileBrowser()}
-              title={fileBrowserOpen ? 'Close file browser' : 'Open file browser'}
+              title={fileBrowserOpen ? 'Close file browser (⌘⇧E)' : 'Open file browser (⌘⇧E)'}
             >
               &#9636;
             </button>

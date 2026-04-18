@@ -211,6 +211,7 @@ export default function TabBar({
                   e.stopPropagation()
                   removeTab(projectId, taskId, pane, tab.id)
                 }}
+                title="Close tab (⌘W)"
               >
                 &times;
               </button>
@@ -222,7 +223,7 @@ export default function TabBar({
         )}
       </div>
       <div className="tab-actions">
-        <button className="tab-add-btn" onClick={() => handleAdd('terminal')} title="New terminal">
+        <button className="tab-add-btn" onClick={() => handleAdd('terminal')} title="New terminal (⌘T)">
           &gt;_
         </button>
         <button className="tab-add-btn" onClick={() => handleAdd('browser')} title="New browser">
