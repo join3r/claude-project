@@ -18,6 +18,9 @@ export class SshConnectionManager extends EventEmitter {
   private socksProxies = new Map<string, { port: number; process: ChildProcess }>()
   private socksStartPromises = new Map<string, Promise<number>>()
   private connectLocks = new Map<string, Promise<void>>()
+  private autoReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private autoReconnectAttempts = new Map<string, number>()
+  private autoReconnectEnabled = new Set<string>()
 
   /** Promisified execFile that always returns { stdout, stderr } */
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
@@ -77,6 +80,7 @@ export class SshConnectionManager extends EventEmitter {
   }
 
   clearProject(projectId: string): void {
+    this.cancelAutoReconnect(projectId)
     this.statuses.delete(projectId)
     this.remotePorts.delete(projectId)
     this.configs.delete(projectId)
@@ -96,6 +100,9 @@ export class SshConnectionManager extends EventEmitter {
       '-fN', '-M',
       '-S', this.getSocketPath(projectId),
       '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', 'ServerAliveInterval=30',
+      '-o', 'ServerAliveCountMax=3',
+      '-o', 'TCPKeepAlive=yes',
       '-p', String(config.port)
     ]
     if (config.keyFile) {
@@ -381,6 +388,7 @@ export class SshConnectionManager extends EventEmitter {
     // Without this, ssh -M will refuse to create a new master or connect
     // through the dead socket, leaving the session stuck.
     this.stopHealthCheck(projectId)
+    this.cancelPendingAutoReconnect(projectId)
     const socketPath = this.getSocketPath(projectId)
     try {
       await this.execFileAsync('ssh', this.buildExitArgs(projectId, config), { timeout: 5000 })
@@ -411,9 +419,16 @@ export class SshConnectionManager extends EventEmitter {
       }
       this.setRemotePort(projectId, parseInt(portMatch[1], 10))
       this.setStatus(projectId, 'connected')
+      this.autoReconnectEnabled.add(projectId)
+      this.autoReconnectAttempts.delete(projectId)
     } catch (err) {
       this.setStatus(projectId, 'disconnected')
       this.configs.delete(projectId)
+      // If a previous session had succeeded, user hasn't explicitly disconnected,
+      // and this attempt failed — keep trying in the background.
+      if (this.autoReconnectEnabled.has(projectId)) {
+        this.scheduleAutoReconnect(projectId, config)
+      }
       throw err
     }
   }
@@ -488,9 +503,58 @@ export class SshConnectionManager extends EventEmitter {
         this.clearTunnelRuntime(projectId)
         this.setStatus(projectId, 'disconnected')
         this.stopHealthCheck(projectId)
+        if (this.autoReconnectEnabled.has(projectId)) {
+          this.scheduleAutoReconnect(projectId, config)
+        }
       }
     }, intervalMs)
     this.healthCheckTimers.set(projectId, timer)
+  }
+
+  /** Schedule an auto-reconnect attempt with exponential backoff (1s, 2s, 4s, 8s, 16s, capped at 30s).
+   *  Chains on failure; stops when the connect succeeds or auto-reconnect is cancelled
+   *  (explicit disconnect, clearProject, or a competing manual connect). */
+  private scheduleAutoReconnect(projectId: string, config: SshConfig): void {
+    if (this.autoReconnectTimers.has(projectId)) return
+    const attempts = this.autoReconnectAttempts.get(projectId) ?? 0
+    const delay = Math.min(1000 * Math.pow(2, attempts), 30000)
+    const timer = setTimeout(async () => {
+      this.autoReconnectTimers.delete(projectId)
+      if (!this.autoReconnectEnabled.has(projectId)) return
+      this.autoReconnectAttempts.set(projectId, attempts + 1)
+      try {
+        await this.connect(projectId, config)
+        if (this.getStatus(projectId) === 'connected') {
+          this.autoReconnectAttempts.delete(projectId)
+          this.startHealthChecks(projectId, config)
+        } else if (this.autoReconnectEnabled.has(projectId)) {
+          this.scheduleAutoReconnect(projectId, config)
+        }
+      } catch {
+        if (this.autoReconnectEnabled.has(projectId)) {
+          this.scheduleAutoReconnect(projectId, config)
+        }
+      }
+    }, delay)
+    this.autoReconnectTimers.set(projectId, timer)
+  }
+
+  /** Cancel a pending auto-reconnect timer but keep the intent to auto-reconnect.
+   *  Used when a manual connect is starting — we don't want a stale timer to race,
+   *  but we do want auto-reconnect to resume if the manual attempt itself fails. */
+  private cancelPendingAutoReconnect(projectId: string): void {
+    const timer = this.autoReconnectTimers.get(projectId)
+    if (timer) {
+      clearTimeout(timer)
+      this.autoReconnectTimers.delete(projectId)
+    }
+    this.autoReconnectAttempts.delete(projectId)
+  }
+
+  /** Fully stop auto-reconnect for a project — used on explicit disconnect. */
+  private cancelAutoReconnect(projectId: string): void {
+    this.autoReconnectEnabled.delete(projectId)
+    this.cancelPendingAutoReconnect(projectId)
   }
 
   private stopHealthCheck(projectId: string): void {
