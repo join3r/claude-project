@@ -290,10 +290,15 @@ export function useAppState() {
         ? project.lastTaskId
         : null
 
+      const expandedProjectIds = prev.expandedProjectIds.includes(id)
+        ? prev.expandedProjectIds
+        : [...prev.expandedProjectIds, id]
+
       return {
         ...prev,
         selectedProjectId: id,
-        selectedTaskId: restoredTaskId
+        selectedTaskId: restoredTaskId,
+        expandedProjectIds
       }
     })
 
@@ -315,7 +320,10 @@ export function useAppState() {
     updateWindowViewState(prev => ({
       ...prev,
       selectedProjectId: projectId,
-      selectedTaskId: taskId
+      selectedTaskId: taskId,
+      expandedProjectIds: prev.expandedProjectIds.includes(projectId)
+        ? prev.expandedProjectIds
+        : [...prev.expandedProjectIds, projectId]
     }))
 
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
@@ -419,7 +427,8 @@ export function useAppState() {
     updateWindowViewState(prev => ({
       ...prev,
       selectedProjectId: prev.selectedProjectId === id ? null : prev.selectedProjectId,
-      selectedTaskId: prev.selectedProjectId === id ? null : prev.selectedTaskId
+      selectedTaskId: prev.selectedProjectId === id ? null : prev.selectedTaskId,
+      expandedProjectIds: prev.expandedProjectIds.filter(pid => pid !== id)
     }))
   }, [getProjectDir, persistProjects, updateWindowViewState])
 
@@ -1015,6 +1024,28 @@ export function useAppState() {
     })
   }, [updateWindowViewState])
 
+  const toggleProjectExpansion = useCallback((projectId: string) => {
+    updateWindowViewState(prev => ({
+      ...prev,
+      expandedProjectIds: prev.expandedProjectIds.includes(projectId)
+        ? prev.expandedProjectIds.filter(id => id !== projectId)
+        : [...prev.expandedProjectIds, projectId]
+    }))
+  }, [updateWindowViewState])
+
+  const setProjectExpanded = useCallback((projectId: string, expanded: boolean) => {
+    updateWindowViewState(prev => {
+      const isExpanded = prev.expandedProjectIds.includes(projectId)
+      if (isExpanded === expanded) return prev
+      return {
+        ...prev,
+        expandedProjectIds: expanded
+          ? [...prev.expandedProjectIds, projectId]
+          : prev.expandedProjectIds.filter(id => id !== projectId)
+      }
+    })
+  }, [updateWindowViewState])
+
   const exportWindowViewState = useCallback(() => cloneWindowViewState(windowViewStateRef.current), [])
 
   const zoomTerminal = useCallback((direction: 'in' | 'out' | 'reset') => {
@@ -1106,6 +1137,7 @@ export function useAppState() {
     selectedProjectId,
     selectedTaskId,
     collapsedFolderIds: windowViewState.collapsedFolderIds,
+    expandedProjectIds: windowViewState.expandedProjectIds,
     effectiveTheme,
     effectiveTerminalTheme,
     setSelectedProjectId: selectProject,
@@ -1142,6 +1174,8 @@ export function useAppState() {
     setSplitRatio,
     toggleFolderCollapse,
     setFolderCollapsed,
+    toggleProjectExpansion,
+    setProjectExpanded,
     exportWindowViewState,
     updateConfig,
     terminalZoomDelta,

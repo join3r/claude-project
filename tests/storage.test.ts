@@ -262,6 +262,7 @@ describe('Storage', () => {
         geometry: session.windows[0].geometry,
         viewState: {
           ...session.windows[0].viewState,
+          expandedProjectIds: [],
           fileBrowserOpen: false,
           fileBrowserWidth: 250,
           fileBrowserActiveTab: 'files'
