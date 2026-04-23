@@ -10,6 +10,7 @@ import AddLocalProject from './AddLocalProject'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
+import ActivityPanel from './ActivityPanel'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import './Sidebar.css'
@@ -285,6 +286,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     e.preventDefault()
     setContextMenu({ x: e.clientX, y: e.clientY, type, projectId, taskId })
   }
+
+  const handleTaskContextMenu = useCallback((e: React.MouseEvent, projectId: string, taskId: string) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'task', projectId, taskId })
+  }, [])
 
   const DRAG_THRESHOLD = 5
 
@@ -688,6 +694,22 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           <div className="sidebar-drop-indicator" />
         )}
       </div>
+
+      {config?.activityPanel?.enabled && (
+        <ActivityPanel
+          projects={projects}
+          selectedTaskId={selectedTaskId}
+          switchToTask={switchToTask}
+          onTaskContextMenu={handleTaskContextMenu}
+          recencySettings={config.taskRecencyHighlight}
+          now={now}
+          heightPx={config.activityPanel.heightPx}
+          onHeightChange={(next) => updateConfig({
+            activityPanel: { ...config.activityPanel, heightPx: next }
+          })}
+          allStatuses={allStatuses}
+        />
+      )}
       </>)}
 
       {contextMenu && (
