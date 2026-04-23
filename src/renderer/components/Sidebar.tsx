@@ -11,6 +11,7 @@ import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
+import { computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import './Sidebar.css'
 
 type DragState = {
@@ -82,6 +83,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
+
+  const [now, setNow] = useState(() => Date.now())
+  const sortedByRecency = React.useMemo(
+    () => sortTasksByRecency(projects.flatMap(p => p.tasks)),
+    [projects]
+  )
+
+  useEffect(() => {
+    if (!config?.taskRecencyHighlight?.enabled) return
+    if (config.taskRecencyHighlight.mode !== 'time') return
+    const id = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(id)
+  }, [config?.taskRecencyHighlight?.enabled, config?.taskRecencyHighlight?.mode])
 
   const handleSelectTask = useCallback((task: Task) => {
     setSelectedTaskId(task.id)
@@ -492,41 +506,50 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {isExpanded && (
         <div className="sidebar-tasks">
-          {project.tasks.map((task, tIdx) => (
-            <React.Fragment key={task.id}>
-              {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
-                <div className="sidebar-drop-indicator task-drop-indicator" />
-              )}
-              <div
-                className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
-                data-task-id={task.id}
-                data-task-index={tIdx}
-                onClick={() => handleSelectTask(task)}
-                onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, tIdx, null, project.id)}
-                onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
-              >
-                {editingId === task.id ? (
-                  <input
-                    ref={editRef}
-                    className="sidebar-edit"
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => handleRenameSubmit('task', project.id, task.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleRenameSubmit('task', project.id, task.id)
-                      if (e.key === 'Escape') setEditingId(null)
-                    }}
-                  />
-                ) : (
-                  <>
-                    <span className="sidebar-label">{task.name}</span>
-                    {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
-                    <TaskStatusDot task={task} allStatuses={allStatuses} />
-                  </>
+          {project.tasks.map((task, tIdx) => {
+            const opacity = config
+              ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
+              : 0
+            const recencyStyle = opacity > 0
+              ? { backgroundColor: `rgba(var(--recency-rgb), ${opacity.toFixed(3)})` }
+              : undefined
+            return (
+              <React.Fragment key={task.id}>
+                {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
+                  <div className="sidebar-drop-indicator task-drop-indicator" />
                 )}
-              </div>
-            </React.Fragment>
-          ))}
+                <div
+                  className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
+                  data-task-id={task.id}
+                  data-task-index={tIdx}
+                  style={recencyStyle}
+                  onClick={() => handleSelectTask(task)}
+                  onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, tIdx, null, project.id)}
+                  onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
+                >
+                  {editingId === task.id ? (
+                    <input
+                      ref={editRef}
+                      className="sidebar-edit"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => handleRenameSubmit('task', project.id, task.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRenameSubmit('task', project.id, task.id)
+                        if (e.key === 'Escape') setEditingId(null)
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="sidebar-label">{task.name}</span>
+                      {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
+                      <TaskStatusDot task={task} allStatuses={allStatuses} />
+                    </>
+                  )}
+                </div>
+              </React.Fragment>
+            )
+          })}
           {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
             <div className="sidebar-drop-indicator task-drop-indicator" />
           )}
