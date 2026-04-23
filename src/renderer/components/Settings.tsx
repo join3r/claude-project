@@ -296,6 +296,101 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </div>
             </div>
           </div>
+
+          <div className="settings-section">
+            <div className="settings-section-title">Sidebar</div>
+
+            <div className="settings-group">
+              <div className="settings-checkboxes">
+                <label className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={config.taskRecencyHighlight.enabled}
+                    onChange={(e) => updateConfig({
+                      taskRecencyHighlight: {
+                        ...config.taskRecencyHighlight,
+                        enabled: e.target.checked
+                      }
+                    })}
+                  />
+                  Highlight recently focused tasks
+                </label>
+              </div>
+            </div>
+
+            <div className="settings-grid">
+              <div className="settings-group">
+                <label className="settings-label">Highlight Mode</label>
+                <select
+                  className="settings-input"
+                  disabled={!config.taskRecencyHighlight.enabled}
+                  value={config.taskRecencyHighlight.mode}
+                  onChange={(e) => updateConfig({
+                    taskRecencyHighlight: {
+                      ...config.taskRecencyHighlight,
+                      mode: e.target.value as 'rank' | 'time'
+                    }
+                  })}
+                >
+                  <option value="rank">Rank</option>
+                  <option value="time">Time decay</option>
+                </select>
+              </div>
+
+              <div className="settings-group">
+                <label className="settings-label">
+                  {config.taskRecencyHighlight.mode === 'rank' ? 'Show top N tasks' : 'Fade after N minutes'}
+                </label>
+                <input
+                  className="settings-input"
+                  type="number"
+                  disabled={!config.taskRecencyHighlight.enabled}
+                  min={config.taskRecencyHighlight.mode === 'rank' ? 1 : 5}
+                  max={config.taskRecencyHighlight.mode === 'rank' ? 20 : 10080}
+                  value={
+                    config.taskRecencyHighlight.mode === 'rank'
+                      ? config.taskRecencyHighlight.rankCount
+                      : config.taskRecencyHighlight.timeWindowMinutes
+                  }
+                  onChange={(e) => {
+                    if (config.taskRecencyHighlight.mode === 'rank') {
+                      updateConfig({
+                        taskRecencyHighlight: {
+                          ...config.taskRecencyHighlight,
+                          rankCount: parseNumberInput(e.target.value, 5, 1, 20)
+                        }
+                      })
+                    } else {
+                      updateConfig({
+                        taskRecencyHighlight: {
+                          ...config.taskRecencyHighlight,
+                          timeWindowMinutes: parseNumberInput(e.target.value, 1440, 5, 10080)
+                        }
+                      })
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="settings-group">
+              <div className="settings-checkboxes">
+                <label className="settings-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={config.activityPanel.enabled}
+                    onChange={(e) => updateConfig({
+                      activityPanel: {
+                        ...config.activityPanel,
+                        enabled: e.target.checked
+                      }
+                    })}
+                  />
+                  Show Recent Activity panel
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
