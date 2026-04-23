@@ -41,6 +41,7 @@ export interface Task {
   splitOpen: boolean
   splitRatio: number
   workspace?: WorkspaceConfig
+  lastFocusedAt?: number
 }
 
 export interface WorkspaceConfig {
@@ -154,6 +155,16 @@ export interface AppConfig {
   lastProjectId: string | null
   lastTaskId: string | null
   collapsedFolderIds: string[]
+  taskRecencyHighlight: {
+    enabled: boolean
+    mode: 'rank' | 'time'
+    rankCount: number
+    timeWindowMinutes: number
+  }
+  activityPanel: {
+    enabled: boolean
+    heightPx: number
+  }
 }
 
 export type EditorWordWrap = 'off' | 'on' | 'bounded'
@@ -198,6 +209,7 @@ export interface WindowViewState {
   selectedProjectId: string | null
   selectedTaskId: string | null
   collapsedFolderIds: string[]
+  expandedProjectIds: string[]
   taskStates: Record<string, TaskViewState>
   fileBrowserOpen: boolean
   fileBrowserWidth: number
@@ -242,7 +254,17 @@ export const DEFAULT_CONFIG: AppConfig = {
   enableOpencode: false,
   lastProjectId: null,
   lastTaskId: null,
-  collapsedFolderIds: []
+  collapsedFolderIds: [],
+  taskRecencyHighlight: {
+    enabled: false,
+    mode: 'rank',
+    rankCount: 5,
+    timeWindowMinutes: 1440
+  },
+  activityPanel: {
+    enabled: false,
+    heightPx: 160
+  }
 }
 
 export function createTaskViewState(task: Task): TaskViewState {
@@ -271,6 +293,7 @@ export function createDefaultWindowViewState(): WindowViewState {
     selectedProjectId: null,
     selectedTaskId: null,
     collapsedFolderIds: [],
+    expandedProjectIds: [],
     taskStates: {},
     fileBrowserOpen: false,
     fileBrowserWidth: 250,
@@ -283,6 +306,7 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     selectedProjectId: state.selectedProjectId,
     selectedTaskId: state.selectedTaskId,
     collapsedFolderIds: [...state.collapsedFolderIds],
+    expandedProjectIds: [...state.expandedProjectIds],
     taskStates: Object.fromEntries(
       Object.entries(state.taskStates).map(([taskId, taskState]) => [
         taskId,
@@ -390,10 +414,13 @@ export function reconcileWindowViewState(
     }
   }
 
+  const expandedProjectIds = (state.expandedProjectIds ?? []).filter(id => projectById.has(id))
+
   return {
     selectedProjectId: selectedProject?.id ?? null,
     selectedTaskId: selectedTask?.id ?? null,
     collapsedFolderIds: collapsedFolderIds ? [...collapsedFolderIds] : [...state.collapsedFolderIds],
+    expandedProjectIds,
     taskStates,
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
@@ -421,10 +448,18 @@ export function buildWindowViewState(
     }
   }
 
+  const selectedProjectId = seed?.selectedProjectId ?? storedSelection.selectedProjectId
+  const selectedTaskId = seed?.selectedTaskId ?? storedSelection.selectedTaskId
+
+  const expandedProjectIds = seed?.expandedProjectIds
+    ? [...seed.expandedProjectIds]
+    : (selectedProjectId ? [selectedProjectId] : [])
+
   return reconcileWindowViewState({
-    selectedProjectId: seed?.selectedProjectId ?? storedSelection.selectedProjectId,
-    selectedTaskId: seed?.selectedTaskId ?? storedSelection.selectedTaskId,
+    selectedProjectId,
+    selectedTaskId,
     collapsedFolderIds: seed?.collapsedFolderIds ? [...seed.collapsedFolderIds] : [...config.collapsedFolderIds],
+    expandedProjectIds,
     taskStates
   }, projects)
 }

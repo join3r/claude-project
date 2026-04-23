@@ -65,6 +65,7 @@ describe('window view state', () => {
       selectedProjectId: 'project-1',
       selectedTaskId: 'task-1',
       collapsedFolderIds: [],
+      expandedProjectIds: [],
       taskStates: {
         'task-1': {
           activeTab: { left: 'missing-tab', right: 'right-1' },
@@ -136,5 +137,43 @@ describe('window view state', () => {
       splitOpen: true,
       splitRatio: 0.7
     })
+  })
+
+  it('seeds expandedProjectIds from the resolved selection when seed has none', () => {
+    const state = buildWindowViewState(
+      projects,
+      { ...DEFAULT_CONFIG, lastProjectId: 'project-1', lastTaskId: 'task-1', collapsedFolderIds: [] }
+    )
+
+    expect(state.expandedProjectIds).toEqual(['project-1'])
+  })
+
+  it('keeps seeded expandedProjectIds (even when empty)', () => {
+    const state = buildWindowViewState(projects, DEFAULT_CONFIG, {
+      selectedProjectId: 'project-1',
+      selectedTaskId: 'task-1',
+      expandedProjectIds: [],
+      taskStates: {}
+    })
+
+    expect(state.expandedProjectIds).toEqual([])
+  })
+
+  it('filters expandedProjectIds to existing projects during reconcile', () => {
+    const reconciled = reconcileWindowViewState(
+      {
+        selectedProjectId: 'project-1',
+        selectedTaskId: null,
+        collapsedFolderIds: [],
+        expandedProjectIds: ['project-1', 'missing-project'],
+        taskStates: {},
+        fileBrowserOpen: false,
+        fileBrowserWidth: 250,
+        fileBrowserActiveTab: 'files'
+      },
+      projects
+    )
+
+    expect(reconciled.expandedProjectIds).toEqual(['project-1'])
   })
 })
