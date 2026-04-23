@@ -1,0 +1,93 @@
+.activity-splitter {
+  height: 4px;
+  cursor: ns-resize;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.activity-splitter:hover {
+  background: var(--border-focus);
+}
+
+.activity-panel {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.activity-header:hover {
+  background: var(--hover);
+}
+
+.activity-header-chevron {
+  margin-right: 6px;
+  font-size: 8px;
+  width: 10px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.activity-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 2px 0 4px;
+}
+
+.activity-empty {
+  padding: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-style: italic;
+  text-align: center;
+}
+
+.activity-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-item:hover {
+  background: var(--hover) !important;
+}
+
+.activity-item.selected {
+  background: var(--selected) !important;
+}
+
+.activity-project-prefix {
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex-shrink: 0;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-task-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
