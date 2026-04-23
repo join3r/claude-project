@@ -77,7 +77,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     reorderRootItems, reorderProjectsInFolder,
     reorderTasks, getProjectDir,
     config, updateConfig,
-    collapsedFolderIds, toggleFolderCollapse, setFolderCollapsed
+    collapsedFolderIds, toggleFolderCollapse, setFolderCollapsed,
+    expandedProjectIds, toggleProjectExpansion
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
@@ -113,6 +114,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const collapsedFolders = new Set(collapsedFolderIds)
+  const expandedProjects = new Set(expandedProjectIds)
 
   useEffect(() => {
     if (switcherRequested) {
@@ -436,7 +438,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     document.addEventListener('mouseup', onMouseUp)
   }, [editingId, rootOrder, folders, reorderTasks, moveProjectToFolder, moveProjectToRoot, reorderRootItems, reorderProjectsInFolder])
 
-  const renderProject = (project: Project, folderId: string | null) => (
+  const renderProject = (project: Project, folderId: string | null) => {
+    const isExpanded = expandedProjects.has(project.id)
+    return (
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
         className={`sidebar-item project-item ${selectedProjectId === project.id ? 'selected' : ''} ${dragState?.type === 'project' && dragState.id === project.id ? 'dragging' : ''}`}
@@ -467,13 +471,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           />
         ) : (
           <>
+            <span
+              className="sidebar-project-chevron"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); toggleProjectExpansion(project.id) }}
+            >{isExpanded ? '▾' : '▸'}</span>
             <span className="sidebar-label">{project.name}</span>
             {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
             {isShellCommandProject(project) && <span className="sidebar-ssh-badge">shell</span>}
             {isRemoteProject(project) && (
               <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
             )}
-            {selectedProjectId !== project.id && (() => {
+            {!isExpanded && (() => {
               const projectStatus = getProjectStatus(project.tasks, allStatuses)
               return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
             })()}
@@ -481,7 +490,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         )}
       </div>
 
-      {selectedProjectId === project.id && (
+      {isExpanded && (
         <div className="sidebar-tasks">
           {project.tasks.map((task, tIdx) => (
             <React.Fragment key={task.id}>
@@ -538,7 +547,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </div>
       )}
     </div>
-  )
+    )
+  }
 
   return (
     <div className="sidebar">

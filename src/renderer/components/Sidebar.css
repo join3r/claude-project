@@ -302,6 +302,20 @@
   flex-shrink: 0;
 }
 
+.sidebar-project-chevron {
+  margin-right: 6px;
+  font-size: 8px;
+  width: 10px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sidebar-project-chevron:hover {
+  color: var(--text-primary);
+}
+
 .sidebar-folder-label {
   overflow: hidden;
   text-overflow: ellipsis;
