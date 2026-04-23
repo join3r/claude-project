@@ -259,6 +259,21 @@ export function useAppState() {
     setProjectsData(prev => updater(prev))
   }, [])
 
+  const markTaskFocused = useCallback((projectId: string, taskId: string) => {
+    const now = Date.now()
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project =>
+        project.id !== projectId ? project : {
+          ...project,
+          tasks: project.tasks.map(task =>
+            task.id === taskId ? { ...task, lastFocusedAt: now } : task
+          )
+        }
+      )
+    }))
+  }, [persistProjects])
+
   const cleanupClosedTabHistory = useCallback((entries: RecentlyClosedTab[]) => {
     for (const entry of entries) {
       void window.api.scrollbackDelete(entry.tab.id)
@@ -314,7 +329,11 @@ export function useAppState() {
 
   const selectTask = useCallback((id: string | null) => {
     updateWindowViewState(prev => ({ ...prev, selectedTaskId: id }))
-  }, [updateWindowViewState])
+    if (id) {
+      const project = projectsRef.current.find(p => p.tasks.some(t => t.id === id))
+      if (project) markTaskFocused(project.id, id)
+    }
+  }, [updateWindowViewState, markTaskFocused])
 
   const switchToTask = useCallback((projectId: string, taskId: string) => {
     updateWindowViewState(prev => ({
@@ -326,6 +345,8 @@ export function useAppState() {
         : [...prev.expandedProjectIds, projectId]
     }))
 
+    markTaskFocused(projectId, taskId)
+
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     if (project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
@@ -334,7 +355,7 @@ export function useAppState() {
         }
       })
     }
-  }, [updateWindowViewState])
+  }, [updateWindowViewState, markTaskFocused])
 
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
     persistProjects(prev => ({
