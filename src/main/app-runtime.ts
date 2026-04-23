@@ -805,6 +805,21 @@ export class AppRuntime {
     sshConfig?: SshConfig
   ): Promise<PtyAttachResult> {
     let runtime = this.ptyRuntimes.get(id)
+    // If the stored runtime's PTY has already exited and this tab is an SSH tab
+    // whose project is currently connected, drop the dead runtime so we respawn
+    // fresh.  Happens when a tab is hidden (renderer-side spawnedRef=false) while
+    // SSH master dies and auto-reconnects: the renderer's false→true respawn
+    // effect skips hidden tabs, so main is the only place left to detect and
+    // clean up the stranded dead slave — otherwise the user sees a frozen
+    // "Shared connection closed" in scrollback when they switch back to the tab.
+    if (runtime && runtime.exitCode !== null && sshConfig && projectId
+        && this.sshManager.getStatus(projectId) === 'connected') {
+      this.logDebug(`ptyAttach refresh-dead id=${id} exitCode=${runtime.exitCode}`)
+      this.ptyManager.kill(id)
+      this.scrollbackStorage.delete(id)
+      this.ptyRuntimes.delete(id)
+      runtime = undefined
+    }
     if (!runtime) {
       this.logDebug(`ptyAttach create windowId=${windowId} id=${id}`)
       runtime = {
