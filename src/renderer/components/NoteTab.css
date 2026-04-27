@@ -1,0 +1,50 @@
+.note-tab {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-tab-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.note-tab-title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-tab-toggle {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.note-tab-toggle:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.note-tab-body {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
