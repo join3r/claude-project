@@ -13,6 +13,7 @@ import {
 } from '../../shared/types'
 import type {
   Project,
+  ProjectNote,
   ProjectsData,
   Task,
   Tab,
@@ -37,6 +38,8 @@ export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel'>>
 type AddTabOptions = {
   filePath?: string
   url?: string
+  noteId?: string
+  noteName?: string
 }
 
 export function buildWindowTitle(projectName: string | null, taskName: string | null): string {
@@ -92,6 +95,10 @@ export function useAppState() {
   const lastSavedConfigJsonRef = useRef<string | null>(null)
   const lastSavedWindowStateJsonRef = useRef<string | null>(null)
   const recentlyClosedTabsRef = useRef<RecentlyClosedTab[]>([])
+  const [notes, setNotes] = useState<Record<string, ProjectNote[]>>({})
+  const notesRef = useRef<Record<string, ProjectNote[]>>({})
+  notesRef.current = notes
+  const noteContentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const updateWindowViewState = useCallback((updater: (prev: WindowViewState) => WindowViewState) => {
     setWindowViewState(prev => {
@@ -110,8 +117,9 @@ export function useAppState() {
     Promise.all([
       window.api.loadProjects(),
       window.api.loadConfig(),
-      window.api.loadWindowState()
-    ]).then(([loadedProjectsData, loadedConfig, loadedWindowViewState]) => {
+      window.api.loadWindowState(),
+      window.api.notesLoad()
+    ]).then(([loadedProjectsData, loadedConfig, loadedWindowViewState, loadedNotes]) => {
       if (cancelled) return
 
       const hydratedProjectsData = applyQueuedStateUpdates(loadedProjectsData, pendingProjectUpdatersRef.current)
@@ -134,6 +142,7 @@ export function useAppState() {
       setProjectsData(hydratedProjectsData)
       setConfig(hydratedConfig)
       setWindowViewState(hydratedWindowViewState)
+      setNotes(loadedNotes)
     })
 
     void window.api.getNativeTheme().then(setTheme)
@@ -669,10 +678,12 @@ export function useAppState() {
     arg?: string | AddTabOptions
   ) => {
     const options = typeof arg === 'string' ? { filePath: arg } : (arg ?? {})
-    const { filePath, url } = options
+    const { filePath, url, noteId, noteName } = options
     const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
     let title: string
-    if (filePath) {
+    if (noteId) {
+      title = noteName ?? 'Note'
+    } else if (filePath) {
       const fileName = filePath.split('/').pop() ?? filePath
       title = type === 'diff' ? `${fileName} (diff)` : fileName
     } else {
@@ -683,7 +694,8 @@ export function useAppState() {
       type,
       title,
       ...(filePath ? { filePath } : {}),
-      ...(url ? { url } : {})
+      ...(url ? { url } : {}),
+      ...(noteId ? { noteId } : {})
     }
 
     persistProjects(prev => ({
@@ -1136,6 +1148,104 @@ export function useAppState() {
     addTab(projectId, taskId, pane, 'editor', filePath)
   }, [addTab, setActiveTab])
 
+  const createNote = useCallback((projectId: string, name: string): ProjectNote => {
+    const note: ProjectNote = {
+      id: uuid(),
+      name,
+      content: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+    setNotes(prev => {
+      const updated = { ...prev, [projectId]: [...(prev[projectId] ?? []), note] }
+      void window.api.notesSave(updated)
+      return updated
+    })
+    return note
+  }, [])
+
+  const renameNote = useCallback((projectId: string, noteId: string, name: string) => {
+    setNotes(prev => {
+      const updated = {
+        ...prev,
+        [projectId]: (prev[projectId] ?? []).map(n =>
+          n.id === noteId ? { ...n, name, updatedAt: Date.now() } : n
+        )
+      }
+      void window.api.notesSave(updated)
+      return updated
+    })
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project =>
+        project.id !== projectId ? project : {
+          ...project,
+          tasks: project.tasks.map(task => ({
+            ...task,
+            tabs: {
+              left: task.tabs.left.map(tab =>
+                tab.type === 'note' && tab.noteId === noteId ? { ...tab, title: name } : tab
+              ),
+              right: task.tabs.right.map(tab =>
+                tab.type === 'note' && tab.noteId === noteId ? { ...tab, title: name } : tab
+              )
+            }
+          }))
+        }
+      )
+    }))
+  }, [persistProjects])
+
+  const deleteNote = useCallback((projectId: string, noteId: string) => {
+    setNotes(prev => {
+      const updated = {
+        ...prev,
+        [projectId]: (prev[projectId] ?? []).filter(n => n.id !== noteId)
+      }
+      void window.api.notesSave(updated)
+      return updated
+    })
+  }, [])
+
+  const updateNoteContent = useCallback((projectId: string, noteId: string, content: string) => {
+    const now = Date.now()
+    setNotes(prev => ({
+      ...prev,
+      [projectId]: (prev[projectId] ?? []).map(n =>
+        n.id === noteId ? { ...n, content, updatedAt: now } : n
+      )
+    }))
+    if (noteContentSaveTimerRef.current !== null) clearTimeout(noteContentSaveTimerRef.current)
+    noteContentSaveTimerRef.current = setTimeout(() => {
+      noteContentSaveTimerRef.current = null
+      void window.api.notesSave(notesRef.current)
+    }, 500)
+  }, [])
+
+  const openOrFocusNoteTab = useCallback((
+    projectId: string,
+    taskId: string,
+    pane: 'left' | 'right',
+    noteId: string
+  ) => {
+    const project = projectsRef.current.find(p => p.id === projectId)
+    const task = project?.tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    const allTabs = [...task.tabs.left, ...task.tabs.right]
+    const existingTab = allTabs.find(t => t.type === 'note' && t.noteId === noteId)
+    if (existingTab) {
+      const existingPane = task.tabs.left.includes(existingTab) ? 'left' : 'right'
+      setActiveTab(projectId, taskId, existingPane, existingTab.id)
+      return
+    }
+
+    const note = notesRef.current[projectId]?.find(n => n.id === noteId)
+    if (!note) return
+
+    addTab(projectId, taskId, pane, 'note', { noteId, noteName: note.name })
+  }, [addTab, setActiveTab])
+
   const selectedProjectId = windowViewState.selectedProjectId
   const selectedTaskId = windowViewState.selectedTaskId
   const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null
@@ -1210,7 +1320,13 @@ export function useAppState() {
     setFileBrowserWidth,
     setFileBrowserActiveTab,
     openOrFocusDiffTab,
-    openOrFocusEditorTab
+    openOrFocusEditorTab,
+    notes,
+    createNote,
+    renameNote,
+    deleteNote,
+    updateNoteContent,
+    openOrFocusNoteTab
   }
 }
 
