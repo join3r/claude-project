@@ -1,4 +1,4 @@
-export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode' | 'diff' | 'editor'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode' | 'diff' | 'editor' | 'note'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'opencode'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -16,6 +16,15 @@ export interface Tab {
   url?: string
   sessionId?: string
   filePath?: string
+  noteId?: string
+}
+
+export interface ProjectNote {
+  id: string
+  name: string
+  content: string
+  createdAt: number
+  updatedAt: number
 }
 
 export interface TaskViewState {
@@ -173,7 +182,7 @@ export type EditorLineNumbers = 'off' | 'on' | 'relative' | 'interval'
 
 export type EditorRenderWhitespace = 'none' | 'boundary' | 'selection' | 'trailing' | 'all'
 
-export type FileBrowserTab = 'files' | 'git'
+export type FileBrowserTab = 'files' | 'git' | 'notes'
 
 export interface DirectoryEntry {
   name: string
