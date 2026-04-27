@@ -6,6 +6,7 @@ import BrowserTab from './BrowserTab'
 import AiToolTab from './AiToolTab'
 import DiffTab from './DiffTab'
 import EditorTab from './EditorTab'
+import NoteTab from './NoteTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import type { Tab, AiTabType, SshConfig, ShellCommandConfig } from '../../shared/types'
 import type { PaneSide } from './paneFocus'
@@ -149,6 +150,17 @@ export default function Pane({
                 projectId={projectId}
                 taskId={taskId}
                 pane={pane}
+                effectiveTheme={effectiveTheme}
+              />
+            )
+          }
+          if (tab.type === 'note' && tab.noteId) {
+            return (
+              <NoteTab
+                key={tab.id}
+                noteId={tab.noteId}
+                projectId={projectId}
+                visible={taskVisible && tab.id === activeTabId}
                 effectiveTheme={effectiveTheme}
               />
             )
