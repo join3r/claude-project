@@ -283,6 +283,18 @@ export function useAppState() {
     }))
   }, [persistProjects])
 
+  useEffect(() => {
+    if (!windowFocused) return
+    const { selectedProjectId: pid, selectedTaskId: tid } = windowViewStateRef.current
+    if (pid && tid) markTaskFocused(pid, tid)
+
+    const id = window.setInterval(() => {
+      const { selectedProjectId: pidNow, selectedTaskId: tidNow } = windowViewStateRef.current
+      if (pidNow && tidNow) markTaskFocused(pidNow, tidNow)
+    }, 30_000)
+    return () => window.clearInterval(id)
+  }, [windowFocused, windowViewState.selectedTaskId, windowViewState.selectedProjectId, markTaskFocused])
+
   const cleanupClosedTabHistory = useCallback((entries: RecentlyClosedTab[]) => {
     for (const entry of entries) {
       void window.api.scrollbackDelete(entry.tab.id)

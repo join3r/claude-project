@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu } from 'electron'
+import { app, BrowserWindow, Menu, systemPreferences } from 'electron'
 import { join } from 'path'
 import { resolveShellEnv } from './shell-env'
 import { AppRuntime } from './app-runtime'
@@ -21,6 +21,12 @@ function buildAppMenu(): void {
             label: app.name,
             submenu: [
               { role: 'about' as const },
+              { type: 'separator' as const },
+              {
+                label: 'Settings...',
+                accelerator: 'Cmd+,',
+                click: () => sendToRenderer('menu-open-settings')
+              },
               { type: 'separator' as const },
               { role: 'services' as const },
               { type: 'separator' as const },
@@ -209,6 +215,12 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
 
 app.whenReady().then(async () => {
   await resolveShellEnv()
+  if (process.platform === 'darwin') {
+    // Trigger the macOS mic-access prompt so terminal subprocesses (e.g. Claude Code voice mode)
+    // can inherit the grant. Without this, pty children hit TCC with no Info.plist in their
+    // responsibility chain and get denied silently, with no dialog.
+    void systemPreferences.askForMediaAccess('microphone').catch(() => {})
+  }
   appRuntime = new AppRuntime((initialViewState, geometry) => createWindow(initialViewState, geometry))
   await appRuntime.start()
   buildAppMenu()

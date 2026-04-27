@@ -195,6 +195,11 @@ const api = {
     ipcRenderer.on('menu-zoom-reset', handler)
     return () => ipcRenderer.removeListener('menu-zoom-reset', handler)
   },
+  onMenuOpenSettings: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-open-settings', handler)
+    return () => ipcRenderer.removeListener('menu-open-settings', handler)
+  },
 
   // File browser
   fbReadDirectory: (projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> =>

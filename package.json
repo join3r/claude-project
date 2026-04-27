@@ -11,7 +11,7 @@
     "build:linux": "electron-vite build && electron-builder --linux --dir",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "npx @electron/rebuild -m ."
+    "postinstall": "npx @electron/rebuild -m . && node scripts/patch-dev-electron-plist.mjs"
   },
   "build": {
     "appId": "com.devtool.app",
@@ -26,7 +26,14 @@
     ],
     "mac": {
       "target": "dir",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "DevTool forwards microphone access to terminal apps you run inside it, such as Claude Code's voice mode.",
+        "NSCameraUsageDescription": "DevTool forwards camera access to terminal apps you run inside it that request video input."
+      }
     },
     "linux": {
       "target": "dir",

@@ -11,6 +11,7 @@ import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
+import { NotesStorage } from './notes-storage'
 import { parseNumstat } from './git-diff-summary'
 import type {
   AppConfig,
@@ -28,7 +29,8 @@ import type {
   WorkspaceDeleteRequest,
   WorkspaceListBranchesRequest,
   WindowGeometry,
-  WindowViewState
+  WindowViewState,
+  ProjectNote
 } from '../shared/types'
 import {
   buildWindowViewState,
@@ -129,6 +131,7 @@ function getWindowGeometry(window: BrowserWindow): WindowGeometry {
 export class AppRuntime {
   private readonly storage = new Storage(CONFIG_DIR)
   private readonly scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
+  private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
   private readonly hookServer = new HookServer()
   private readonly codexSessionManager = new CodexSessionManager()
@@ -374,6 +377,9 @@ export class AppRuntime {
       if (runtime) runtime.scrollback = scrollback
       event.returnValue = true
     })
+
+    ipcMain.handle('notes-load', () => this.notesStorage.load())
+    ipcMain.handle('notes-save', (_event, data: Record<string, ProjectNote[]>) => this.notesStorage.save(data))
 
     ipcMain.handle('ssh-connect', async (_event, projectId: string, sshConfig: SshConfig) => {
       await this.sshManager.connect(projectId, sshConfig)

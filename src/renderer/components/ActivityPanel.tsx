@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback } from 'react'
 import type { Project, AppConfig } from '../../shared/types'
 import { AI_TAB_TYPES, isWorkspaceTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
-import { computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
+import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import './ActivityPanel.css'
 
 type Props = {
@@ -15,6 +15,7 @@ type Props = {
   heightPx: number
   onHeightChange: (next: number) => void
   allStatuses: Record<string, TabStatusValue>
+  theme: 'dark' | 'light'
 }
 
 function getTaskStatus(
@@ -41,7 +42,8 @@ export default function ActivityPanel({
   now,
   heightPx,
   onHeightChange,
-  allStatuses
+  allStatuses,
+  theme
 }: Props): React.ReactElement {
   const collapsed = heightPx === 0
   const panelRef = useRef<HTMLDivElement>(null)
@@ -120,9 +122,7 @@ export default function ActivityPanel({
                 const project = projectByTaskId.get(task.id)
                 if (!project) return null
                 const opacity = computeTaskRecencyOpacity(task, sortedByRecency, recencySettings, now)
-                const style: React.CSSProperties | undefined = opacity > 0
-                  ? { backgroundColor: `rgba(var(--recency-rgb), ${opacity.toFixed(3)})` }
-                  : undefined
+                const style = buildRecencyStyle(opacity, theme)
                 const status = getTaskStatus(task, allStatuses)
                 return (
                   <div

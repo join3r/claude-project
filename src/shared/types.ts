@@ -265,13 +265,13 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastTaskId: null,
   collapsedFolderIds: [],
   taskRecencyHighlight: {
-    enabled: false,
+    enabled: true,
     mode: 'rank',
     rankCount: 5,
     timeWindowMinutes: 1440
   },
   activityPanel: {
-    enabled: false,
+    enabled: true,
     heightPx: 160
   }
 }

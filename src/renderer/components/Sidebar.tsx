@@ -12,7 +12,7 @@ import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
-import { computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
+import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import './Sidebar.css'
 
 type DragState = {
@@ -71,7 +71,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const {
     projects, folders, rootOrder,
     selectedProjectId, selectedTaskId,
-    setSelectedProjectId, setSelectedTaskId, switchToTask,
+    setSelectedProjectId, switchToTask,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
     addFolder, removeFolder, renameFolder,
@@ -80,7 +80,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     reorderTasks, getProjectDir,
     config, updateConfig,
     collapsedFolderIds, toggleFolderCollapse, setFolderCollapsed,
-    expandedProjectIds, toggleProjectExpansion
+    expandedProjectIds, toggleProjectExpansion,
+    effectiveTheme
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
@@ -98,8 +99,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     return () => window.clearInterval(id)
   }, [config?.taskRecencyHighlight?.enabled, config?.taskRecencyHighlight?.mode])
 
-  const handleSelectTask = useCallback((task: Task) => {
-    setSelectedTaskId(task.id)
+  const handleSelectTask = useCallback((projectId: string, task: Task) => {
+    switchToTask(projectId, task.id)
     const aiTabs = [...task.tabs.left, ...task.tabs.right]
       .filter((t) => (AI_TAB_TYPES as readonly string[]).includes(t.type))
     for (const tab of aiTabs) {
@@ -107,7 +108,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         tabStatusStore.setStatus(tab.id, null)
       }
     }
-  }, [setSelectedTaskId, tabStatusStore])
+  }, [switchToTask, tabStatusStore])
 
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; type: 'project' | 'task' | 'folder'; projectId: string; taskId?: string
@@ -159,6 +160,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   useEffect(() => {
     return window.api.onMenuProjectSwitcher(() => {
       setSwitcherActive(prev => !prev)
+    })
+  }, [])
+
+  useEffect(() => {
+    return window.api.onMenuOpenSettings(() => {
+      setSettingsOpen(true)
     })
   }, [])
 
@@ -513,12 +520,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       {isExpanded && (
         <div className="sidebar-tasks">
           {project.tasks.map((task, tIdx) => {
-            const opacity = config
+            const opacity = config?.taskRecencyHighlight
               ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
               : 0
-            const recencyStyle = opacity > 0
-              ? { backgroundColor: `rgba(var(--recency-rgb), ${opacity.toFixed(3)})` }
-              : undefined
+            const recencyStyle = buildRecencyStyle(opacity, effectiveTheme)
             return (
               <React.Fragment key={task.id}>
                 {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
@@ -529,7 +534,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   data-task-id={task.id}
                   data-task-index={tIdx}
                   style={recencyStyle}
-                  onClick={() => handleSelectTask(task)}
+                  onClick={() => handleSelectTask(project.id, task)}
                   onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, tIdx, null, project.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
                 >
@@ -708,6 +713,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             activityPanel: { ...config.activityPanel, heightPx: next }
           })}
           allStatuses={allStatuses}
+          theme={effectiveTheme}
         />
       )}
       </>)}

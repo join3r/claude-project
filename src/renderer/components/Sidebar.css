@@ -56,8 +56,12 @@
   background: var(--selected) !important;
 }
 
+.project-item .sidebar-label {
+  font-weight: 600;
+}
+
 .task-item {
-  padding-left: 24px;
+  padding-left: 34px;
   font-size: 12px;
 }
 
@@ -88,7 +92,7 @@
 }
 
 .add-task-btn {
-  margin-left: 24px;
+  margin-left: 34px;
   font-size: 11px;
   padding: 4px 8px;
 }
@@ -338,11 +342,11 @@
 }
 
 .sidebar-folder-children .task-item {
-  padding-left: 24px;
+  padding-left: 34px;
 }
 
 .sidebar-folder-children .add-task-btn {
-  margin-left: 24px;
+  margin-left: 34px;
 }
 
 .sidebar-folder-children .sidebar-drop-indicator {
