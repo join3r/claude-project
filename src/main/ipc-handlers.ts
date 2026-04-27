@@ -8,8 +8,9 @@ import { HookServer } from './hook-server'
 import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
-import type { SshConfig } from '../shared/types'
+import type { SshConfig, ProjectNote } from '../shared/types'
 import { AppConfig, ProjectsData } from '../shared/types'
+import { NotesStorage } from './notes-storage'
 import os from 'os'
 import path from 'path'
 
@@ -89,6 +90,11 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
     scrollbackStorage.save(tabId, data)
     e.returnValue = true
   })
+
+  // Notes
+  const notesStorage = new NotesStorage(CONFIG_DIR)
+  ipcMain.handle('notes-load', () => notesStorage.load())
+  ipcMain.handle('notes-save', (_e, data: Record<string, ProjectNote[]>) => notesStorage.save(data))
 
   // SSH
   const sshDir = path.join(CONFIG_DIR, 'ssh')

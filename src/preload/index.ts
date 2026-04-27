@@ -4,6 +4,7 @@ import type {
   DirectoryEntry,
   GitOperationResult,
   GitStatusResult,
+  ProjectNote,
   ProjectsData,
   SshConfig,
   TunnelConfig,
@@ -32,6 +33,10 @@ const api = {
     ipcRenderer.on('config-updated', handler)
     return () => ipcRenderer.removeListener('config-updated', handler)
   },
+
+  // Notes
+  notesLoad: (): Promise<Record<string, ProjectNote[]>> => ipcRenderer.invoke('notes-load'),
+  notesSave: (data: Record<string, ProjectNote[]>): Promise<void> => ipcRenderer.invoke('notes-save', data),
 
   // Window state
   loadWindowState: (): Promise<WindowViewState> => ipcRenderer.invoke('load-window-state'),
