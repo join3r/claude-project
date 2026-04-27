@@ -80,7 +80,9 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     [selectedProjectId, selectedTaskId, openOrFocusDiffTab]
   )
 
-  if (!fileBrowserOpen || !isLocalProject) return null
+  if (!fileBrowserOpen || !selectedProject) return null
+
+  const activeTab = !isLocalProject && fileBrowserActiveTab !== 'notes' ? 'notes' : fileBrowserActiveTab
 
   return (
     <>
@@ -91,33 +93,37 @@ export default function FileBrowserPanel(): React.ReactElement | null {
         style={{ width: fileBrowserWidth, minWidth: fileBrowserWidth, maxWidth: fileBrowserWidth }}
       >
         <div className="filebrowser-tabs">
+          {isLocalProject && (
+            <>
+              <button
+                className={`filebrowser-tab${activeTab === 'files' ? ' filebrowser-tab-active' : ''}`}
+                onClick={() => setFileBrowserActiveTab('files')}
+              >
+                Files
+              </button>
+              <button
+                className={`filebrowser-tab${activeTab === 'git' ? ' filebrowser-tab-active' : ''}`}
+                onClick={() => setFileBrowserActiveTab('git')}
+              >
+                Git
+              </button>
+            </>
+          )}
           <button
-            className={`filebrowser-tab${fileBrowserActiveTab === 'files' ? ' filebrowser-tab-active' : ''}`}
-            onClick={() => setFileBrowserActiveTab('files')}
-          >
-            Files
-          </button>
-          <button
-            className={`filebrowser-tab${fileBrowserActiveTab === 'git' ? ' filebrowser-tab-active' : ''}`}
-            onClick={() => setFileBrowserActiveTab('git')}
-          >
-            Git
-          </button>
-          <button
-            className={`filebrowser-tab${fileBrowserActiveTab === 'notes' ? ' filebrowser-tab-active' : ''}`}
+            className={`filebrowser-tab${activeTab === 'notes' ? ' filebrowser-tab-active' : ''}`}
             onClick={() => setFileBrowserActiveTab('notes')}
           >
             Notes
           </button>
         </div>
         <div className="filebrowser-content">
-          {fileBrowserActiveTab === 'files' ? (
+          {activeTab === 'files' ? (
             <FileTree
               projectDir={effectiveDir}
               gitStatus={gitStatus}
               onFileClick={handleFileClick}
             />
-          ) : fileBrowserActiveTab === 'git' ? (
+          ) : activeTab === 'git' ? (
             <GitStatus
               gitStatus={gitStatus}
               projectDir={effectiveDir}

@@ -326,7 +326,7 @@ export default function ContentArea(): React.ReactElement {
               onClick={() => toggleFileBrowser()}
               title={fileBrowserOpen ? 'Close file browser (⌘⇧E)' : 'Open file browser (⌘⇧E)'}
             >
-              &#9636;
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><path d="M1 1H14V14H1Z M2 2V13H9V2Z"/></svg>
             </button>
           )}
           {selectedTask && (
