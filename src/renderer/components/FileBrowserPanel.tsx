@@ -4,6 +4,7 @@ import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import FileTree from './FileTree'
 import GitStatus from './GitStatus'
+import NotesList from './NotesList'
 import './FileBrowserPanel.css'
 
 export default function FileBrowserPanel(): React.ReactElement | null {
@@ -102,6 +103,12 @@ export default function FileBrowserPanel(): React.ReactElement | null {
           >
             Git
           </button>
+          <button
+            className={`filebrowser-tab${fileBrowserActiveTab === 'notes' ? ' filebrowser-tab-active' : ''}`}
+            onClick={() => setFileBrowserActiveTab('notes')}
+          >
+            Notes
+          </button>
         </div>
         <div className="filebrowser-content">
           {fileBrowserActiveTab === 'files' ? (
@@ -110,12 +117,14 @@ export default function FileBrowserPanel(): React.ReactElement | null {
               gitStatus={gitStatus}
               onFileClick={handleFileClick}
             />
-          ) : (
+          ) : fileBrowserActiveTab === 'git' ? (
             <GitStatus
               gitStatus={gitStatus}
               projectDir={effectiveDir}
               onFileClick={handleGitFileClick}
             />
+          ) : (
+            <NotesList />
           )}
         </div>
       </div>
