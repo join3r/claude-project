@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { isRemoteProject, isShellCommandProject, AI_TAB_TYPES } from '../../shared/types'
 import type { Project } from '../../shared/types'
 import { useTabStatusStore } from '../context/TabStatusContext'
-import './ProjectSwitcher.css'
 
 interface SearchResult {
   type: 'project' | 'task'
@@ -14,23 +13,19 @@ interface SearchResult {
 
 interface ProjectSwitcherProps {
   projects: Project[]
-  selectedProjectId: string | null
   setSelectedProjectId: (id: string) => void
   switchToTask: (projectId: string, taskId: string) => void
   isActive: boolean
-  onActivate: () => void
   onDeactivate: () => void
 }
 
 export default function ProjectSwitcher({
   projects,
-  selectedProjectId,
   setSelectedProjectId,
   switchToTask,
   isActive,
-  onActivate,
   onDeactivate
-}: ProjectSwitcherProps): React.ReactElement {
+}: ProjectSwitcherProps): React.ReactElement | null {
   const [query, setQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -155,56 +150,78 @@ export default function ProjectSwitcher({
     }
   }, [filteredResults, selectedIndex, handleSelect, handleDeactivate])
 
-  if (!isActive) {
-    return (
-      <div className="project-switcher">
-        <div className="project-switcher-input-wrapper">
-          <input
-            className="project-switcher-input"
-            placeholder="Search..."
-            readOnly
-            onClick={onActivate}
-          />
-          <span className="project-switcher-hint">&#8984;P</span>
-        </div>
-      </div>
-    )
-  }
+  if (!isActive) return null
 
   return (
-    <div className="project-switcher" ref={containerRef}>
-      <div className="project-switcher-input-wrapper">
-        <input
-          ref={inputRef}
-          className="project-switcher-input"
-          placeholder="Search projects and tasks..."
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-        <span className="project-switcher-hint">esc</span>
-      </div>
-      <div className="project-switcher-results" ref={resultsRef}>
-        {filteredResults.length === 0 ? (
-          <div className="project-switcher-empty">No results</div>
-        ) : (
-          filteredResults.map((result, i) => (
-            <div
-              key={result.type + ':' + (result.taskId || result.projectId)}
-              className={`project-switcher-row ${i === selectedIndex ? 'selected' : ''}`}
-              onClick={() => handleSelect(result)}
-              onMouseEnter={() => setSelectedIndex(i)}
-            >
-              <div className="project-switcher-row-top">
-                <span className={`project-switcher-row-name ${result.type === 'project' ? 'is-project' : ''}`}>
-                  {result.name}
-                </span>
-                <span className="project-switcher-badge">{result.type}</span>
-              </div>
-              <div className="project-switcher-context">{result.context}</div>
-            </div>
-          ))
-        )}
+    /* Backdrop */
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/60 [-webkit-app-region:no-drag]"
+      onClick={handleDeactivate}
+    >
+      {/* Card */}
+      <div
+        ref={containerRef}
+        className="w-[440px] max-w-[90vw] rounded-xl border border-border bg-surface-2 shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Body */}
+        <div className="p-3 flex flex-col gap-2 max-h-[60vh]">
+          {/* Input wrapper */}
+          <div className="relative flex items-center">
+            <input
+              ref={inputRef}
+              className="w-full h-9 px-3 rounded-md bg-surface border border-border text-text text-[13px] outline-none focus:border-border-focus"
+              placeholder="Search projects and tasks..."
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <span className="absolute right-2 text-[10px] text-text-subtle pointer-events-none px-1.5 py-px rounded bg-surface-3">
+              esc
+            </span>
+          </div>
+          {/* Results */}
+          <div className="flex-1 overflow-y-auto -mx-1 px-1" ref={resultsRef}>
+            {filteredResults.length === 0 ? (
+              <div className="p-3 text-center text-text-muted text-[12px]">No results</div>
+            ) : (
+              filteredResults.map((result, i) => (
+                <div
+                  key={result.type + ':' + (result.taskId || result.projectId)}
+                  data-active={i === selectedIndex ? 'true' : undefined}
+                  className={[
+                    'px-3 py-1.5 rounded-md cursor-pointer text-[12px] text-text',
+                    // Selection rail recipe
+                    'data-[active=true]:relative',
+                    'data-[active=true]:before:absolute data-[active=true]:before:inset-y-0 data-[active=true]:before:left-0',
+                    'data-[active=true]:before:w-0.5 data-[active=true]:before:bg-accent-400',
+                    'data-[active=true]:bg-gradient-to-r data-[active=true]:from-accent-600/30 data-[active=true]:to-transparent',
+                    'data-[active=true]:text-accent-50',
+                    '[.theme-light_&[data-active=true]]:from-accent-200',
+                    '[.theme-light_&[data-active=true]]:text-accent-700',
+                  ].join(' ')}
+                  onClick={() => handleSelect(result)}
+                  onMouseEnter={() => setSelectedIndex(i)}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={[
+                      'overflow-hidden text-ellipsis whitespace-nowrap',
+                      result.type === 'project' ? 'font-semibold' : ''
+                    ].join(' ').trim()}>
+                      {result.name}
+                    </span>
+                    <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0 ml-auto uppercase tracking-wide">
+                      {result.type}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-text-muted overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
+                    {result.context}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
