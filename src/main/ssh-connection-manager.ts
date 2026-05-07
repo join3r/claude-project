@@ -13,7 +13,7 @@ export function shellQuote(s: string): string {
 }
 
 /** POSIX-join a remote base dir with a relative path */
-function joinRemotePath(remoteDir: string, relative: string): string {
+export function joinRemotePath(remoteDir: string, relative: string): string {
   if (!remoteDir) return relative
   return remoteDir.replace(/\/+$/, '') + '/' + relative.replace(/^\/+/, '')
 }

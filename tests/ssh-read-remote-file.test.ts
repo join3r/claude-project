@@ -21,7 +21,7 @@ describe('buildReadRemoteFileArgs', () => {
 
   it('quotes paths containing spaces', () => {
     const args = buildReadRemoteFileArgs(SOCKET_DIR, 'proj-1', { ...SSH_CONFIG, remoteDir: '/srv/my app' }, 'README.md')
-    const cmd = args.slice(args.indexOf('cat') - 0).join(' ')
+    const cmd = args.slice(args.indexOf('cat')).join(' ')
     expect(cmd).toContain('cat')
     expect(cmd).toMatch(/'\/srv\/my app\/README\.md'|"\/srv\/my app\/README\.md"/)
   })
