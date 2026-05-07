@@ -8,7 +8,7 @@ import { Palette } from './palette/Palette'
 import { paletteEvents } from './palette/paletteEvents'
 
 function AppInner(): React.ReactElement {
-  const { effectiveTheme, exportWindowViewState, toggleFileBrowser } = useApp()
+  const { effectiveTheme, exportWindowViewState, toggleFileBrowser, selectedProjectId, toggleWatchStripForProject } = useApp()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [switcherRequested, setSwitcherRequested] = useState(false)
 
@@ -49,6 +49,20 @@ function AppInner(): React.ReactElement {
   useEffect(() => paletteEvents.on('quit-app', () => {
     void window.api.quitApp()
   }), [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'w') {
+        if (selectedProjectId) {
+          e.preventDefault()
+          e.stopPropagation()
+          toggleWatchStripForProject(selectedProjectId)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [selectedProjectId, toggleWatchStripForProject])
 
   // Mirror theme-light onto documentElement so getComputedStyle(documentElement)
   // resolves CSS custom properties via the .theme-light cascade. Used by xterm
