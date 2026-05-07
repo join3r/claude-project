@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import type { SearchAddon } from '@xterm/addon-search'
 import type { Terminal } from '@xterm/xterm'
-import './TerminalSearchBar.css'
 
 interface Props {
   searchAddon: SearchAddon
@@ -41,7 +40,7 @@ export default function TerminalSearchBar({ searchAddon, terminal, visible, onCl
   }
 
   return (
-    <div className="terminal-search-bar">
+    <div className="absolute top-1 right-4 z-10">
       <input
         ref={inputRef}
         type="text"
@@ -52,6 +51,7 @@ export default function TerminalSearchBar({ searchAddon, terminal, visible, onCl
           searchAddon.clearDecorations()
           onClose()
         }}
+        className="bg-surface-2 text-text border border-border rounded-md px-2 py-0.5 text-[12px] outline-none w-[200px] focus:border-border-focus"
       />
     </div>
   )
