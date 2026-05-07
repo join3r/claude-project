@@ -168,6 +168,13 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const codexSpawnTsRef = useRef(0)
   const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const latestSessionIdRef = useRef<string | null>(sessionId ?? null)
+  // Claude tabs with a stored sessionId require explicit user activation before
+  // spawning, so resuming the session doesn't burn tokens just from app startup.
+  const requiresActivation = isClaudeTab && !!sessionId
+  const [userActivated, setUserActivated] = useState(!requiresActivation)
+  const userActivatedRef = useRef(!requiresActivation)
+  userActivatedRef.current = userActivated
+  const wasVisibleRef = useRef(visible)
 
   // Release the renderer-side xterm instance while hidden. The PTY keeps
   // running in main and will be reattached from runtime scrollback on show.
@@ -179,6 +186,15 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     initializedRef.current = false
     spawnedRef.current = false
   }, [visible, tabId])
+
+  // A hidden→visible transition is a deliberate user action (clicking the tab
+  // or switching tasks), so it counts as activation for Claude resume.
+  useEffect(() => {
+    if (visible && !wasVisibleRef.current && requiresActivation && !userActivated) {
+      setUserActivated(true)
+    }
+    wasVisibleRef.current = visible
+  }, [visible, requiresActivation, userActivated])
 
   function startCodexSessionPolling(): void {
     if (codexSessionPollRef.current) return
@@ -470,6 +486,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         }
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
+          if (requiresActivation && !userActivatedRef.current) return // wait for explicit user activation
           spawnedRef.current = true
 
           const startSession = async (): Promise<void> => {
@@ -538,7 +555,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, toolType, config, sessionId, projectDir, sshReady])
+  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated])
 
   // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
@@ -634,6 +651,16 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       style={{ display: visible ? 'block' : 'none', position: 'relative' }}
     >
       <div ref={hostRef} className="w-full h-full" />
+      {requiresActivation && !userActivated && visible && (
+        <div
+          className="absolute inset-0 flex items-center justify-center cursor-pointer z-10 bg-bg-base/70"
+          onMouseDown={() => setUserActivated(true)}
+        >
+          <div className="text-text-secondary text-[13px] px-3 py-2 rounded border border-border-default bg-bg-elevated">
+            Click to resume Claude session
+          </div>
+        </div>
+      )}
       {entry && (
         <TerminalSearchBar
           searchAddon={entry.searchAddon}
