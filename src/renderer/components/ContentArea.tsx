@@ -346,7 +346,7 @@ export default function ContentArea(): React.ReactElement {
         <div className="flex-1 flex items-center justify-center text-text-muted text-[14px]">Select or create a task to get started</div>
       )}
       {hasProjectSelection && !hasTaskSelection && selectedProjectId && (
-        <ProjectHome key={selectedProjectId} projectId={selectedProjectId} />
+        <ProjectHome projectId={selectedProjectId} />
       )}
       {projects.flatMap((project) =>
         project.tasks.map((task) => {
