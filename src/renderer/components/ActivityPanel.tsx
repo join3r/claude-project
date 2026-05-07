@@ -1,9 +1,9 @@
 import React, { useState, useRef, useCallback } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Project, AppConfig } from '../../shared/types'
 import { AI_TAB_TYPES, isWorkspaceTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
-import './ActivityPanel.css'
 
 type Props = {
   projects: Project[]
@@ -31,6 +31,16 @@ function getTaskStatus(
   if (statuses.includes('working')) return 'working'
   if (statuses.includes('exited')) return 'exited'
   return null
+}
+
+function StatusDot({ status }: { status: NonNullable<TabStatusValue> }) {
+  const stateClass =
+    status === 'working'
+      ? 'bg-status-working animate-pulse'
+      : status === 'attention'
+        ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+        : 'bg-status-exited'
+  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-auto ${stateClass}`} />
 }
 
 export default function ActivityPanel({
@@ -106,17 +116,29 @@ export default function ActivityPanel({
   return (
     <>
       {!collapsed && (
-        <div className="activity-splitter" onMouseDown={handleSplitterMouseDown} />
+        <div
+          className="h-1 cursor-ns-resize bg-transparent shrink-0 hover:bg-border-focus"
+          onMouseDown={handleSplitterMouseDown}
+        />
       )}
-      <div className="activity-panel" style={panelStyle} ref={panelRef}>
-        <div className="activity-header" onClick={toggleCollapse}>
-          <span className="activity-header-chevron">{collapsed ? '▸' : '▾'}</span>
+      <div
+        className="border-t border-border flex flex-col shrink-0 overflow-hidden"
+        style={panelStyle}
+        ref={panelRef}
+      >
+        <div
+          className="flex items-center px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-text-muted cursor-pointer shrink-0 hover:bg-surface-2"
+          onClick={toggleCollapse}
+        >
+          {collapsed
+            ? <ChevronRight size={12} className="mr-1.5" />
+            : <ChevronDown size={12} className="mr-1.5" />}
           Recent
         </div>
         {!collapsed && (
-          <div className="activity-list">
+          <div className="overflow-y-auto flex-1 min-h-0 pt-0.5 pb-1">
             {sortedByRecency.length === 0 ? (
-              <div className="activity-empty">No recent activity</div>
+              <div className="p-3 text-text-muted text-[12px] italic text-center">No recent activity</div>
             ) : (
               sortedByRecency.map(task => {
                 const project = projectByTaskId.get(task.id)
@@ -124,18 +146,31 @@ export default function ActivityPanel({
                 const opacity = computeTaskRecencyOpacity(task, sortedByRecency, recencySettings, now)
                 const style = buildRecencyStyle(opacity, theme)
                 const status = getTaskStatus(task, allStatuses)
+                const isSelected = selectedTaskId === task.id
                 return (
                   <div
                     key={task.id}
-                    className={`activity-item ${selectedTaskId === task.id ? 'selected' : ''}`}
+                    className={[
+                      'px-3 py-1.5 cursor-pointer text-[12px] text-text flex items-center gap-1.5 hover:bg-surface-2',
+                      'data-[selected=true]:relative',
+                      'data-[selected=true]:before:absolute data-[selected=true]:before:inset-y-0 data-[selected=true]:before:left-0',
+                      'data-[selected=true]:before:w-0.5 data-[selected=true]:before:bg-accent-400',
+                      'data-[selected=true]:bg-gradient-to-r data-[selected=true]:from-accent-600/30 data-[selected=true]:to-transparent',
+                      'data-[selected=true]:text-accent-50',
+                      '[.theme-light_&[data-selected=true]]:from-accent-200',
+                      '[.theme-light_&[data-selected=true]]:text-accent-700',
+                    ].join(' ')}
+                    data-selected={isSelected ? 'true' : undefined}
                     style={style}
                     onClick={() => switchToTask(project.id, task.id)}
                     onContextMenu={(e) => onTaskContextMenu(e, project.id, task.id)}
                   >
-                    <span className="activity-project-prefix">{project.name}</span>
-                    <span className="activity-task-name">{task.name}</span>
-                    {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
-                    {status && <span className={`sidebar-status sidebar-status-${status}`} />}
+                    <span className="text-text-muted text-[11px] shrink-0 max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">{project.name}</span>
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{task.name}</span>
+                    {isWorkspaceTask(task) && (
+                      <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>
+                    )}
+                    {status && <StatusDot status={status} />}
                   </div>
                 )
               })

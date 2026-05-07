@@ -641,7 +641,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }
 
   return (
-    <div className="flex flex-col w-60 min-w-[200px] bg-surface border-r border-border select-none [--recency-rgb:100,150,230] [.theme-light_&]:[--recency-rgb:230,160,80]">
+    <div className="sidebar flex flex-col w-60 min-w-[200px] bg-surface border-r border-border select-none [--recency-rgb:100,150,230] [.theme-light_&]:[--recency-rgb:230,160,80]">
       <ProjectSwitcher
         projects={projects}
         selectedProjectId={selectedProjectId}
