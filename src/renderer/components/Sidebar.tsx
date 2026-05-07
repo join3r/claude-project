@@ -78,7 +78,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const {
     projects, folders, rootOrder,
     selectedProjectId, selectedTaskId,
-    setSelectedProjectId, switchToTask,
+    setSelectedProjectId, setSelectedTaskId, switchToTask,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
     addFolder, removeFolder, renameFolder,
@@ -513,7 +513,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         data-drag-type="project"
         data-drag-id={project.id}
         data-folder-id={folderId || ''}
-        onClick={() => setSelectedProjectId(project.id)}
+        onClick={() => { setSelectedProjectId(project.id); setSelectedTaskId(null) }}
         onContextMenu={(e) => handleContextMenu(e, 'project', project.id)}
         onMouseDown={(e) => {
           const folder = folderId ? folders.find(f => f.id === folderId) : null
