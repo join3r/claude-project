@@ -1,8 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppConfig,
+  CommitHistoryResult,
   DirectoryEntry,
   GitOperationResult,
+  GitPostureResult,
   GitStatusResult,
   ProjectNote,
   ProjectsData,
@@ -219,6 +221,10 @@ const api = {
     ipcRenderer.invoke('fb-write-file', projectCwd, relativeFilePath, content),
   fbGitStatus: (projectCwd: string): Promise<GitStatusResult> =>
     ipcRenderer.invoke('fb-git-status', projectCwd),
+  gitProjectPosture: (projectCwd: string): Promise<GitPostureResult> =>
+    ipcRenderer.invoke('git-project-posture', projectCwd),
+  gitCommitHistory: (projectCwd: string): Promise<CommitHistoryResult> =>
+    ipcRenderer.invoke('git-commit-history', projectCwd),
   fbGitDiff: (projectCwd: string, relativeFilePath: string): Promise<string> =>
     ipcRenderer.invoke('fb-git-diff', projectCwd, relativeFilePath),
   fbGitStage: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
