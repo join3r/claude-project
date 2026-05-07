@@ -5,7 +5,6 @@ import { AI_TAB_TYPES, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
-import './TabBar.css'
 
 interface Props {
   tabs: Tab[]
@@ -24,17 +23,25 @@ const DRAG_THRESHOLD = 5
 
 function tabIcon(type: TabType): string {
   if (type === 'terminal') return '>'
-  if (type === 'browser') return '\u25C9'
-  if (type === 'claude') return '\u2726'
-  if (type === 'codex') return '\u25EB'
-  if (type === 'opencode') return '\u25C7'
+  if (type === 'browser') return '◉'
+  if (type === 'claude') return '✦'
+  if (type === 'codex') return '◫'
+  if (type === 'opencode') return '◇'
   return '>'
 }
 
 function TabStatusIndicator({ tabId }: { tabId: string }): React.ReactElement | null {
   const status = useTabStatus(tabId)
   if (!status) return null
-  return <span className={`tab-status tab-status-${status}`} />
+
+  const stateClasses =
+    status === 'working'
+      ? 'bg-status-working animate-pulse'
+      : status === 'attention'
+        ? 'bg-status-attention shadow-[0_0_4px_var(--color-status-attention)]'
+        : 'bg-status-exited'
+
+  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stateClasses}`} />
 }
 
 function getDropPane(value: string | undefined): 'left' | 'right' | null {
@@ -109,7 +116,7 @@ export default function TabBar({
 }: Props): React.ReactElement {
   const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config } = useApp()
   const suppressClickRef = useRef(false)
-  if (!selectedProject) return <div className="tab-bar" />
+  if (!selectedProject) return <div className="flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]" />
 
   const isTabDragActive = tabDragState?.projectId === projectId && tabDragState.taskId === taskId
   const isDropTargetPane = isTabDragActive && tabDropTarget?.pane === pane
@@ -174,9 +181,13 @@ export default function TabBar({
   }
 
   return (
-    <div className="tab-bar">
+    <div className="flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
       <div
-        className={`tab-list ${isDropTargetPane ? 'tab-list-drop-active' : ''}`}
+        className={[
+          'tab-list',
+          'flex flex-1 overflow-x-auto overflow-y-hidden relative [&::-webkit-scrollbar]:h-0 [-webkit-app-region:no-drag]',
+          isDropTargetPane ? 'shadow-[inset_0_-2px_0_var(--color-accent-400)]' : ''
+        ].join(' ')}
         data-project-id={projectId}
         data-task-id={taskId}
         data-pane={pane}
@@ -184,12 +195,19 @@ export default function TabBar({
         {tabs.map((tab, index) => (
           <React.Fragment key={tab.id}>
             {isDropTargetPane && tabDropTarget?.index === index && (
-              <div className="tab-drop-indicator" />
+              <div className="w-0.5 shrink-0 self-stretch bg-accent-400 shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent-400)_55%,transparent)]" />
             )}
             <div
-              className={`tab ${tab.id === activeTabId ? 'tab-active' : ''} ${tabDragState?.tabId === tab.id ? 'tab-dragging' : ''}`}
+              className={[
+                'tab',
+                'group relative flex items-center gap-1.5 h-full px-3 text-[12.5px] cursor-pointer whitespace-nowrap text-text-muted min-w-0 select-none hover:text-text',
+                'data-[active=true]:text-text',
+                'data-[active=true]:after:absolute data-[active=true]:after:inset-x-2 data-[active=true]:after:bottom-0 data-[active=true]:after:h-0.5 data-[active=true]:after:bg-accent-400',
+                tabDragState?.tabId === tab.id ? 'opacity-[0.45]' : ''
+              ].join(' ')}
               data-tab-id={tab.id}
               data-tab-index={index}
+              data-active={tab.id === activeTabId ? 'true' : undefined}
               onClick={() => {
                 if (suppressClickRef.current) return
                 setActiveTab(projectId, taskId, pane, tab.id)
@@ -197,15 +215,15 @@ export default function TabBar({
               onMouseDown={(event) => handleTabMouseDown(event, tab.id, index)}
             >
               {index < 9 && (
-                <span className="tab-shortcut-hint">
+                <span className="text-[10px] text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.meta-held_&]:visible">
                   {pane === 'left' ? `⌘${index + 1}` : `⇧${index + 1}`}
                 </span>
               )}
-              <span className="tab-icon">{tabIcon(tab.type)}</span>
+              <span className="text-[11px] shrink-0">{tabIcon(tab.type)}</span>
               <TabStatusIndicator tabId={tab.id} />
-              <span className="tab-title">{tab.title}</span>
+              <span className="overflow-hidden text-ellipsis">{tab.title}</span>
               <button
-                className="tab-close"
+                className="bg-transparent border-0 text-text-muted cursor-pointer text-[14px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation()
@@ -219,28 +237,28 @@ export default function TabBar({
           </React.Fragment>
         ))}
         {isDropTargetPane && tabDropTarget?.index === tabs.length && (
-          <div className="tab-drop-indicator" />
+          <div className="w-0.5 shrink-0 self-stretch bg-accent-400 shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent-400)_55%,transparent)]" />
         )}
       </div>
-      <div className="tab-actions">
-        <button className="tab-add-btn" onClick={() => handleAdd('terminal')} title="New terminal (⌘T)">
+      <div className="flex px-1 gap-0.5 [-webkit-app-region:no-drag]">
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('terminal')} title="New terminal (⌘T)">
           &gt;_
         </button>
-        <button className="tab-add-btn" onClick={() => handleAdd('browser')} title="New browser">
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('browser')} title="New browser">
           &#9673;
         </button>
         {config?.enableClaude && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="tab-add-btn" onClick={() => handleAdd('claude')} title="New Claude Code">
+          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('claude')} title="New Claude Code">
             &#10022;
           </button>
         )}
         {config?.enableCodex && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="tab-add-btn" onClick={() => handleAdd('codex')} title="New Codex">
+          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('codex')} title="New Codex">
             &#9707;
           </button>
         )}
         {config?.enableOpencode && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="tab-add-btn" onClick={() => handleAdd('opencode')} title="New OpenCode">
+          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('opencode')} title="New OpenCode">
             &#9671;
           </button>
         )}
