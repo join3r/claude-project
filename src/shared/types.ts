@@ -88,6 +88,7 @@ export function isWorkspaceTask(task: Task): boolean {
 export interface Project {
   id: string
   name: string
+  emoji?: string
   directory: string
   tasks: Task[]
   lastTaskId?: string
