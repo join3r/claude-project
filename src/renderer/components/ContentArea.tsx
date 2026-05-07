@@ -7,6 +7,7 @@ import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
 import { ProjectHome } from './ProjectHome'
+import { WatchStrip } from './WatchStrip'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
@@ -434,6 +435,7 @@ export default function ContentArea(): React.ReactElement {
           )
         })
       )}
+      <WatchStrip />
       {tunnelPopupOpen && selectedProject && isRemoteProject(selectedProject) && (
         <TunnelPopup
           project={selectedProject}
