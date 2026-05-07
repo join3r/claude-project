@@ -20,34 +20,37 @@ export function ProjectReadme({ project }: Props): React.ReactElement {
   const actions = useApp()
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
 
+  function applyResult(content: string | null) {
+    if (content === null) { setState({ kind: 'missing' }); return }
+    if (content.length > SIZE_CAP) {
+      setState({ kind: 'truncated', content: content.slice(0, SIZE_CAP) })
+    } else {
+      setState({ kind: 'ready', content })
+    }
+  }
+
+  function applyError(err: any) {
+    if (err?.message?.includes('ssh-not-connected') || err?.code === 'SSH_NOT_CONNECTED') {
+      setState({ kind: 'ssh-disconnected' })
+    } else {
+      setState({ kind: 'error', message: String(err?.message ?? err) })
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     setState({ kind: 'loading' })
     const api = (window as any).api
     api.readProjectReadme(project.id)
-      .then((content: string | null) => {
-        if (cancelled) return
-        if (content === null) { setState({ kind: 'missing' }); return }
-        if (content.length > SIZE_CAP) {
-          setState({ kind: 'truncated', content: content.slice(0, SIZE_CAP) })
-        } else {
-          setState({ kind: 'ready', content })
-        }
-      })
-      .catch((err: any) => {
-        if (cancelled) return
-        if (err?.message?.includes('ssh-not-connected') || err?.code === 'SSH_NOT_CONNECTED') {
-          setState({ kind: 'ssh-disconnected' })
-        } else {
-          setState({ kind: 'error', message: String(err?.message ?? err) })
-        }
-      })
+      .then((c: string | null) => { if (!cancelled) applyResult(c) })
+      .catch((e: any) => { if (!cancelled) applyError(e) })
     return () => { cancelled = true }
   }, [project.id])
 
+  const taskId = project.tasks[0]?.id
+
   const openInEditor = () => {
     if (!project.directory) return
-    const taskId = project.tasks[0]?.id
     if (!taskId) return
     actions.openOrFocusEditorTab(project.id, taskId, 'left', `${project.directory}/README.md`)
   }
@@ -55,20 +58,14 @@ export function ProjectReadme({ project }: Props): React.ReactElement {
   const retry = () => {
     setState({ kind: 'loading' })
     const api = (window as any).api
-    api.readProjectReadme(project.id)
-      .then((content: string | null) => {
-        if (content === null) setState({ kind: 'missing' })
-        else if (content.length > SIZE_CAP) setState({ kind: 'truncated', content: content.slice(0, SIZE_CAP) })
-        else setState({ kind: 'ready', content })
-      })
-      .catch(() => { /* no-op; user can retry again */ })
+    api.readProjectReadme(project.id).then(applyResult).catch(applyError)
   }
 
   return (
     <section className="px-4 py-3">
       <header className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-text-subtle">README</h2>
-        {(state.kind === 'ready' || state.kind === 'truncated') && project.directory && (
+        {(state.kind === 'ready' || state.kind === 'truncated') && project.directory && taskId && (
           <button
             type="button"
             onClick={openInEditor}
@@ -87,7 +84,7 @@ export function ProjectReadme({ project }: Props): React.ReactElement {
         <>
           <div className="mb-2 px-3 py-2 bg-surface-2 rounded text-xs text-text-subtle">
             README is large — showing first 200KB.{' '}
-            <button type="button" onClick={openInEditor} className="underline bg-transparent border-0 cursor-pointer text-text-subtle hover:text-text">Open in editor</button>
+            {taskId && <button type="button" onClick={openInEditor} className="underline bg-transparent border-0 cursor-pointer text-text-subtle hover:text-text">Open in editor</button>}
           </div>
           <MarkdownPreview content={state.content} effectiveTheme={actions.effectiveTheme} />
         </>
@@ -99,9 +96,11 @@ export function ProjectReadme({ project }: Props): React.ReactElement {
           return (
             <div className="text-sm text-text-subtle">
               No README found.{' '}
-              <button type="button" onClick={openInEditor} className="underline bg-transparent border-0 cursor-pointer text-text-subtle hover:text-text">
-                Create README
-              </button>
+              {taskId && (
+                <button type="button" onClick={openInEditor} className="underline bg-transparent border-0 cursor-pointer text-text-subtle hover:text-text">
+                  Create README
+                </button>
+              )}
             </div>
           )
         }
