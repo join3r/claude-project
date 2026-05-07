@@ -26,6 +26,16 @@ commandRegistry.register({
 })
 
 commandRegistry.register({
+  id: 'cmd.openProjectHome',
+  title: 'Open Project Home',
+  aliases: ['home', 'project home'],
+  when: ctx => !!ctx.actions.selectedProjectId,
+  run: ctx => {
+    if (ctx.actions.selectedProjectId) ctx.actions.setSelectedTaskId(null)
+  }
+})
+
+commandRegistry.register({
   id: 'cmd.newTerminalTab',
   title: 'New Terminal Tab',
   aliases: ['terminal', 'term'],
