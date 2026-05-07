@@ -69,3 +69,45 @@
   *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
   .theme-light *::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); }
 }
+
+@layer utilities {
+  .sidebar-hidden .content-toolbar { padding-left: 76px; background: var(--color-surface-2); border-bottom: none; }
+  .sidebar-hidden .tab-bar { padding-left: 76px; }
+}
+
+/* TEMP: legacy tokens used by unconverted .css files; remove in Task 22 */
+:root {
+  --bg: #1e1e1e;
+  --sidebar-bg: #252526;
+  --text-primary: #cccccc;
+  --text-secondary: #888888;
+  --border: #333333;
+  --border-focus: #007acc;
+  --hover: #2a2d2e;
+  --selected: #8a6730;
+  --input-bg: #3c3c3c;
+  --dropdown-bg: #2d2d2d;
+  --tab-bg: #2d2d2d;
+  --tab-active-bg: #1e1e1e;
+  --tab-border: #252526;
+  --toolbar-bg: #333333;
+  --accent: #007acc;
+}
+
+.theme-light {
+  --bg: #ffffff;
+  --sidebar-bg: #f3f3f3;
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --border: #e0e0e0;
+  --border-focus: #007acc;
+  --hover: #e8e8e8;
+  --selected: #f5d8a6;
+  --input-bg: #ffffff;
+  --dropdown-bg: #ffffff;
+  --tab-bg: #ececec;
+  --tab-active-bg: #ffffff;
+  --tab-border: #f3f3f3;
+  --toolbar-bg: #dddddd;
+  --accent: #007acc;
+}

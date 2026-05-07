@@ -9,7 +9,6 @@ import TunnelPopup from './TunnelPopup'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
-import './ContentArea.css'
 
 function joinPath(...parts: string[]): string {
   return parts.filter(Boolean).join('/')
@@ -272,45 +271,45 @@ export default function ContentArea(): React.ReactElement {
   const gitStatus = useGitStatus(selectedProjectDir, shouldShowGitSummary)
   const gitSummary = gitStatus?.summary ?? null
   const hasGitSummary = !!gitSummary && (gitSummary.added > 0 || gitSummary.deleted > 0)
+  const baseTunnelClasses = 'bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-0.5 rounded-sm text-[15px] leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag]'
   const tunnelButtonClassName = selectedProject && isRemoteProject(selectedProject)
     ? [
-        'content-toolbar-btn',
-        'tunnel-btn',
+        baseTunnelClasses,
         selectedTunnelState?.status === 'error'
-          ? 'tunnel-btn-error'
+          ? 'text-red-400'
           : selectedProject.tunnel && selectedTunnelState?.status === 'active'
-            ? 'tunnel-btn-active'
+            ? 'text-accent-400'
             : ''
       ].filter(Boolean).join(' ')
-    : 'content-toolbar-btn tunnel-btn'
+    : baseTunnelClasses
 
   return (
-    <div className="content-area">
+    <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {selectedProject && (
-        <div className="content-toolbar">
-          <div className="content-toolbar-title" title={windowBarTitle}>
-            <span className="content-toolbar-project">{selectedProject.name}</span>
+        <div className="content-toolbar flex items-center justify-between gap-1.5 px-2 py-0.5 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
+          <div className="flex items-center gap-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-text-muted" title={windowBarTitle}>
+            <span className="text-text font-semibold">{selectedProject.name}</span>
             {selectedTask && (
               <>
-                <span className="content-toolbar-separator"> / </span>
-                <span className="content-toolbar-task">{selectedTask.name}</span>
+                <span className="text-text-muted"> / </span>
+                <span className="text-text-muted">{selectedTask.name}</span>
               </>
             )}
             {hasGitSummary && gitSummary && (
               <span
-                className="content-toolbar-git-summary"
+                className="inline-flex items-center gap-1.5 ml-1.5 [font-variant-numeric:tabular-nums]"
                 title={`${gitSummary.added} added, ${gitSummary.deleted} removed`}
               >
                 {gitSummary.added > 0 && (
-                  <span className="content-toolbar-git-added">+{gitSummary.added}</span>
+                  <span className="text-emerald-400">+{gitSummary.added}</span>
                 )}
                 {gitSummary.deleted > 0 && (
-                  <span className="content-toolbar-git-deleted">-{gitSummary.deleted}</span>
+                  <span className="text-red-400">-{gitSummary.deleted}</span>
                 )}
               </span>
             )}
           </div>
-          <div className="content-toolbar-actions">
+          <div className="flex items-center gap-1.5 shrink-0">
           {isRemoteProject(selectedProject) && (
             <button
               className={tunnelButtonClassName}
@@ -322,7 +321,7 @@ export default function ContentArea(): React.ReactElement {
           )}
           {canToggleFileBrowser && (
             <button
-              className={`content-toolbar-btn file-browser-btn${fileBrowserOpen ? ' content-toolbar-btn-active' : ''}`}
+              className={`bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-0.5 rounded-sm text-[14px] leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] translate-y-px${fileBrowserOpen ? ' text-accent-400' : ''}`}
               onClick={() => toggleFileBrowser()}
               title={fileBrowserOpen ? 'Close file browser (⌘⇧E)' : 'Open file browser (⌘⇧E)'}
             >
@@ -331,7 +330,7 @@ export default function ContentArea(): React.ReactElement {
           )}
           {selectedTask && (
             <button
-              className="content-toolbar-btn split-btn"
+              className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-0.5 rounded-sm text-[14px] leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag]"
               onClick={() => toggleSplit(selectedProject.id, selectedTask.id)}
               title={selectedTaskView?.splitOpen ? 'Close split' : 'Split right'}
             >
@@ -343,10 +342,10 @@ export default function ContentArea(): React.ReactElement {
       )}
 
       {!hasProjectSelection && (
-        <div className="content-empty">Select or create a task to get started</div>
+        <div className="flex-1 flex items-center justify-center text-text-muted text-[14px]">Select or create a task to get started</div>
       )}
       {hasProjectSelection && !hasTaskSelection && (
-        <div className="content-empty">Select or create a task to get started</div>
+        <div className="flex-1 flex items-center justify-center text-text-muted text-[14px]">Select or create a task to get started</div>
       )}
       {projects.flatMap((project) =>
         project.tasks.map((task) => {
@@ -360,18 +359,18 @@ export default function ContentArea(): React.ReactElement {
           return (
             <div
               key={`${project.id}-${task.id}`}
-              className="content-task"
+              className="flex-1 flex-col overflow-hidden relative"
               style={{ display: isVisible ? 'flex' : 'none' }}
             >
-              <div className="content-panes" ref={isVisible ? panesRef : undefined}>
-                {isDragging && <div className="pane-drag-overlay" />}
+              <div className="flex-1 flex overflow-hidden relative" ref={isVisible ? panesRef : undefined}>
+                {isDragging && <div className="absolute inset-0 z-10 cursor-col-resize" />}
                 {isRemoteProject(project) && sshStatuses[project.id] !== 'connected' && (
-                  <div className="content-disconnected-overlay">
-                    <div className="content-disconnected-message">
-                      <span className="content-disconnected-icon">&#9888;</span>
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-[100]">
+                    <div className="flex flex-col items-center gap-3 text-text text-[14px]">
+                      <span className="text-[32px] text-red-400">&#9888;</span>
                       <span>SSH connection lost</span>
                       <button
-                        className="add-remote-btn add-remote-btn-primary"
+                        className="inline-flex items-center justify-center h-9 px-4 rounded-md bg-accent-500 text-accent-50 hover:bg-accent-400 disabled:opacity-50 cursor-pointer border-0"
                         onClick={() => {
                           if (project.ssh) {
                             window.api.sshConnect(project.id, project.ssh).catch(() => {})
@@ -405,7 +404,7 @@ export default function ContentArea(): React.ReactElement {
                 {isSplitOpen && (
                   <>
                     <div
-                      className="pane-divider"
+                      className="w-[3px] shrink-0 bg-border cursor-col-resize hover:bg-accent-400 active:bg-accent-400"
                       onMouseDown={handleDividerMouseDown(project.id, task.id)}
                     />
                     <Pane

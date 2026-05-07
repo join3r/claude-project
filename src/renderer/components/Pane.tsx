@@ -56,7 +56,7 @@ export default function Pane({
 
   return (
     <div
-      className={`pane ${isEmptyDropTarget ? 'pane-drop-active' : ''}`}
+      className={`pane flex-1 flex flex-col overflow-hidden min-w-0${isEmptyDropTarget ? ' shadow-[inset_0_0_0_1px_var(--color-accent-400)]' : ''}`}
       style={style}
       data-pane={pane}
       data-project-id={projectId}
@@ -76,9 +76,9 @@ export default function Pane({
         onTabDropTargetChange={onTabDropTargetChange}
         onTabDragComplete={onTabDragComplete}
       />
-      <div className="pane-content">
+      <div className="flex-1 overflow-hidden relative">
         {tabs.length === 0 && (
-          <div className="pane-empty">Open a terminal or browser tab</div>
+          <div className="flex-1 flex items-center justify-center h-full text-text-muted text-[13px]">Open a terminal or browser tab</div>
         )}
         {tabs.map((tab) => {
           if (tab.type === 'terminal') {

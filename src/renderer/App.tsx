@@ -39,7 +39,7 @@ function AppInner(): React.ReactElement {
   }, [exportWindowViewState])
 
   return (
-    <div className={`app ${effectiveTheme === 'light' ? 'theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}`}>
+    <div className={`h-full w-full flex bg-bg text-text font-sans${effectiveTheme === 'light' ? ' theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}`}>
       {!sidebarHidden && (
         <Sidebar
           switcherRequested={switcherRequested}
