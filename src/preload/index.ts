@@ -39,7 +39,6 @@ const api = {
   // Notes
   notesLoad: (): Promise<Record<string, ProjectNote[]>> => ipcRenderer.invoke('notes-load'),
   notesSave: (data: Record<string, ProjectNote[]>): Promise<void> => ipcRenderer.invoke('notes-save', data),
-  readProjectReadme: (projectId: string): Promise<string | null> => ipcRenderer.invoke('read-project-readme', projectId),
 
   // Palette frecency
   paletteFrecencyLoad: (): Promise<{ version: 1; entries: Record<string, { lastUsedAt: number; useCount: number }> }> =>

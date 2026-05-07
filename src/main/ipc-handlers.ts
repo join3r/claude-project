@@ -9,10 +9,9 @@ import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import type { SshConfig, ProjectNote, GitPostureResult, GitPostureLastCommit, CommitHistoryResult } from '../shared/types'
-import { AppConfig, ProjectsData, isRemoteProject, isShellCommandProject } from '../shared/types'
+import { AppConfig, ProjectsData } from '../shared/types'
 import { NotesStorage } from './notes-storage'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
-import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { execFile } from 'child_process'
@@ -190,27 +189,6 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       return { commits }
     } catch {
       return { commits: [] }
-    }
-  })
-
-  // Project README (local or remote SSH; not specific to SSH section but placed here so sshManager is in scope)
-  ipcMain.handle('read-project-readme', async (_e, projectId: string): Promise<string | null> => {
-    const data = storage.loadProjects()
-    const project = data.projects.find(p => p.id === projectId)
-    if (!project) return null
-
-    if (isShellCommandProject(project)) return null
-
-    if (isRemoteProject(project) && project.ssh) {
-      return sshManager.readRemoteFile(projectId, project.ssh, 'README.md')
-    }
-
-    if (!project.directory) return null
-    try {
-      return await fs.promises.readFile(path.join(project.directory, 'README.md'), 'utf8')
-    } catch (err: any) {
-      if (err?.code === 'ENOENT') return null
-      throw err
     }
   })
 
