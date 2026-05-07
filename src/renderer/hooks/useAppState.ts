@@ -52,6 +52,15 @@ export function buildWindowTitle(projectName: string | null, taskName: string | 
   return 'DevTool'
 }
 
+export function selectRecentNotes(
+  notes: Record<string, ProjectNote[]>,
+  projectId: string,
+  limit: number
+): ProjectNote[] {
+  const list = notes[projectId] ?? []
+  return [...list].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
+}
+
 function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
