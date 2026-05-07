@@ -192,7 +192,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
           {viewMode === 'source' ? 'Preview' : 'Source'}
         </button>
       )}
-      {dirty && <div style={{ position: 'absolute', top: 4, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', zIndex: 5 }} />}
+      {dirty && <div style={{ position: 'absolute', top: 4, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--color-accent-400)', zIndex: 5 }} />}
     </div>
   )
 }

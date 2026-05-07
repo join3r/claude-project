@@ -114,7 +114,7 @@ function TreeNode({
     <>
       <div
         className="flex items-center px-2 py-0.5 cursor-pointer whitespace-nowrap select-none hover:bg-surface-2"
-        style={{ paddingLeft: 8 + level * 16, color: color || 'var(--text-primary)' }}
+        style={{ paddingLeft: 8 + level * 16, color: color || 'var(--color-text)' }}
         onClick={handleClick}
       >
         <span className="w-4 flex items-center justify-center shrink-0 text-text-muted">
