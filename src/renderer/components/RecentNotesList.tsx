@@ -1,7 +1,7 @@
 import React from 'react'
 import { useApp } from '../context/AppContext'
 import { selectRecentNotes } from '../hooks/useAppState'
-import type { Project } from '../../shared/types'
+import type { Project, ProjectNote } from '../../shared/types'
 
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms
@@ -19,15 +19,27 @@ interface Props { project: Project }
 export function RecentNotesList({ project }: Props): React.ReactElement {
   const actions = useApp()
   const recent = selectRecentNotes(actions.notes, project.id, 8)
-  const taskId = project.tasks[0]?.id
 
-  const onNew = () => {
-    actions.createNote(project.id, 'Untitled')
+  const ensureTaskId = (): string => {
+    const existing = project.tasks[0]?.id
+    if (existing) return existing
+    return actions.addTask(project.id, 'Notes').id
   }
 
-  const onOpen = (noteId: string) => {
-    if (!taskId) return
-    actions.openOrFocusNoteTab(project.id, taskId, 'left', noteId)
+  const onNew = () => {
+    const note = actions.createNote(project.id, 'Untitled')
+    const taskId = ensureTaskId()
+    actions.addTab(project.id, taskId, 'left', 'note', { noteId: note.id, noteName: note.name })
+  }
+
+  const onOpen = (n: ProjectNote) => {
+    const existingTaskId = project.tasks[0]?.id
+    if (existingTaskId) {
+      actions.openOrFocusNoteTab(project.id, existingTaskId, 'left', n.id)
+      return
+    }
+    const task = actions.addTask(project.id, 'Notes')
+    actions.addTab(project.id, task.id, 'left', 'note', { noteId: n.id, noteName: n.name })
   }
 
   return (
@@ -48,21 +60,14 @@ export function RecentNotesList({ project }: Props): React.ReactElement {
         <ul className="flex flex-col gap-1">
           {recent.map(n => (
             <li key={n.id}>
-              {taskId ? (
-                <button
-                  type="button"
-                  onClick={() => onOpen(n.id)}
-                  className="w-full text-left px-2 py-1 rounded hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text flex items-center justify-between gap-3"
-                >
-                  <span className="truncate">&#9658; {n.name}</span>
-                  <span className="text-xs text-text-subtle shrink-0">{timeAgo(n.updatedAt)}</span>
-                </button>
-              ) : (
-                <div className="w-full text-left px-2 py-1 rounded text-text flex items-center justify-between gap-3 cursor-default">
-                  <span className="truncate">&#9658; {n.name}</span>
-                  <span className="text-xs text-text-subtle shrink-0">{timeAgo(n.updatedAt)}</span>
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => onOpen(n)}
+                className="w-full text-left px-2 py-1 rounded hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text flex items-center justify-between gap-3"
+              >
+                <span className="truncate">&#9658; {n.name}</span>
+                <span className="text-xs text-text-subtle shrink-0">{timeAgo(n.updatedAt)}</span>
+              </button>
             </li>
           ))}
         </ul>

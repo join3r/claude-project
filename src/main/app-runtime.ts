@@ -37,7 +37,9 @@ import {
   buildWindowViewState,
   clonePersistedWindowState,
   cloneWindowGeometry,
-  cloneWindowViewState
+  cloneWindowViewState,
+  isRemoteProject,
+  isShellCommandProject
 } from '../shared/types'
 import fsPromises from 'fs/promises'
 import { execFile } from 'child_process'
@@ -387,6 +389,22 @@ export class AppRuntime {
 
     ipcMain.handle('notes-load', () => this.notesStorage.load())
     ipcMain.handle('notes-save', (_event, data: Record<string, ProjectNote[]>) => this.notesStorage.save(data))
+
+    ipcMain.handle('read-project-readme', async (_event, projectId: string): Promise<string | null> => {
+      const project = this.projectsData.projects.find(p => p.id === projectId)
+      if (!project) return null
+      if (isShellCommandProject(project)) return null
+      if (isRemoteProject(project) && project.ssh) {
+        return this.sshManager.readRemoteFile(projectId, project.ssh, 'README.md')
+      }
+      if (!project.directory) return null
+      try {
+        return await fsPromises.readFile(path.join(project.directory, 'README.md'), 'utf8')
+      } catch (err: any) {
+        if (err?.code === 'ENOENT') return null
+        throw err
+      }
+    })
 
     ipcMain.handle('palette-frecency:load', () => this.paletteFrecencyStorage.load())
     ipcMain.handle('palette-frecency:save', (_event, file: FrecencyFile) => this.paletteFrecencyStorage.save(file))
