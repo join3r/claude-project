@@ -2,7 +2,6 @@ import React, { useMemo } from 'react'
 import { marked } from 'marked'
 import hljs from 'highlight.js/lib/common'
 import DOMPurify from 'dompurify'
-import './MarkdownPreview.css'
 
 marked.setOptions({
   gfm: true,
@@ -34,7 +33,7 @@ export default function MarkdownPreview({ content }: Props): React.ReactElement 
   // Content is sanitized via DOMPurify above before being set as innerHTML
   return (
     <div
-      className="markdown-preview"
+      className="note-preview absolute inset-0 overflow-y-auto px-8 py-6 font-sans text-[14px] leading-[1.6] text-text bg-bg"
       dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
     />
   )
