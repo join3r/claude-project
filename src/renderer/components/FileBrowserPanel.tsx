@@ -5,7 +5,6 @@ import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import FileTree from './FileTree'
 import GitStatus from './GitStatus'
 import NotesList from './NotesList'
-import './FileBrowserPanel.css'
 
 export default function FileBrowserPanel(): React.ReactElement | null {
   const {
@@ -86,23 +85,23 @@ export default function FileBrowserPanel(): React.ReactElement | null {
 
   return (
     <>
-      <div className="filebrowser-divider" onMouseDown={handleDividerMouseDown} />
+      <div className="w-[3px] shrink-0 bg-border cursor-col-resize hover:bg-accent-400 active:bg-accent-400" onMouseDown={handleDividerMouseDown} />
       <div
         ref={panelRef}
-        className="filebrowser-panel"
+        className="flex flex-col h-full bg-surface border-l border-border"
         style={{ width: fileBrowserWidth, minWidth: fileBrowserWidth, maxWidth: fileBrowserWidth }}
       >
-        <div className="filebrowser-tabs">
+        <div className="flex flex-row gap-1 px-2 pt-1 border-b border-border">
           {isLocalProject && (
             <>
               <button
-                className={`filebrowser-tab${activeTab === 'files' ? ' filebrowser-tab-active' : ''}`}
+                className={`bg-transparent border-0 cursor-pointer px-2 pt-1 pb-1.5 text-[12px] border-b-2 leading-none hover:text-text ${activeTab === 'files' ? 'text-accent-400 border-accent-400' : 'text-text-muted border-transparent'}`}
                 onClick={() => setFileBrowserActiveTab('files')}
               >
                 Files
               </button>
               <button
-                className={`filebrowser-tab${activeTab === 'git' ? ' filebrowser-tab-active' : ''}`}
+                className={`bg-transparent border-0 cursor-pointer px-2 pt-1 pb-1.5 text-[12px] border-b-2 leading-none hover:text-text ${activeTab === 'git' ? 'text-accent-400 border-accent-400' : 'text-text-muted border-transparent'}`}
                 onClick={() => setFileBrowserActiveTab('git')}
               >
                 Git
@@ -110,13 +109,13 @@ export default function FileBrowserPanel(): React.ReactElement | null {
             </>
           )}
           <button
-            className={`filebrowser-tab${activeTab === 'notes' ? ' filebrowser-tab-active' : ''}`}
+            className={`bg-transparent border-0 cursor-pointer px-2 pt-1 pb-1.5 text-[12px] border-b-2 leading-none hover:text-text ${activeTab === 'notes' ? 'text-accent-400 border-accent-400' : 'text-text-muted border-transparent'}`}
             onClick={() => setFileBrowserActiveTab('notes')}
           >
             Notes
           </button>
         </div>
-        <div className="filebrowser-content">
+        <div className="flex-1 overflow-auto">
           {activeTab === 'files' ? (
             <FileTree
               projectDir={effectiveDir}

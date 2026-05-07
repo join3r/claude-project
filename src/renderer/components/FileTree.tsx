@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
-import './FileTree.css'
+import { ChevronDown, ChevronRight, Folder, FileText } from 'lucide-react'
 
 interface Props {
   projectDir: string
@@ -113,19 +113,23 @@ function TreeNode({
   return (
     <>
       <div
-        className="filetree-node"
+        className="flex items-center px-2 py-0.5 cursor-pointer whitespace-nowrap select-none hover:bg-surface-2"
         style={{ paddingLeft: 8 + level * 16, color: color || 'var(--text-primary)' }}
         onClick={handleClick}
       >
-        <span className="filetree-caret">
-          {isDirectory ? (isExpanded ? '▾' : '▸') : ''}
+        <span className="w-4 flex items-center justify-center shrink-0 text-text-muted">
+          {isDirectory ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
         </span>
-        <span className="filetree-name">{entry.name}</span>
+        {isDirectory
+          ? <Folder size={12} className="mr-1.5 text-text-muted shrink-0" />
+          : <FileText size={12} className="mr-1.5 text-text-muted shrink-0" />
+        }
+        <span className="overflow-hidden text-ellipsis" style={{ color: color }}>{entry.name}</span>
       </div>
       {isDirectory && isExpanded && (
         <>
           {isLoading && (
-            <div className="filetree-loading" style={{ paddingLeft: 8 + (level + 1) * 16 }}>
+            <div className="text-text-muted px-2 py-0.5 italic" style={{ paddingLeft: 8 + (level + 1) * 16 }}>
               Loading...
             </div>
           )}
@@ -203,9 +207,9 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
   const rootEntries = childrenCache['']
 
   return (
-    <div className="filetree">
+    <div className="overflow-y-auto text-[13px]">
       {!rootEntries && loadingDirs.has('') && (
-        <div className="filetree-loading">Loading...</div>
+        <div className="text-text-muted px-2 py-0.5 italic">Loading...</div>
       )}
       {rootEntries &&
         rootEntries.map((entry) => (
