@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { GitStatusResult, GitStatusEntry } from '../../shared/types'
-import './GitStatus.css'
 
 interface Props {
   gitStatus: GitStatusResult | null
@@ -186,18 +186,18 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
   }, [handleStage, handleUnstage])
 
   return (
-    <div className="gitstatus">
-      <div className="gitstatus-actions">
-        <div className="gitstatus-actions-row">
-          <button className="gitstatus-btn" onClick={handlePull} disabled={busy} title="Git Pull">
+    <div className="overflow-y-auto text-[13px]">
+      <div className="p-2 border-b border-border flex flex-col gap-1.5">
+        <div className="flex gap-1">
+          <button className="bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default" onClick={handlePull} disabled={busy} title="Git Pull">
             {busy ? '...' : 'Pull'}
           </button>
-          <button className="gitstatus-btn" onClick={handlePush} disabled={busy} title="Git Push">
+          <button className="bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default" onClick={handlePush} disabled={busy} title="Git Push">
             Push
           </button>
           {hasUnstagedOrUntracked && (
             <button
-              className="gitstatus-btn gitstatus-btn-stage-all"
+              className="ml-auto bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default"
               onClick={handleStageAll}
               disabled={busy}
               title="Stage all unstaged and untracked files"
@@ -206,9 +206,9 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
             </button>
           )}
         </div>
-        <div className="gitstatus-commit-row">
+        <div className="flex gap-1">
           <input
-            className="gitstatus-commit-input"
+            className="flex-1 min-w-0 bg-surface-2 text-text border border-border rounded-sm px-1.5 py-0.5 text-[11px] outline-none focus:border-border-focus placeholder:text-text-muted"
             type="text"
             placeholder="Commit message..."
             value={commitMsg}
@@ -217,7 +217,7 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
             disabled={busy}
           />
           <button
-            className="gitstatus-btn"
+            className="bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default"
             onClick={handleCommit}
             disabled={busy || !commitMsg.trim() || !hasStagedFiles}
             title="Commit staged files"
@@ -226,31 +226,33 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
           </button>
         </div>
         {feedback && (
-          <div className={`gitstatus-feedback gitstatus-feedback-${feedback.type}`}>
+          <div className={`text-[11px] px-1 py-0.5 rounded-sm overflow-hidden text-ellipsis whitespace-nowrap ${feedback.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
             {feedback.text}
           </div>
         )}
       </div>
       {isEmpty ? (
-        <div className="gitstatus-empty">No changes</div>
+        <div className="flex items-center justify-center p-6 text-text-muted">No changes</div>
       ) : (
         SECTIONS.map(({ key, label }) => {
           const entries = gitStatus![key]
           if (entries.length === 0) return null
           const collapsed = collapsedSections.has(key)
           return (
-            <div key={key} className="gitstatus-section">
-              <div className="gitstatus-header" onClick={() => toggleSection(key)}>
-                <span className="gitstatus-caret">{collapsed ? '\u25B6' : '\u25BC'}</span>
+            <div key={key} className="mb-1">
+              <div className="group flex items-center px-2 py-1 cursor-pointer font-semibold text-[11px] uppercase text-text-muted select-none hover:bg-surface-2" onClick={() => toggleSection(key)}>
+                <span className="w-4 flex items-center justify-center text-text-muted shrink-0">
+                  {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                </span>
                 {label}
-                <span className="gitstatus-count">{entries.length}</span>
+                <span className="ml-1.5 font-normal opacity-70">{entries.length}</span>
                 <button
-                  className="gitstatus-stage-btn"
+                  className="ml-auto bg-transparent border border-border rounded-sm text-text-muted cursor-pointer text-[13px] font-semibold leading-none w-5 h-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:enabled:bg-surface-3 hover:enabled:text-text disabled:opacity-0 disabled:cursor-default"
                   title={key === 'staged' ? 'Unstage All' : 'Stage All'}
                   disabled={busy}
                   onClick={(e) => { e.stopPropagation(); handleSectionAction(key) }}
                 >
-                  {key === 'staged' ? '\u2212' : '+'}
+                  {key === 'staged' ? '−' : '+'}
                 </button>
               </div>
               {!collapsed &&
@@ -309,33 +311,33 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: 
 
   return (
     <div
-      className="gitstatus-file"
+      className="group flex items-center px-2 pl-6 py-0.5 cursor-pointer gap-2 select-none hover:bg-surface-2"
       onClick={() => onFileClick(entry.relativePath)}
     >
       <span
-        className="gitstatus-badge"
+        className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-sm text-[11px] font-semibold shrink-0"
         style={{ background: colors.background, color: colors.color }}
       >
         {entry.status}
       </span>
-      <span className="gitstatus-path">{entry.relativePath}</span>
+      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{entry.relativePath}</span>
       {onDiscard && (
         <button
-          className={`gitstatus-discard-btn gitstatus-file-action${confirmDiscard ? ' gitstatus-discard-confirm' : ''}`}
+          className={`bg-transparent border border-border rounded-sm text-text-muted cursor-pointer text-[11px] leading-none w-5 h-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:enabled:bg-red-400/25 hover:enabled:text-red-400 hover:enabled:border-red-400 disabled:opacity-0 disabled:cursor-default${confirmDiscard ? ' !opacity-100 bg-red-400/25 text-red-400 border-red-400 font-bold' : ''}`}
           title={confirmDiscard ? 'Click again to confirm discard' : 'Discard changes'}
           disabled={busy}
           onClick={handleDiscardClick}
         >
-          {confirmDiscard ? '?' : '\u2715'}
+          {confirmDiscard ? '?' : '✕'}
         </button>
       )}
       <button
-        className="gitstatus-stage-btn gitstatus-file-action"
+        className="ml-auto bg-transparent border border-border rounded-sm text-text-muted cursor-pointer text-[13px] font-semibold leading-none w-5 h-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:enabled:bg-surface-3 hover:enabled:text-text disabled:opacity-0 disabled:cursor-default"
         title={sectionKey === 'staged' ? 'Unstage' : 'Stage'}
         disabled={busy}
         onClick={(e) => { e.stopPropagation(); onAction(sectionKey, entry.relativePath) }}
       >
-        {sectionKey === 'staged' ? '\u2212' : '+'}
+        {sectionKey === 'staged' ? '−' : '+'}
       </button>
     </div>
   )
