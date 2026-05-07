@@ -116,7 +116,7 @@ export default function TabBar({
 }: Props): React.ReactElement {
   const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config } = useApp()
   const suppressClickRef = useRef(false)
-  if (!selectedProject) return <div className="flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]" />
+  if (!selectedProject) return <div className="tab-bar flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]" />
 
   const isTabDragActive = tabDragState?.projectId === projectId && tabDragState.taskId === taskId
   const isDropTargetPane = isTabDragActive && tabDropTarget?.pane === pane
@@ -181,7 +181,7 @@ export default function TabBar({
   }
 
   return (
-    <div className="flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
+    <div className="tab-bar flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
       <div
         className={[
           'tab-list',

@@ -38,6 +38,13 @@ function AppInner(): React.ReactElement {
     })
   }, [exportWindowViewState])
 
+  // Mirror theme-light onto documentElement so getComputedStyle(documentElement)
+  // resolves CSS custom properties via the .theme-light cascade. Used by xterm
+  // theme construction in TerminalTab/AiToolTab and any other CSS-var reader.
+  useEffect(() => {
+    document.documentElement.classList.toggle('theme-light', effectiveTheme === 'light')
+  }, [effectiveTheme])
+
   return (
     <div className={`h-full w-full flex bg-bg text-text font-sans${effectiveTheme === 'light' ? ' theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}`}>
       {!sidebarHidden && (
