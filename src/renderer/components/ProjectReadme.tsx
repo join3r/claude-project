@@ -78,7 +78,7 @@ export function ProjectReadme({ project }: Props): React.ReactElement {
 
       {state.kind === 'loading' && <div className="text-sm text-text-subtle">Loading…</div>}
 
-      {state.kind === 'ready' && <MarkdownPreview content={state.content} effectiveTheme={actions.effectiveTheme} />}
+      {state.kind === 'ready' && <MarkdownPreview content={state.content} effectiveTheme={actions.effectiveTheme} variant="flow" />}
 
       {state.kind === 'truncated' && (
         <>
@@ -86,7 +86,7 @@ export function ProjectReadme({ project }: Props): React.ReactElement {
             README is large — showing first 200KB.{' '}
             {taskId && <button type="button" onClick={openInEditor} className="underline bg-transparent border-0 cursor-pointer text-text-subtle hover:text-text">Open in editor</button>}
           </div>
-          <MarkdownPreview content={state.content} effectiveTheme={actions.effectiveTheme} />
+          <MarkdownPreview content={state.content} effectiveTheme={actions.effectiveTheme} variant="flow" />
         </>
       )}
 

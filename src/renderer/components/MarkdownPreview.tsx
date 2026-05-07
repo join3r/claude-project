@@ -22,18 +22,24 @@ marked.use({ renderer })
 interface Props {
   content: string
   effectiveTheme: 'dark' | 'light'
+  /** 'absolute' fills the nearest positioned ancestor (default). 'flow' lays out in normal document flow. */
+  variant?: 'absolute' | 'flow'
 }
 
-export default function MarkdownPreview({ content }: Props): React.ReactElement {
+export default function MarkdownPreview({ content, variant = 'absolute' }: Props): React.ReactElement {
   const sanitizedHtml = useMemo(() => {
     const raw = marked.parse(content) as string
     return DOMPurify.sanitize(raw)
   }, [content])
 
-  // Content is sanitized via DOMPurify above before being set as innerHTML
+  const className = variant === 'absolute'
+    ? 'note-preview absolute inset-0 overflow-y-auto px-8 py-6 font-sans text-[14px] leading-[1.6] text-text bg-bg'
+    : 'note-preview font-sans text-[14px] leading-[1.6] text-text'
+
+  // Content is sanitized via DOMPurify above before being inserted as innerHTML
   return (
     <div
-      className="note-preview absolute inset-0 overflow-y-auto px-8 py-6 font-sans text-[14px] leading-[1.6] text-text bg-bg"
+      className={className}
       dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
     />
   )
