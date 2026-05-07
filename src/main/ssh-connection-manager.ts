@@ -7,6 +7,39 @@ import type { SshConfig, TunnelConfig, TunnelState, TunnelStatus } from '../shar
 
 export type SshStatus = 'disconnected' | 'connecting' | 'connected'
 
+/** Shell-quote a value for safe interpolation into a remote shell command */
+export function shellQuote(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'"
+}
+
+/** POSIX-join a remote base dir with a relative path */
+function joinRemotePath(remoteDir: string, relative: string): string {
+  if (!remoteDir) return relative
+  return remoteDir.replace(/\/+$/, '') + '/' + relative.replace(/^\/+/, '')
+}
+
+/** Compute the ControlMaster socket path for a given socketDir + projectId */
+export function controlSocketPath(socketDir: string, projectId: string): string {
+  return path.join(socketDir, `${projectId}.sock`)
+}
+
+/** Pure argv builder: produce ssh args to read a remote file via cat */
+export function buildReadRemoteFileArgs(
+  socketDir: string,
+  projectId: string,
+  config: SshConfig,
+  relativePath: string
+): string[] {
+  const userHost = `${config.username}@${config.host}`
+  const port = String(config.port ?? 22)
+  const sock = controlSocketPath(socketDir, projectId)
+  const remotePath = joinRemotePath(config.remoteDir, relativePath)
+  const args = ['-S', sock, '-o', 'ControlMaster=no', '-p', port]
+  if (config.keyFile) args.push('-i', config.keyFile)
+  args.push(userHost, 'cat', '--', shellQuote(remotePath))
+  return args
+}
+
 export class SshConnectionManager extends EventEmitter {
   private socketDir: string
   private hookPort: number
@@ -39,7 +72,7 @@ export class SshConnectionManager extends EventEmitter {
   }
 
   getSocketPath(projectId: string): string {
-    return path.join(this.socketDir, `${projectId}.sock`)
+    return controlSocketPath(this.socketDir, projectId)
   }
 
   getStatus(projectId: string): SshStatus {
@@ -145,11 +178,6 @@ export class SshConnectionManager extends EventEmitter {
     ]
   }
 
-  /** Shell-quote a value for safe interpolation into a remote shell command */
-  private shellQuote(s: string): string {
-    return "'" + s.replace(/'/g, "'\\''") + "'"
-  }
-
   /** Build common SSH args shared across spawn/check/exit (socket, port, keyFile). */
   private buildBaseArgs(projectId: string, config: SshConfig): string[] {
     const args = [
@@ -178,14 +206,14 @@ export class SshConnectionManager extends EventEmitter {
       `${config.username}@${config.host}`
     ]
     const envPrefix = envVars
-      ? Object.entries(envVars).map(([k, v]) => `${k}=${this.shellQuote(v)}`).join(' ') + ' '
+      ? Object.entries(envVars).map(([k, v]) => `${k}=${shellQuote(v)}`).join(' ') + ' '
       : ''
-    const cmdSuffix = commandArgs?.length ? ' ' + commandArgs.map(a => this.shellQuote(a)).join(' ') : ''
+    const cmdSuffix = commandArgs?.length ? ' ' + commandArgs.map(a => shellQuote(a)).join(' ') : ''
     const prefix = commandPrefix || ''
     const cwd = cwdOverride || config.remoteDir
     // Wrap in login shell so the user's profile is sourced (PATH, etc.)
-    const innerCmd = `${prefix}cd ${this.shellQuote(cwd)} && ${envPrefix}exec ${command}${cmdSuffix}`
-    args.push(`bash -l -c ${this.shellQuote(innerCmd)}`)
+    const innerCmd = `${prefix}cd ${shellQuote(cwd)} && ${envPrefix}exec ${command}${cmdSuffix}`
+    args.push(`bash -l -c ${shellQuote(innerCmd)}`)
     return args
   }
 
