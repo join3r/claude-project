@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  /* surfaces */
+  --color-bg: #0b0b0f;
+  --color-surface: #0f0f13;
+  --color-surface-2: #16161b;
+  --color-surface-3: #1f1f24;
+
+  /* text */
+  --color-text: #e4e4e7;
+  --color-text-muted: #a1a1aa;
+  --color-text-subtle: #71717a;
+
+  /* borders */
+  --color-border: #1f1f24;
+  --color-border-strong: #27272a;
+  --color-border-focus: #d4a05a;
+
+  /* gold accent scale */
+  --color-accent-50:  #fdf6e3;
+  --color-accent-100: #f9e8c2;
+  --color-accent-200: #f5d8a6;
+  --color-accent-300: #e8be7e;
+  --color-accent-400: #d4a05a;
+  --color-accent-500: #b87a2a;
+  --color-accent-600: #8a6730;
+  --color-accent-700: #6b4f24;
+  --color-accent-800: #4a3717;
+  --color-accent-900: #2a1f0d;
+
+  /* status */
+  --color-status-working: #a1a1aa;
+  --color-status-attention: #f59e0b;
+  --color-status-exited: #6b7280;
+  --color-ssh-connected: #34d399;
+  --color-ssh-connecting: #fbbf24;
+  --color-ssh-disconnected: #f87171;
+
+  /* font */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.theme-light {
+  --color-bg: #ffffff;
+  --color-surface: #fbf8f1;
+  --color-surface-2: #f3ecd9;
+  --color-surface-3: #efe6cf;
+  --color-text: #1f1d18;
+  --color-text-muted: #5b5447;
+  --color-text-subtle: #8a7a55;
+  --color-border: #e7dec8;
+  --color-border-strong: #d6c79f;
+  --color-border-focus: #b87a2a;
+  --color-status-working: #94a3b8;
+  --color-status-attention: #d97706;
+  --color-status-exited: #94a3b8;
+}
+
+@layer base {
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+
+  body { background: var(--color-bg); color: var(--color-text); font-family: var(--font-sans); }
+
+  *::-webkit-scrollbar { width: 5px; height: 5px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+  .theme-light *::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); }
+}
