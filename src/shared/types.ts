@@ -89,6 +89,7 @@ export interface Project {
   id: string
   name: string
   emoji?: string
+  icon?: string
   directory: string
   tasks: Task[]
   lastTaskId?: string
@@ -148,6 +149,7 @@ export interface AppConfig {
   fontSize: number
   theme: 'system' | 'dark' | 'light'
   terminalTheme: 'system' | 'dark' | 'light'
+  terminalColorScheme: TerminalColorScheme
   defaultShell: string
   copyOnSelect: boolean
   editorFontFamily: string
@@ -176,6 +178,15 @@ export interface AppConfig {
     heightPx: number
   }
 }
+
+export type TerminalColorScheme =
+  | 'auto'
+  | 'solarized-dark'
+  | 'solarized-light'
+  | 'one-dark'
+  | 'dracula'
+  | 'monokai'
+  | 'classic'
 
 export type EditorWordWrap = 'off' | 'on' | 'bounded'
 
@@ -248,6 +259,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   fontSize: 14,
   theme: 'system',
   terminalTheme: 'system',
+  terminalColorScheme: 'auto',
   defaultShell: '',
   copyOnSelect: false,
   editorFontFamily: 'monospace',

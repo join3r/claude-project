@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap } from '../../shared/types'
+import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, TerminalColorScheme } from '../../shared/types'
 import { useApp } from '../context/AppContext'
+import { TERMINAL_SCHEME_OPTIONS } from './terminalThemes'
 import {
   EDITOR_FONT_SIZE_MAX,
   EDITOR_FONT_SIZE_MIN,
@@ -112,6 +113,22 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 <option value="dark">Dark</option>
                 <option value="light">Light</option>
               </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className={labelCls}>Terminal Color Scheme</label>
+              <select
+                className={inputCls}
+                value={config.terminalColorScheme}
+                onChange={(e) => updateConfig({ terminalColorScheme: e.target.value as TerminalColorScheme })}
+              >
+                {TERMINAL_SCHEME_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <p className="text-[12px] text-text-muted leading-snug mt-1">
+                {TERMINAL_SCHEME_OPTIONS.find(o => o.value === config.terminalColorScheme)?.description}
+              </p>
             </div>
 
             <div className="flex flex-col gap-1">

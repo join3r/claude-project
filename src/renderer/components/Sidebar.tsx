@@ -15,6 +15,7 @@ import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import { ChevronDown, ChevronRight, Plus, Search, Settings as SettingsIcon, Plug, Terminal as TerminalIcon } from 'lucide-react'
 import { paletteEvents } from '../palette/paletteEvents'
+import { dashboardIconUrl, fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
 
 type DragState = {
   type: 'project' | 'task' | 'folder'
@@ -125,6 +126,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
   const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null)
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
+  const [iconMetadata, setIconMetadata] = useState<DashboardIconsMetadata | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
@@ -152,6 +154,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   useEffect(() => {
     dragStateRef.current = dragState
   }, [dragState])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchDashboardIconsMetadata()
+      .then((m) => { if (!cancelled) setIconMetadata(m) })
+      .catch(() => { /* CDN unreachable — icons fall back to slug-as-given */ })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     dropTargetRef.current = dropTarget
@@ -532,7 +542,25 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); toggleProjectExpansion(project.id) }}
             >{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
-            {project.emoji && <span className="text-[13px] leading-none mr-1.5">{project.emoji}</span>}
+            {(() => {
+              const iconUrl = project.icon
+                ? dashboardIconUrl(project.icon, { theme: effectiveTheme, metadata: iconMetadata ?? undefined })
+                : null
+              if (iconUrl) {
+                return (
+                  <img
+                    src={iconUrl}
+                    alt=""
+                    className="w-3.5 h-3.5 object-contain mr-1.5 shrink-0"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                  />
+                )
+              }
+              if (project.emoji) {
+                return <span className="text-[13px] leading-none mr-1.5">{project.emoji}</span>
+              }
+              return null
+            })()}
             <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
             {isRemoteProject(project) && (
               <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
@@ -661,7 +689,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       />
 
       {switcherActive ? null : (<>
-      <div className="flex items-center justify-between px-3 py-2 [-webkit-app-region:drag]">
+      <div className="flex items-center justify-between px-3 pt-9 pb-2 [-webkit-app-region:drag]">
         <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-text-subtle">Projects</span>
         <div className="relative [-webkit-app-region:no-drag]">
           <button

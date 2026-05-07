@@ -16,24 +16,9 @@ import '@xterm/xterm/css/xterm.css'
 import { DEFAULT_CONFIG, type SshConfig, type ShellCommandConfig } from '../../shared/types'
 import { normalizeBrowserUrl } from '../browserUrl'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
+import { buildXtermTheme } from './terminalThemes'
 
 const ENABLE_XTERM_WEBGL = false
-
-function buildXtermTheme(theme: 'dark' | 'light') {
-  const root = document.documentElement
-  const css = (name: string) => getComputedStyle(root).getPropertyValue(name).trim()
-  const isLight = theme === 'light'
-  return {
-    background: css('--color-bg'),
-    foreground: css('--color-text'),
-    cursor: css('--color-accent-400'),
-    selectionBackground: css('--color-accent-600') + '60',
-    selectionInactiveBackground: css('--color-accent-700') + '40',
-    scrollbarSliderBackground: isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.15)',
-    scrollbarSliderHoverBackground: isLight ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.25)',
-    scrollbarSliderActiveBackground: isLight ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.35)',
-  }
-}
 
 interface Props {
   tabId: string
@@ -207,7 +192,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     if (initializedRef.current) return
     initializedRef.current = true
 
-    const termTheme = buildXtermTheme(effectiveTerminalTheme)
+    const termTheme = buildXtermTheme(effectiveTerminalTheme, config.terminalColorScheme)
 
     const term = new Terminal({
       fontFamily: config.fontFamily,
@@ -400,11 +385,12 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
 
   // Update terminal theme when it changes
   useEffect(() => {
+    if (!config) return
     const entry = terminals.get(tabId)
     if (entry) {
-      entry.term.options.theme = buildXtermTheme(effectiveTerminalTheme)
+      entry.term.options.theme = buildXtermTheme(effectiveTerminalTheme, config.terminalColorScheme)
     }
-  }, [effectiveTerminalTheme, tabId])
+  }, [effectiveTerminalTheme, config?.terminalColorScheme, tabId, config])
 
   // Listen for tab removal to dispose
   useEffect(() => {

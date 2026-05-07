@@ -1,18 +1,50 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META } from '../../shared/types'
 import type { Project, AiTabType } from '../../shared/types'
+import { useApp } from '../context/AppContext'
+import {
+  dashboardIconUrl,
+  fetchDashboardIconsMetadata,
+  searchDashboardIcons,
+  type DashboardIconsMetadata,
+} from './dashboardIcons'
 
 interface Props {
   project: Project
-  onSave: (payload: { aiToolArgs: Partial<Record<AiTabType, string>>; emoji?: string }) => void
+  onSave: (payload: { aiToolArgs: Partial<Record<AiTabType, string>>; emoji?: string; icon?: string }) => void
   onClose: () => void
 }
 
 export default function ProjectSettings({ project, onSave, onClose }: Props): React.ReactElement {
+  const { effectiveTheme } = useApp()
   const [args, setArgs] = useState<Partial<Record<AiTabType, string>>>(
     project.aiToolArgs ?? {}
   )
   const [emoji, setEmoji] = useState(project.emoji ?? '')
+  const [icon, setIcon] = useState(project.icon ?? '')
+  const [iconQuery, setIconQuery] = useState('')
+  const [iconMetadata, setIconMetadata] = useState<DashboardIconsMetadata | null>(null)
+  const [iconError, setIconError] = useState<string | null>(null)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const suggestionsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchDashboardIconsMetadata()
+      .then((m) => { if (!cancelled) setIconMetadata(m) })
+      .catch((e) => { if (!cancelled) setIconError(e instanceof Error ? e.message : 'Failed to load icons') })
+    return () => { cancelled = true }
+  }, [])
+
+  const suggestions = useMemo(() => {
+    if (!iconMetadata || !iconQuery.trim()) return []
+    return searchDashboardIcons(iconMetadata, iconQuery, 12)
+  }, [iconMetadata, iconQuery])
+
+  const previewUrl = useMemo(
+    () => dashboardIconUrl(icon, { theme: effectiveTheme, metadata: iconMetadata ?? undefined }),
+    [icon, effectiveTheme, iconMetadata],
+  )
 
   const handleSave = () => {
     const cleaned: Partial<Record<AiTabType, string>> = {}
@@ -20,8 +52,18 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
       const val = args[tool]?.trim()
       if (val) cleaned[tool] = val
     }
-    onSave({ aiToolArgs: cleaned, emoji: emoji.trim() || undefined })
+    onSave({
+      aiToolArgs: cleaned,
+      emoji: emoji.trim() || undefined,
+      icon: icon.trim() || undefined,
+    })
     onClose()
+  }
+
+  const pickSuggestion = (slug: string) => {
+    setIcon(slug)
+    setIconQuery('')
+    setShowSuggestions(false)
   }
 
   return (
@@ -43,8 +85,75 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
 
         {/* body */}
         <div className="p-5 flex flex-col gap-4 overflow-y-auto">
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Dashboard Icon</span>
+            <div className="flex items-center gap-2.5 relative">
+              <div className="w-9 h-9 rounded-md border border-border bg-surface-1 flex items-center justify-center shrink-0 overflow-hidden">
+                {previewUrl ? (
+                  <img
+                    src={previewUrl}
+                    alt=""
+                    className="w-6 h-6 object-contain"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }}
+                    onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'visible' }}
+                  />
+                ) : emoji ? (
+                  <span className="text-[18px] leading-none">{emoji}</span>
+                ) : (
+                  <span className="text-text-subtle text-[10px]">none</span>
+                )}
+              </div>
+              <div className="flex-1 flex flex-col gap-1 min-w-0">
+                <input
+                  value={icon}
+                  onChange={(e) => { setIcon(e.target.value); setIconQuery(e.target.value); setShowSuggestions(true) }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  placeholder="slug (e.g. vscode) or full URL"
+                  className="h-9 rounded-md bg-surface-2 border border-border px-2.5 text-text focus:border-border-focus outline-none text-[13px]"
+                />
+                <span className="text-[11px] text-text-subtle">
+                  Search icons at{' '}
+                  <a
+                    href="https://dashboardicons.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline hover:text-text"
+                  >
+                    dashboardicons.com
+                  </a>
+                  {iconError && <span className="ml-2 text-text-muted">({iconError})</span>}
+                </span>
+              </div>
+              {showSuggestions && suggestions.length > 0 && (
+                <div
+                  ref={suggestionsRef}
+                  className="absolute left-[46px] right-0 top-[40px] z-10 max-h-60 overflow-y-auto rounded-md border border-border bg-surface-2 shadow-lg"
+                >
+                  {suggestions.map((hit) => {
+                    const url = dashboardIconUrl(hit.slug, { theme: effectiveTheme, metadata: iconMetadata ?? undefined })
+                    return (
+                      <button
+                        key={hit.slug}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); pickSuggestion(hit.slug) }}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 text-left bg-transparent border-0 cursor-pointer hover:bg-surface-3 text-text text-[13px]"
+                      >
+                        {url && <img src={url} alt="" className="w-4 h-4 object-contain shrink-0" />}
+                        <span className="truncate">{hit.slug}</span>
+                        {hit.matchedAlias && (
+                          <span className="text-text-subtle text-[11px] truncate">— {hit.matchedAlias}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Icon</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Emoji (fallback)</span>
             <input
               value={emoji}
               onChange={(e) => setEmoji(e.target.value.slice(0, 4))}

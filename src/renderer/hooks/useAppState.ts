@@ -34,7 +34,7 @@ import {
   type RecentlyClosedTab
 } from '../recentlyClosedTabs'
 
-export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel' | 'emoji'>>
+export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon'>>
 type AddTabOptions = {
   filePath?: string
   url?: string
