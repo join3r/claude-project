@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useApp } from '../context/AppContext'
 import type { SshConfig } from '../../shared/types'
 import { normalizeBrowserUrl } from '../browserUrl'
-import './BrowserTab.css'
 
 interface Props {
   tabId: string
@@ -178,15 +177,15 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   }
 
   return (
-    <div className="browser-tab" style={{ display: visible ? 'flex' : 'none' }}>
-      <div className="browser-toolbar">
-        <button className="browser-nav-btn" onClick={() => webviewRef.current?.goBack()} title="Back">&larr;</button>
-        <button className="browser-nav-btn" onClick={() => webviewRef.current?.goForward()} title="Forward">&rarr;</button>
-        <button className="browser-nav-btn" onClick={() => webviewRef.current?.reload()} title="Reload (⌘R)">&#8635;</button>
-        <div className="browser-url-wrapper">
-          {isRemote && proxyEnabled && <span className="browser-remote-badge">Remote</span>}
+    <div className="w-full h-full flex flex-col" style={{ display: visible ? 'flex' : 'none' }}>
+      <div className="flex items-center gap-1 px-2 py-1 bg-surface-2 border-b border-border">
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-[14px] hover:bg-surface-3 hover:text-text" onClick={() => webviewRef.current?.goBack()} title="Back">&larr;</button>
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-[14px] hover:bg-surface-3 hover:text-text" onClick={() => webviewRef.current?.goForward()} title="Forward">&rarr;</button>
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-[14px] hover:bg-surface-3 hover:text-text" onClick={() => webviewRef.current?.reload()} title="Reload (⌘R)">&#8635;</button>
+        <div className="flex-1 flex items-center relative">
+          {isRemote && proxyEnabled && <span className="absolute right-2 bg-accent-500 text-accent-50 text-[9px] font-semibold px-1.5 py-px rounded-sm uppercase tracking-wider pointer-events-none z-[1]">Remote</span>}
           <input
-            className="browser-url"
+            className="flex-1 bg-surface text-text border border-border px-2 py-1 rounded-md text-[12px] outline-none focus:border-border-focus"
             value={inputUrl}
             onChange={(e) => setInputUrl(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -195,7 +194,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
         </div>
         {isRemote && (
           <button
-            className={`browser-nav-btn proxy-toggle-btn ${proxyEnabled ? 'active' : ''}`}
+            className={['bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-[14px] hover:bg-surface-3 hover:text-text text-[13px] disabled:opacity-40 disabled:cursor-not-allowed', proxyEnabled ? 'text-accent-400' : ''].join(' ').trim()}
             onClick={() => void handleProxyToggle()}
             disabled={proxyLoading}
             title={proxyEnabled ? 'Routing through remote host (click to use direct)' : 'Direct connection (click to route through remote host)'}
@@ -204,7 +203,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
           </button>
         )}
         <button
-          className={`browser-nav-btn devtools-btn ${devToolsOpen ? 'active' : ''}`}
+          className={['bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-[14px] hover:bg-surface-3 hover:text-text', devToolsOpen ? 'text-accent-400' : ''].join(' ').trim()}
           onClick={() => {
             if (devToolsOpen) {
               webviewRef.current?.closeDevTools()
@@ -218,16 +217,16 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
           &#9874;
         </button>
       </div>
-      <div className="browser-content">
+      <div className="flex-1 flex flex-col overflow-hidden">
         {proxyReady ? (
           <webview
             ref={webviewRef}
             src={url}
-            className="browser-webview"
+            className="flex-1 w-full h-full"
             {...(partition ? { partition } : {})}
           />
         ) : (
-          <div className="browser-proxy-loading">Connecting to remote host...</div>
+          <div className="flex-1 flex items-center justify-center text-text-muted text-[13px]">Connecting to remote host...</div>
         )}
       </div>
     </div>

@@ -19,9 +19,24 @@ import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
 import { normalizeBrowserUrl } from '../browserUrl'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import '@xterm/xterm/css/xterm.css'
-import './AiToolTab.css'
-
 const ENABLE_XTERM_WEBGL = false
+
+const root = document.documentElement
+const css = (name: string) => getComputedStyle(root).getPropertyValue(name).trim()
+
+function buildXtermTheme(theme: 'dark' | 'light') {
+  const isLight = theme === 'light'
+  return {
+    background: css('--color-bg'),
+    foreground: css('--color-text'),
+    cursor: css('--color-accent-400'),
+    selectionBackground: css('--color-accent-600') + '60',
+    selectionInactiveBackground: css('--color-accent-700') + '40',
+    scrollbarSliderBackground: isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.15)',
+    scrollbarSliderHoverBackground: isLight ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.25)',
+    scrollbarSliderActiveBackground: isLight ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.35)'
+  }
+}
 
 interface Props {
   tabId: string
@@ -279,9 +294,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     if (initializedRef.current) return
     initializedRef.current = true
 
-    const termTheme = effectiveTerminalTheme === 'light'
-      ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', selectionBackground: 'rgba(0, 120, 215, 0.3)', selectionInactiveBackground: 'rgba(0, 120, 215, 0.15)', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
-      : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: 'rgba(255, 255, 255, 0.3)', selectionInactiveBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
+    const termTheme = buildXtermTheme(effectiveTerminalTheme)
 
     const term = new Terminal({
       fontFamily: config.fontFamily,
@@ -311,7 +324,6 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     term.unicode.activeVersion = '11'
     term.loadAddon(imageAddon)
     term.open(hostRef.current)
-    term.element?.style.setProperty('--terminal-background', termTheme.background ?? '#1e1e1e')
 
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
     terminals.set(tabId, {
@@ -585,11 +597,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   useEffect(() => {
     const entry = terminals.get(tabId)
     if (entry) {
-      const theme = effectiveTerminalTheme === 'light'
-        ? { background: '#ffffff', foreground: '#333333', cursor: '#000000', selectionBackground: 'rgba(0, 120, 215, 0.3)', selectionInactiveBackground: 'rgba(0, 120, 215, 0.15)', scrollbarSliderBackground: 'rgba(0, 0, 0, 0.2)', scrollbarSliderHoverBackground: 'rgba(0, 0, 0, 0.3)', scrollbarSliderActiveBackground: 'rgba(0, 0, 0, 0.4)' }
-        : { background: '#1e1e1e', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: 'rgba(255, 255, 255, 0.3)', selectionInactiveBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderBackground: 'rgba(255, 255, 255, 0.15)', scrollbarSliderHoverBackground: 'rgba(255, 255, 255, 0.25)', scrollbarSliderActiveBackground: 'rgba(255, 255, 255, 0.35)' }
-      entry.term.options.theme = theme
-      entry.term.element?.style.setProperty('--terminal-background', theme.background ?? '#1e1e1e')
+      entry.term.options.theme = buildXtermTheme(effectiveTerminalTheme)
     }
   }, [effectiveTerminalTheme, tabId])
 
@@ -636,10 +644,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   return (
     <div
       ref={containerRef}
-      className="ai-tool-tab"
+      className="ai-tool-tab w-full h-full p-1"
       style={{ display: visible ? 'block' : 'none', position: 'relative' }}
     >
-      <div ref={hostRef} className="ai-tool-tab-host" />
+      <div ref={hostRef} className="w-full h-full" />
       {entry && (
         <TerminalSearchBar
           searchAddon={entry.searchAddon}
