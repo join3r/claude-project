@@ -511,6 +511,24 @@ export class SshConnectionManager extends EventEmitter {
     }
   }
 
+  async readRemoteFile(projectId: string, config: SshConfig, relativePath: string): Promise<string | null> {
+    const status = this.getStatus(projectId)
+    if (status !== 'connected') {
+      const err = new Error('ssh-not-connected') as Error & { code?: string }
+      err.code = 'SSH_NOT_CONNECTED'
+      throw err
+    }
+    const args = buildReadRemoteFileArgs(this.socketDir, projectId, config, relativePath)
+    try {
+      const { stdout } = await this.execFileAsync('ssh', args, { timeout: 10000 })
+      return stdout
+    } catch (err: any) {
+      if (err && typeof err === 'object' && (err.code === 1 || err.code === 2)) return null
+      if (typeof err?.stderr === 'string' && /No such file/i.test(err.stderr)) return null
+      throw err
+    }
+  }
+
   async checkConnection(projectId: string, config: SshConfig): Promise<boolean> {
     const args = this.buildCheckArgs(projectId, config)
     try {
