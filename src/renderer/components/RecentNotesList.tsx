@@ -22,7 +22,10 @@ export function RecentNotesList({ project }: Props): React.ReactElement {
 
   const ensureTaskId = (): string => {
     const existing = project.tasks[0]?.id
-    if (existing) return existing
+    if (existing) {
+      actions.setSelectedTaskId(existing)
+      return existing
+    }
     return actions.addTask(project.id, 'Notes').id
   }
 
@@ -35,6 +38,7 @@ export function RecentNotesList({ project }: Props): React.ReactElement {
   const onOpen = (n: ProjectNote) => {
     const existingTaskId = project.tasks[0]?.id
     if (existingTaskId) {
+      actions.setSelectedTaskId(existingTaskId)
       actions.openOrFocusNoteTab(project.id, existingTaskId, 'left', n.id)
       return
     }
