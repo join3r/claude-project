@@ -222,6 +222,27 @@ export interface GitStatusResult {
   summary: GitDiffSummary
 }
 
+export interface GitPostureLastCommit {
+  sha: string
+  subject: string
+  author: string
+  isoDate: string
+}
+
+export interface GitPostureResult {
+  isGitRepo: boolean
+  branch: string | null
+  upstream: string | null
+  ahead: number
+  behind: number
+  dirtyCount: number
+  lastCommit: GitPostureLastCommit | null
+}
+
+export interface CommitHistoryResult {
+  commits: string[]
+}
+
 export interface GitOperationResult {
   success: boolean
   message: string

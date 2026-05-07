@@ -8,13 +8,17 @@ import { HookServer } from './hook-server'
 import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
-import type { SshConfig, ProjectNote } from '../shared/types'
+import type { SshConfig, ProjectNote, GitPostureResult, GitPostureLastCommit, CommitHistoryResult } from '../shared/types'
 import { AppConfig, ProjectsData, isRemoteProject, isShellCommandProject } from '../shared/types'
 import { NotesStorage } from './notes-storage'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 const CONFIG_DIR = path.join(os.homedir(), '.devtool')
 
@@ -128,6 +132,65 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
 
   ipcMain.handle('ssh-status', (_e, projectId: string) => {
     return sshManager.getStatus(projectId)
+  })
+
+  ipcMain.handle('git-project-posture', async (_event, projectCwd: string): Promise<GitPostureResult> => {
+    const resolvedCwd = path.resolve(projectCwd)
+    const empty: GitPostureResult = {
+      isGitRepo: false, branch: null, upstream: null,
+      ahead: 0, behind: 0, dirtyCount: 0, lastCommit: null
+    }
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['status', '--porcelain=v2', '--branch'],
+        { cwd: resolvedCwd }
+      )
+      let branch: string | null = null
+      let upstream: string | null = null
+      let ahead = 0
+      let behind = 0
+      let dirtyCount = 0
+      for (const line of stdout.split('\n')) {
+        if (!line) continue
+        if (line.startsWith('# branch.head ')) branch = line.slice('# branch.head '.length).trim()
+        else if (line.startsWith('# branch.upstream ')) upstream = line.slice('# branch.upstream '.length).trim()
+        else if (line.startsWith('# branch.ab ')) {
+          const m = line.match(/\+(\d+)\s+-(\d+)/)
+          if (m) { ahead = Number(m[1]); behind = Number(m[2]) }
+        } else if (!line.startsWith('#')) {
+          dirtyCount += 1
+        }
+      }
+      let lastCommit: GitPostureLastCommit | null = null
+      try {
+        const { stdout: logOut } = await execFileAsync(
+          'git', ['log', '-1', '--format=%H%x00%s%x00%an%x00%cI'],
+          { cwd: resolvedCwd }
+        )
+        const trimmed = logOut.replace(/\n+$/, '')
+        if (trimmed) {
+          const [sha, subject, author, isoDate] = trimmed.split('\x00')
+          if (sha) lastCommit = { sha, subject: subject ?? '', author: author ?? '', isoDate: isoDate ?? '' }
+        }
+      } catch { /* repo with zero commits */ }
+      return { isGitRepo: true, branch, upstream, ahead, behind, dirtyCount, lastCommit }
+    } catch {
+      return empty
+    }
+  })
+
+  ipcMain.handle('git-commit-history', async (_event, projectCwd: string): Promise<CommitHistoryResult> => {
+    const resolvedCwd = path.resolve(projectCwd)
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['log', '--format=%cI'],
+        { cwd: resolvedCwd, maxBuffer: 32 * 1024 * 1024 }
+      )
+      const commits = stdout.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+      return { commits }
+    } catch {
+      return { commits: [] }
+    }
   })
 
   // Project README (local or remote SSH; not specific to SSH section but placed here so sshManager is in scope)
