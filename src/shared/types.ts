@@ -97,6 +97,7 @@ export interface Project {
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
+  lifetimeStats?: { tasksCreated: number; notesCreated: number }
 }
 
 export function isRemoteProject(project: Project): boolean {

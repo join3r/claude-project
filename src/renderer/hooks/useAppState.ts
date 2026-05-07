@@ -27,6 +27,7 @@ import type {
   FileBrowserTab
 } from '../../shared/types'
 import { applyQueuedStateUpdates, persistSelectionState, type StateUpdater } from './stateHydration'
+import { backfillLifetimeStats, incrementLifetimeStat } from './lifetimeStats'
 import { moveTaskTab } from '../tabMove'
 import {
   pushRecentlyClosedTab,
@@ -139,16 +140,21 @@ export function useAppState() {
         loadedWindowViewState
       )
 
+      const projectsWithLifetime = hydratedProjectsData.projects.map(p =>
+        backfillLifetimeStats(p, loadedNotes)
+      )
+      const finalProjectsData = { ...hydratedProjectsData, projects: projectsWithLifetime }
+
       pendingProjectUpdatersRef.current = []
       pendingConfigUpdatersRef.current = []
-      lastSavedProjectsJsonRef.current = JSON.stringify(loadedProjectsData)
+      lastSavedProjectsJsonRef.current = JSON.stringify(finalProjectsData)
       lastSavedConfigJsonRef.current = JSON.stringify(loadedConfig)
       lastSavedWindowStateJsonRef.current = JSON.stringify(hydratedWindowViewState)
       projectsLoadedRef.current = true
       configLoadedRef.current = true
       windowStateLoadedRef.current = true
 
-      setProjectsData(hydratedProjectsData)
+      setProjectsData(finalProjectsData)
       setConfig(hydratedConfig)
       setWindowViewState(hydratedWindowViewState)
       setNotes(loadedNotes)
@@ -159,8 +165,12 @@ export function useAppState() {
 
     const cleanupProjects = window.api.onProjectsUpdated((updatedProjectsData) => {
       if (cancelled) return
-      lastSavedProjectsJsonRef.current = JSON.stringify(updatedProjectsData)
-      setProjectsData(updatedProjectsData)
+      const projectsWithLifetime = updatedProjectsData.projects.map(p =>
+        backfillLifetimeStats(p, notesRef.current)
+      )
+      const final = { ...updatedProjectsData, projects: projectsWithLifetime }
+      lastSavedProjectsJsonRef.current = JSON.stringify(final)
+      setProjectsData(final)
     })
 
     const cleanupConfig = window.api.onConfigUpdated((updatedConfig) => {
@@ -594,7 +604,9 @@ export function useAppState() {
     persistProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
-        project.id === projectId ? { ...project, tasks: [...project.tasks, task] } : project
+        project.id === projectId
+          ? incrementLifetimeStat({ ...project, tasks: [...project.tasks, task] }, 'tasksCreated')
+          : project
       )
     }))
     updateWindowViewState(prev => ({
@@ -622,7 +634,9 @@ export function useAppState() {
     persistProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
-        project.id === projectId ? { ...project, tasks: [...project.tasks, task] } : project
+        project.id === projectId
+          ? incrementLifetimeStat({ ...project, tasks: [...project.tasks, task] }, 'tasksCreated')
+          : project
       )
     }))
     updateWindowViewState(prev => ({
@@ -1182,8 +1196,14 @@ export function useAppState() {
       void window.api.notesSave(updated)
       return updated
     })
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project =>
+        project.id === projectId ? incrementLifetimeStat(project, 'notesCreated') : project
+      )
+    }))
     return note
-  }, [])
+  }, [persistProjects])
 
   const renameNote = useCallback((projectId: string, noteId: string, name: string) => {
     setNotes(prev => {
