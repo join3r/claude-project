@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import GitStatus from './GitStatus'
 import { ProjectReadme } from './ProjectReadme'
 import { RecentNotesList } from './RecentNotesList'
+import { NotePreviewPane } from './NotePreviewPane'
 
 interface Props { projectId: string }
 
@@ -14,6 +15,7 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
   const isLocal = project ? !isRemoteProject(project) && !isShellCommandProject(project) : false
   const projectDir = isLocal && project?.directory ? project.directory : ''
   const gitStatus = useGitStatus(projectDir, isLocal)
+  const [previewNoteId, setPreviewNoteId] = useState<string | null>(null)
 
   if (!project) return null
 
@@ -42,7 +44,15 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
         )}
       </div>
       <div className="basis-2/5 grow-0 shrink min-w-0 flex flex-col overflow-y-auto">
-        <RecentNotesList project={project} />
+        {previewNoteId === null ? (
+          <RecentNotesList project={project} onSelect={setPreviewNoteId} />
+        ) : (
+          <NotePreviewPane
+            project={project}
+            noteId={previewNoteId}
+            onBack={() => setPreviewNoteId(null)}
+          />
+        )}
       </div>
     </div>
   )

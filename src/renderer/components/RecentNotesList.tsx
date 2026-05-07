@@ -14,9 +14,12 @@ function timeAgo(ms: number): string {
   return `${d}d ago`
 }
 
-interface Props { project: Project }
+interface Props {
+  project: Project
+  onSelect?: (noteId: string) => void
+}
 
-export function RecentNotesList({ project }: Props): React.ReactElement {
+export function RecentNotesList({ project, onSelect }: Props): React.ReactElement {
   const actions = useApp()
   const recent = selectRecentNotes(actions.notes, project.id, 8)
 
@@ -35,7 +38,11 @@ export function RecentNotesList({ project }: Props): React.ReactElement {
     actions.addTab(project.id, taskId, 'left', 'note', { noteId: note.id, noteName: note.name })
   }
 
-  const onOpen = (n: ProjectNote) => {
+  const onClickNote = (n: ProjectNote) => {
+    if (onSelect) {
+      onSelect(n.id)
+      return
+    }
     const existingTaskId = project.tasks[0]?.id
     if (existingTaskId) {
       actions.setSelectedTaskId(existingTaskId)
@@ -66,7 +73,7 @@ export function RecentNotesList({ project }: Props): React.ReactElement {
             <li key={n.id}>
               <button
                 type="button"
-                onClick={() => onOpen(n)}
+                onClick={() => onClickNote(n)}
                 className="w-full text-left px-2 py-1 rounded hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text flex items-center justify-between gap-3"
               >
                 <span className="truncate">&#9658; {n.name}</span>
