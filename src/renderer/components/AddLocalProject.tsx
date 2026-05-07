@@ -1,5 +1,4 @@
 import React, { useState } from 'react'
-import './AddRemoteProject.css'
 
 interface Props {
   onAdd: (name: string, directory: string) => void
