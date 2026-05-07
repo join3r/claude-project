@@ -4,7 +4,7 @@ import type { Project, AiTabType } from '../../shared/types'
 
 interface Props {
   project: Project
-  onSave: (aiToolArgs: Partial<Record<AiTabType, string>>) => void
+  onSave: (payload: { aiToolArgs: Partial<Record<AiTabType, string>>; emoji?: string }) => void
   onClose: () => void
 }
 
@@ -12,6 +12,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   const [args, setArgs] = useState<Partial<Record<AiTabType, string>>>(
     project.aiToolArgs ?? {}
   )
+  const [emoji, setEmoji] = useState(project.emoji ?? '')
 
   const handleSave = () => {
     const cleaned: Partial<Record<AiTabType, string>> = {}
@@ -19,7 +20,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
       const val = args[tool]?.trim()
       if (val) cleaned[tool] = val
     }
-    onSave(cleaned)
+    onSave({ aiToolArgs: cleaned, emoji: emoji.trim() || undefined })
     onClose()
   }
 
@@ -32,6 +33,16 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
         </div>
 
         <div className="settings-body">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Icon</span>
+            <input
+              value={emoji}
+              onChange={(e) => setEmoji(e.target.value.slice(0, 4))}
+              placeholder="e.g. 📁"
+              className="w-20 h-9 rounded-md bg-surface-2 border border-border px-2.5 text-text"
+            />
+          </label>
+
           <div className="settings-group">
             <label className="settings-label">AI Tool Arguments</label>
             {AI_TAB_TYPES.map((tool) => (

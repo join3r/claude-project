@@ -522,6 +522,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); toggleProjectExpansion(project.id) }}
             >{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
+            {project.emoji && <span className="text-[13px] leading-none mr-1.5">{project.emoji}</span>}
             <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
             {isRemoteProject(project) && (
               <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
@@ -915,7 +916,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         return (
           <ProjectSettings
             project={project}
-            onSave={(aiToolArgs) => updateProject(projectSettingsId, { aiToolArgs })}
+            onSave={(payload) => updateProject(projectSettingsId, payload)}
             onClose={() => setProjectSettingsId(null)}
           />
         )
