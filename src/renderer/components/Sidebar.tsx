@@ -677,6 +677,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </div>
       </div>
 
+      <div className="px-3 pb-2 [-webkit-app-region:no-drag]">
+        <button
+          type="button"
+          onClick={() => setSwitcherActive(true)}
+          className="flex items-center gap-2 w-full h-7 px-2.5 rounded-md bg-surface-2 border border-border text-text-subtle text-[11.5px] hover:text-text-muted"
+        >
+          <Search size={12} />
+          <span>Quick switch…</span>
+          <span className="ml-auto text-[10px] opacity-70">⌘P</span>
+        </button>
+      </div>
+
       <div className="sidebar-list flex-1 overflow-y-auto py-1">
         {rootOrder.map((itemId, rootIdx) => {
           const folder = folders.find(f => f.id === itemId)
