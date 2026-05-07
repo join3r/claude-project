@@ -13,7 +13,7 @@ import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
-import './Sidebar.css'
+import { ChevronDown, ChevronRight, Plus, Search, Settings as SettingsIcon, Plug, Terminal as TerminalIcon } from 'lucide-react'
 
 type DragState = {
   type: 'project' | 'task' | 'folder'
@@ -64,7 +64,12 @@ function getFolderStatus(folder: { projectIds: string[] }, projects: { id: strin
 function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<string, TabStatusValue> }): React.ReactElement | null {
   const status = getTaskStatus(task, allStatuses)
   if (!status) return null
-  return <span className={`sidebar-status sidebar-status-${status}`} />
+  const dotClass = status === 'working'
+    ? 'bg-status-working animate-pulse'
+    : status === 'attention'
+    ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+    : 'bg-status-exited'
+  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-auto ${dotClass}`} />
 }
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
@@ -467,10 +472,24 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const renderProject = (project: Project, folderId: string | null) => {
     const isExpanded = expandedProjects.has(project.id)
+    const isProjectSelected = selectedProjectId === project.id && !isExpanded
+    const isProjectDragging = dragState?.type === 'project' && dragState.id === project.id
     return (
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
-        className={`sidebar-item project-item ${selectedProjectId === project.id && !isExpanded ? 'selected' : ''} ${dragState?.type === 'project' && dragState.id === project.id ? 'dragging' : ''}`}
+        className={[
+          'flex items-center gap-2 px-3 py-1.5 text-[13px] text-text cursor-pointer hover:bg-surface-2',
+          // selection rail recipe
+          'data-[selected=true]:relative',
+          'data-[selected=true]:before:absolute data-[selected=true]:before:inset-y-0 data-[selected=true]:before:left-0',
+          'data-[selected=true]:before:w-0.5 data-[selected=true]:before:bg-accent-400',
+          'data-[selected=true]:bg-gradient-to-r data-[selected=true]:from-accent-600/30 data-[selected=true]:to-transparent',
+          'data-[selected=true]:text-accent-50',
+          '[.theme-light_&[data-selected=true]]:from-accent-200',
+          '[.theme-light_&[data-selected=true]]:text-accent-700',
+          isProjectDragging ? 'opacity-40' : '',
+        ].join(' ')}
+        data-selected={isProjectSelected ? 'true' : undefined}
         data-drag-type="project"
         data-drag-id={project.id}
         data-folder-id={folderId || ''}
@@ -487,7 +506,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         {editingId === project.id ? (
           <input
             ref={editRef}
-            className="sidebar-edit"
+            className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onBlur={() => handleRenameSubmit('project', project.id)}
@@ -498,40 +517,75 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           />
         ) : (
           <>
-            <span
-              className="sidebar-project-chevron"
+            <button
+              className="text-text-subtle hover:text-text bg-transparent border-0 cursor-pointer p-0 flex items-center shrink-0"
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); toggleProjectExpansion(project.id) }}
-            >{isExpanded ? '▾' : '▸'}</span>
-            <span className="sidebar-label">{project.name}</span>
-            {isRemoteProject(project) && <span className="sidebar-ssh-badge">ssh</span>}
-            {isShellCommandProject(project) && <span className="sidebar-ssh-badge">shell</span>}
+            >{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
             {isRemoteProject(project) && (
-              <span className={`sidebar-ssh-dot sidebar-ssh-dot-${sshStatuses[project.id] || 'disconnected'}`} />
+              <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
+                <Plug size={10} className="inline mr-0.5" />ssh
+              </span>
             )}
+            {isShellCommandProject(project) && (
+              <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
+                <TerminalIcon size={10} className="inline mr-0.5" />shell
+              </span>
+            )}
+            {isRemoteProject(project) && (() => {
+              const sshStatus = sshStatuses[project.id] || 'disconnected'
+              const dotClass = sshStatus === 'connected'
+                ? 'bg-ssh-connected'
+                : sshStatus === 'connecting'
+                ? 'bg-ssh-connecting animate-pulse'
+                : 'bg-ssh-disconnected'
+              return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-1 ${dotClass}`} />
+            })()}
             {!isExpanded && (() => {
               const projectStatus = getProjectStatus(project.tasks, allStatuses)
-              return projectStatus ? <span className={`sidebar-status sidebar-status-${projectStatus}`} /> : null
+              if (!projectStatus) return null
+              const dotClass = projectStatus === 'working'
+                ? 'bg-status-working animate-pulse'
+                : projectStatus === 'attention'
+                ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+                : 'bg-status-exited'
+              return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-auto ${dotClass}`} />
             })()}
           </>
         )}
       </div>
 
       {isExpanded && (
-        <div className="sidebar-tasks">
+        <div className="pb-1">
           {project.tasks.map((task, tIdx) => {
             const isSelected = selectedTaskId === task.id
             const opacity = !isSelected && config?.taskRecencyHighlight
               ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
               : 0
             const recencyStyle = buildRecencyStyle(opacity, effectiveTheme)
+            const isTaskDragging = dragState?.type === 'task' && dragState.index === tIdx
             return (
               <React.Fragment key={task.id}>
                 {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
-                  <div className="sidebar-drop-indicator task-drop-indicator" />
+                  <div className="h-0.5 bg-accent-400 mr-2 rounded-sm ml-6" />
                 )}
                 <div
-                  className={`sidebar-item task-item ${isSelected ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
+                  className={[
+                    'flex items-center gap-2 px-3 py-1.5 text-text cursor-pointer hover:bg-surface-2',
+                    'pl-[34px] text-[12px]',
+                    'task-item',
+                    // selection rail recipe
+                    'data-[selected=true]:relative',
+                    'data-[selected=true]:before:absolute data-[selected=true]:before:inset-y-0 data-[selected=true]:before:left-0',
+                    'data-[selected=true]:before:w-0.5 data-[selected=true]:before:bg-accent-400',
+                    'data-[selected=true]:bg-gradient-to-r data-[selected=true]:from-accent-600/30 data-[selected=true]:to-transparent',
+                    'data-[selected=true]:text-accent-50',
+                    '[.theme-light_&[data-selected=true]]:from-accent-200',
+                    '[.theme-light_&[data-selected=true]]:text-accent-700',
+                    isTaskDragging ? 'opacity-40' : '',
+                  ].join(' ')}
+                  data-selected={isSelected ? 'true' : undefined}
                   data-task-id={task.id}
                   data-task-index={tIdx}
                   style={recencyStyle}
@@ -542,7 +596,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   {editingId === task.id ? (
                     <input
                       ref={editRef}
-                      className="sidebar-edit"
+                      className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
                       onBlur={() => handleRenameSubmit('task', project.id, task.id)}
@@ -553,8 +607,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     />
                   ) : (
                     <>
-                      <span className="sidebar-label">{task.name}</span>
-                      {isWorkspaceTask(task) && <span className="sidebar-ssh-badge">ws</span>}
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
+                      {isWorkspaceTask(task) && <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
                       <TaskStatusDot task={task} allStatuses={allStatuses} />
                     </>
                   )}
@@ -563,20 +617,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             )
           })}
           {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
-            <div className="sidebar-drop-indicator task-drop-indicator" />
+            <div className="h-0.5 bg-accent-400 mr-2 rounded-sm ml-6" />
           )}
           <button
-            className="sidebar-btn add-task-btn"
+            className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] ml-[34px] text-[11px]"
             onClick={() => handleAddTask(project.id)}
           >
-            + Task
+            <Plus size={14} className="inline mr-0.5" /> Task
           </button>
           {!isShellCommandProject(project) && (
             <button
-              className="sidebar-btn add-task-btn"
+              className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] ml-[34px] text-[11px]"
               onClick={() => handleAddWorkspace(project.id)}
             >
-              + Workspace
+              <Plus size={14} className="inline mr-0.5" /> Workspace
             </button>
           )}
         </div>
@@ -586,7 +640,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }
 
   return (
-    <div className="sidebar">
+    <div className="flex flex-col w-60 min-w-[200px] bg-surface border-r border-border select-none [--recency-rgb:100,150,230] [.theme-light_&]:[--recency-rgb:230,160,80]">
       <ProjectSwitcher
         projects={projects}
         selectedProjectId={selectedProjectId}
@@ -598,16 +652,21 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       />
 
       {switcherActive ? null : (<>
-      <div className="sidebar-header">
-        <span className="sidebar-title">Projects</span>
-        <div className="sidebar-add-wrapper">
-          <button className="sidebar-btn" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }} title="Add project">+</button>
+      <div className="flex items-center justify-between px-3 py-2 [-webkit-app-region:drag]">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-text-subtle">Projects</span>
+        <div className="relative [-webkit-app-region:no-drag]">
+          <button
+            className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded text-[13px] hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag]"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }}
+            title="Add project"
+          ><Plus size={14} /></button>
           {addMenuOpen && (
-            <div className="sidebar-add-menu" onMouseDown={(e) => e.stopPropagation()}>
-              <button onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
-              <button onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
-              <button onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
-              <button onClick={() => {
+            <div className="absolute top-full right-0 bg-surface-2 border border-border rounded-md py-1 shadow-lg z-[1000] whitespace-nowrap" onMouseDown={(e) => e.stopPropagation()}>
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                 setAddMenuOpen(false)
                 const folderId = addFolder()
                 setEditingId(folderId)
@@ -618,21 +677,27 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </div>
       </div>
 
-      <div className="sidebar-list">
+      <div className="sidebar-list flex-1 overflow-y-auto py-1">
         {rootOrder.map((itemId, rootIdx) => {
           const folder = folders.find(f => f.id === itemId)
           if (folder) {
             const isCollapsed = collapsedFolders.has(folder.id)
             const folderStatus = getFolderStatus(folder, projects, allStatuses)
+            const isFolderDropTarget = dropTarget?.type === 'into-folder' && dropTarget.folderId === folder.id
+            const isFolderDragging = dragState?.type === 'folder' && dragState.id === folder.id
             return (
               <React.Fragment key={folder.id}>
                 {dropTarget?.type === 'between-root' && dropTarget.index === rootIdx && (
-                  <div className="sidebar-drop-indicator" />
+                  <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
                 )}
                 <div
-                  className={`sidebar-folder-heading ${
-                    dropTarget?.type === 'into-folder' && dropTarget.folderId === folder.id ? 'drop-target' : ''
-                  } ${dragState?.type === 'folder' && dragState.id === folder.id ? 'dragging' : ''}`}
+                  className={[
+                    'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-[10px] font-semibold uppercase tracking-[0.15em] text-text-subtle mt-2 first:mt-0 hover:bg-surface-2',
+                    isFolderDropTarget
+                      ? 'bg-accent-600/20 outline outline-1 outline-dashed outline-border-focus -outline-offset-1'
+                      : '',
+                    isFolderDragging ? 'opacity-40' : '',
+                  ].join(' ')}
                   data-drag-type="folder-heading"
                   data-drag-id={folder.id}
                   onClick={() => toggleFolderCollapse(folder.id)}
@@ -645,7 +710,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   {editingId === folder.id ? (
                     <input
                       ref={editRef}
-                      className="sidebar-edit"
+                      className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
                       onBlur={() => handleRenameSubmit('folder', folder.id)}
@@ -656,28 +721,35 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     />
                   ) : (
                     <>
-                      <span className="sidebar-folder-chevron">{isCollapsed ? '\u25B8' : '\u25BE'}</span>
-                      <span className="sidebar-folder-label">{folder.name}</span>
-                      {isCollapsed && folderStatus && <span className={`sidebar-status sidebar-status-${folderStatus}`} />}
+                      {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{folder.name}</span>
+                      {isCollapsed && folderStatus && (() => {
+                        const dotClass = folderStatus === 'working'
+                          ? 'bg-status-working animate-pulse'
+                          : folderStatus === 'attention'
+                          ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+                          : 'bg-status-exited'
+                        return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-auto ${dotClass}`} />
+                      })()}
                     </>
                   )}
                 </div>
                 {!isCollapsed && (
-                  <div className="sidebar-folder-children">
+                  <div className="border-l border-border ml-4">
                     {folder.projectIds.map((pid, childIdx) => {
                       const project = projects.find(p => p.id === pid)
                       if (!project) return null
                       return (
                         <React.Fragment key={pid}>
                           {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === childIdx && (
-                            <div className="sidebar-drop-indicator" />
+                            <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
                           )}
                           {renderProject(project, folder.id)}
                         </React.Fragment>
                       )
                     })}
                     {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === folder.projectIds.length && (
-                      <div className="sidebar-drop-indicator" />
+                      <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
                     )}
                   </div>
                 )}
@@ -690,14 +762,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           return (
             <React.Fragment key={project.id}>
               {dropTarget?.type === 'between-root' && dropTarget.index === rootIdx && (
-                <div className="sidebar-drop-indicator" />
+                <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
               )}
               {renderProject(project, null)}
             </React.Fragment>
           )
         })}
         {dropTarget?.type === 'between-root' && dropTarget.index === rootOrder.length && (
-          <div className="sidebar-drop-indicator" />
+          <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
         )}
       </div>
 
@@ -720,23 +792,23 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       </>)}
 
       {contextMenu && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="fixed bg-surface-2 border border-border rounded-md py-1 shadow-lg z-[1000]" style={{ top: contextMenu.y, left: contextMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
           {contextMenu.type === 'folder' ? (
             <>
-              <button onClick={() => {
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                 setEditingId(contextMenu.projectId)
                 const folder = folders.find(f => f.id === contextMenu.projectId)
                 setEditValue(folder?.name ?? '')
                 setContextMenu(null)
               }}>Rename</button>
-              <button onClick={() => {
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                 removeFolder(contextMenu.projectId)
                 setContextMenu(null)
               }}>Delete</button>
             </>
           ) : (
             <>
-              <button onClick={() => {
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                 const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
                 setEditingId(id)
                 const item = contextMenu.type === 'project'
@@ -746,13 +818,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 setContextMenu(null)
               }}>Rename</button>
               {contextMenu.type === 'project' && (
-                <button onClick={() => {
+                <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                   setDuplicateProjectId(contextMenu.projectId)
                   setContextMenu(null)
                 }}>Duplicate</button>
               )}
               {contextMenu.type === 'project' && (
-                <button onClick={() => {
+                <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                   setProjectSettingsId(contextMenu.projectId)
                   setContextMenu(null)
                 }}>Settings</button>
@@ -761,13 +833,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project || !isRemoteProject(project)) return null
                 return (
-                  <button onClick={() => {
+                  <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                     window.api.sshConnect(project.id, project.ssh!).catch(() => {})
                     setContextMenu(null)
                   }}>Reconnect SSH</button>
                 )
               })()}
-              <button onClick={() => {
+              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                 if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
                 else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
                 setContextMenu(null)
@@ -785,10 +857,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   details.push({ label: 'Dir', value: project.directory })
                 }
                 return (
-                  <div className="context-menu-details">
+                  <div className="border-t border-border mt-1 px-4 pt-1.5 pb-1">
                     {details.map(d => (
-                      <div key={d.label} className="context-menu-detail" title={d.value}>
-                        <span className="context-menu-detail-label">{d.label}:</span> {d.value}
+                      <div key={d.label} className="text-text-subtle text-[11px] leading-snug overflow-hidden text-ellipsis whitespace-nowrap max-w-[260px] select-text cursor-text" title={d.value}>
+                        <span className="opacity-70">{d.label}:</span> {d.value}
                       </div>
                     ))}
                   </div>
@@ -799,8 +871,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </div>
       )}
 
-      <div className="sidebar-footer">
-        <button className="sidebar-btn settings-btn" onClick={() => setSettingsOpen(true)} title="Settings">&#9881;</button>
+      <div className="px-3 py-2 border-t border-border">
+        <button className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] text-base" onClick={() => setSettingsOpen(true)} title="Settings"><SettingsIcon size={16} /></button>
       </div>
 
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
