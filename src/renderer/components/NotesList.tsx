@@ -15,7 +15,9 @@ export default function NotesList(): React.ReactElement {
 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const editInputRef = useRef<HTMLInputElement | null>(null)
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const projectNotes = selectedProjectId ? (notes[selectedProjectId] ?? []) : []
 
@@ -24,6 +26,12 @@ export default function NotesList(): React.ReactElement {
       editInputRef.current.select()
     }
   }, [editingNoteId])
+
+  useEffect(() => {
+    return () => {
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+    }
+  }, [])
 
   const handleCreate = useCallback(() => {
     if (!selectedProjectId) return
@@ -57,8 +65,16 @@ export default function NotesList(): React.ReactElement {
   const handleDelete = useCallback((e: React.MouseEvent, noteId: string) => {
     e.stopPropagation()
     if (!selectedProjectId) return
-    deleteNote(selectedProjectId, noteId)
-  }, [selectedProjectId, deleteNote])
+    if (confirmDeleteId !== noteId) {
+      setConfirmDeleteId(noteId)
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+      confirmTimerRef.current = setTimeout(() => setConfirmDeleteId(null), 3000)
+    } else {
+      setConfirmDeleteId(null)
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+      deleteNote(selectedProjectId, noteId)
+    }
+  }, [selectedProjectId, deleteNote, confirmDeleteId])
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -93,11 +109,11 @@ export default function NotesList(): React.ReactElement {
             )}
             {editingNoteId !== note.id && (
               <button
-                className="bg-transparent border-0 cursor-pointer text-text-muted text-[11px] px-1 py-0.5 rounded-sm shrink-0 leading-none opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-red-400 transition-opacity"
+                className={`bg-transparent border-0 cursor-pointer text-text-muted text-[11px] px-1 py-0.5 rounded-sm shrink-0 leading-none opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-red-400 transition-opacity${confirmDeleteId === note.id ? ' !opacity-100 bg-red-400/25 text-red-400 font-bold' : ''}`}
                 onClick={e => handleDelete(e, note.id)}
-                title="Delete note"
+                title={confirmDeleteId === note.id ? 'Click again to confirm delete' : 'Delete note'}
               >
-                <X size={11} />
+                {confirmDeleteId === note.id ? '?' : <X size={11} />}
               </button>
             )}
           </div>
