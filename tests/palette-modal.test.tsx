@@ -3,6 +3,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
 import { render, fireEvent, screen, act, cleanup } from '@testing-library/react'
 
+// React import is required by the JSX runtime under vitest's default transform.
+void React
+
 // Mock the AppContext entirely — Palette only needs a stub of AppActions.
 vi.mock('../src/renderer/context/AppContext', () => ({
   useApp: () => ({
