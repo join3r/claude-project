@@ -6,6 +6,7 @@ import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
+import { ProjectHome } from './ProjectHome'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
@@ -344,8 +345,8 @@ export default function ContentArea(): React.ReactElement {
       {!hasProjectSelection && (
         <div className="flex-1 flex items-center justify-center text-text-muted text-[14px]">Select or create a task to get started</div>
       )}
-      {hasProjectSelection && !hasTaskSelection && (
-        <div className="flex-1 flex items-center justify-center text-text-muted text-[14px]">Select or create a task to get started</div>
+      {hasProjectSelection && !hasTaskSelection && selectedProjectId && (
+        <ProjectHome projectId={selectedProjectId} />
       )}
       {projects.flatMap((project) =>
         project.tasks.map((task) => {
