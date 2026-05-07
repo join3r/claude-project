@@ -53,6 +53,35 @@ export function buildWindowTitle(projectName: string | null, taskName: string | 
   return 'DevTool'
 }
 
+export function applyTabPinned(
+  data: ProjectsData,
+  projectId: string,
+  taskId: string,
+  pane: 'left' | 'right',
+  tabId: string,
+  pinned: boolean
+): ProjectsData {
+  return {
+    ...data,
+    projects: data.projects.map(p =>
+      p.id !== projectId ? p : {
+        ...p,
+        tasks: p.tasks.map(t =>
+          t.id !== taskId ? t : {
+            ...t,
+            tabs: {
+              ...t.tabs,
+              [pane]: t.tabs[pane].map(tab =>
+                tab.id !== tabId ? tab : { ...tab, pinned }
+              )
+            }
+          }
+        )
+      }
+    )
+  }
+}
+
 function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
@@ -953,6 +982,16 @@ export function useAppState() {
     }))
   }, [persistProjects])
 
+  const setTabPinned = useCallback((
+    projectId: string,
+    taskId: string,
+    pane: 'left' | 'right',
+    tabId: string,
+    pinned: boolean
+  ) => {
+    persistProjects(prev => applyTabPinned(prev, projectId, taskId, pane, tabId, pinned))
+  }, [persistProjects])
+
   const setActiveTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = project?.tasks.find(candidate => candidate.id === taskId)
@@ -1330,6 +1369,7 @@ export function useAppState() {
     reopenClosedTab,
     updateTabUrl,
     updateTabSessionId,
+    setTabPinned,
     setActiveTab,
     moveTab,
     getTaskViewState: getTaskViewStateForTask,
