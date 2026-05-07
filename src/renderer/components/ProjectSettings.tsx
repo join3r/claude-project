@@ -25,14 +25,24 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   }
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel add-remote-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
-          <h2>Project Settings</h2>
-          <button className="settings-close" onClick={onClose}>&times;</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="w-[440px] max-w-[90vw] rounded-xl border border-border bg-surface-2 shadow-2xl flex flex-col max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <h2 className="text-[14px] font-semibold text-text m-0">Project Settings</h2>
+          <button
+            onClick={onClose}
+            className="bg-transparent border-0 text-text-muted cursor-pointer text-[18px] leading-none px-1 rounded-sm hover:text-text"
+          >
+            &times;
+          </button>
         </div>
 
-        <div className="settings-body">
+        {/* body */}
+        <div className="p-5 flex flex-col gap-4 overflow-y-auto">
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Icon</span>
             <input
@@ -43,26 +53,34 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
             />
           </label>
 
-          <div className="settings-group">
-            <label className="settings-label">AI Tool Arguments</label>
-            {AI_TAB_TYPES.map((tool) => (
-              <div key={tool} className="project-settings-tool-row">
-                <span className="project-settings-tool-label">{AI_TAB_META[tool].label}</span>
-                <input
-                  className="settings-input"
-                  value={args[tool] ?? ''}
-                  onChange={(e) => setArgs({ ...args, [tool]: e.target.value })}
-                  placeholder={`e.g. --model sonnet`}
-                />
-              </div>
-            ))}
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
+              AI Tool Arguments
+            </label>
+            <div className="flex flex-col gap-2 mt-1">
+              {AI_TAB_TYPES.map((tool) => (
+                <div key={tool} className="flex items-center gap-2.5">
+                  <span className="text-[13px] text-text min-w-[90px] shrink-0">{AI_TAB_META[tool].label}</span>
+                  <input
+                    className="flex-1 h-9 px-3 rounded-md bg-surface-2 border border-border text-text focus:border-border-focus outline-none text-[13px]"
+                    value={args[tool] ?? ''}
+                    onChange={(e) => setArgs({ ...args, [tool]: e.target.value })}
+                    placeholder="e.g. --model sonnet"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
+        </div>
 
-          <div className="add-remote-actions">
-            <button className="add-remote-btn add-remote-btn-primary" onClick={handleSave}>
-              Save
-            </button>
-          </div>
+        {/* footer */}
+        <div className="flex items-center justify-end px-5 py-3 border-t border-border shrink-0">
+          <button
+            onClick={handleSave}
+            className="h-8 px-4 rounded-md bg-accent-500 hover:bg-accent-600 text-white text-[13px] font-medium border-0 cursor-pointer transition-colors"
+          >
+            Save
+          </button>
         </div>
       </div>
     </div>

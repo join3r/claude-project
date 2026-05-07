@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import type { Project, TunnelConfig, TunnelState } from '../../shared/types'
-import './Settings.css'
 import './TunnelPopup.css'
 
 interface Props {

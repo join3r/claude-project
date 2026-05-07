@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import {
@@ -7,7 +7,6 @@ import {
   EDITOR_TAB_SIZE_MAX,
   EDITOR_TAB_SIZE_MIN
 } from './monacoOptions'
-import './Settings.css'
 
 interface Props {
   onClose: () => void
@@ -40,53 +39,60 @@ function parseNumberInput(value: string, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, parsed))
 }
 
+type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar'
+
+const tabs: Array<{ id: SettingsTab; label: string }> = [
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'editor', label: 'Editor & Diff' },
+  { id: 'ai', label: 'AI Tools' },
+  { id: 'sidebar', label: 'Sidebar' }
+]
+
+const inputCls = 'w-full h-9 px-3 rounded-md bg-surface-2 border border-border text-text focus:border-border-focus outline-none text-[13px]'
+const labelCls = 'text-[11px] font-semibold uppercase tracking-wider text-text-subtle'
+
 export default function Settings({ onClose }: Props): React.ReactElement {
   const { config, updateConfig } = useApp()
+  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
+
   if (!config) return <div />
 
-  return (
-    <div className="settings-overlay">
-      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
-          <h2>Settings</h2>
-          <button className="settings-close" onClick={onClose}>&times;</button>
-        </div>
-
-        <div className="settings-body">
-          <div className="settings-section">
-            <div className="settings-section-title">Appearance</div>
-
-            <div className="settings-group">
-              <label className="settings-label">Application Theme</label>
-              <select
-                className="settings-input"
-                value={config.theme}
-                onChange={(e) => updateConfig({ theme: e.target.value as 'system' | 'dark' | 'light' })}
-              >
-                <option value="system">System</option>
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-              </select>
-            </div>
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'appearance':
+        return (
+          <div className="flex flex-col gap-1">
+            <label className={labelCls}>Application Theme</label>
+            <select
+              className={inputCls}
+              value={config.theme}
+              onChange={(e) => updateConfig({ theme: e.target.value as 'system' | 'dark' | 'light' })}
+            >
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
           </div>
+        )
 
-          <div className="settings-section">
-            <div className="settings-section-title">Terminal</div>
-
-            <div className="settings-group">
-              <label className="settings-label">Terminal Font Family</label>
+      case 'terminal':
+        return (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className={labelCls}>Terminal Font Family</label>
               <input
-                className="settings-input"
+                className={inputCls}
                 value={config.fontFamily}
                 onChange={(e) => updateConfig({ fontFamily: e.target.value })}
                 placeholder="e.g. MesloLGS NF, monospace"
               />
             </div>
 
-            <div className="settings-group">
-              <label className="settings-label">Terminal Font Size</label>
+            <div className="flex flex-col gap-1">
+              <label className={labelCls}>Terminal Font Size</label>
               <input
-                className="settings-input"
+                className={inputCls}
                 type="number"
                 min={8}
                 max={32}
@@ -95,10 +101,10 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               />
             </div>
 
-            <div className="settings-group">
-              <label className="settings-label">Terminal Theme</label>
+            <div className="flex flex-col gap-1">
+              <label className={labelCls}>Terminal Theme</label>
               <select
-                className="settings-input"
+                className={inputCls}
                 value={config.terminalTheme}
                 onChange={(e) => updateConfig({ terminalTheme: e.target.value as 'system' | 'dark' | 'light' })}
               >
@@ -108,22 +114,23 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </select>
             </div>
 
-            <div className="settings-group">
-              <label className="settings-label">Default Shell</label>
+            <div className="flex flex-col gap-1">
+              <label className={labelCls}>Default Shell</label>
               <input
-                className="settings-input"
+                className={inputCls}
                 value={config.defaultShell}
                 onChange={(e) => updateConfig({ defaultShell: e.target.value })}
                 placeholder="$SHELL (system default)"
               />
             </div>
 
-            <div className="settings-group">
-              <label className="settings-label">Terminal</label>
-              <div className="settings-checkboxes">
-                <label className="settings-checkbox">
+            <div className="flex flex-col gap-1">
+              <label className={labelCls}>Terminal</label>
+              <div className="flex flex-col gap-2">
+                <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
                   <input
                     type="checkbox"
+                    className="cursor-pointer"
                     checked={config.copyOnSelect}
                     onChange={(e) => updateConfig({ copyOnSelect: e.target.checked })}
                   />
@@ -131,27 +138,31 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 </label>
               </div>
             </div>
-          </div>
+          </>
+        )
 
-          <div className="settings-section">
-            <div className="settings-section-title">Editor &amp; Diff</div>
-            <p className="settings-help">These options apply to Monaco-backed file editor and diff tabs.</p>
+      case 'editor':
+        return (
+          <>
+            <p className="text-[12px] text-text-muted leading-snug mb-2">
+              These options apply to Monaco-backed file editor and diff tabs.
+            </p>
 
-            <div className="settings-group">
-              <label className="settings-label">Editor Font Family</label>
+            <div className="flex flex-col gap-1">
+              <label className={labelCls}>Editor Font Family</label>
               <input
-                className="settings-input"
+                className={inputCls}
                 value={config.editorFontFamily}
                 onChange={(e) => updateConfig({ editorFontFamily: e.target.value })}
                 placeholder="e.g. JetBrains Mono, monospace"
               />
             </div>
 
-            <div className="settings-grid">
-              <div className="settings-group">
-                <label className="settings-label">Editor Font Size</label>
+            <div className="grid gap-3 grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>Editor Font Size</label>
                 <input
-                  className="settings-input"
+                  className={inputCls}
                   type="number"
                   min={EDITOR_FONT_SIZE_MIN}
                   max={EDITOR_FONT_SIZE_MAX}
@@ -167,10 +178,10 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 />
               </div>
 
-              <div className="settings-group">
-                <label className="settings-label">Tab Size</label>
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>Tab Size</label>
                 <input
-                  className="settings-input"
+                  className={inputCls}
                   type="number"
                   min={EDITOR_TAB_SIZE_MIN}
                   max={EDITOR_TAB_SIZE_MAX}
@@ -187,11 +198,11 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </div>
             </div>
 
-            <div className="settings-grid">
-              <div className="settings-group">
-                <label className="settings-label">Word Wrap</label>
+            <div className="grid gap-3 grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>Word Wrap</label>
                 <select
-                  className="settings-input"
+                  className={inputCls}
                   value={config.editorWordWrap}
                   onChange={(e) => updateConfig({ editorWordWrap: e.target.value as EditorWordWrap })}
                 >
@@ -201,10 +212,10 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 </select>
               </div>
 
-              <div className="settings-group">
-                <label className="settings-label">Line Numbers</label>
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>Line Numbers</label>
                 <select
-                  className="settings-input"
+                  className={inputCls}
                   value={config.editorLineNumbers}
                   onChange={(e) => updateConfig({ editorLineNumbers: e.target.value as EditorLineNumbers })}
                 >
@@ -215,11 +226,11 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </div>
             </div>
 
-            <div className="settings-grid">
-              <div className="settings-group">
-                <label className="settings-label">Render Whitespace</label>
+            <div className="grid gap-3 grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>Render Whitespace</label>
                 <select
-                  className="settings-input"
+                  className={inputCls}
                   value={config.editorRenderWhitespace}
                   onChange={(e) => updateConfig({ editorRenderWhitespace: e.target.value as EditorRenderWhitespace })}
                 >
@@ -229,10 +240,10 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 </select>
               </div>
 
-              <div className="settings-group">
-                <label className="settings-label">Diff Layout</label>
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>Diff Layout</label>
                 <select
-                  className="settings-input"
+                  className={inputCls}
                   value={config.diffRenderSideBySide ? 'side-by-side' : 'inline'}
                   onChange={(e) => updateConfig({ diffRenderSideBySide: e.target.value === 'side-by-side' })}
                 >
@@ -242,87 +253,87 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </div>
             </div>
 
-            <div className="settings-group">
-              <div className="settings-checkboxes">
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={config.editorMinimap}
-                    onChange={(e) => updateConfig({ editorMinimap: e.target.checked })}
-                  />
-                  Show minimap in editor and diff tabs
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={config.diffIgnoreTrimWhitespace}
-                    onChange={(e) => updateConfig({ diffIgnoreTrimWhitespace: e.target.checked })}
-                  />
-                  Ignore trim whitespace in diffs
-                </label>
-              </div>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.editorMinimap}
+                  onChange={(e) => updateConfig({ editorMinimap: e.target.checked })}
+                />
+                Show minimap in editor and diff tabs
+              </label>
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.diffIgnoreTrimWhitespace}
+                  onChange={(e) => updateConfig({ diffIgnoreTrimWhitespace: e.target.checked })}
+                />
+                Ignore trim whitespace in diffs
+              </label>
             </div>
+          </>
+        )
+
+      case 'ai':
+        return (
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+              <input
+                type="checkbox"
+                className="cursor-pointer"
+                checked={config.enableClaude}
+                onChange={(e) => updateConfig({ enableClaude: e.target.checked })}
+              />
+              Claude Code
+            </label>
+            <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+              <input
+                type="checkbox"
+                className="cursor-pointer"
+                checked={config.enableCodex}
+                onChange={(e) => updateConfig({ enableCodex: e.target.checked })}
+              />
+              Codex
+            </label>
+            <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+              <input
+                type="checkbox"
+                className="cursor-pointer"
+                checked={config.enableOpencode}
+                onChange={(e) => updateConfig({ enableOpencode: e.target.checked })}
+              />
+              OpenCode
+            </label>
           </div>
+        )
 
-          <div className="settings-section">
-            <div className="settings-section-title">AI Tools</div>
-
-            <div className="settings-group">
-              <div className="settings-checkboxes">
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={config.enableClaude}
-                    onChange={(e) => updateConfig({ enableClaude: e.target.checked })}
-                  />
-                  Claude Code
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={config.enableCodex}
-                    onChange={(e) => updateConfig({ enableCodex: e.target.checked })}
-                  />
-                  Codex
-                </label>
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={config.enableOpencode}
-                    onChange={(e) => updateConfig({ enableOpencode: e.target.checked })}
-                  />
-                  OpenCode
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="settings-section">
-            <div className="settings-section-title">Sidebar</div>
-
-            <div className="settings-group">
-              <div className="settings-checkboxes">
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={config.taskRecencyHighlight.enabled}
-                    onChange={(e) => updateConfig({
-                      taskRecencyHighlight: {
-                        ...config.taskRecencyHighlight,
-                        enabled: e.target.checked
-                      }
-                    })}
-                  />
-                  Highlight recently focused tasks
-                </label>
-              </div>
+      case 'sidebar':
+        return (
+          <>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.taskRecencyHighlight.enabled}
+                  onChange={(e) => updateConfig({
+                    taskRecencyHighlight: {
+                      ...config.taskRecencyHighlight,
+                      enabled: e.target.checked
+                    }
+                  })}
+                />
+                Highlight recently focused tasks
+              </label>
             </div>
 
-            <div className="settings-grid">
-              <div className="settings-group">
-                <label className="settings-label">Highlight Mode</label>
+            <div className="grid gap-3 grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>Highlight Mode</label>
                 <select
-                  className="settings-input"
+                  className={inputCls}
                   disabled={!config.taskRecencyHighlight.enabled}
                   value={config.taskRecencyHighlight.mode}
                   onChange={(e) => updateConfig({
@@ -337,12 +348,12 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 </select>
               </div>
 
-              <div className="settings-group">
-                <label className="settings-label">
+              <div className="flex flex-col gap-1">
+                <label className={labelCls}>
                   {config.taskRecencyHighlight.mode === 'rank' ? 'Show top N tasks' : 'Fade after N minutes'}
                 </label>
                 <input
-                  className="settings-input"
+                  className={inputCls}
                   type="number"
                   disabled={!config.taskRecencyHighlight.enabled}
                   min={config.taskRecencyHighlight.mode === 'rank' ? 1 : 5}
@@ -373,23 +384,60 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </div>
             </div>
 
-            <div className="settings-group">
-              <div className="settings-checkboxes">
-                <label className="settings-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={config.activityPanel.enabled}
-                    onChange={(e) => updateConfig({
-                      activityPanel: {
-                        ...config.activityPanel,
-                        enabled: e.target.checked
-                      }
-                    })}
-                  />
-                  Show Recent Activity panel
-                </label>
-              </div>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.activityPanel.enabled}
+                  onChange={(e) => updateConfig({
+                    activityPanel: {
+                      ...config.activityPanel,
+                      enabled: e.target.checked
+                    }
+                  })}
+                />
+                Show Recent Activity panel
+              </label>
             </div>
+          </>
+        )
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50">
+      <div className="w-[680px] max-w-[90vw] max-h-[85vh] rounded-xl border border-border bg-surface-2 shadow-2xl flex flex-col overflow-hidden">
+        {/* header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <h2 className="text-[14px] font-semibold text-text m-0">Settings</h2>
+          <button
+            onClick={onClose}
+            className="bg-transparent border-0 text-text-muted cursor-pointer text-[18px] leading-none px-1 rounded-sm hover:text-text"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* split: tabs + panel */}
+        <div className="flex flex-1 min-h-0">
+          {/* left rail */}
+          <div className="w-44 border-r border-border py-2 flex flex-col gap-0.5 shrink-0">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                data-selected={activeTab === tab.id ? 'true' : undefined}
+                className="text-left px-4 py-1.5 text-[13px] text-text-muted hover:text-text cursor-pointer bg-transparent border-0 data-[selected=true]:relative data-[selected=true]:before:absolute data-[selected=true]:before:inset-y-0 data-[selected=true]:before:left-0 data-[selected=true]:before:w-0.5 data-[selected=true]:before:bg-accent-400 data-[selected=true]:bg-gradient-to-r data-[selected=true]:from-accent-600/30 data-[selected=true]:to-transparent data-[selected=true]:text-accent-50 [.theme-light_&[data-selected=true]]:from-accent-200 [.theme-light_&[data-selected=true]]:text-accent-700"
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* right panel */}
+          <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+            {renderTabContent()}
           </div>
         </div>
       </div>
