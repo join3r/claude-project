@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -17,6 +17,8 @@ import { DEFAULT_CONFIG, type SshConfig, type ShellCommandConfig } from '../../s
 import { normalizeBrowserUrl } from '../browserUrl'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import { buildXtermTheme } from './terminalThemes'
+import { useTabStatusStore } from '../context/TabStatusContext'
+import { terminalStatusFromOutput } from './terminalStatus'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -41,11 +43,14 @@ interface TerminalEntry {
   restoring: boolean
   pendingData: string[]
   suppressResizeEvents: number
+  onStatusUpdate?: (chunk: string) => void
+  onPtyExit?: () => void
 }
 
 const terminals = new Map<string, TerminalEntry>()
 
 let ptyListenerRegistered = false
+let ptyExitListenerRegistered = false
 let ptySizeListenerRegistered = false
 
 function resizeTerminal(entry: TerminalEntry, cols: number, rows: number): void {
@@ -69,6 +74,17 @@ function ensurePtyListener(): void {
       return
     }
     entry.term.write(data)
+    entry.onStatusUpdate?.(data)
+  })
+}
+
+function ensurePtyExitListener(): void {
+  if (ptyExitListenerRegistered) return
+  ptyExitListenerRegistered = true
+  window.api.onPtyExit((id: string) => {
+    const entry = terminals.get(id)
+    if (!entry) return
+    entry.onPtyExit?.()
   })
 }
 
@@ -126,6 +142,30 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   const [sshReady, setSshReady] = useState(!sshConfig)
   const prevSshReadyRef = useRef(sshReady)
   const [searchOpen, setSearchOpen] = useState(false)
+
+  const statusStore = useTabStatusStore()
+  const lastStatusWriteRef = useRef(0)
+  const decayTimerRef = useRef<number | null>(null)
+
+  const handleOutputForStatus = useCallback((chunk: string) => {
+    const now = Date.now()
+    if (now - lastStatusWriteRef.current < 200) return // throttle ~5/sec
+    lastStatusWriteRef.current = now
+
+    const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0)
+    const lastLine = lines[lines.length - 1]
+    if (!lastLine) return
+
+    const prev = statusStore.getStatus(tabId)
+    const next = terminalStatusFromOutput(lastLine, prev)
+    if (next !== prev) statusStore.setStatus(tabId, next)
+
+    if (decayTimerRef.current) window.clearTimeout(decayTimerRef.current)
+    decayTimerRef.current = window.setTimeout(() => {
+      const current = statusStore.getStatus(tabId)
+      if (current === 'working') statusStore.setStatus(tabId, null)
+    }, 30_000)
+  }, [statusStore, tabId])
 
   // Release the renderer-side xterm instance while hidden. The PTY keeps
   // running in main and will be reattached from runtime scrollback on show.
@@ -268,6 +308,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     }
 
     ensurePtyListener()
+    ensurePtyExitListener()
     ensurePtySizeListener()
     ensureBeforeUnloadHandler()
   }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId, visible])
@@ -414,6 +455,28 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [visible])
+
+  // Wire status detection callbacks into the terminal entry
+  useEffect(() => {
+    const entry = terminals.get(tabId)
+    if (!entry) return
+    entry.onStatusUpdate = handleOutputForStatus
+    entry.onPtyExit = () => statusStore.setStatus(tabId, 'exited')
+    return () => {
+      const e = terminals.get(tabId)
+      if (e) {
+        e.onStatusUpdate = undefined
+        e.onPtyExit = undefined
+      }
+    }
+  }, [tabId, handleOutputForStatus, statusStore, visible])
+
+  // Cleanup decay timer on unmount
+  useEffect(() => {
+    return () => {
+      if (decayTimerRef.current) window.clearTimeout(decayTimerRef.current)
+    }
+  }, [])
 
   const entry = terminals.get(tabId)
 
