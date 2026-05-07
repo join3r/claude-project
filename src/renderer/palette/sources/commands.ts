@@ -1,6 +1,13 @@
 // src/renderer/palette/sources/commands.ts
 import { commandRegistry } from '../CommandRegistry'
 import { paletteEvents } from '../paletteEvents'
+import { AI_TAB_TYPES, AI_TAB_META, isShellCommandProject, type AiTabType } from '../../../shared/types'
+
+const ENABLE_FLAG: Record<AiTabType, 'enableClaude' | 'enableCodex' | 'enableOpencode'> = {
+  claude: 'enableClaude',
+  codex: 'enableCodex',
+  opencode: 'enableOpencode'
+}
 
 commandRegistry.register({
   id: 'cmd.openSettings',
@@ -53,6 +60,28 @@ commandRegistry.register({
     ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'browser')
   }
 })
+
+for (const aiType of AI_TAB_TYPES) {
+  const meta = AI_TAB_META[aiType as AiTabType]
+  commandRegistry.register({
+    id: `cmd.new${aiType.charAt(0).toUpperCase()}${aiType.slice(1)}Tab`,
+    title: `New ${meta.label} Tab`,
+    aliases: [meta.label.toLowerCase(), aiType, meta.command],
+    when: ctx => {
+      const { selectedProjectId, selectedTaskId, projects, config } = ctx.actions
+      if (!selectedProjectId || !selectedTaskId) return false
+      if (!config?.[ENABLE_FLAG[aiType as AiTabType]]) return false
+      const project = projects.find(p => p.id === selectedProjectId)
+      if (!project || isShellCommandProject(project)) return false
+      return true
+    },
+    run: ctx => {
+      const { selectedProjectId, selectedTaskId } = ctx.actions
+      if (!selectedProjectId || !selectedTaskId) return
+      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', aiType)
+    }
+  })
+}
 
 commandRegistry.register({
   id: 'cmd.newNote',

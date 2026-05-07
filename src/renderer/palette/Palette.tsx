@@ -34,6 +34,7 @@ export function Palette(): React.ReactElement | null {
   const [frecency, setFrecency] = useState<FrecencyState>({})
   const inputRef = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<number | null>(null)
+  const lastFocusedRef = useRef<HTMLElement | null>(null)
 
   const toggle = useCallback(() => setOpen(o => !o), [])
   usePaletteHotkey(toggle)
@@ -59,13 +60,21 @@ export function Palette(): React.ReactElement | null {
     return () => { if (saveTimer.current) window.clearTimeout(saveTimer.current) }
   }, [frecency])
 
-  // Reset input/selection when opening; focus input
+  // Reset input/selection when opening; focus input. On close, restore focus.
   useEffect(() => {
     if (open) {
+      const prev = document.activeElement
+      lastFocusedRef.current = prev instanceof HTMLElement ? prev : null
       setInput('')
       setSelectedIndex(0)
       const t = window.setTimeout(() => inputRef.current?.focus(), 0)
       return () => window.clearTimeout(t)
+    } else {
+      const target = lastFocusedRef.current
+      if (target && document.body.contains(target)) {
+        const t = window.setTimeout(() => target.focus(), 0)
+        return () => window.clearTimeout(t)
+      }
     }
   }, [open])
 
@@ -179,7 +188,13 @@ export function Palette(): React.ReactElement | null {
       const head = p + (cur.allProjects ? '*' : '')
       return head + (cur.query ? cur.query : '')
     })
-    requestAnimationFrame(() => inputRef.current?.focus())
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (!el) return
+      el.focus()
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+    })
   }
 
   if (!open) return null
