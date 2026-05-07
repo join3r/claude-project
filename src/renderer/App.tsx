@@ -4,6 +4,8 @@ import { TabStatusProvider } from './context/TabStatusContext'
 import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
 import FileBrowserPanel from './components/FileBrowserPanel'
+import { Palette } from './palette/Palette'
+import { paletteEvents } from './palette/paletteEvents'
 
 function AppInner(): React.ReactElement {
   const { effectiveTheme, exportWindowViewState, toggleFileBrowser } = useApp()
@@ -38,6 +40,16 @@ function AppInner(): React.ReactElement {
     })
   }, [exportWindowViewState])
 
+  useEffect(() => paletteEvents.on('toggle-sidebar', () => setSidebarHidden(p => !p)), [])
+  useEffect(() => paletteEvents.on('toggle-file-browser', () => toggleFileBrowser()), [toggleFileBrowser])
+  useEffect(() => paletteEvents.on('reload-window', () => window.location.reload()), [])
+  useEffect(() => paletteEvents.on('open-devtools', () => {
+    void window.api.openDevTools()
+  }), [])
+  useEffect(() => paletteEvents.on('quit-app', () => {
+    void window.api.quitApp()
+  }), [])
+
   // Mirror theme-light onto documentElement so getComputedStyle(documentElement)
   // resolves CSS custom properties via the .theme-light cascade. Used by xterm
   // theme construction in TerminalTab/AiToolTab and any other CSS-var reader.
@@ -55,6 +67,7 @@ function AppInner(): React.ReactElement {
       )}
       <ContentArea />
       <FileBrowserPanel />
+      <Palette />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -356,6 +356,11 @@ export class AppRuntime {
       clipboard.writeText(text)
       return undefined
     })
+
+    ipcMain.handle('app:open-devtools', (event) => {
+      BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools()
+    })
+    ipcMain.handle('app:quit', () => app.quit())
 
     ipcMain.handle('scrollback-save', (_event, tabId: string, data: string) => {
       const scrollback = trimScrollback(data)

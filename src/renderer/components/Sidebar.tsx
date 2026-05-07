@@ -14,6 +14,7 @@ import ActivityPanel from './ActivityPanel'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import { ChevronDown, ChevronRight, Plus, Search, Settings as SettingsIcon, Plug, Terminal as TerminalIcon } from 'lucide-react'
+import { paletteEvents } from '../palette/paletteEvents'
 
 type DragState = {
   type: 'project' | 'task' | 'folder'
@@ -173,6 +174,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       setSettingsOpen(true)
     })
   }, [])
+
+  useEffect(() => {
+    return paletteEvents.on('open-settings', () => setSettingsOpen(true))
+  }, [])
+  useEffect(() => {
+    return paletteEvents.on('open-project-settings', () => {
+      if (selectedProjectId) setProjectSettingsId(selectedProjectId)
+    })
+  }, [selectedProjectId])
 
   useEffect(() => {
     window.api.onSshStatusChanged((projectId: string, status: string) => {

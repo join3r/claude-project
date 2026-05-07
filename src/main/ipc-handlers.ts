@@ -1,6 +1,6 @@
 // Legacy IPC handlers — kept for single-window fallback.
 // The primary IPC registration (including pty-spawn) lives in AppRuntime (app-runtime.ts).
-import { ipcMain, dialog, BrowserWindow, nativeTheme } from 'electron'
+import { app, ipcMain, dialog, BrowserWindow, nativeTheme } from 'electron'
 import { Storage } from './storage'
 import { ScrollbackStorage } from './scrollback-storage'
 import { PtyManager } from './pty-manager'
@@ -71,6 +71,10 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
 
   // Theme
   ipcMain.handle('get-native-theme', () => nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+  ipcMain.handle('app:open-devtools', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools()
+  })
+  ipcMain.handle('app:quit', () => app.quit())
   nativeTheme.on('updated', () => {
     mainWindow.webContents.send('theme-changed', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
   })

@@ -43,6 +43,8 @@ const api = {
     ipcRenderer.invoke('palette-frecency:load'),
   paletteFrecencySave: (file: { version: 1; entries: Record<string, { lastUsedAt: number; useCount: number }> }): Promise<void> =>
     ipcRenderer.invoke('palette-frecency:save', file),
+  openDevTools: (): Promise<void> => ipcRenderer.invoke('app:open-devtools'),
+  quitApp: (): Promise<void> => ipcRenderer.invoke('app:quit'),
 
   // Window state
   loadWindowState: (): Promise<WindowViewState> => ipcRenderer.invoke('load-window-state'),
