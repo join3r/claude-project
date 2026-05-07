@@ -11,6 +11,7 @@ import { CodexSessionManager } from './codex-session-manager'
 import type { SshConfig, ProjectNote } from '../shared/types'
 import { AppConfig, ProjectsData } from '../shared/types'
 import { NotesStorage } from './notes-storage'
+import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import os from 'os'
 import path from 'path'
 
@@ -95,6 +96,11 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   const notesStorage = new NotesStorage(CONFIG_DIR)
   ipcMain.handle('notes-load', () => notesStorage.load())
   ipcMain.handle('notes-save', (_e, data: Record<string, ProjectNote[]>) => notesStorage.save(data))
+
+  // Palette frecency
+  const paletteFrecency = new PaletteFrecencyStorage(CONFIG_DIR)
+  ipcMain.handle('palette-frecency:load', () => paletteFrecency.load())
+  ipcMain.handle('palette-frecency:save', (_e, file: FrecencyFile) => paletteFrecency.save(file))
 
   // SSH
   const sshDir = path.join(CONFIG_DIR, 'ssh')

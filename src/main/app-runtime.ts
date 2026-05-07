@@ -12,6 +12,7 @@ import { CodexSessionManager } from './codex-session-manager'
 import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
 import { NotesStorage } from './notes-storage'
+import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import { parseNumstat } from './git-diff-summary'
 import type {
   AppConfig,
@@ -132,6 +133,7 @@ export class AppRuntime {
   private readonly storage = new Storage(CONFIG_DIR)
   private readonly scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
+  private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
   private readonly hookServer = new HookServer()
   private readonly codexSessionManager = new CodexSessionManager()
@@ -380,6 +382,9 @@ export class AppRuntime {
 
     ipcMain.handle('notes-load', () => this.notesStorage.load())
     ipcMain.handle('notes-save', (_event, data: Record<string, ProjectNote[]>) => this.notesStorage.save(data))
+
+    ipcMain.handle('palette-frecency:load', () => this.paletteFrecencyStorage.load())
+    ipcMain.handle('palette-frecency:save', (_event, file: FrecencyFile) => this.paletteFrecencyStorage.save(file))
 
     ipcMain.handle('ssh-connect', async (_event, projectId: string, sshConfig: SshConfig) => {
       await this.sshManager.connect(projectId, sshConfig)

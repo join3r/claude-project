@@ -38,6 +38,12 @@ const api = {
   notesLoad: (): Promise<Record<string, ProjectNote[]>> => ipcRenderer.invoke('notes-load'),
   notesSave: (data: Record<string, ProjectNote[]>): Promise<void> => ipcRenderer.invoke('notes-save', data),
 
+  // Palette frecency
+  paletteFrecencyLoad: (): Promise<{ version: 1; entries: Record<string, { lastUsedAt: number; useCount: number }> }> =>
+    ipcRenderer.invoke('palette-frecency:load'),
+  paletteFrecencySave: (file: { version: 1; entries: Record<string, { lastUsedAt: number; useCount: number }> }): Promise<void> =>
+    ipcRenderer.invoke('palette-frecency:save', file),
+
   // Window state
   loadWindowState: (): Promise<WindowViewState> => ipcRenderer.invoke('load-window-state'),
   saveWindowState: (viewState: WindowViewState): Promise<void> => ipcRenderer.invoke('save-window-state', viewState),
