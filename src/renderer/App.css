@@ -38,7 +38,7 @@ html, body, #root {
   --border: #333333;
   --border-focus: #007acc;
   --hover: #2a2d2e;
-  --selected: #37373d;
+  --selected: #8a6730;
   --input-bg: #3c3c3c;
   --dropdown-bg: #2d2d2d;
   --tab-bg: #2d2d2d;
@@ -57,7 +57,7 @@ html, body, #root {
   --border: #e0e0e0;
   --border-focus: #007acc;
   --hover: #e8e8e8;
-  --selected: #d6ebff;
+  --selected: #f5d8a6;
   --input-bg: #ffffff;
   --dropdown-bg: #ffffff;
   --tab-bg: #ececec;

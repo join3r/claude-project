@@ -4,7 +4,7 @@ import type { AppConfig, Task } from '../../shared/types'
 export const MAX_OPACITY = 0.5
 
 const RECENCY_RGB_DARK = '100, 150, 230'
-const RECENCY_RGB_LIGHT = '230, 160, 80'
+const RECENCY_RGB_LIGHT = '100, 150, 230'
 
 export function buildRecencyStyle(opacity: number, theme: 'dark' | 'light'): CSSProperties | undefined {
   if (opacity <= 0) return undefined

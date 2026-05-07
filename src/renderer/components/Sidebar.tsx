@@ -470,7 +470,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     return (
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
-        className={`sidebar-item project-item ${selectedProjectId === project.id ? 'selected' : ''} ${dragState?.type === 'project' && dragState.id === project.id ? 'dragging' : ''}`}
+        className={`sidebar-item project-item ${selectedProjectId === project.id && !isExpanded ? 'selected' : ''} ${dragState?.type === 'project' && dragState.id === project.id ? 'dragging' : ''}`}
         data-drag-type="project"
         data-drag-id={project.id}
         data-folder-id={folderId || ''}
@@ -520,7 +520,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       {isExpanded && (
         <div className="sidebar-tasks">
           {project.tasks.map((task, tIdx) => {
-            const opacity = config?.taskRecencyHighlight
+            const isSelected = selectedTaskId === task.id
+            const opacity = !isSelected && config?.taskRecencyHighlight
               ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
               : 0
             const recencyStyle = buildRecencyStyle(opacity, effectiveTheme)
@@ -530,7 +531,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   <div className="sidebar-drop-indicator task-drop-indicator" />
                 )}
                 <div
-                  className={`sidebar-item task-item ${selectedTaskId === task.id ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
+                  className={`sidebar-item task-item ${isSelected ? 'selected' : ''} ${dragState?.type === 'task' && dragState.index === tIdx ? 'dragging' : ''}`}
                   data-task-id={task.id}
                   data-task-index={tIdx}
                   style={recencyStyle}
