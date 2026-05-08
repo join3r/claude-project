@@ -72,12 +72,12 @@ describe('ensureHomeTasks migration', () => {
   })
 
   it('reconcileTaskViewState injects the home tab into a home task that lost it', () => {
-    const homeTask = {
+    const homeTask: Task = {
       id: 'home-task-p1', name: 'Home',
       tabs: { left: [], right: [] },
       activeTab: { left: null, right: null },
       splitOpen: false, splitRatio: 0.5,
-      system: 'home' as const
+      system: 'home'
     }
     const state = reconcileTaskViewState(homeTask)
     // After reconcile the home tab is present and active
