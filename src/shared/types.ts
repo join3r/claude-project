@@ -1,4 +1,4 @@
-export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode' | 'diff' | 'editor' | 'note'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode' | 'diff' | 'editor' | 'note' | 'home'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'opencode'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -18,6 +18,7 @@ export interface Tab {
   filePath?: string
   noteId?: string
   pinned?: boolean
+  system?: 'home'
 }
 
 export interface ProjectNote {
@@ -52,6 +53,7 @@ export interface Task {
   splitRatio: number
   workspace?: WorkspaceConfig
   lastFocusedAt?: number
+  system?: 'home'
 }
 
 export interface WorkspaceConfig {
@@ -84,6 +86,34 @@ export interface WorkspaceDeleteRequest extends WorkspaceTarget {
 
 export function isWorkspaceTask(task: Task): boolean {
   return !!task.workspace
+}
+
+export function isHomeTask(task: Task): boolean {
+  return task.system === 'home'
+}
+
+export function isHomeTab(tab: Tab): boolean {
+  return tab.system === 'home'
+}
+
+export function createHomeTask(projectId: string): { task: Task; tab: Tab } {
+  const tabId = `home-tab-${projectId}`
+  const tab: Tab = {
+    id: tabId,
+    type: 'home',
+    title: 'Home',
+    system: 'home'
+  }
+  const task: Task = {
+    id: `home-task-${projectId}`,
+    name: 'Home',
+    tabs: { left: [tab], right: [] },
+    activeTab: { left: tabId, right: null },
+    splitOpen: false,
+    splitRatio: 0.5,
+    system: 'home'
+  }
+  return { task, tab }
 }
 
 export interface Project {
