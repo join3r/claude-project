@@ -219,6 +219,7 @@ export default function TabBar({
               onMouseDown={(event) => handleTabMouseDown(event, tab.id, index)}
               onContextMenu={(e) => {
                 e.preventDefault()
+                if (isHomeTab(tab)) return
                 setTabMenu({ tabId: tab.id, x: e.clientX, y: e.clientY })
               }}
             >
