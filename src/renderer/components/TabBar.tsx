@@ -1,10 +1,12 @@
-import React, { useRef } from 'react'
+import React, { useRef, useState } from 'react'
+import { Pin, PinOff } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
 import { AI_TAB_TYPES, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
+import { isPinnable } from './terminalStatus'
 
 interface Props {
   tabs: Tab[]
@@ -114,8 +116,9 @@ export default function TabBar({
   onTabDropTargetChange,
   onTabDragComplete
 }: Props): React.ReactElement {
-  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config } = useApp()
+  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, setTabPinned } = useApp()
   const suppressClickRef = useRef(false)
+  const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   if (!selectedProject) return <div className="tab-bar flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]" />
 
   const isTabDragActive = tabDragState?.projectId === projectId && tabDragState.taskId === taskId
@@ -181,6 +184,7 @@ export default function TabBar({
   }
 
   return (
+    <>
     <div className="tab-bar flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
       <div
         className={[
@@ -213,6 +217,10 @@ export default function TabBar({
                 setActiveTab(projectId, taskId, pane, tab.id)
               }}
               onMouseDown={(event) => handleTabMouseDown(event, tab.id, index)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setTabMenu({ tabId: tab.id, x: e.clientX, y: e.clientY })
+              }}
             >
               {index < 9 && (
                 <span className="text-[10px] text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.meta-held_&]:visible">
@@ -222,6 +230,19 @@ export default function TabBar({
               <span className="text-[11px] shrink-0">{tabIcon(tab.type)}</span>
               <TabStatusIndicator tabId={tab.id} />
               <span className="overflow-hidden text-ellipsis">{tab.title}</span>
+              {isPinnable(tab) && (
+                <button
+                  className={`bg-transparent border-0 cursor-pointer text-[12px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 transition-opacity ${tab.pinned ? 'opacity-100 text-accent' : 'opacity-0 group-hover:opacity-100 text-text-muted hover:text-text'}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setTabPinned(projectId, taskId, pane, tab.id, !tab.pinned)
+                  }}
+                  title={tab.pinned ? 'Unpin from watch strip' : 'Pin to watch strip'}
+                >
+                  {tab.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+                </button>
+              )}
               <button
                 className="bg-transparent border-0 text-text-muted cursor-pointer text-[14px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity"
                 onMouseDown={(e) => e.stopPropagation()}
@@ -264,5 +285,40 @@ export default function TabBar({
         )}
       </div>
     </div>
+    {tabMenu && (() => {
+      const tab = tabs.find(t => t.id === tabMenu.tabId)
+      if (!tab) return null
+      const close = () => setTabMenu(null)
+      return (
+        <>
+          <div className="fixed inset-0 z-30" onClick={close} onContextMenu={e => { e.preventDefault(); close() }} />
+          <div
+            style={{ left: tabMenu.x, top: tabMenu.y }}
+            className="fixed z-40 min-w-[180px] bg-surface border border-border rounded shadow-lg text-sm py-1"
+          >
+            {isPinnable(tab) && (
+              <button
+                type="button"
+                className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+                onClick={() => {
+                  setTabPinned(projectId, taskId, pane, tab.id, !tab.pinned)
+                  close()
+                }}
+              >
+                {tab.pinned ? 'Unpin from watch strip' : 'Pin to watch strip'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+              onClick={() => { removeTab(projectId, taskId, pane, tab.id); close() }}
+            >
+              Close tab
+            </button>
+          </div>
+        </>
+      )
+    })()}
+    </>
   )
 }

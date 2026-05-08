@@ -2,6 +2,22 @@
 import { commandRegistry } from '../CommandRegistry'
 import { paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, isShellCommandProject, type AiTabType } from '../../../shared/types'
+import { isPinnable } from '../../components/terminalStatus'
+
+function activePinnableTab(actions: any): { projectId: string; taskId: string; pane: 'left' | 'right'; tabId: string; pinned: boolean } | null {
+  const { selectedProjectId, selectedTaskId, projects } = actions
+  if (!selectedProjectId || !selectedTaskId) return null
+  const project = projects.find((p: any) => p.id === selectedProjectId)
+  const task = project?.tasks.find((t: any) => t.id === selectedTaskId)
+  if (!task) return null
+  const taskState = actions.getTaskViewState(task)
+  const pane: 'left' | 'right' = taskState.activeTab.right ? 'right' : 'left'
+  const tabId = taskState.activeTab[pane]
+  if (!tabId) return null
+  const tab = task.tabs[pane].find((x: any) => x.id === tabId)
+  if (!tab || !isPinnable(tab)) return null
+  return { projectId: selectedProjectId, taskId: selectedTaskId, pane, tabId, pinned: !!tab.pinned }
+}
 
 const ENABLE_FLAG: Record<AiTabType, 'enableClaude' | 'enableCodex' | 'enableOpencode'> = {
   claude: 'enableClaude',
@@ -153,4 +169,44 @@ commandRegistry.register({
   title: 'Quit DevTool',
   aliases: ['quit', 'exit'],
   run: () => paletteEvents.emit('quit-app')
+})
+
+commandRegistry.register({
+  id: 'cmd.toggleWatchStrip',
+  title: 'Toggle Watch Strip',
+  aliases: ['watch', 'pin strip', 'watch strip'],
+  when: ctx => !!ctx.actions.selectedProjectId,
+  run: ctx => {
+    if (ctx.actions.selectedProjectId) {
+      ctx.actions.toggleWatchStripForProject(ctx.actions.selectedProjectId)
+    }
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.pinActiveTab',
+  title: 'Pin Active Tab to Watch Strip',
+  aliases: ['pin tab', 'pin watch'],
+  when: ctx => {
+    const t = activePinnableTab(ctx.actions)
+    return !!t && !t.pinned
+  },
+  run: ctx => {
+    const t = activePinnableTab(ctx.actions)
+    if (t) ctx.actions.setTabPinned(t.projectId, t.taskId, t.pane, t.tabId, true)
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.unpinActiveTab',
+  title: 'Unpin Active Tab',
+  aliases: ['unpin tab', 'unpin watch'],
+  when: ctx => {
+    const t = activePinnableTab(ctx.actions)
+    return !!t && t.pinned
+  },
+  run: ctx => {
+    const t = activePinnableTab(ctx.actions)
+    if (t) ctx.actions.setTabPinned(t.projectId, t.taskId, t.pane, t.tabId, false)
+  }
 })

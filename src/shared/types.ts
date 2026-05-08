@@ -17,6 +17,7 @@ export interface Tab {
   sessionId?: string
   filePath?: string
   noteId?: string
+  pinned?: boolean
 }
 
 export interface ProjectNote {
@@ -257,6 +258,7 @@ export interface WindowViewState {
   fileBrowserOpen: boolean
   fileBrowserWidth: number
   fileBrowserActiveTab: FileBrowserTab
+  watchStripHiddenProjectIds: string[]
 }
 
 export interface WindowGeometry {
@@ -341,7 +343,8 @@ export function createDefaultWindowViewState(): WindowViewState {
     taskStates: {},
     fileBrowserOpen: false,
     fileBrowserWidth: 250,
-    fileBrowserActiveTab: 'files'
+    fileBrowserActiveTab: 'files',
+    watchStripHiddenProjectIds: []
   }
 }
 
@@ -366,7 +369,8 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     ),
     fileBrowserOpen: state.fileBrowserOpen,
     fileBrowserWidth: state.fileBrowserWidth,
-    fileBrowserActiveTab: state.fileBrowserActiveTab
+    fileBrowserActiveTab: state.fileBrowserActiveTab,
+    watchStripHiddenProjectIds: [...state.watchStripHiddenProjectIds]
   }
 }
 
@@ -468,7 +472,8 @@ export function reconcileWindowViewState(
     taskStates,
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
-    fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files'
+    fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
+    watchStripHiddenProjectIds: Array.isArray(state.watchStripHiddenProjectIds) ? [...state.watchStripHiddenProjectIds] : []
   }
 }
 
@@ -504,6 +509,7 @@ export function buildWindowViewState(
     selectedTaskId,
     collapsedFolderIds: seed?.collapsedFolderIds ? [...seed.collapsedFolderIds] : [...config.collapsedFolderIds],
     expandedProjectIds,
-    taskStates
+    taskStates,
+    watchStripHiddenProjectIds: []
   }, projects)
 }
