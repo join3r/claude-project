@@ -78,7 +78,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const {
     projects, folders, rootOrder,
     selectedProjectId, selectedTaskId,
-    setSelectedProjectId, switchToTask, selectProjectHome,
+    switchToTask, selectProjectHome,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
     addFolder, removeFolder, renameFolder,
@@ -684,7 +684,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     <div className="sidebar flex flex-col w-60 min-w-[200px] bg-surface border-r border-border select-none [--recency-rgb:100,150,230] [.theme-light_&]:[--recency-rgb:230,160,80]">
       <ProjectSwitcher
         projects={projects}
-        setSelectedProjectId={setSelectedProjectId}
+        selectProjectHome={selectProjectHome}
         switchToTask={switchToTask}
         isActive={switcherActive}
         onDeactivate={() => setSwitcherActive(false)}

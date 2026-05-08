@@ -13,7 +13,7 @@ interface SearchResult {
 
 interface ProjectSwitcherProps {
   projects: Project[]
-  setSelectedProjectId: (id: string) => void
+  selectProjectHome: (id: string) => void
   switchToTask: (projectId: string, taskId: string) => void
   isActive: boolean
   onDeactivate: () => void
@@ -21,7 +21,7 @@ interface ProjectSwitcherProps {
 
 export default function ProjectSwitcher({
   projects,
-  setSelectedProjectId,
+  selectProjectHome,
   switchToTask,
   isActive,
   onDeactivate
@@ -114,7 +114,7 @@ export default function ProjectSwitcher({
 
   const handleSelect = useCallback((result: SearchResult) => {
     if (result.type === 'project') {
-      setSelectedProjectId(result.projectId)
+      selectProjectHome(result.projectId)
     } else if (result.taskId) {
       switchToTask(result.projectId, result.taskId)
       // Clear attention state on target task's AI tabs
@@ -131,7 +131,7 @@ export default function ProjectSwitcher({
       }
     }
     handleDeactivate()
-  }, [setSelectedProjectId, switchToTask, projects, tabStatusStore, handleDeactivate])
+  }, [selectProjectHome, switchToTask, projects, tabStatusStore, handleDeactivate])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {

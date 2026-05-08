@@ -150,7 +150,7 @@ export function Palette(): React.ReactElement | null {
       if (cmd) Promise.resolve(cmd.run({ actions })).catch(() => {})
     } else if (e.kind === 'project') {
       const projectId = id.slice('project:'.length)
-      actions.setSelectedProjectId(projectId)
+      actions.selectProjectHome(projectId)
     } else if (e.kind === 'task') {
       const [, projectId, taskId] = id.split(':')
       actions.switchToTask(projectId, taskId)

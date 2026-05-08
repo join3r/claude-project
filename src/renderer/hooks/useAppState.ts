@@ -158,17 +158,18 @@ export function useAppState() {
 
       const hydratedProjectsData = applyQueuedStateUpdates(loadedProjectsData, pendingProjectUpdatersRef.current)
       const hydratedConfig = applyQueuedStateUpdates(loadedConfig, pendingConfigUpdatersRef.current)
-      const hydratedWindowViewState = buildWindowViewState(
-        hydratedProjectsData.projects,
-        hydratedConfig,
-        loadedWindowViewState
-      )
 
       const projectsWithLifetime = hydratedProjectsData.projects.map(p =>
         backfillLifetimeStats(p, loadedNotes)
       )
       const { projects: migratedProjects } = ensureHomeTasks(projectsWithLifetime)
       const finalProjectsData = { ...hydratedProjectsData, projects: migratedProjects }
+
+      const hydratedWindowViewState = buildWindowViewState(
+        migratedProjects,
+        hydratedConfig,
+        loadedWindowViewState
+      )
 
       pendingProjectUpdatersRef.current = []
       pendingConfigUpdatersRef.current = []
