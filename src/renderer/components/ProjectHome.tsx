@@ -26,20 +26,21 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
 
   if (!project) return null
 
-  const allTabs: Tab[] = project.tasks.flatMap(t => [...t.tabs.left, ...t.tabs.right])
+  const visibleTasks = project.tasks.filter(t => t.system !== 'home')
+  const allTabs: Tab[] = visibleTasks.flatMap(t => [...t.tabs.left, ...t.tabs.right]).filter(tab => tab.system !== 'home')
   const tabsByType = new Map<TabType, number>()
   for (const tab of allTabs) tabsByType.set(tab.type, (tabsByType.get(tab.type) ?? 0) + 1)
   const tabBreakdown = TAB_TYPE_ORDER
     .map(type => ({ type, count: tabsByType.get(type) ?? 0 }))
     .filter(x => x.count > 0)
 
-  const activeTaskCount = project.tasks.length
-  const mostRecentTask = project.tasks
+  const activeTaskCount = visibleTasks.length
+  const mostRecentTask = visibleTasks
     .filter(t => t.lastFocusedAt)
     .sort((a, b) => (b.lastFocusedAt ?? 0) - (a.lastFocusedAt ?? 0))[0] ?? null
 
   const lifetime = project.lifetimeStats ?? {
-    tasksCreated: project.tasks.length,
+    tasksCreated: visibleTasks.length,
     notesCreated: (actions.notes[project.id] ?? []).length
   }
 

@@ -8,6 +8,7 @@ export function tasksToEntities(actions: AppActions, opts: { allProjects: boolea
   for (const p of actions.projects) {
     if (!opts.allProjects && p.id !== activeId) continue
     for (const t of p.tasks) {
+      if (t.system === 'home') continue
       out.push({
         kind: 'task',
         id: `task:${p.id}:${t.id}`,

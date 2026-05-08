@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Project, AppConfig } from '../../shared/types'
-import { AI_TAB_TYPES, isWorkspaceTask } from '../../shared/types'
+import { AI_TAB_TYPES, isHomeTask, isWorkspaceTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 
@@ -60,14 +60,14 @@ export default function ActivityPanel({
   const [lastExpandedHeight, setLastExpandedHeight] = useState<number>(() => heightPx > 0 ? heightPx : 160)
 
   const sortedByRecency = React.useMemo(
-    () => sortTasksByRecency(projects.flatMap(p => p.tasks)),
+    () => sortTasksByRecency(projects.flatMap(p => p.tasks.filter(t => !isHomeTask(t)))),
     [projects]
   )
 
   const projectByTaskId = React.useMemo(() => {
     const map = new Map<string, Project>()
     for (const project of projects) {
-      for (const task of project.tasks) {
+      for (const task of project.tasks.filter(t => !isHomeTask(t))) {
         map.set(task.id, project)
       }
     }
