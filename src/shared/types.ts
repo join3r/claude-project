@@ -467,7 +467,10 @@ export function reconcileTaskViewState(task: Task, state?: TaskViewState): TaskV
   if (task.system === 'home') {
     const hasHomeTab = task.tabs.left.some((tab) => tab.system === 'home')
     if (!hasHomeTab) {
-      const { tab } = createHomeTask(task.id.replace(/^home-task-/, ''))
+      const projectId = task.id.startsWith('home-task-')
+        ? task.id.slice('home-task-'.length)
+        : task.id
+      const { tab } = createHomeTask(projectId)
       task.tabs.left.unshift(tab)
       if (!task.activeTab.left) task.activeTab.left = tab.id
     }

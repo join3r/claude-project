@@ -82,6 +82,8 @@ describe('ensureHomeTasks migration', () => {
     const state = reconcileTaskViewState(homeTask)
     // After reconcile the home tab is present and active
     expect(state.activeTab.left).toBeTruthy()
+    expect(homeTask.tabs.left).toHaveLength(1)
+    expect(homeTask.tabs.left[0].system).toBe('home')
   })
 
   it('resolveStoredSelection defaults to the home task when no task remembered', () => {
