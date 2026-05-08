@@ -13,4 +13,8 @@ describe('buildWindowTitle', () => {
   it('falls back to the app name when nothing is selected', () => {
     expect(buildWindowTitle(null, null)).toBe('DevTool')
   })
+
+  it('omits the task suffix when the task is the home task', () => {
+    expect(buildWindowTitle('claude-project', 'Home', true)).toBe('claude-project')
+  })
 })

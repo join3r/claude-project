@@ -6,7 +6,11 @@ import {
   buildWindowViewState,
   cloneWindowViewState,
   createDefaultWindowViewState,
+  createHomeTask,
   createTaskViewState,
+  ensureHomeTasks,
+  isHomeTab,
+  isHomeTask,
   isRemoteProject,
   reconcileTaskViewState,
   reconcileWindowViewState
@@ -43,8 +47,8 @@ type AddTabOptions = {
   noteName?: string
 }
 
-export function buildWindowTitle(projectName: string | null, taskName: string | null): string {
-  if (projectName && taskName) {
+export function buildWindowTitle(projectName: string | null, taskName: string | null, taskIsHome?: boolean): string {
+  if (projectName && taskName && !taskIsHome) {
     return `${projectName} / ${taskName}`
   }
   if (projectName) {
@@ -163,7 +167,8 @@ export function useAppState() {
       const projectsWithLifetime = hydratedProjectsData.projects.map(p =>
         backfillLifetimeStats(p, loadedNotes)
       )
-      const finalProjectsData = { ...hydratedProjectsData, projects: projectsWithLifetime }
+      const { projects: migratedProjects } = ensureHomeTasks(projectsWithLifetime)
+      const finalProjectsData = { ...hydratedProjectsData, projects: migratedProjects }
 
       pendingProjectUpdatersRef.current = []
       pendingConfigUpdatersRef.current = []
@@ -387,6 +392,45 @@ export function useAppState() {
     }
   }, [updateWindowViewState])
 
+  const selectProjectHome = useCallback((projectId: string) => {
+    const project = projectsRef.current.find(p => p.id === projectId) ?? null
+    const homeTask = project?.tasks.find(t => t.system === 'home') ?? null
+    if (!project || !homeTask) {
+      selectProject(projectId)
+      return
+    }
+    const homeTab = homeTask.tabs.left.find(t => t.system === 'home') ?? null
+    updateWindowViewState(prev => {
+      const expandedProjectIds = prev.expandedProjectIds.includes(projectId)
+        ? prev.expandedProjectIds
+        : [...prev.expandedProjectIds, projectId]
+      const prevTaskState = prev.taskStates[homeTask.id] ?? createTaskViewState(homeTask)
+      return {
+        ...prev,
+        selectedProjectId: projectId,
+        selectedTaskId: homeTask.id,
+        expandedProjectIds,
+        taskStates: {
+          ...prev.taskStates,
+          [homeTask.id]: {
+            ...prevTaskState,
+            activeTab: {
+              ...prevTaskState.activeTab,
+              left: homeTab?.id ?? prevTaskState.activeTab.left
+            }
+          }
+        }
+      }
+    })
+    if (project.ssh) {
+      window.api.sshStatus(projectId).then(status => {
+        if (status !== 'connected' && status !== 'connecting') {
+          window.api.sshConnect(projectId, project.ssh!).catch(() => {})
+        }
+      })
+    }
+  }, [selectProject, updateWindowViewState])
+
   const selectTask = useCallback((id: string | null) => {
     updateWindowViewState(prev => ({ ...prev, selectedTaskId: id }))
     if (id) {
@@ -431,7 +475,9 @@ export function useAppState() {
   }, [persistProjects])
 
   const addProject = useCallback((name: string, directory: string) => {
-    const project: Project = { id: uuid(), name, directory, tasks: [] }
+    const id = uuid()
+    const { task: homeTask } = createHomeTask(id)
+    const project: Project = { id, name, directory, tasks: [homeTask] }
     persistProjects(prev => ({
       ...prev,
       projects: [...prev.projects, project],
@@ -442,7 +488,9 @@ export function useAppState() {
   }, [persistProjects, selectProject])
 
   const addRemoteProject = useCallback((name: string, sshConfig: SshConfig, aiToolArgs?: Partial<Record<AiTabType, string>>) => {
-    const project: Project = { id: uuid(), name, directory: '', ssh: sshConfig, tasks: [], ...(aiToolArgs ? { aiToolArgs } : {}) }
+    const id = uuid()
+    const { task: homeTask } = createHomeTask(id)
+    const project: Project = { id, name, directory: '', ssh: sshConfig, tasks: [homeTask], ...(aiToolArgs ? { aiToolArgs } : {}) }
     persistProjects(prev => ({
       ...prev,
       projects: [...prev.projects, project],
@@ -454,7 +502,9 @@ export function useAppState() {
   }, [persistProjects, selectProject])
 
   const addShellCommandProject = useCallback((name: string, command: string) => {
-    const project: Project = { id: uuid(), name, directory: '', shellCommand: { command }, tasks: [] }
+    const id = uuid()
+    const { task: homeTask } = createHomeTask(id)
+    const project: Project = { id, name, directory: '', shellCommand: { command }, tasks: [homeTask] }
     persistProjects(prev => ({
       ...prev,
       projects: [...prev.projects, project],
@@ -674,6 +724,7 @@ export function useAppState() {
   const removeTask = useCallback((projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = project?.tasks.find(candidate => candidate.id === taskId)
+    if (task && isHomeTask(task)) return
     if (task) {
       for (const tab of [...task.tabs.left, ...task.tabs.right]) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
@@ -806,6 +857,7 @@ export function useAppState() {
     const task = project?.tasks.find(candidate => candidate.id === taskId)
     const tabIndex = task?.tabs[pane].findIndex(tab => tab.id === tabId) ?? -1
     const removedTab = tabIndex >= 0 ? task?.tabs[pane][tabIndex] ?? null : null
+    if (removedTab && isHomeTab(removedTab)) return
 
     if (removedTab && tabIndex >= 0) {
       rememberClosedTab({
@@ -1335,8 +1387,12 @@ export function useAppState() {
   const effectiveTerminalTheme = config?.terminalTheme === 'system' || !config ? theme : config.terminalTheme
 
   useEffect(() => {
-    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
-  }, [selectedProject?.name, selectedTask?.name])
+    document.title = buildWindowTitle(
+      selectedProject?.name ?? null,
+      selectedTask?.name ?? null,
+      selectedTask?.system === 'home'
+    )
+  }, [selectedProject?.name, selectedTask?.name, selectedTask?.system])
 
   return {
     projects,
@@ -1352,6 +1408,7 @@ export function useAppState() {
     effectiveTheme,
     effectiveTerminalTheme,
     setSelectedProjectId: selectProject,
+    selectProjectHome,
     setSelectedTaskId: selectTask,
     switchToTask,
     addProject,
