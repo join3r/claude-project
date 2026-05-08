@@ -78,7 +78,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const {
     projects, folders, rootOrder,
     selectedProjectId, selectedTaskId,
-    setSelectedProjectId, setSelectedTaskId, switchToTask, selectProjectHome,
+    setSelectedProjectId, switchToTask, selectProjectHome,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
     addFolder, removeFolder, renameFolder,
@@ -599,15 +599,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       {isExpanded && (
         <div className="pb-1">
           {visibleTasks.map((task, tIdx) => {
+            const projectTaskIndex = project.tasks.indexOf(task)
             const isSelected = selectedTaskId === task.id
             const opacity = !isSelected && config?.taskRecencyHighlight
               ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
               : 0
             const recencyStyle = buildRecencyStyle(opacity, effectiveTheme)
-            const isTaskDragging = dragState?.type === 'task' && dragState.index === tIdx
+            const isTaskDragging = dragState?.type === 'task' && dragState.index === projectTaskIndex
             return (
               <React.Fragment key={task.id}>
-                {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === tIdx && (
+                {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === projectTaskIndex && (
                   <div className="h-0.5 bg-accent-400 mr-2 rounded-sm ml-6" />
                 )}
                 <div
@@ -627,10 +628,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   ].join(' ')}
                   data-selected={isSelected ? 'true' : undefined}
                   data-task-id={task.id}
-                  data-task-index={tIdx}
+                  data-task-index={projectTaskIndex}
                   style={recencyStyle}
                   onClick={() => handleSelectTask(project.id, task)}
-                  onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, tIdx, null, project.id)}
+                  onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, projectTaskIndex, null, project.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
                 >
                   {editingId === task.id ? (
@@ -656,7 +657,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               </React.Fragment>
             )
           })}
-          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === visibleTasks.length && (
+          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
             <div className="h-0.5 bg-accent-400 mr-2 rounded-sm ml-6" />
           )}
           <button

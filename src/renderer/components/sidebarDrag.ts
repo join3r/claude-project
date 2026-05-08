@@ -10,7 +10,7 @@ export function getTaskDropIndex(
   cursorY: number,
   draggedTaskId: string
 ): number {
-  let bestIndex = 0
+  let bestIndex = items[0]?.index ?? 0
 
   for (const item of items) {
     if (item.id === draggedTaskId) continue
