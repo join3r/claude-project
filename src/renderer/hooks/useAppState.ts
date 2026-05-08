@@ -422,7 +422,7 @@ export function useAppState() {
         }
       }
     })
-    if (project.ssh) {
+    if (isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
         if (status !== 'connected' && status !== 'connecting') {
           window.api.sshConnect(projectId, project.ssh!).catch(() => {})
