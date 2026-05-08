@@ -6,7 +6,6 @@ import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
-import { ProjectHome } from './ProjectHome'
 import { WatchStrip } from './WatchStrip'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -76,7 +75,6 @@ export default function ContentArea(): React.ReactElement {
   const isDragging = dragRatio !== null
 
   const hasProjectSelection = !!selectedProjectId
-  const hasTaskSelection = !!selectedProjectId && !!selectedTaskId
 
   const rememberFocusedPane = useCallback((pane: PaneSide) => {
     focusedPaneRef.current = {
@@ -151,7 +149,7 @@ export default function ContentArea(): React.ReactElement {
 
     const cleanupClose = window.api.onMenuCloseTab(() => {
       const info = getActiveTabInfo()
-      if (selectedProjectId && selectedTaskId && info?.activeTabId) {
+      if (selectedProjectId && selectedTaskId && info?.activeTabId && info.activeTab?.type !== 'home') {
         removeTab(selectedProjectId, selectedTaskId, info.pane, info.activeTabId)
       }
     })
@@ -258,7 +256,11 @@ export default function ContentArea(): React.ReactElement {
 
   const selectedTunnelState = selectedProjectId ? tunnelStates[selectedProjectId] : undefined
   const selectedTaskView = selectedTask ? getTaskViewState(selectedTask) : null
-  const windowBarTitle = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
+  const windowBarTitle = buildWindowTitle(
+    selectedProject?.name ?? null,
+    selectedTask?.name ?? null,
+    selectedTask?.system === 'home'
+  )
   const selectedProjectDir = selectedTask?.workspace
     ? joinPath(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
     : selectedProject?.directory ?? ''
@@ -291,7 +293,7 @@ export default function ContentArea(): React.ReactElement {
         <div className="content-toolbar flex items-center justify-between gap-1.5 px-2 py-0.5 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
           <div className="flex items-center gap-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-text-muted" title={windowBarTitle}>
             <span className="text-text font-semibold">{selectedProject.name}</span>
-            {selectedTask && (
+            {selectedTask && selectedTask.system !== 'home' && (
               <>
                 <span className="text-text-muted"> / </span>
                 <span className="text-text-muted">{selectedTask.name}</span>
@@ -345,9 +347,6 @@ export default function ContentArea(): React.ReactElement {
 
       {!hasProjectSelection && (
         <div className="flex-1 flex items-center justify-center text-text-muted text-[14px]">Select or create a task to get started</div>
-      )}
-      {hasProjectSelection && !hasTaskSelection && selectedProjectId && (
-        <ProjectHome projectId={selectedProjectId} />
       )}
       {projects.flatMap((project) =>
         project.tasks.map((task) => {
