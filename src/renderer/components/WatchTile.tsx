@@ -14,10 +14,10 @@ interface Props {
 
 function dotClass(status: TabStatusValue): string {
   switch (status) {
-    case 'working':   return 'bg-green-400 animate-pulse'
-    case 'attention': return 'bg-amber-400'
-    case 'exited':    return 'bg-text-subtle/50'
-    default:          return 'bg-teal-400/70'
+    case 'working':   return 'bg-status-working animate-pulse'
+    case 'attention': return 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+    case 'exited':    return 'bg-status-exited'
+    default:          return 'bg-status-exited'
   }
 }
 

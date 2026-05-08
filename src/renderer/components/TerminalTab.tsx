@@ -43,11 +43,11 @@ interface TerminalEntry {
   restoring: boolean
   pendingData: string[]
   suppressResizeEvents: number
-  onStatusUpdate?: (chunk: string) => void
-  onPtyExit?: () => void
 }
 
 const terminals = new Map<string, TerminalEntry>()
+const statusDetectors = new Map<string, (chunk: string) => void>()
+const exitListeners = new Map<string, () => void>()
 
 let ptyListenerRegistered = false
 let ptyExitListenerRegistered = false
@@ -67,6 +67,7 @@ function ensurePtyListener(): void {
   if (ptyListenerRegistered) return
   ptyListenerRegistered = true
   window.api.onPtyData((id: string, data: string) => {
+    statusDetectors.get(id)?.(data)
     const entry = terminals.get(id)
     if (!entry) return
     if (entry.restoring) {
@@ -74,7 +75,6 @@ function ensurePtyListener(): void {
       return
     }
     entry.term.write(data)
-    entry.onStatusUpdate?.(data)
   })
 }
 
@@ -82,9 +82,7 @@ function ensurePtyExitListener(): void {
   if (ptyExitListenerRegistered) return
   ptyExitListenerRegistered = true
   window.api.onPtyExit((id: string) => {
-    const entry = terminals.get(id)
-    if (!entry) return
-    entry.onPtyExit?.()
+    exitListeners.get(id)?.()
   })
 }
 
@@ -456,20 +454,18 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     return () => window.removeEventListener('keydown', handler)
   }, [visible])
 
-  // Wire status detection callbacks into the terminal entry
+  // Status detection runs independently of the renderer-side terminal entry,
+  // so activity keeps updating while the tab is hidden (entry is disposed).
   useEffect(() => {
-    const entry = terminals.get(tabId)
-    if (!entry) return
-    entry.onStatusUpdate = handleOutputForStatus
-    entry.onPtyExit = () => statusStore.setStatus(tabId, 'exited')
+    statusDetectors.set(tabId, handleOutputForStatus)
+    exitListeners.set(tabId, () => statusStore.setStatus(tabId, 'exited'))
+    ensurePtyListener()
+    ensurePtyExitListener()
     return () => {
-      const e = terminals.get(tabId)
-      if (e) {
-        e.onStatusUpdate = undefined
-        e.onPtyExit = undefined
-      }
+      statusDetectors.delete(tabId)
+      exitListeners.delete(tabId)
     }
-  }, [tabId, handleOutputForStatus, statusStore, visible])
+  }, [tabId, handleOutputForStatus, statusStore])
 
   // Cleanup decay timer on unmount
   useEffect(() => {

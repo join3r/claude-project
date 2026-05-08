@@ -401,24 +401,29 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       })
 
       ensureHookListeners()
-    } else {
-      // Non-Claude AI tabs: keep PTY output heuristic
-      activityCallbacks.set(tabId, () => {
-        if (Date.now() < suppressUntilRef.current) return
-        const current = statusStore.getStatus(tabId)
-        if (current === 'exited') return
-        if (current !== 'attention') {
-          statusStore.setStatus(tabId, 'working')
-        }
-        if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
-        activityTimerRef.current = setTimeout(() => {
-          const latest = statusStore.getStatus(tabId)
-          if (latest === 'working') {
-            statusStore.setStatus(tabId, visibleRef.current ? null : 'attention')
-          }
-        }, 3000)
-      })
+    }
 
+    // PTY-based activity heuristic for all AI tabs. For Claude this is a fallback
+    // signal so the watch strip / sidebar still reflect activity when hooks
+    // haven't been configured or before they fire. For non-Claude tabs it's the
+    // primary signal. Hook-driven 'attention' is preserved (not overwritten).
+    activityCallbacks.set(tabId, () => {
+      if (Date.now() < suppressUntilRef.current) return
+      const current = statusStore.getStatus(tabId)
+      if (current === 'exited') return
+      if (current !== 'attention') {
+        statusStore.setStatus(tabId, 'working')
+      }
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+      activityTimerRef.current = setTimeout(() => {
+        const latest = statusStore.getStatus(tabId)
+        if (latest === 'working') {
+          statusStore.setStatus(tabId, visibleRef.current ? null : 'attention')
+        }
+      }, 3000)
+    })
+
+    if (!isClaudeTab) {
       term.onBell(() => {
         statusStore.setStatus(tabId, 'attention')
       })
