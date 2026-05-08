@@ -1236,6 +1236,10 @@ export function useAppState() {
     updateWindowViewState(prev => ({ ...prev, fileBrowserWidth: Math.min(400, Math.max(150, width)) }))
   }, [updateWindowViewState])
 
+  const setFileBrowserOpen = useCallback((open: boolean) => {
+    updateWindowViewState(prev => ({ ...prev, fileBrowserOpen: open }))
+  }, [updateWindowViewState])
+
   const setFileBrowserActiveTab = useCallback((tab: FileBrowserTab) => {
     updateWindowViewState(prev => ({ ...prev, fileBrowserActiveTab: tab }))
   }, [updateWindowViewState])
@@ -1455,6 +1459,7 @@ export function useAppState() {
     fileBrowserWidth: windowViewState.fileBrowserWidth,
     fileBrowserActiveTab: windowViewState.fileBrowserActiveTab,
     toggleFileBrowser,
+    setFileBrowserOpen,
     watchStripHiddenProjectIds: windowViewState.watchStripHiddenProjectIds,
     toggleWatchStripForProject,
     setFileBrowserWidth,
