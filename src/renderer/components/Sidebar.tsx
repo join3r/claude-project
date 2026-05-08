@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isRemoteProject, isShellCommandProject, isWorkspaceTask } from '../../shared/types'
+import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask } from '../../shared/types'
 import type { Tab, Task, Project, Folder } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
@@ -56,7 +56,7 @@ function getFolderStatus(folder: { projectIds: string[] }, projects: { id: strin
   const folderProjects = folder.projectIds
     .map(pid => projects.find(p => p.id === pid))
     .filter(Boolean) as { tasks: Task[] }[]
-  const statuses = folderProjects.map(p => getProjectStatus(p.tasks, allStatuses)).filter(Boolean)
+  const statuses = folderProjects.map(p => getProjectStatus(p.tasks.filter(t => !isHomeTask(t)), allStatuses)).filter(Boolean)
   if (statuses.includes('attention')) return 'attention'
   if (statuses.includes('working')) return 'working'
   if (statuses.includes('exited')) return 'exited'
@@ -78,7 +78,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const {
     projects, folders, rootOrder,
     selectedProjectId, selectedTaskId,
-    setSelectedProjectId, setSelectedTaskId, switchToTask,
+    setSelectedProjectId, setSelectedTaskId, switchToTask, selectProjectHome,
     addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
     addFolder, removeFolder, renameFolder,
@@ -95,7 +95,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const [now, setNow] = useState(() => Date.now())
   const sortedByRecency = React.useMemo(
-    () => sortTasksByRecency(projects.flatMap(p => p.tasks)),
+    () => sortTasksByRecency(projects.flatMap(p => p.tasks.filter(t => !isHomeTask(t)))),
     [projects]
   )
 
@@ -494,6 +494,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const isExpanded = expandedProjects.has(project.id)
     const isProjectSelected = selectedProjectId === project.id && !isExpanded
     const isProjectDragging = dragState?.type === 'project' && dragState.id === project.id
+    const visibleTasks = project.tasks.filter(t => !isHomeTask(t))
     return (
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
@@ -513,7 +514,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         data-drag-type="project"
         data-drag-id={project.id}
         data-folder-id={folderId || ''}
-        onClick={() => { setSelectedProjectId(project.id); setSelectedTaskId(null) }}
+        onClick={() => { selectProjectHome(project.id) }}
         onContextMenu={(e) => handleContextMenu(e, 'project', project.id)}
         onMouseDown={(e) => {
           const folder = folderId ? folders.find(f => f.id === folderId) : null
@@ -582,7 +583,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-1 ${dotClass}`} />
             })()}
             {!isExpanded && (() => {
-              const projectStatus = getProjectStatus(project.tasks, allStatuses)
+              const projectStatus = getProjectStatus(project.tasks.filter(t => !isHomeTask(t)), allStatuses)
               if (!projectStatus) return null
               const dotClass = projectStatus === 'working'
                 ? 'bg-status-working animate-pulse'
@@ -597,7 +598,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {isExpanded && (
         <div className="pb-1">
-          {project.tasks.map((task, tIdx) => {
+          {visibleTasks.map((task, tIdx) => {
             const isSelected = selectedTaskId === task.id
             const opacity = !isSelected && config?.taskRecencyHighlight
               ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
@@ -655,7 +656,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               </React.Fragment>
             )
           })}
-          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
+          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === visibleTasks.length && (
             <div className="h-0.5 bg-accent-400 mr-2 rounded-sm ml-6" />
           )}
           <button
