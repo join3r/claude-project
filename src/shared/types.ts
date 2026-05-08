@@ -116,6 +116,17 @@ export function createHomeTask(projectId: string): { task: Task; tab: Tab } {
   return { task, tab }
 }
 
+export function ensureHomeTasks(projects: Project[]): { projects: Project[]; changed: boolean } {
+  let changed = false
+  const next = projects.map((project) => {
+    if (project.tasks.some((t) => t.system === 'home')) return project
+    changed = true
+    const { task } = createHomeTask(project.id)
+    return { ...project, tasks: [task, ...project.tasks] }
+  })
+  return { projects: changed ? next : projects, changed }
+}
+
 export interface Project {
   id: string
   name: string
@@ -438,9 +449,12 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
   }
 
   const candidateTaskId = config.lastTaskId ?? project.lastTaskId ?? null
-  const taskId = candidateTaskId && project.tasks.some((task) => task.id === candidateTaskId)
+  const remembered = candidateTaskId && project.tasks.some((task) => task.id === candidateTaskId)
     ? candidateTaskId
     : null
+
+  const homeTask = project.tasks.find((task) => task.system === 'home') ?? null
+  const taskId = remembered ?? homeTask?.id ?? null
 
   return {
     selectedProjectId: project.id,
@@ -449,6 +463,16 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
 }
 
 export function reconcileTaskViewState(task: Task, state?: TaskViewState): TaskViewState {
+  // For home tasks, ensure the home tab exists in the left pane and is active by default.
+  if (task.system === 'home') {
+    const hasHomeTab = task.tabs.left.some((tab) => tab.system === 'home')
+    if (!hasHomeTab) {
+      const { tab } = createHomeTask(task.id.replace(/^home-task-/, ''))
+      task.tabs.left.unshift(tab)
+      if (!task.activeTab.left) task.activeTab.left = tab.id
+    }
+  }
+
   const fallback = createTaskViewState(task)
   if (!state) return fallback
 
