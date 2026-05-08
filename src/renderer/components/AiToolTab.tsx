@@ -168,13 +168,35 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const codexSpawnTsRef = useRef(0)
   const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const latestSessionIdRef = useRef<string | null>(sessionId ?? null)
-  // Claude tabs with a stored sessionId require explicit user activation before
-  // spawning, so resuming the session doesn't burn tokens just from app startup.
-  const requiresActivation = isClaudeTab && !!sessionId
-  const [userActivated, setUserActivated] = useState(!requiresActivation)
-  const userActivatedRef = useRef(!requiresActivation)
+  // Lazy loading: Claude tabs with prior activity (sessionId or saved scrollback)
+  // require explicit user activation before spawning, so resuming doesn't burn
+  // tokens on app startup. Brand-new Claude tabs (no prior activity) auto-spawn.
+  // null = still checking disk, true/false = decided.
+  const lazyLoadEnabled = config?.lazyLoadClaude ?? true
+  const [hadPriorActivity, setHadPriorActivity] = useState<boolean | null>(
+    isClaudeTab ? (sessionId ? true : null) : false
+  )
+  const requiresActivation = isClaudeTab && lazyLoadEnabled && hadPriorActivity === true
+  const activationDecisionPending = isClaudeTab && lazyLoadEnabled && hadPriorActivity === null
+  const [userActivated, setUserActivated] = useState(false)
+  const userActivatedRef = useRef(false)
   userActivatedRef.current = userActivated
-  const wasVisibleRef = useRef(visible)
+  const scrollbackPreloadedRef = useRef(false)
+
+  // Probe disk for existing scrollback to decide if this Claude tab counts as
+  // having prior activity (and therefore needs lazy activation).
+  useEffect(() => {
+    if (!isClaudeTab || sessionId) return
+    let cancelled = false
+    window.api.scrollbackLoad(tabId).then(data => {
+      if (cancelled) return
+      setHadPriorActivity(!!data && data.length > 0)
+    }).catch(() => {
+      if (cancelled) return
+      setHadPriorActivity(false)
+    })
+    return () => { cancelled = true }
+  }, [tabId, isClaudeTab, sessionId])
 
   // Release the renderer-side xterm instance while hidden. The PTY keeps
   // running in main and will be reattached from runtime scrollback on show.
@@ -185,16 +207,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     disposeAiToolTerminal(tabId, { killRuntime: false, persistScrollback: false })
     initializedRef.current = false
     spawnedRef.current = false
+    scrollbackPreloadedRef.current = false
   }, [visible, tabId])
-
-  // A hidden→visible transition is a deliberate user action (clicking the tab
-  // or switching tasks), so it counts as activation for Claude resume.
-  useEffect(() => {
-    if (visible && !wasVisibleRef.current && requiresActivation && !userActivated) {
-      setUserActivated(true)
-    }
-    wasVisibleRef.current = visible
-  }, [visible, requiresActivation, userActivated])
 
   function startCodexSessionPolling(): void {
     if (codexSessionPollRef.current) return
@@ -441,6 +455,27 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     ensureBeforeUnloadHandler()
   }, [tabId, toolType, config, addTab, pane, projectId, taskId, visible])
 
+  // Show stored scrollback in the xterm before the user clicks Resume so they
+  // can see what the session was about. Skipped if the tab will auto-spawn
+  // anyway — that path writes scrollback itself after PTY attach.
+  useEffect(() => {
+    if (!visible || !requiresActivation || userActivated || scrollbackPreloadedRef.current) return
+    const entry = terminals.get(tabId)
+    if (!entry) return
+    let cancelled = false
+    window.api.scrollbackLoad(tabId).then(data => {
+      if (cancelled) return
+      const sanitized = sanitizeRestoredScrollback(data ?? '')
+      if (sanitized) {
+        entry.term.write(sanitized, () => {
+          entry.term.scrollToBottom()
+        })
+      }
+      scrollbackPreloadedRef.current = true
+    }).catch(() => { /* ignore */ })
+    return () => { cancelled = true }
+  }, [visible, requiresActivation, userActivated, tabId])
+
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
     const entry = terminals.get(tabId)
@@ -491,6 +526,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         }
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
+          if (activationDecisionPending) return // wait until we've checked disk for prior scrollback
           if (requiresActivation && !userActivatedRef.current) return // wait for explicit user activation
           spawnedRef.current = true
 
@@ -531,7 +567,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
             const restoredScrollback = sanitizeRestoredScrollback(attachResult.scrollback)
 
-            if (restoredScrollback) {
+            // Skip the rewrite if we already pre-loaded scrollback for the
+            // unloaded-state preview — same disk file, no need to duplicate.
+            if (restoredScrollback && !scrollbackPreloadedRef.current) {
               await new Promise<void>(resolve => {
                 entry.term.write(restoredScrollback, () => {
                   flushPending()
@@ -560,7 +598,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated])
+  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending])
 
   // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
@@ -658,10 +696,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       <div ref={hostRef} className="w-full h-full" />
       {requiresActivation && !userActivated && visible && (
         <div
-          className="absolute inset-0 flex items-center justify-center cursor-pointer z-10 bg-bg-base/70"
+          className="absolute inset-x-0 bottom-0 flex items-center justify-center cursor-pointer z-10 py-3 bg-gradient-to-t from-bg-base/95 via-bg-base/70 to-transparent"
           onMouseDown={() => setUserActivated(true)}
         >
-          <div className="text-text-secondary text-[13px] px-3 py-2 rounded border border-border-default bg-bg-elevated">
+          <div className="text-text text-[13px] px-4 py-2 rounded border border-border-default bg-bg-elevated shadow-lg hover:border-accent-400">
             Click to resume Claude session
           </div>
         </div>

@@ -166,6 +166,7 @@ export interface AppConfig {
   enableClaude: boolean
   enableCodex: boolean
   enableOpencode: boolean
+  lazyLoadClaude: boolean
   lastProjectId: string | null
   lastTaskId: string | null
   collapsedFolderIds: string[]
@@ -298,6 +299,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   enableClaude: false,
   enableCodex: false,
   enableOpencode: false,
+  lazyLoadClaude: true,
   lastProjectId: null,
   lastTaskId: null,
   collapsedFolderIds: [],

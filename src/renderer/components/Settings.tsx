@@ -295,34 +295,53 @@ export default function Settings({ onClose }: Props): React.ReactElement {
 
       case 'ai':
         return (
-          <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
-              <input
-                type="checkbox"
-                className="cursor-pointer"
-                checked={config.enableClaude}
-                onChange={(e) => updateConfig({ enableClaude: e.target.checked })}
-              />
-              Claude Code
-            </label>
-            <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
-              <input
-                type="checkbox"
-                className="cursor-pointer"
-                checked={config.enableCodex}
-                onChange={(e) => updateConfig({ enableCodex: e.target.checked })}
-              />
-              Codex
-            </label>
-            <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
-              <input
-                type="checkbox"
-                className="cursor-pointer"
-                checked={config.enableOpencode}
-                onChange={(e) => updateConfig({ enableOpencode: e.target.checked })}
-              />
-              OpenCode
-            </label>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <label className={labelCls}>Enabled tools</label>
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.enableClaude}
+                  onChange={(e) => updateConfig({ enableClaude: e.target.checked })}
+                />
+                Claude Code
+              </label>
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.enableCodex}
+                  onChange={(e) => updateConfig({ enableCodex: e.target.checked })}
+                />
+                Codex
+              </label>
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.enableOpencode}
+                  onChange={(e) => updateConfig({ enableOpencode: e.target.checked })}
+                />
+                OpenCode
+              </label>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className={labelCls}>Claude Code</label>
+              <label className="flex items-center gap-2 text-[13px] text-text cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="cursor-pointer"
+                  checked={config.lazyLoadClaude}
+                  onChange={(e) => updateConfig({ lazyLoadClaude: e.target.checked })}
+                />
+                Lazy-load Claude tabs (require Resume click)
+              </label>
+              <p className="text-[12px] text-text-muted leading-snug">
+                When on, Claude Code tabs with prior history wait for an explicit Resume click before spawning. Saves tokens after restarting the app.
+              </p>
+            </div>
           </div>
         )
 
