@@ -598,7 +598,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {isExpanded && (
         <div className="pb-1">
-          {visibleTasks.map((task, tIdx) => {
+          {visibleTasks.map((task) => {
             const projectTaskIndex = project.tasks.indexOf(task)
             const isSelected = selectedTaskId === task.id
             const opacity = !isSelected && config?.taskRecencyHighlight
