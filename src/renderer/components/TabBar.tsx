@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react'
 import { Pin, PinOff } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isShellCommandProject } from '../../shared/types'
+import { AI_TAB_TYPES, isHomeTab, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -243,17 +243,19 @@ export default function TabBar({
                   {tab.pinned ? <PinOff size={12} /> : <Pin size={12} />}
                 </button>
               )}
-              <button
-                className="bg-transparent border-0 text-text-muted cursor-pointer text-[14px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity"
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  removeTab(projectId, taskId, pane, tab.id)
-                }}
-                title="Close tab (⌘W)"
-              >
-                &times;
-              </button>
+              {!isHomeTab(tab) && (
+                <button
+                  className="bg-transparent border-0 text-text-muted cursor-pointer text-[14px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    removeTab(projectId, taskId, pane, tab.id)
+                  }}
+                  title="Close tab (⌘W)"
+                >
+                  &times;
+                </button>
+              )}
             </div>
           </React.Fragment>
         ))}
@@ -308,13 +310,15 @@ export default function TabBar({
                 {tab.pinned ? 'Unpin from watch strip' : 'Pin to watch strip'}
               </button>
             )}
-            <button
-              type="button"
-              className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
-              onClick={() => { removeTab(projectId, taskId, pane, tab.id); close() }}
-            >
-              Close tab
-            </button>
+            {!isHomeTab(tab) && (
+              <button
+                type="button"
+                className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+                onClick={() => { removeTab(projectId, taskId, pane, tab.id); close() }}
+              >
+                Close tab
+              </button>
+            )}
           </div>
         </>
       )
