@@ -13,7 +13,8 @@ interface Props { projectId: string }
 const TAB_TYPE_ORDER: TabType[] = ['terminal', 'editor', 'diff', 'note', 'browser', 'claude', 'codex', 'opencode']
 const TAB_TYPE_LABEL: Record<TabType, string> = {
   terminal: 'terminal', editor: 'editor', diff: 'diff', note: 'note',
-  browser: 'browser', claude: 'claude', codex: 'codex', opencode: 'opencode'
+  browser: 'browser', claude: 'claude', codex: 'codex', opencode: 'opencode',
+  home: 'home'
 }
 
 export function ProjectHome({ projectId }: Props): React.ReactElement | null {
