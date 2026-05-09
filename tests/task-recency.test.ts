@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   sortTasksByRecency,
   computeTaskRecencyOpacity,
+  buildRecencyStyle,
   MAX_OPACITY
 } from '../src/renderer/components/taskRecency'
 import type { AppConfig, Task } from '../src/shared/types'
@@ -31,6 +32,26 @@ const timeSettings: AppConfig['taskRecencyHighlight'] = {
   rankCount: 5,
   timeWindowMinutes: 60
 }
+
+describe('MAX_OPACITY', () => {
+  it('is capped low enough that recency does not out-shout selection', () => {
+    expect(MAX_OPACITY).toBe(0.12)
+  })
+})
+
+describe('buildRecencyStyle', () => {
+  it('returns undefined for non-positive opacity', () => {
+    expect(buildRecencyStyle(0, 'dark')).toBeUndefined()
+    expect(buildRecencyStyle(-0.1, 'dark')).toBeUndefined()
+  })
+
+  it('returns only a backgroundColor (no inset bar) for positive opacity', () => {
+    const style = buildRecencyStyle(0.1, 'dark')
+    expect(style).toBeDefined()
+    expect(style!.backgroundColor).toMatch(/^rgba\(100, 150, 230, 0\.100\)$/)
+    expect(style!.boxShadow).toBeUndefined()
+  })
+})
 
 describe('sortTasksByRecency', () => {
   it('excludes tasks without lastFocusedAt', () => {

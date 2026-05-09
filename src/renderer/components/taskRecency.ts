@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import type { AppConfig, Task } from '../../shared/types'
 
-export const MAX_OPACITY = 0.5
+export const MAX_OPACITY = 0.12
 
 const RECENCY_RGB_DARK = '100, 150, 230'
 const RECENCY_RGB_LIGHT = '100, 150, 230'
@@ -9,10 +9,8 @@ const RECENCY_RGB_LIGHT = '100, 150, 230'
 export function buildRecencyStyle(opacity: number, theme: 'dark' | 'light'): CSSProperties | undefined {
   if (opacity <= 0) return undefined
   const rgb = theme === 'light' ? RECENCY_RGB_LIGHT : RECENCY_RGB_DARK
-  const barAlpha = Math.min(1, opacity * 2.5).toFixed(3)
   return {
-    backgroundColor: `rgba(${rgb}, ${opacity.toFixed(3)})`,
-    boxShadow: `inset 4px 0 0 rgba(${rgb}, ${barAlpha})`
+    backgroundColor: `rgba(${rgb}, ${opacity.toFixed(3)})`
   }
 }
 
