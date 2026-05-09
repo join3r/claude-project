@@ -131,7 +131,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
 export default function TerminalTab({ tabId, visible, projectId, taskId, pane, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const { addTab, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
+  const { addTab, config, effectiveTerminalTheme, terminalZoomDelta, markTaskInteracted } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
   const focusClaimRef = useRef(false)
@@ -277,6 +277,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     term.onData((data) => {
       const currentEntry = terminals.get(tabId)
       if (!currentEntry || currentEntry.restoring) return
+      markTaskInteracted(projectId, taskId)
       window.api.ptyWrite(tabId, data)
     })
 
@@ -309,7 +310,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     ensurePtyExitListener()
     ensurePtySizeListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId, visible])
+  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId, visible, markTaskInteracted])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
