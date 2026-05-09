@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { buildWindowTitle } from '../hooks/useAppState'
-import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { isRemoteProject, isRenamableTab, isShellCommandProject } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
 import { WatchStrip } from './WatchStrip'
@@ -116,6 +116,37 @@ export default function ContentArea(): React.ReactElement {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [projects, selectedProjectId, selectedTaskId, setActiveTab, rememberFocusedPane, getTaskViewState])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'F2') return
+      if (!selectedProjectId || !selectedTaskId) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+
+      const project = projects.find(p => p.id === selectedProjectId)
+      const task = project?.tasks.find(t => t.id === selectedTaskId)
+      if (!task) return
+      const taskView = getTaskViewState(task)
+
+      const activeEl = typeof document !== 'undefined' ? document.activeElement : null
+      const paneFromDom = activeEl instanceof Element
+        ? activeEl.closest<HTMLElement>('[data-pane]')?.dataset.pane
+        : undefined
+      const pane: 'left' | 'right' = paneFromDom === 'right' ? 'right' : 'left'
+
+      const activeTabId = taskView.activeTab[pane]
+      if (!activeTabId) return
+      const activeTab = task.tabs[pane].find(t => t.id === activeTabId)
+      if (!activeTab || !isRenamableTab(activeTab)) return
+
+      e.preventDefault()
+      window.dispatchEvent(new CustomEvent('request-tab-rename', { detail: { tabId: activeTabId } }))
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [projects, selectedProjectId, selectedTaskId, getTaskViewState])
 
   // Menu shortcut handlers (Cmd+W, Cmd+Shift+T, Cmd+R, Cmd+T)
   useEffect(() => {

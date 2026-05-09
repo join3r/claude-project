@@ -1,8 +1,8 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Pin, PinOff } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isHomeTab, isShellCommandProject } from '../../shared/types'
+import { AI_TAB_TYPES, isHomeTab, isRenamableTab, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -116,9 +116,51 @@ export default function TabBar({
   onTabDropTargetChange,
   onTabDragComplete
 }: Props): React.ReactElement {
-  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, setTabPinned } = useApp()
+  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, setTabPinned, renameTab } = useApp()
   const suppressClickRef = useRef(false)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement | null>(null)
+
+  const beginRename = (tab: Tab) => {
+    if (!isRenamableTab(tab)) return
+    setRenamingTabId(tab.id)
+    setRenameValue(tab.title)
+  }
+
+  const cancelRename = () => {
+    setRenamingTabId(null)
+    setRenameValue('')
+  }
+
+  const commitRename = (tabId: string) => {
+    const trimmed = renameValue.trim()
+    if (trimmed) renameTab(projectId, taskId, pane, tabId, trimmed)
+    setRenamingTabId(null)
+    setRenameValue('')
+  }
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId: string }>).detail
+      if (!detail) return
+      const tab = tabs.find(t => t.id === detail.tabId)
+      if (!tab) return
+      if (!isRenamableTab(tab)) return
+      setRenamingTabId(tab.id)
+      setRenameValue(tab.title)
+    }
+    window.addEventListener('request-tab-rename', handler as EventListener)
+    return () => window.removeEventListener('request-tab-rename', handler as EventListener)
+  }, [tabs])
+
+  useEffect(() => {
+    if (renamingTabId && renameInputRef.current) {
+      renameInputRef.current.focus()
+      renameInputRef.current.select()
+    }
+  }, [renamingTabId])
   if (!selectedProject) return <div className="tab-bar flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]" />
 
   const isTabDragActive = tabDragState?.projectId === projectId && tabDragState.taskId === taskId
@@ -230,7 +272,28 @@ export default function TabBar({
               )}
               <span className="text-[11px] shrink-0">{tabIcon(tab.type)}</span>
               <TabStatusIndicator tabId={tab.id} />
-              <span className="overflow-hidden text-ellipsis">{tab.title}</span>
+              {renamingTabId === tab.id ? (
+                <input
+                  ref={renameInputRef}
+                  className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none min-w-0 w-28"
+                  value={renameValue}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => commitRename(tab.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      commitRename(tab.id)
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      cancelRename()
+                    }
+                  }}
+                />
+              ) : (
+                <span className="overflow-hidden text-ellipsis">{tab.title}</span>
+              )}
               {isPinnable(tab) && (
                 <button
                   className={`bg-transparent border-0 cursor-pointer text-[12px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 transition-opacity ${tab.pinned ? 'opacity-100 text-accent' : 'opacity-0 group-hover:opacity-100 text-text-muted hover:text-text'}`}
@@ -299,6 +362,18 @@ export default function TabBar({
             style={{ left: tabMenu.x, top: tabMenu.y }}
             className="fixed z-40 min-w-[180px] bg-surface border border-border rounded shadow-lg text-sm py-1"
           >
+            {isRenamableTab(tab) && (
+              <button
+                type="button"
+                className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+                onClick={() => {
+                  beginRename(tab)
+                  close()
+                }}
+              >
+                Rename tab
+              </button>
+            )}
             {isPinnable(tab) && (
               <button
                 type="button"

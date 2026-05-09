@@ -762,6 +762,42 @@ export function useAppState() {
     }))
   }, [persistProjects])
 
+  const renameTab = useCallback((
+    projectId: string,
+    taskId: string,
+    pane: 'left' | 'right',
+    tabId: string,
+    title: string
+  ) => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project =>
+        project.id === projectId
+          ? {
+              ...project,
+              tasks: project.tasks.map(task =>
+                task.id === taskId
+                  ? {
+                      ...task,
+                      tabs: {
+                        ...task.tabs,
+                        [pane]: task.tabs[pane].map(tab =>
+                          tab.id === tabId && tab.title !== trimmed
+                            ? { ...tab, title: trimmed }
+                            : tab
+                        )
+                      }
+                    }
+                  : task
+              )
+            }
+          : project
+      )
+    }))
+  }, [persistProjects])
+
   const addTab = useCallback((
     projectId: string,
     taskId: string,
@@ -1423,6 +1459,7 @@ export function useAppState() {
     reorderTasks,
     addTab,
     removeTab,
+    renameTab,
     reopenClosedTab,
     updateTabUrl,
     updateTabSessionId,
