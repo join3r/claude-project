@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:cdp": "DEVTOOL_CDP_PORT=9222 electron-vite dev",
     "build": "electron-vite build",
     "build:mac": "electron-vite build && electron-builder --mac --dir",
     "build:linux": "electron-vite build && electron-builder --linux --dir",

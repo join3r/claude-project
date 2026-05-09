@@ -4,6 +4,10 @@ import { resolveShellEnv } from './shell-env'
 import { AppRuntime } from './app-runtime'
 import type { WindowGeometry, WindowViewState } from '../shared/types'
 
+if (process.env.DEVTOOL_CDP_PORT) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.DEVTOOL_CDP_PORT)
+}
+
 let appRuntime: AppRuntime | null = null
 
 function buildAppMenu(): void {
