@@ -8,12 +8,13 @@ import MarkdownPreview from './MarkdownPreview'
 interface Props {
   noteId: string
   projectId: string
+  taskId: string
   visible: boolean
   effectiveTheme: 'dark' | 'light'
 }
 
-export default function NoteTab({ noteId, projectId, visible, effectiveTheme }: Props): React.ReactElement {
-  const { notes, updateNoteContent, config } = useApp()
+export default function NoteTab({ noteId, projectId, taskId, visible, effectiveTheme }: Props): React.ReactElement {
+  const { notes, updateNoteContent, config, markTaskInteracted } = useApp()
   const note = notes[projectId]?.find(n => n.id === noteId) ?? null
   const [viewMode, setViewMode] = useState<'source' | 'preview'>('source')
   const currentContentRef = useRef<string>(note?.content ?? '')
@@ -26,8 +27,9 @@ export default function NoteTab({ noteId, projectId, visible, effectiveTheme }: 
   const handleChange = useCallback((value: string | undefined) => {
     const next = value ?? ''
     currentContentRef.current = next
+    markTaskInteracted(projectId, taskId)
     updateNoteContent(projectId, noteId, next)
-  }, [projectId, noteId, updateNoteContent])
+  }, [projectId, taskId, noteId, updateNoteContent, markTaskInteracted])
 
   if (!visible) return <div style={{ display: 'none' }} />
   if (!note) return <div className="flex-1 flex items-center justify-center h-full text-text-muted text-[13px]">Note not found.</div>

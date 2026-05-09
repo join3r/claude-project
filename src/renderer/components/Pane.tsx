@@ -172,6 +172,7 @@ export default function Pane({
                 key={tab.id}
                 noteId={tab.noteId}
                 projectId={projectId}
+                taskId={taskId}
                 visible={taskVisible && tab.id === activeTabId}
                 effectiveTheme={effectiveTheme}
               />
