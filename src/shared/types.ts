@@ -96,6 +96,13 @@ export function isHomeTab(tab: Tab): boolean {
   return tab.system === 'home'
 }
 
+const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'codex', 'opencode']
+
+export function isRenamableTab(tab: Tab): boolean {
+  if (isHomeTab(tab)) return false
+  return RENAMABLE_TAB_TYPES.includes(tab.type)
+}
+
 export function createHomeTask(projectId: string): { task: Task; tab: Tab } {
   const tabId = `home-tab-${projectId}`
   const tab: Tab = {
