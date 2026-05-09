@@ -14,7 +14,7 @@ interface Props {
 }
 
 export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane, sshConfig }: Props): React.ReactElement {
-  const { updateTabUrl, browserZoomFactor } = useApp()
+  const { updateTabUrl, browserZoomFactor, markTaskInteracted } = useApp()
   const [url, setUrl] = useState(initialUrl || 'https://www.google.com')
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
@@ -31,6 +31,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     if (!webview) return
 
     const handleNavigation = () => {
+      markTaskInteracted(projectId, taskId)
       const newUrl = webview.getURL()
       setUrl(newUrl)
       setInputUrl(newUrl)
@@ -44,7 +45,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
       webview.removeEventListener('did-navigate', handleNavigation)
       webview.removeEventListener('did-navigate-in-page', handleNavigation)
     }
-  }, [projectId, taskId, pane, tabId, updateTabUrl])
+  }, [projectId, taskId, pane, tabId, updateTabUrl, markTaskInteracted])
 
   useEffect(() => {
     const handleReload = (e: Event) => {
