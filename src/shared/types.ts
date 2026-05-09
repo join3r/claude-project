@@ -307,7 +307,7 @@ export interface WindowViewState {
   fileBrowserOpen: boolean
   fileBrowserWidth: number
   fileBrowserActiveTab: FileBrowserTab
-  watchStripHiddenProjectIds: string[]
+  watchStripHidden: boolean
 }
 
 export interface WindowGeometry {
@@ -394,7 +394,7 @@ export function createDefaultWindowViewState(): WindowViewState {
     fileBrowserOpen: false,
     fileBrowserWidth: 250,
     fileBrowserActiveTab: 'files',
-    watchStripHiddenProjectIds: []
+    watchStripHidden: false
   }
 }
 
@@ -420,7 +420,7 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     fileBrowserOpen: state.fileBrowserOpen,
     fileBrowserWidth: state.fileBrowserWidth,
     fileBrowserActiveTab: state.fileBrowserActiveTab,
-    watchStripHiddenProjectIds: [...state.watchStripHiddenProjectIds]
+    watchStripHidden: state.watchStripHidden
   }
 }
 
@@ -539,7 +539,7 @@ export function reconcileWindowViewState(
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
-    watchStripHiddenProjectIds: Array.isArray(state.watchStripHiddenProjectIds) ? [...state.watchStripHiddenProjectIds] : []
+    watchStripHidden: typeof state.watchStripHidden === 'boolean' ? state.watchStripHidden : false
   }
 }
 
@@ -576,6 +576,6 @@ export function buildWindowViewState(
     collapsedFolderIds: seed?.collapsedFolderIds ? [...seed.collapsedFolderIds] : [...config.collapsedFolderIds],
     expandedProjectIds,
     taskStates,
-    watchStripHiddenProjectIds: []
+    watchStripHidden: false
   }, projects)
 }

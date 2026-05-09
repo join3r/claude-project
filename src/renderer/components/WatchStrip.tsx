@@ -13,18 +13,15 @@ interface PinnedRef {
 
 export function WatchStrip(): React.ReactElement | null {
   const actions = useApp()
-  const projectId = actions.selectedProjectId
-  if (!projectId) return null
-  if (actions.watchStripHiddenProjectIds.includes(projectId)) return null
-
-  const project = actions.projects.find(p => p.id === projectId)
-  if (!project) return null
+  if (actions.watchStripHidden) return null
 
   const pins: PinnedRef[] = []
-  for (const task of project.tasks) {
-    for (const pane of ['left', 'right'] as const) {
-      for (const tab of task.tabs[pane]) {
-        if (tab.pinned) pins.push({ projectId, taskId: task.id, pane, tabId: tab.id })
+  for (const project of actions.projects) {
+    for (const task of project.tasks) {
+      for (const pane of ['left', 'right'] as const) {
+        for (const tab of task.tabs[pane]) {
+          if (tab.pinned) pins.push({ projectId: project.id, taskId: task.id, pane, tabId: tab.id })
+        }
       }
     }
   }
@@ -33,7 +30,7 @@ export function WatchStrip(): React.ReactElement | null {
   return (
     <div className="border-t border-border bg-surface flex items-stretch gap-px overflow-x-auto h-8 shrink-0">
       {pins.map(ref => (
-        <WatchTile key={`${ref.taskId}:${ref.pane}:${ref.tabId}`} {...ref} />
+        <WatchTile key={`${ref.projectId}:${ref.taskId}:${ref.pane}:${ref.tabId}`} {...ref} />
       ))}
       <button
         type="button"

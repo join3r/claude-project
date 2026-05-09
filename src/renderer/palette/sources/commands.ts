@@ -175,11 +175,8 @@ commandRegistry.register({
   id: 'cmd.toggleWatchStrip',
   title: 'Toggle Watch Strip',
   aliases: ['watch', 'pin strip', 'watch strip'],
-  when: ctx => !!ctx.actions.selectedProjectId,
   run: ctx => {
-    if (ctx.actions.selectedProjectId) {
-      ctx.actions.toggleWatchStripForProject(ctx.actions.selectedProjectId)
-    }
+    ctx.actions.toggleWatchStrip()
   }
 })
 

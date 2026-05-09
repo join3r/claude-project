@@ -266,7 +266,7 @@ describe('Storage', () => {
           fileBrowserOpen: false,
           fileBrowserWidth: 250,
           fileBrowserActiveTab: 'files',
-          watchStripHiddenProjectIds: []
+          watchStripHidden: false
         }
       }]
     })

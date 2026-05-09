@@ -9,7 +9,7 @@ import { paletteEvents } from './palette/paletteEvents'
 
 function AppInner(): React.ReactElement {
   const {
-    effectiveTheme, exportWindowViewState, toggleFileBrowser, selectedProjectId, toggleWatchStripForProject,
+    effectiveTheme, exportWindowViewState, toggleFileBrowser, toggleWatchStrip,
     selectedTask, getTaskViewState,
     setFileBrowserOpen, setFileBrowserActiveTab
   } = useApp()
@@ -57,16 +57,14 @@ function AppInner(): React.ReactElement {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'w') {
-        if (selectedProjectId) {
-          e.preventDefault()
-          e.stopPropagation()
-          toggleWatchStripForProject(selectedProjectId)
-        }
+        e.preventDefault()
+        e.stopPropagation()
+        toggleWatchStrip()
       }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [selectedProjectId, toggleWatchStripForProject])
+  }, [toggleWatchStrip])
 
   const prevActiveTabIdRef = useRef<string | null>(null)
   useEffect(() => {
