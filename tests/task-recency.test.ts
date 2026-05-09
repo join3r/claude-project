@@ -3,6 +3,8 @@ import {
   sortTasksByRecency,
   computeTaskRecencyOpacity,
   buildRecencyStyle,
+  createInteractionStampGate,
+  INTERACTION_STAMP_INTERVAL_MS,
   MAX_OPACITY
 } from '../src/renderer/components/taskRecency'
 import type { AppConfig, Task } from '../src/shared/types'
@@ -138,5 +140,36 @@ describe('computeTaskRecencyOpacity', () => {
       const opacity = computeTaskRecencyOpacity(task, [task], timeSettings, now)
       expect(opacity).toBeCloseTo(MAX_OPACITY / 2, 2)
     })
+  })
+})
+
+describe('createInteractionStampGate', () => {
+  it('exposes a 5 second window', () => {
+    expect(INTERACTION_STAMP_INTERVAL_MS).toBe(5000)
+  })
+
+  it('allows the first call for a task', () => {
+    const gate = createInteractionStampGate()
+    expect(gate('task-a', 1000)).toBe(true)
+  })
+
+  it('throttles a second call inside the window', () => {
+    const gate = createInteractionStampGate()
+    expect(gate('task-a', 1000)).toBe(true)
+    expect(gate('task-a', 1000 + INTERACTION_STAMP_INTERVAL_MS - 1)).toBe(false)
+  })
+
+  it('allows a call exactly at the window boundary', () => {
+    const gate = createInteractionStampGate()
+    expect(gate('task-a', 1000)).toBe(true)
+    expect(gate('task-a', 1000 + INTERACTION_STAMP_INTERVAL_MS)).toBe(true)
+  })
+
+  it('tracks tasks independently', () => {
+    const gate = createInteractionStampGate()
+    expect(gate('task-a', 1000)).toBe(true)
+    expect(gate('task-b', 1000)).toBe(true)
+    expect(gate('task-a', 1500)).toBe(false)
+    expect(gate('task-b', 1500)).toBe(false)
   })
 })

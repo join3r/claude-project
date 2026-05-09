@@ -45,3 +45,17 @@ export function computeTaskRecencyOpacity(
   const remaining = 1 - age / windowMs
   return MAX_OPACITY * Math.max(0, remaining)
 }
+
+export const INTERACTION_STAMP_INTERVAL_MS = 5000
+
+export function createInteractionStampGate(): (taskId: string, now: number) => boolean {
+  const lastStamp = new Map<string, number>()
+  return (taskId, now) => {
+    const previous = lastStamp.get(taskId)
+    if (previous !== undefined && now - previous < INTERACTION_STAMP_INTERVAL_MS) {
+      return false
+    }
+    lastStamp.set(taskId, now)
+    return true
+  }
+}
