@@ -151,7 +151,7 @@ function ensureBeforeUnloadHandler(): void {
 export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta } = useApp()
+  const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta, markTaskInteracted } = useApp()
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
@@ -356,6 +356,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     term.onData((data) => {
       const currentEntry = terminals.get(tabId)
       if (!currentEntry || currentEntry.restoring) return
+      markTaskInteracted(projectId, taskId)
       window.api.ptyWrite(tabId, data)
     })
 
@@ -453,7 +454,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     ensurePtySizeListener()
     ensureExitListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, toolType, config, addTab, pane, projectId, taskId, visible])
+  }, [tabId, toolType, config, addTab, pane, projectId, taskId, visible, markTaskInteracted])
 
   // Show stored scrollback in the xterm before the user clicks Resume so they
   // can see what the session was about. Skipped if the tab will auto-spawn
