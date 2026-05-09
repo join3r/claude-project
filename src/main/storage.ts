@@ -180,17 +180,29 @@ export class Storage {
       return createDefaultWindowViewState()
     }
 
+    const projectIds = new Set(projects.map(p => p.id))
     const taskStates = Storage.normalizeTaskStates(value.taskStates)
     const collapsedFolderIds = Array.isArray(value.collapsedFolderIds)
       ? value.collapsedFolderIds.filter((folderId): folderId is string => typeof folderId === 'string' && folderIds.has(folderId))
       : []
+    const expandedProjectIds = Array.isArray(value.expandedProjectIds)
+      ? value.expandedProjectIds.filter((id): id is string => typeof id === 'string' && projectIds.has(id))
+      : []
+    const fileBrowserActiveTab = (value.fileBrowserActiveTab === 'files' || value.fileBrowserActiveTab === 'git' || value.fileBrowserActiveTab === 'notes')
+      ? value.fileBrowserActiveTab
+      : 'files'
 
     return reconcileWindowViewState(
       {
         selectedProjectId: typeof value.selectedProjectId === 'string' ? value.selectedProjectId : null,
         selectedTaskId: typeof value.selectedTaskId === 'string' ? value.selectedTaskId : null,
         collapsedFolderIds,
-        taskStates
+        expandedProjectIds,
+        taskStates,
+        fileBrowserOpen: typeof value.fileBrowserOpen === 'boolean' ? value.fileBrowserOpen : false,
+        fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,
+        fileBrowserActiveTab,
+        watchStripHidden: typeof value.watchStripHidden === 'boolean' ? value.watchStripHidden : false
       },
       projects,
       collapsedFolderIds
@@ -204,13 +216,20 @@ export class Storage {
     for (const [taskId, taskState] of Object.entries(value)) {
       if (!isRecord(taskState)) continue
       const activeTab = isRecord(taskState.activeTab) ? taskState.activeTab : {}
+      const fileBrowserActiveTab = (taskState.fileBrowserActiveTab === 'files'
+        || taskState.fileBrowserActiveTab === 'git'
+        || taskState.fileBrowserActiveTab === 'notes')
+        ? taskState.fileBrowserActiveTab
+        : undefined
       taskStates[taskId] = {
         activeTab: {
           left: typeof activeTab.left === 'string' ? activeTab.left : null,
           right: typeof activeTab.right === 'string' ? activeTab.right : null
         },
         splitOpen: typeof taskState.splitOpen === 'boolean' ? taskState.splitOpen : false,
-        splitRatio: isFiniteNumber(taskState.splitRatio) ? taskState.splitRatio : 0.5
+        splitRatio: isFiniteNumber(taskState.splitRatio) ? taskState.splitRatio : 0.5,
+        ...(typeof taskState.fileBrowserOpen === 'boolean' ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
+        ...(fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab } : {})
       }
     }
 

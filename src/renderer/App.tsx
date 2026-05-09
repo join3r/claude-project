@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { TabStatusProvider } from './context/TabStatusContext'
 import Sidebar from './components/Sidebar'
@@ -9,9 +9,7 @@ import { paletteEvents } from './palette/paletteEvents'
 
 function AppInner(): React.ReactElement {
   const {
-    effectiveTheme, exportWindowViewState, toggleFileBrowser, toggleWatchStrip,
-    selectedTask, getTaskViewState,
-    setFileBrowserOpen, setFileBrowserActiveTab
+    effectiveTheme, exportWindowViewState, toggleFileBrowser, toggleWatchStrip
   } = useApp()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [switcherRequested, setSwitcherRequested] = useState(false)
@@ -65,28 +63,6 @@ function AppInner(): React.ReactElement {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [toggleWatchStrip])
-
-  const prevActiveTabIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!selectedTask) {
-      prevActiveTabIdRef.current = null
-      return
-    }
-    const view = getTaskViewState(selectedTask)
-    const activeTabId = view.activeTab.left
-    const activeTab = activeTabId
-      ? selectedTask.tabs.left.find(t => t.id === activeTabId) ?? null
-      : null
-    const isOnHome = activeTab?.system === 'home'
-    const wasOnHome = prevActiveTabIdRef.current
-      ? selectedTask.tabs.left.some(t => t.id === prevActiveTabIdRef.current && t.system === 'home')
-      : false
-    if (isOnHome && !wasOnHome) {
-      setFileBrowserOpen(true)
-      setFileBrowserActiveTab('notes')
-    }
-    prevActiveTabIdRef.current = activeTabId
-  }, [selectedTask, getTaskViewState, setFileBrowserOpen, setFileBrowserActiveTab])
 
   // Mirror theme-light onto documentElement so getComputedStyle(documentElement)
   // resolves CSS custom properties via the .theme-light cascade. Used by xterm

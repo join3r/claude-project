@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { Folder, GitBranch, StickyNote, PanelRightOpen, PanelRightClose } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { buildWindowTitle } from '../hooks/useAppState'
-import { isRemoteProject, isRenamableTab, isShellCommandProject } from '../../shared/types'
+import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
 import { WatchStrip } from './WatchStrip'
@@ -13,6 +14,33 @@ import type { TunnelConfig, TunnelState } from '../../shared/types'
 
 function joinPath(...parts: string[]): string {
   return parts.filter(Boolean).join('/')
+}
+
+function FileBrowserTabButton({
+  icon,
+  tab,
+  label,
+  fileBrowserOpen,
+  fileBrowserActiveTab,
+  onActivate
+}: {
+  icon: React.ReactNode
+  tab: FileBrowserTab
+  label: string
+  fileBrowserOpen: boolean
+  fileBrowserActiveTab: FileBrowserTab
+  onActivate: (tab: FileBrowserTab) => void
+}): React.ReactElement {
+  const active = fileBrowserOpen && fileBrowserActiveTab === tab
+  return (
+    <button
+      className={`bg-transparent border-0 cursor-pointer px-1.5 py-0.5 rounded-sm leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] ${active ? 'text-accent-400' : 'text-text-muted hover:text-text'}`}
+      onClick={() => onActivate(tab)}
+      title={active ? `Close ${label}` : `Open ${label}`}
+    >
+      {icon}
+    </button>
+  )
 }
 
 export default function ContentArea(): React.ReactElement {
@@ -30,7 +58,9 @@ export default function ContentArea(): React.ReactElement {
     removeTab,
     reopenClosedTab,
     fileBrowserOpen,
-    toggleFileBrowser,
+    fileBrowserActiveTab,
+    setFileBrowserOpen,
+    setFileBrowserActiveTab,
     zoomTerminal,
     zoomBrowser,
     getTaskViewState,
@@ -88,6 +118,21 @@ export default function ContentArea(): React.ReactElement {
     setTabDragState(null)
     setTabDropTarget(null)
   }, [selectedProjectId, selectedTaskId])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
+      if (e.key.toLowerCase() !== 'd') return
+      if (!selectedProjectId || !selectedTaskId) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      e.preventDefault()
+      e.stopPropagation()
+      toggleSplit(selectedProjectId, selectedTaskId)
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [selectedProjectId, selectedTaskId, toggleSplit])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -295,10 +340,21 @@ export default function ContentArea(): React.ReactElement {
   const selectedProjectDir = selectedTask?.workspace
     ? joinPath(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
     : selectedProject?.directory ?? ''
-  const canToggleFileBrowser = !!selectedProject
+  const canShowLocalTabs = !!selectedProject
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
     && !!selectedProject.directory
+  // Notes are always available (including remote / shell-command projects); the
+  // Files/Git tabs are local-only.
+  const hasFileBrowserTabs = !!selectedProject
+  const handleFileBrowserActivate = useCallback((tab: FileBrowserTab) => {
+    if (fileBrowserOpen && fileBrowserActiveTab === tab) {
+      setFileBrowserOpen(false)
+      return
+    }
+    setFileBrowserActiveTab(tab)
+    if (!fileBrowserOpen) setFileBrowserOpen(true)
+  }, [fileBrowserOpen, fileBrowserActiveTab, setFileBrowserOpen, setFileBrowserActiveTab])
   const shouldShowGitSummary = !!selectedProject
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
@@ -354,22 +410,47 @@ export default function ContentArea(): React.ReactElement {
               &#8596;
             </button>
           )}
-          {canToggleFileBrowser && (
-            <button
-              className={`bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-0.5 rounded-sm text-[14px] leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] translate-y-px${fileBrowserOpen ? ' text-accent-400' : ''}`}
-              onClick={() => toggleFileBrowser()}
-              title={fileBrowserOpen ? 'Close file browser (⌘⇧E)' : 'Open file browser (⌘⇧E)'}
-            >
-              <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor"><path d="M1 1H14V14H1Z M2 2V13H9V2Z"/></svg>
-            </button>
+          {hasFileBrowserTabs && (
+            <>
+              {canShowLocalTabs && (
+                <FileBrowserTabButton
+                  icon={<Folder size={14} />}
+                  tab="files"
+                  label="Files"
+                  fileBrowserOpen={fileBrowserOpen}
+                  fileBrowserActiveTab={fileBrowserActiveTab}
+                  onActivate={handleFileBrowserActivate}
+                />
+              )}
+              {canShowLocalTabs && (
+                <FileBrowserTabButton
+                  icon={<GitBranch size={14} />}
+                  tab="git"
+                  label="Git"
+                  fileBrowserOpen={fileBrowserOpen}
+                  fileBrowserActiveTab={fileBrowserActiveTab}
+                  onActivate={handleFileBrowserActivate}
+                />
+              )}
+              <FileBrowserTabButton
+                icon={<StickyNote size={14} />}
+                tab="notes"
+                label="Notes"
+                fileBrowserOpen={fileBrowserOpen}
+                fileBrowserActiveTab={fileBrowserActiveTab}
+                onActivate={handleFileBrowserActivate}
+              />
+            </>
           )}
           {selectedTask && (
             <button
-              className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-0.5 rounded-sm text-[14px] leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag]"
+              className={`bg-transparent border-0 cursor-pointer px-1.5 py-0.5 rounded-sm leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] ${selectedTaskView?.splitOpen ? 'text-accent-400' : 'text-text-muted hover:text-text'}`}
               onClick={() => toggleSplit(selectedProject.id, selectedTask.id)}
-              title={selectedTaskView?.splitOpen ? 'Close split' : 'Split right'}
+              title={selectedTaskView?.splitOpen ? 'Close right pane (⌘D)' : 'Open right pane (⌘D)'}
             >
-              {selectedTaskView?.splitOpen ? '\u25E7' : '\u2B12'}
+              {selectedTaskView?.splitOpen
+                ? <PanelRightClose size={15} />
+                : <PanelRightOpen size={15} />}
             </button>
           )}
           </div>

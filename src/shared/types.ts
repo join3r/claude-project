@@ -36,6 +36,8 @@ export interface TaskViewState {
   }
   splitOpen: boolean
   splitRatio: number
+  fileBrowserOpen?: boolean
+  fileBrowserActiveTab?: FileBrowserTab
 }
 
 export interface Task {
@@ -413,7 +415,9 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
             right: taskState.activeTab.right
           },
           splitOpen: taskState.splitOpen,
-          splitRatio: taskState.splitRatio
+          splitRatio: taskState.splitRatio,
+          ...(taskState.fileBrowserOpen !== undefined ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
+          ...(taskState.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: taskState.fileBrowserActiveTab } : {})
         }
       ])
     ),
@@ -503,7 +507,9 @@ export function reconcileTaskViewState(task: Task, state?: TaskViewState): TaskV
           : fallback.activeTab.right
     },
     splitOpen: state.splitOpen,
-    splitRatio: state.splitRatio
+    splitRatio: state.splitRatio,
+    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
+    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
   }
 }
 
@@ -558,7 +564,9 @@ export function buildWindowViewState(
           right: taskState.activeTab.right
         },
         splitOpen: taskState.splitOpen,
-        splitRatio: taskState.splitRatio
+        splitRatio: taskState.splitRatio,
+        ...(taskState.fileBrowserOpen !== undefined ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
+        ...(taskState.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: taskState.fileBrowserActiveTab } : {})
       }
     }
   }
@@ -576,6 +584,9 @@ export function buildWindowViewState(
     collapsedFolderIds: seed?.collapsedFolderIds ? [...seed.collapsedFolderIds] : [...config.collapsedFolderIds],
     expandedProjectIds,
     taskStates,
-    watchStripHidden: false
+    fileBrowserOpen: seed?.fileBrowserOpen ?? false,
+    fileBrowserWidth: seed?.fileBrowserWidth ?? 250,
+    fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
+    watchStripHidden: seed?.watchStripHidden ?? false
   }, projects)
 }

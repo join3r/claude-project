@@ -98,7 +98,9 @@ function cloneTaskState(state: TaskViewState): TaskViewState {
       right: state.activeTab.right
     },
     splitOpen: state.splitOpen,
-    splitRatio: state.splitRatio
+    splitRatio: state.splitRatio,
+    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
+    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
   }
 }
 
@@ -197,13 +199,17 @@ export function useAppState() {
         backfillLifetimeStats(p, notesRef.current)
       )
       const final = { ...updatedProjectsData, projects: projectsWithLifetime }
-      lastSavedProjectsJsonRef.current = JSON.stringify(final)
+      const serialized = JSON.stringify(final)
+      if (serialized === lastSavedProjectsJsonRef.current) return
+      lastSavedProjectsJsonRef.current = serialized
       setProjectsData(final)
     })
 
     const cleanupConfig = window.api.onConfigUpdated((updatedConfig) => {
       if (cancelled) return
-      lastSavedConfigJsonRef.current = JSON.stringify(updatedConfig)
+      const serialized = JSON.stringify(updatedConfig)
+      if (serialized === lastSavedConfigJsonRef.current) return
+      lastSavedConfigJsonRef.current = serialized
       setConfig(updatedConfig)
     })
 
@@ -307,6 +313,40 @@ export function useAppState() {
       })
     }
   }, [projects, windowViewState.selectedProjectId])
+
+  const lastSyncedSidebarTaskIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const taskId = windowViewState.selectedTaskId
+    if (!taskId) {
+      lastSyncedSidebarTaskIdRef.current = null
+      return
+    }
+    if (lastSyncedSidebarTaskIdRef.current === taskId) return
+    const project = projects.find(p => p.tasks.some(t => t.id === taskId))
+    const task = project?.tasks.find(t => t.id === taskId) ?? null
+    if (!task) return
+    lastSyncedSidebarTaskIdRef.current = taskId
+
+    const saved = windowViewState.taskStates[taskId]
+    const isHome = task.system === 'home'
+    const nextOpen = saved?.fileBrowserOpen !== undefined
+      ? saved.fileBrowserOpen
+      : isHome
+        ? true
+        : windowViewState.fileBrowserOpen
+    const nextTab: FileBrowserTab = saved?.fileBrowserActiveTab !== undefined
+      ? saved.fileBrowserActiveTab
+      : isHome
+        ? 'notes'
+        : windowViewState.fileBrowserActiveTab
+
+    if (nextOpen === windowViewState.fileBrowserOpen && nextTab === windowViewState.fileBrowserActiveTab) return
+    updateWindowViewState(prev => ({
+      ...prev,
+      fileBrowserOpen: nextOpen,
+      fileBrowserActiveTab: nextTab
+    }))
+  }, [projects, windowViewState.selectedTaskId, windowViewState.taskStates, windowViewState.fileBrowserOpen, windowViewState.fileBrowserActiveTab, updateWindowViewState])
 
   const persistProjects = useCallback((updater: (prev: ProjectsData) => ProjectsData) => {
     if (!projectsLoadedRef.current) {
@@ -1241,9 +1281,34 @@ export function useAppState() {
     })
   }, [])
 
+  const writeSidebarToCurrentTask = useCallback((
+    prev: WindowViewState,
+    patch: { fileBrowserOpen?: boolean; fileBrowserActiveTab?: FileBrowserTab }
+  ): WindowViewState => {
+    const taskId = prev.selectedTaskId
+    const project = taskId ? projectsRef.current.find(p => p.tasks.some(t => t.id === taskId)) : null
+    const task = project && taskId ? project.tasks.find(t => t.id === taskId) ?? null : null
+    const next: WindowViewState = {
+      ...prev,
+      ...(patch.fileBrowserOpen !== undefined ? { fileBrowserOpen: patch.fileBrowserOpen } : {}),
+      ...(patch.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: patch.fileBrowserActiveTab } : {})
+    }
+    if (!taskId || !task) return next
+    const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
+    next.taskStates = {
+      ...prev.taskStates,
+      [taskId]: {
+        ...cloneTaskState(currentState),
+        ...(patch.fileBrowserOpen !== undefined ? { fileBrowserOpen: patch.fileBrowserOpen } : {}),
+        ...(patch.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: patch.fileBrowserActiveTab } : {})
+      }
+    }
+    return next
+  }, [])
+
   const toggleFileBrowser = useCallback(() => {
-    updateWindowViewState(prev => ({ ...prev, fileBrowserOpen: !prev.fileBrowserOpen }))
-  }, [updateWindowViewState])
+    updateWindowViewState(prev => writeSidebarToCurrentTask(prev, { fileBrowserOpen: !prev.fileBrowserOpen }))
+  }, [updateWindowViewState, writeSidebarToCurrentTask])
 
   const toggleWatchStrip = useCallback(() => {
     updateWindowViewState(prev => ({ ...prev, watchStripHidden: !prev.watchStripHidden }))
@@ -1254,12 +1319,12 @@ export function useAppState() {
   }, [updateWindowViewState])
 
   const setFileBrowserOpen = useCallback((open: boolean) => {
-    updateWindowViewState(prev => ({ ...prev, fileBrowserOpen: open }))
-  }, [updateWindowViewState])
+    updateWindowViewState(prev => writeSidebarToCurrentTask(prev, { fileBrowserOpen: open }))
+  }, [updateWindowViewState, writeSidebarToCurrentTask])
 
   const setFileBrowserActiveTab = useCallback((tab: FileBrowserTab) => {
-    updateWindowViewState(prev => ({ ...prev, fileBrowserActiveTab: tab }))
-  }, [updateWindowViewState])
+    updateWindowViewState(prev => writeSidebarToCurrentTask(prev, { fileBrowserActiveTab: tab }))
+  }, [updateWindowViewState, writeSidebarToCurrentTask])
 
   const openOrFocusDiffTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', filePath: string) => {
     const project = projectsRef.current.find(p => p.id === projectId)

@@ -514,9 +514,12 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     return () => disposable.dispose()
   }, [tabId, visible, config?.copyOnSelect])
 
-  // ResizeObserver for fitting + spawning
+  // ResizeObserver for fitting + spawning. Re-runs on visibility flips so that
+  // hide → show resets the observer; ResizeObserver fires an initial callback
+  // on observe(), which is what triggers re-attach (otherwise the freshly
+  // created xterm stays empty after switching back to the tab).
   useEffect(() => {
-    if (!containerRef.current || !config) return
+    if (!containerRef.current || !config || !visible) return
     const container = containerRef.current
     const ro = new ResizeObserver(() => {
       if (container.clientWidth === 0 || container.clientHeight === 0) return
@@ -599,7 +602,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending])
+  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible])
 
   // Focus + re-fit on visibility change, clear attention
   useEffect(() => {
@@ -697,10 +700,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       <div ref={hostRef} className="w-full h-full" />
       {requiresActivation && !userActivated && visible && (
         <div
-          className="absolute inset-x-0 bottom-0 flex items-center justify-center cursor-pointer z-10 py-3 bg-gradient-to-t from-bg-base/95 via-bg-base/70 to-transparent"
+          className="absolute inset-x-0 bottom-0 flex items-center justify-center cursor-pointer z-10 py-3 bg-gradient-to-t from-bg/95 via-bg/70 to-transparent"
           onMouseDown={() => setUserActivated(true)}
         >
-          <div className="text-text text-[13px] px-4 py-2 rounded border border-border-default bg-bg-elevated shadow-lg hover:border-accent-400">
+          <div className="text-text text-[13px] px-4 py-2 rounded border border-border bg-surface-2 shadow-lg hover:border-accent-400">
             Click to resume Claude session
           </div>
         </div>
