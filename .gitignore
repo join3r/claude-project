@@ -2,6 +2,8 @@
 node_modules/
 out/
 dist/
+electron.vite.config.js
+electron.vite.config.d.ts
 .DS_Store
 *.tsbuildinfo
 .superpowers/
