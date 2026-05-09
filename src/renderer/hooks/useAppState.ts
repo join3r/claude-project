@@ -38,6 +38,7 @@ import {
   shiftRestorableClosedTab,
   type RecentlyClosedTab
 } from '../recentlyClosedTabs'
+import { createInteractionStampGate } from '../components/taskRecency'
 
 export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon'>>
 type AddTabOptions = {
@@ -128,6 +129,7 @@ export function useAppState() {
   const lastSavedProjectsJsonRef = useRef<string | null>(null)
   const lastSavedConfigJsonRef = useRef<string | null>(null)
   const lastSavedWindowStateJsonRef = useRef<string | null>(null)
+  const interactionGateRef = useRef(createInteractionStampGate())
   const recentlyClosedTabsRef = useRef<RecentlyClosedTab[]>([])
   const [notes, setNotes] = useState<Record<string, ProjectNote[]>>({})
   const notesRef = useRef<Record<string, ProjectNote[]>>({})
@@ -313,8 +315,9 @@ export function useAppState() {
     setProjectsData(prev => updater(prev))
   }, [])
 
-  const markTaskFocused = useCallback((projectId: string, taskId: string) => {
+  const markTaskInteracted = useCallback((projectId: string, taskId: string) => {
     const now = Date.now()
+    if (!interactionGateRef.current(taskId, now)) return
     persistProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
@@ -327,18 +330,6 @@ export function useAppState() {
       )
     }))
   }, [persistProjects])
-
-  useEffect(() => {
-    if (!windowFocused) return
-    const { selectedProjectId: pid, selectedTaskId: tid } = windowViewStateRef.current
-    if (pid && tid) markTaskFocused(pid, tid)
-
-    const id = window.setInterval(() => {
-      const { selectedProjectId: pidNow, selectedTaskId: tidNow } = windowViewStateRef.current
-      if (pidNow && tidNow) markTaskFocused(pidNow, tidNow)
-    }, 30_000)
-    return () => window.clearInterval(id)
-  }, [windowFocused, windowViewState.selectedTaskId, windowViewState.selectedProjectId, markTaskFocused])
 
   const cleanupClosedTabHistory = useCallback((entries: RecentlyClosedTab[]) => {
     for (const entry of entries) {
@@ -434,11 +425,7 @@ export function useAppState() {
 
   const selectTask = useCallback((id: string | null) => {
     updateWindowViewState(prev => ({ ...prev, selectedTaskId: id }))
-    if (id) {
-      const project = projectsRef.current.find(p => p.tasks.some(t => t.id === id))
-      if (project) markTaskFocused(project.id, id)
-    }
-  }, [updateWindowViewState, markTaskFocused])
+  }, [updateWindowViewState])
 
   const switchToTask = useCallback((projectId: string, taskId: string) => {
     updateWindowViewState(prev => ({
@@ -450,8 +437,6 @@ export function useAppState() {
         : [...prev.expandedProjectIds, projectId]
     }))
 
-    markTaskFocused(projectId, taskId)
-
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     if (project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
@@ -460,7 +445,7 @@ export function useAppState() {
         }
       })
     }
-  }, [updateWindowViewState, markTaskFocused])
+  }, [updateWindowViewState])
 
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
     persistProjects(prev => ({
@@ -1416,6 +1401,7 @@ export function useAppState() {
     selectProjectHome,
     setSelectedTaskId: selectTask,
     switchToTask,
+    markTaskInteracted,
     addProject,
     addRemoteProject,
     addShellCommandProject,
