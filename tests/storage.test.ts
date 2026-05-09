@@ -337,6 +337,71 @@ describe('Storage', () => {
     })
   })
 
+  it('migrates legacy lastFocusedAt to lastInteractedAt on load', () => {
+    const legacy = {
+      projects: [{
+        id: 'p1',
+        name: 'P1',
+        type: 'local',
+        dir: '/tmp/p1',
+        tasks: [{
+          id: 't1',
+          name: 'T1',
+          tabs: { left: [], right: [] },
+          activeTab: { left: null, right: null },
+          splitOpen: false,
+          splitRatio: 0.5,
+          lastFocusedAt: 12345
+        }, {
+          id: 't2',
+          name: 'T2',
+          tabs: { left: [], right: [] },
+          activeTab: { left: null, right: null },
+          splitOpen: false,
+          splitRatio: 0.5
+        }],
+        tabIdCounter: 0
+      }],
+      folders: [],
+      rootOrder: ['p1']
+    }
+
+    const normalized = Storage.normalizeProjectsData(legacy as any)
+    const tasks = normalized.projects[0].tasks
+    expect(tasks[0].lastInteractedAt).toBe(12345)
+    expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
+    expect(tasks[1].lastInteractedAt).toBeUndefined()
+  })
+
+  it('does not overwrite existing lastInteractedAt', () => {
+    const data = {
+      projects: [{
+        id: 'p1',
+        name: 'P1',
+        type: 'local',
+        dir: '/tmp/p1',
+        tasks: [{
+          id: 't1',
+          name: 'T1',
+          tabs: { left: [], right: [] },
+          activeTab: { left: null, right: null },
+          splitOpen: false,
+          splitRatio: 0.5,
+          lastFocusedAt: 100,
+          lastInteractedAt: 999
+        }],
+        tabIdCounter: 0
+      }],
+      folders: [],
+      rootOrder: ['p1']
+    }
+
+    const normalized = Storage.normalizeProjectsData(data as any)
+    const tasks = normalized.projects[0].tasks
+    expect(tasks[0].lastInteractedAt).toBe(999)
+    expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
+  })
+
   it('returns empty window session when the file contains no saved windows', () => {
     fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({ windows: [] }))
     const loaded = storage.loadWindowSession({ projects: [], folders: [], rootOrder: [] })

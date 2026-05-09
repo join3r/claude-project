@@ -9,7 +9,7 @@ import {
 } from '../src/renderer/components/taskRecency'
 import type { AppConfig, Task } from '../src/shared/types'
 
-function makeTask(id: string, lastFocusedAt?: number): Task {
+function makeTask(id: string, lastInteractedAt?: number): Task {
   return {
     id,
     name: id,
@@ -17,7 +17,7 @@ function makeTask(id: string, lastFocusedAt?: number): Task {
     activeTab: { left: null, right: null },
     splitOpen: false,
     splitRatio: 0.5,
-    ...(lastFocusedAt !== undefined ? { lastFocusedAt } : {})
+    ...(lastInteractedAt !== undefined ? { lastInteractedAt } : {})
   }
 }
 
@@ -56,12 +56,12 @@ describe('buildRecencyStyle', () => {
 })
 
 describe('sortTasksByRecency', () => {
-  it('excludes tasks without lastFocusedAt', () => {
+  it('excludes tasks without lastInteractedAt', () => {
     const sorted = sortTasksByRecency([makeTask('a', 100), makeTask('b'), makeTask('c', 200)])
     expect(sorted.map(t => t.id)).toEqual(['c', 'a'])
   })
 
-  it('sorts descending by lastFocusedAt', () => {
+  it('sorts descending by lastInteractedAt', () => {
     const sorted = sortTasksByRecency([
       makeTask('a', 100),
       makeTask('b', 300),
@@ -85,7 +85,7 @@ describe('computeTaskRecencyOpacity', () => {
     expect(opacity).toBe(0)
   })
 
-  it('returns 0 for a task without lastFocusedAt', () => {
+  it('returns 0 for a task without lastInteractedAt', () => {
     const task = makeTask('a')
     expect(computeTaskRecencyOpacity(task, [], rankSettings, now)).toBe(0)
   })

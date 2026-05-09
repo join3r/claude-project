@@ -321,7 +321,7 @@ export function useAppState() {
         project.id !== projectId ? project : {
           ...project,
           tasks: project.tasks.map(task =>
-            task.id === taskId ? { ...task, lastFocusedAt: now } : task
+            task.id === taskId ? { ...task, lastInteractedAt: now } : task
           )
         }
       )

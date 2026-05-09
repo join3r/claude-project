@@ -52,7 +52,7 @@ export interface Task {
   splitOpen: boolean
   splitRatio: number
   workspace?: WorkspaceConfig
-  lastFocusedAt?: number
+  lastInteractedAt?: number
   system?: 'home'
 }
 

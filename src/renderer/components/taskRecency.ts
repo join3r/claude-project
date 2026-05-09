@@ -18,8 +18,8 @@ export type RecencySettings = AppConfig['taskRecencyHighlight']
 
 export function sortTasksByRecency(tasks: Task[]): Task[] {
   return tasks
-    .filter((task): task is Task & { lastFocusedAt: number } => typeof task.lastFocusedAt === 'number')
-    .sort((a, b) => b.lastFocusedAt - a.lastFocusedAt)
+    .filter((task): task is Task & { lastInteractedAt: number } => typeof task.lastInteractedAt === 'number')
+    .sort((a, b) => b.lastInteractedAt - a.lastInteractedAt)
 }
 
 export function computeTaskRecencyOpacity(
@@ -29,7 +29,7 @@ export function computeTaskRecencyOpacity(
   now: number
 ): number {
   if (!settings || !settings.enabled) return 0
-  if (typeof task.lastFocusedAt !== 'number') return 0
+  if (typeof task.lastInteractedAt !== 'number') return 0
 
   if (settings.mode === 'rank') {
     const rankCount = typeof settings.rankCount === 'number' && settings.rankCount > 0 ? settings.rankCount : 5
@@ -40,7 +40,7 @@ export function computeTaskRecencyOpacity(
 
   const minutes = typeof settings.timeWindowMinutes === 'number' && settings.timeWindowMinutes > 0 ? settings.timeWindowMinutes : 1440
   const windowMs = minutes * 60_000
-  const age = now - task.lastFocusedAt
+  const age = now - task.lastInteractedAt
   if (age >= windowMs) return 0
   const remaining = 1 - age / windowMs
   return MAX_OPACITY * Math.max(0, remaining)

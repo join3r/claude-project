@@ -37,8 +37,8 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
 
   const activeTaskCount = visibleTasks.length
   const mostRecentTask = visibleTasks
-    .filter(t => t.lastFocusedAt)
-    .sort((a, b) => (b.lastFocusedAt ?? 0) - (a.lastFocusedAt ?? 0))[0] ?? null
+    .filter(t => t.lastInteractedAt)
+    .sort((a, b) => (b.lastInteractedAt ?? 0) - (a.lastInteractedAt ?? 0))[0] ?? null
 
   const lifetime = project.lifetimeStats ?? {
     tasksCreated: visibleTasks.length,
@@ -83,9 +83,9 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-text-subtle mb-1">Active tasks</h3>
           <div className="text-2xl font-semibold text-text">{activeTaskCount}</div>
-          {mostRecentTask && mostRecentTask.lastFocusedAt && (
+          {mostRecentTask && mostRecentTask.lastInteractedAt && (
             <div className="text-xs text-text-subtle mt-1 truncate" title={mostRecentTask.name}>
-              last touched: {mostRecentTask.name} · {formatRelativeTime(mostRecentTask.lastFocusedAt)}
+              last touched: {mostRecentTask.name} · {formatRelativeTime(mostRecentTask.lastInteractedAt)}
             </div>
           )}
         </div>

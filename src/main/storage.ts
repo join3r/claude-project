@@ -94,6 +94,17 @@ export class Storage {
       }
     }
 
+    for (const project of projects) {
+      if (!Array.isArray(project.tasks)) continue
+      for (const task of project.tasks) {
+        const legacy = (task as { lastFocusedAt?: unknown }).lastFocusedAt
+        if (typeof legacy === 'number' && task.lastInteractedAt === undefined) {
+          task.lastInteractedAt = legacy
+        }
+        delete (task as { lastFocusedAt?: unknown }).lastFocusedAt
+      }
+    }
+
     return { projects, folders, rootOrder }
   }
 
