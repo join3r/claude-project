@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, session, shell } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -358,6 +358,18 @@ export class AppRuntime {
     ipcMain.handle('clipboard-write-text', (_event, text: string) => {
       clipboard.writeText(text)
       return undefined
+    })
+    ipcMain.handle('open-external', async (_event, url: string) => {
+      let parsed: URL
+      try {
+        parsed = new URL(url)
+      } catch {
+        throw new Error('Invalid URL')
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('Only http and https URLs are allowed')
+      }
+      await shell.openExternal(parsed.toString())
     })
 
     ipcMain.handle('app:open-devtools', (event) => {

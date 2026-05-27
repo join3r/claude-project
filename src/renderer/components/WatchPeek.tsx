@@ -44,21 +44,23 @@ export function WatchPeek({ projectId, taskId, pane, tabId, anchorRect, onEnter,
   }
   const onUnpin = () => actions.setTabPinned(projectId, taskId, pane, tabId, false)
 
-  const left = Math.max(8, Math.min(window.innerWidth - 380, anchorRect.left))
-  const top = Math.max(8, anchorRect.top - 8 - 220)
+  const gap = 8
+  const left = Math.max(gap, Math.min(window.innerWidth - 360 - gap, anchorRect.left))
+  const bottom = Math.max(gap, window.innerHeight - anchorRect.top + gap)
+  const maxHeight = Math.max(80, anchorRect.top - gap * 2)
 
   return createPortal(
     <div
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      style={{ position: 'fixed', left, top, width: 360 }}
-      className="bg-surface border border-border rounded-md shadow-xl text-text z-40"
+      style={{ position: 'fixed', left, bottom, width: 360, maxHeight }}
+      className="bg-surface border border-border rounded-md shadow-xl text-text z-40 flex flex-col"
     >
-      <div className="px-3 py-2 border-b border-border text-xs text-text-subtle font-mono">last {PEEK_LINES} lines</div>
-      <div className="px-3 py-2 max-h-[180px] overflow-y-auto font-mono text-xs whitespace-pre-wrap">
+      <div className="px-3 py-2 border-b border-border text-xs text-text-subtle font-mono shrink-0">last {PEEK_LINES} lines</div>
+      <div className="px-3 py-2 max-h-[180px] min-h-0 overflow-y-auto font-mono text-xs whitespace-pre-wrap">
         {lines.length === 0 ? <em className="text-text-subtle">no output yet</em> : lines.join('\n')}
       </div>
-      <div className="px-3 py-2 flex justify-between border-t border-border">
+      <div className="px-3 py-2 flex justify-between border-t border-border shrink-0">
         <button type="button" onClick={onOpen} className="text-xs hover:text-accent bg-transparent border-0 cursor-pointer">Open</button>
         <button type="button" onClick={onUnpin} className="text-xs hover:text-accent bg-transparent border-0 cursor-pointer">Unpin</button>
       </div>

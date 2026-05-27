@@ -1314,6 +1314,10 @@ export function useAppState() {
     updateWindowViewState(prev => ({ ...prev, watchStripHidden: !prev.watchStripHidden }))
   }, [updateWindowViewState])
 
+  const setPinOrder = useCallback((order: string[]) => {
+    updateWindowViewState(prev => ({ ...prev, pinOrder: [...order] }))
+  }, [updateWindowViewState])
+
   const setFileBrowserWidth = useCallback((width: number) => {
     updateWindowViewState(prev => ({ ...prev, fileBrowserWidth: Math.min(400, Math.max(150, width)) }))
   }, [updateWindowViewState])
@@ -1607,6 +1611,8 @@ export function useAppState() {
     setFileBrowserOpen,
     watchStripHidden: windowViewState.watchStripHidden,
     toggleWatchStrip,
+    pinOrder: windowViewState.pinOrder,
+    setPinOrder,
     setFileBrowserWidth,
     setFileBrowserActiveTab,
     openOrFocusDiffTab,

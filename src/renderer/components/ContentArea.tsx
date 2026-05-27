@@ -120,8 +120,11 @@ export default function ContentArea(): React.ReactElement {
   }, [selectedProjectId, selectedTaskId])
 
   useEffect(() => {
+    const isMac = navigator.userAgent.includes('Mac')
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
+      // On macOS use Cmd only — Ctrl+D must pass through to terminals (EOF).
+      const primary = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+      if (!primary || e.shiftKey || e.altKey) return
       if (e.key.toLowerCase() !== 'd') return
       if (!selectedProjectId || !selectedTaskId) return
       const target = e.target as HTMLElement | null

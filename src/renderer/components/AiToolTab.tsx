@@ -17,6 +17,9 @@ import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
 import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
 import { normalizeBrowserUrl } from '../browserUrl'
+import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
+import { bindTerminalLinkContextMenu } from '../utils/bindTerminalLinkContextMenu'
+import { WEB_LINK_REGEX } from '../utils/terminalLinkAt'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import '@xterm/xterm/css/xterm.css'
 import { buildXtermTheme } from './terminalThemes'
@@ -43,6 +46,7 @@ interface TerminalEntry {
   searchAddon: SearchAddon
   webglAddon: WebglAddon | null
   scrollbarBinding: { dispose(): void } | null
+  linkContextMenuBinding: { dispose(): void } | null
   restoring: boolean
   pendingData: string[]
   suppressResizeEvents: number
@@ -163,6 +167,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const [sshReady, setSshReady] = useState(!sshConfig)
   const prevSshReadyRef = useRef(sshReady)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const isClaudeTab = toolType === 'claude'
   const isCodexTab = toolType === 'codex'
   const codexSpawnTsRef = useRef(0)
@@ -324,10 +329,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     const searchAddon = new SearchAddon()
     const clipboardAddon = new ClipboardAddon()
     const webLinksAddon = new WebLinksAddon((event, uri) => {
+      if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
       addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(uri) })
-    })
+    }, { urlRegex: WEB_LINK_REGEX })
     const unicode11Addon = new Unicode11Addon()
     const imageAddon = new ImageAddon()
     term.loadAddon(fitAddon)
@@ -340,6 +346,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     term.loadAddon(imageAddon)
     term.open(hostRef.current)
 
+    const linkContextMenuBinding = bindTerminalLinkContextMenu(term, setLinkMenu)
+
     // Defer WebGL to visibility effect — don't eagerly consume a context for hidden tabs
     terminals.set(tabId, {
       term,
@@ -348,6 +356,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       searchAddon,
       webglAddon: null,
       scrollbarBinding: null,
+      linkContextMenuBinding,
       restoring: false,
       pendingData: [],
       suppressResizeEvents: 0
@@ -716,6 +725,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           onClose={() => setSearchOpen(false)}
         />
       )}
+      <LinkContextMenu
+        menu={linkMenu}
+        onClose={() => setLinkMenu(null)}
+        onOpenInApp={(targetUrl) => addTab(projectId, taskId, pane, 'browser', { url: targetUrl })}
+      />
     </div>
   )
 }
@@ -738,6 +752,7 @@ function disposeAiToolTerminal(
       try { entry.webglAddon.dispose() } catch { /* already gone */ }
     }
     entry.scrollbarBinding?.dispose()
+    entry.linkContextMenuBinding?.dispose()
     entry.term.dispose()
     terminals.delete(tabId)
   }

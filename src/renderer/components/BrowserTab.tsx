@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import type { SshConfig } from '../../shared/types'
 import { normalizeBrowserUrl } from '../browserUrl'
+import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 
 interface Props {
   tabId: string
@@ -14,14 +15,19 @@ interface Props {
 }
 
 export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane, sshConfig }: Props): React.ReactElement {
-  const { updateTabUrl, browserZoomFactor, markTaskInteracted } = useApp()
+  const { updateTabUrl, browserZoomFactor, markTaskInteracted, addTab } = useApp()
   const [url, setUrl] = useState(initialUrl || 'https://www.google.com')
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
   const [proxyEnabled, setProxyEnabled] = useState(!!sshConfig)
   const [proxyLoading, setProxyLoading] = useState(false)
   const [proxyReady, setProxyReady] = useState(!sshConfig)
+  const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const webviewRef = useRef<Electron.WebviewTag>(null)
+
+  const handleOpenLinkInApp = useCallback((targetUrl: string) => {
+    addTab(projectId, taskId, pane, 'browser', { url: targetUrl })
+  }, [addTab, projectId, taskId, pane])
 
   const isRemote = !!sshConfig
   const partition = isRemote ? `persist:browser-${projectId}` : undefined
@@ -41,9 +47,19 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     webview.addEventListener('did-navigate', handleNavigation)
     webview.addEventListener('did-navigate-in-page', handleNavigation)
 
+    const handleContextMenu = (e: Event) => {
+      const { linkURL, x, y } = (e as Electron.ContextMenuEvent).params
+      if (!linkURL) return
+      e.preventDefault()
+      const rect = webview.getBoundingClientRect()
+      setLinkMenu({ url: linkURL, x: rect.left + x, y: rect.top + y })
+    }
+    webview.addEventListener('context-menu', handleContextMenu)
+
     return () => {
       webview.removeEventListener('did-navigate', handleNavigation)
       webview.removeEventListener('did-navigate-in-page', handleNavigation)
+      webview.removeEventListener('context-menu', handleContextMenu)
     }
   }, [projectId, taskId, pane, tabId, updateTabUrl, markTaskInteracted])
 
@@ -230,6 +246,11 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
           <div className="flex-1 flex items-center justify-center text-text-muted text-[13px]">Connecting to remote host...</div>
         )}
       </div>
+      <LinkContextMenu
+        menu={linkMenu}
+        onClose={() => setLinkMenu(null)}
+        onOpenInApp={handleOpenLinkInApp}
+      />
     </div>
   )
 }

@@ -310,6 +310,25 @@ export interface WindowViewState {
   fileBrowserWidth: number
   fileBrowserActiveTab: FileBrowserTab
   watchStripHidden: boolean
+  pinOrder: string[]
+}
+
+export function pinKey(projectId: string, taskId: string, pane: 'left' | 'right', tabId: string): string {
+  return `${projectId}:${taskId}:${pane}:${tabId}`
+}
+
+function collectPinKeys(projects: Project[]): string[] {
+  const keys: string[] = []
+  for (const project of projects) {
+    for (const task of project.tasks) {
+      for (const pane of ['left', 'right'] as const) {
+        for (const tab of task.tabs[pane]) {
+          if (tab.pinned) keys.push(pinKey(project.id, task.id, pane, tab.id))
+        }
+      }
+    }
+  }
+  return keys
 }
 
 export interface WindowGeometry {
@@ -396,7 +415,8 @@ export function createDefaultWindowViewState(): WindowViewState {
     fileBrowserOpen: false,
     fileBrowserWidth: 250,
     fileBrowserActiveTab: 'files',
-    watchStripHidden: false
+    watchStripHidden: false,
+    pinOrder: []
   }
 }
 
@@ -424,7 +444,8 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     fileBrowserOpen: state.fileBrowserOpen,
     fileBrowserWidth: state.fileBrowserWidth,
     fileBrowserActiveTab: state.fileBrowserActiveTab,
-    watchStripHidden: state.watchStripHidden
+    watchStripHidden: state.watchStripHidden,
+    pinOrder: [...(state.pinOrder ?? [])]
   }
 }
 
@@ -536,6 +557,16 @@ export function reconcileWindowViewState(
 
   const expandedProjectIds = (state.expandedProjectIds ?? []).filter(id => projectById.has(id))
 
+  const currentPinKeys = new Set(collectPinKeys(projects))
+  const seenPinKeys = new Set<string>()
+  const reconciledPinOrder: string[] = []
+  for (const key of state.pinOrder ?? []) {
+    if (currentPinKeys.has(key) && !seenPinKeys.has(key)) {
+      reconciledPinOrder.push(key)
+      seenPinKeys.add(key)
+    }
+  }
+
   return {
     selectedProjectId: selectedProject?.id ?? null,
     selectedTaskId: selectedTask?.id ?? null,
@@ -545,7 +576,8 @@ export function reconcileWindowViewState(
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
-    watchStripHidden: typeof state.watchStripHidden === 'boolean' ? state.watchStripHidden : false
+    watchStripHidden: typeof state.watchStripHidden === 'boolean' ? state.watchStripHidden : false,
+    pinOrder: reconciledPinOrder
   }
 }
 
@@ -587,6 +619,7 @@ export function buildWindowViewState(
     fileBrowserOpen: seed?.fileBrowserOpen ?? false,
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
-    watchStripHidden: seed?.watchStripHidden ?? false
+    watchStripHidden: seed?.watchStripHidden ?? false,
+    pinOrder: seed?.pinOrder ? [...seed.pinOrder] : []
   }, projects)
 }
