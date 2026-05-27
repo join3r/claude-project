@@ -125,7 +125,12 @@ export default function ContentArea(): React.ReactElement {
       if (e.key.toLowerCase() !== 'd') return
       if (!selectedProjectId || !selectedTaskId) return
       const target = e.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      // xterm's hidden textarea (class `xterm-helper-textarea`) is where focused
+      // terminals receive keystrokes — exclude it so Cmd+D still toggles split
+      // when a terminal pane (Claude Code, Codex, plain shell) is focused.
+      const isEditable = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      const isXtermHelper = target?.classList.contains('xterm-helper-textarea')
+      if (isEditable && !isXtermHelper) return
       e.preventDefault()
       e.stopPropagation()
       toggleSplit(selectedProjectId, selectedTaskId)

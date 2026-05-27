@@ -492,7 +492,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const renderProject = (project: Project, folderId: string | null) => {
     const isExpanded = expandedProjects.has(project.id)
-    const isProjectSelected = selectedProjectId === project.id && !isExpanded
+    // Project home lives on the project row itself (it's filtered out of the
+    // visible task list), so the row needs the selection rail whenever the
+    // home task is active — even when the project is expanded.
+    const isHomeSelected = selectedProjectId === project.id
+      && project.tasks.some(t => t.id === selectedTaskId && isHomeTask(t))
+    const isProjectSelected = selectedProjectId === project.id && (!isExpanded || isHomeSelected)
     const isProjectDragging = dragState?.type === 'project' && dragState.id === project.id
     const visibleTasks = project.tasks.filter(t => !isHomeTask(t))
     return (

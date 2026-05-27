@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useState } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { TabStatusProvider } from './context/TabStatusContext'
 import Sidebar from './components/Sidebar'
@@ -67,7 +67,10 @@ function AppInner(): React.ReactElement {
   // Mirror theme-light onto documentElement so getComputedStyle(documentElement)
   // resolves CSS custom properties via the .theme-light cascade. Used by xterm
   // theme construction in TerminalTab/AiToolTab and any other CSS-var reader.
-  useEffect(() => {
+  // Must be a layout effect — child useEffects fire before parent useEffects,
+  // so a regular effect here would leave terminals reading stale CSS vars on
+  // the first commit after a theme flip.
+  useLayoutEffect(() => {
     document.documentElement.classList.toggle('theme-light', effectiveTheme === 'light')
   }, [effectiveTheme])
 

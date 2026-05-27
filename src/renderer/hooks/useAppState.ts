@@ -1423,7 +1423,68 @@ export function useAppState() {
       void window.api.notesSave(updated)
       return updated
     })
-  }, [])
+
+    const project = projectsRef.current.find(p => p.id === projectId)
+    const removedTabIds: string[] = []
+    if (project) {
+      for (const task of project.tasks) {
+        for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+          if (tab.type === 'note' && tab.noteId === noteId) {
+            removedTabIds.push(tab.id)
+          }
+        }
+      }
+    }
+    if (removedTabIds.length === 0) return
+
+    updateWindowViewState(prev => {
+      if (!project) return prev
+      const nextTaskStates = { ...prev.taskStates }
+      for (const task of project.tasks) {
+        const currentState = reconcileTaskViewState(task, prev.taskStates[task.id])
+        const nextActiveTab = { ...currentState.activeTab }
+        let changed = false
+        for (const pane of ['left', 'right'] as const) {
+          const activeId = currentState.activeTab[pane]
+          const activeTab = task.tabs[pane].find(tab => tab.id === activeId)
+          if (activeTab && activeTab.type === 'note' && activeTab.noteId === noteId) {
+            const remaining = task.tabs[pane].filter(
+              tab => !(tab.type === 'note' && tab.noteId === noteId)
+            )
+            nextActiveTab[pane] = remaining[remaining.length - 1]?.id ?? null
+            changed = true
+          }
+        }
+        if (changed) {
+          nextTaskStates[task.id] = {
+            ...cloneTaskState(currentState),
+            activeTab: nextActiveTab
+          }
+        }
+      }
+      return { ...prev, taskStates: nextTaskStates }
+    })
+
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(p =>
+        p.id !== projectId ? p : {
+          ...p,
+          tasks: p.tasks.map(task => ({
+            ...task,
+            tabs: {
+              left: task.tabs.left.filter(tab => !(tab.type === 'note' && tab.noteId === noteId)),
+              right: task.tabs.right.filter(tab => !(tab.type === 'note' && tab.noteId === noteId))
+            }
+          }))
+        }
+      )
+    }))
+
+    for (const tabId of removedTabIds) {
+      window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+    }
+  }, [persistProjects, updateWindowViewState])
 
   const updateNoteContent = useCallback((projectId: string, noteId: string, content: string) => {
     const now = Date.now()

@@ -185,7 +185,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       )}
       {isMarkdown && (
         <button
-          className="md-view-toggle"
+          className="absolute top-1.5 right-7 z-10 bg-surface border border-border text-text-muted cursor-pointer px-2 py-0.5 rounded-md text-[12px] leading-snug hover:bg-surface-2 hover:text-text hover:border-border-focus"
           onClick={handleToggleView}
           title={viewMode === 'source' ? 'Show preview (⌘⇧V)' : 'Show source (⌘⇧V)'}
         >
