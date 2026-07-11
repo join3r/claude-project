@@ -19,6 +19,7 @@ import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 import { bindTerminalLinkContextMenu } from '../utils/bindTerminalLinkContextMenu'
 import { WEB_LINK_REGEX } from '../utils/terminalLinkAt'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
+import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import { buildXtermTheme } from './terminalThemes'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { terminalStatusFromOutput } from './terminalStatus'
@@ -529,6 +530,7 @@ export function disposeTerminal(
     }
     entry.scrollbarBinding?.dispose()
     entry.linkContextMenuBinding?.dispose()
+    disarmXtermDocMouseListeners()
     entry.term.dispose()
     terminals.delete(tabId)
   }

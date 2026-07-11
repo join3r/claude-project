@@ -9,7 +9,8 @@ import { HookInjector } from './hook-injector'
 import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import type { SshConfig, ProjectNote, GitPostureResult, GitPostureLastCommit, CommitHistoryResult } from '../shared/types'
-import { AppConfig, ProjectsData } from '../shared/types'
+import { AppConfig, ProjectsData, AI_TAB_META } from '../shared/types'
+import { piExtensionLocalPath, piExtensionRemotePath, buildRemotePiExtensionScript } from './pi-extension-injector'
 import { NotesStorage } from './notes-storage'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import os from 'os'
@@ -266,7 +267,10 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
 
       // For Claude tabs on remote, inject hooks via the spawn command (ref-counted)
       const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      const isPiRemote = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       let hookInjectPrefix = ''
+      let remoteArgs = args
+      let remoteEnv = extraEnv
       const remoteCwd = cwd || sshConfig.remoteDir
       if (isClaudeRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
@@ -274,13 +278,29 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
           hookInjector.remoteInject(projectId, remoteCwd)
           hookInjectPrefix = hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
         }
+      } else if (isPiRemote) {
+        const remotePort = sshManager.getRemotePort(projectId)
+        if (remotePort) {
+          const remoteExtPath = piExtensionRemotePath(sshConfig.username)
+          hookInjectPrefix = buildRemotePiExtensionScript(remoteExtPath) + ' && '
+          remoteArgs = [...(args ?? []), '-e', remoteExtPath]
+          remoteEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(remotePort) }
+        }
       }
 
-      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix, remoteCwd)
+      const sshArgs = sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
       ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs)
     } else {
       // Local spawn (existing behavior)
-      ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv)
+      const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
+      if (isPiLocal) {
+        ptyManager.spawn(id, shell, cwd, cols, rows, [...(args ?? []), '-e', piExtensionLocalPath()], {
+          ...extraEnv,
+          DEVTOOL_HOOK_PORT: String(hookServer.getPort())
+        })
+      } else {
+        ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv)
+      }
     }
     ptyManager.onData(id, (data) => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('pty-data', id, data)

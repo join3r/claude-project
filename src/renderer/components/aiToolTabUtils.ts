@@ -20,5 +20,11 @@ export function buildAiToolArgs(toolType: AiTabType, parsedExtraArgs: string[], 
     ]
   }
 
+  if (toolType === 'pi') {
+    // DevTool pre-generates a session UUID per pi tab; --session-id loads it if
+    // present and creates it if missing, giving deterministic resume across restarts.
+    return [...parsedExtraArgs, ...(resumeSessionId ? ['--session-id', resumeSessionId] : [])]
+  }
+
   return parsedExtraArgs
 }

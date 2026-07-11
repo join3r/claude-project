@@ -27,4 +27,17 @@ describe('aiToolTabUtils', () => {
       'sess-abc'
     ])
   })
+
+  it('builds pi args with --session-id for deterministic resume', () => {
+    expect(buildAiToolArgs('pi', ['--model', 'gpt-5.5'], 'sess-pi-1')).toEqual([
+      '--model',
+      'gpt-5.5',
+      '--session-id',
+      'sess-pi-1'
+    ])
+  })
+
+  it('omits --session-id for pi when no session id is provided', () => {
+    expect(buildAiToolArgs('pi', ['--model', 'gpt-5.5'])).toEqual(['--model', 'gpt-5.5'])
+  })
 })

@@ -76,21 +76,21 @@ describe('state hydration', () => {
   it('rebases queued ProjectsData mutations onto loaded data', () => {
     const loaded: ProjectsData = {
       projects: [{ id: 'existing', name: 'Existing', directory: '/tmp', tasks: [] }],
-      folders: [],
-      rootOrder: ['existing']
+      tags: [],
+      projectOrder: ['existing']
     }
 
     const hydrated = applyQueuedStateUpdates(loaded, [
       (prev: ProjectsData) => ({
         ...prev,
         projects: [...prev.projects, { id: 'new', name: 'New', directory: '/tmp/new', tasks: [] }],
-        rootOrder: [...prev.rootOrder, 'new']
+        projectOrder: [...prev.projectOrder, 'new']
       })
     ])
 
     expect(hydrated.projects).toHaveLength(2)
-    expect(hydrated.rootOrder).toEqual(['existing', 'new'])
-    expect(hydrated.folders).toEqual([])
+    expect(hydrated.projectOrder).toEqual(['existing', 'new'])
+    expect(hydrated.tags).toEqual([])
   })
 
   it('restores the last valid project and task when nothing is selected yet', () => {
@@ -148,8 +148,8 @@ describe('state hydration', () => {
           ]
         }
       ],
-      folders: [],
-      rootOrder: ['local-project']
+      tags: [],
+      projectOrder: ['local-project']
     }
 
     const next = persistSelectionState(
@@ -192,8 +192,8 @@ describe('state hydration', () => {
           ]
         }
       ],
-      folders: [],
-      rootOrder: ['local-project']
+      tags: [],
+      projectOrder: ['local-project']
     }
 
     const next = persistSelectionState(

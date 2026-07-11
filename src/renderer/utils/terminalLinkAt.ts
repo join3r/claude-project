@@ -5,7 +5,8 @@ export const WEB_LINK_REGEX =
   /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\\^<>`]*[^\s"':,.!?{}|\\\^~\[\]`()<>]/
 
 export function findLinkInLine(line: string, col: number): string | null {
-  const regex = new RegExp(WEB_LINK_REGEX.source, WEB_LINK_REGEX.flags)
+  const flags = WEB_LINK_REGEX.flags.includes('g') ? WEB_LINK_REGEX.flags : `${WEB_LINK_REGEX.flags}g`
+  const regex = new RegExp(WEB_LINK_REGEX.source, flags)
   let match: RegExpExecArray | null
   while ((match = regex.exec(line)) !== null) {
     const start = match.index

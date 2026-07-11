@@ -25,6 +25,9 @@
       "node_modules/**/*",
       "!node_modules/.cache"
     ],
+    "asarUnpack": [
+      "out/main/pi-status-extension.mjs"
+    ],
     "mac": {
       "target": "dir",
       "category": "public.app-category.developer-tools",

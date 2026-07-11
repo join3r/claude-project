@@ -320,10 +320,10 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 <input
                   type="checkbox"
                   className="cursor-pointer"
-                  checked={config.enableOpencode}
-                  onChange={(e) => updateConfig({ enableOpencode: e.target.checked })}
+                  checked={config.enablePi}
+                  onChange={(e) => updateConfig({ enablePi: e.target.checked })}
                 />
-                OpenCode
+                Pi
               </label>
             </div>
 

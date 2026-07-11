@@ -21,6 +21,7 @@ import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 import { bindTerminalLinkContextMenu } from '../utils/bindTerminalLinkContextMenu'
 import { WEB_LINK_REGEX } from '../utils/terminalLinkAt'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
+import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import '@xterm/xterm/css/xterm.css'
 import { buildXtermTheme } from './terminalThemes'
 
@@ -170,6 +171,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const isClaudeTab = toolType === 'claude'
   const isCodexTab = toolType === 'codex'
+  const isPiTab = toolType === 'pi'
+  // Tabs whose status is driven by hook-server events (Claude's shell hooks, pi's
+  // status extension) rather than the terminal-bell / activity heuristic.
+  const isHookTab = isClaudeTab || isPiTab
   const codexSpawnTsRef = useRef(0)
   const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const latestSessionIdRef = useRef<string | null>(sessionId ?? null)
@@ -178,20 +183,25 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   // tokens on app startup. Brand-new Claude tabs (no prior activity) auto-spawn.
   // null = still checking disk, true/false = decided.
   const lazyLoadEnabled = config?.lazyLoadClaude ?? true
+  // For Claude, a stored sessionId means the session was resumed → prior activity.
+  // pi always has a pre-generated sessionId, so it can't signal prior activity that
+  // way; pi (and Claude without a sessionId) probe disk for saved scrollback instead.
   const [hadPriorActivity, setHadPriorActivity] = useState<boolean | null>(
-    isClaudeTab ? (sessionId ? true : null) : false
+    isClaudeTab ? (sessionId ? true : null) : (isPiTab ? null : false)
   )
-  const requiresActivation = isClaudeTab && lazyLoadEnabled && hadPriorActivity === true
-  const activationDecisionPending = isClaudeTab && lazyLoadEnabled && hadPriorActivity === null
+  const requiresActivation = isHookTab && lazyLoadEnabled && hadPriorActivity === true
+  const activationDecisionPending = isHookTab && lazyLoadEnabled && hadPriorActivity === null
   const [userActivated, setUserActivated] = useState(false)
   const userActivatedRef = useRef(false)
   userActivatedRef.current = userActivated
   const scrollbackPreloadedRef = useRef(false)
 
-  // Probe disk for existing scrollback to decide if this Claude tab counts as
-  // having prior activity (and therefore needs lazy activation).
+  // Probe disk for existing scrollback to decide if this hook tab counts as having
+  // prior activity (and therefore needs lazy activation). Claude with a sessionId
+  // already knows it has prior activity; pi always probes (its sessionId is synthetic).
+  const shouldProbeDisk = (isClaudeTab && !sessionId) || isPiTab
   useEffect(() => {
-    if (!isClaudeTab || sessionId) return
+    if (!shouldProbeDisk) return
     let cancelled = false
     window.api.scrollbackLoad(tabId).then(data => {
       if (cancelled) return
@@ -201,7 +211,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       setHadPriorActivity(false)
     })
     return () => { cancelled = true }
-  }, [tabId, isClaudeTab, sessionId])
+  }, [tabId, shouldProbeDisk])
 
   // Release the renderer-side xterm instance while hidden. The PTY keeps
   // running in main and will be reattached from runtime scrollback on show.
@@ -394,9 +404,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       }
     }
 
-    if (isClaudeTab) {
-      // Hook-based status tracking for Claude Code
-      // Uses stable projectId/taskId props, not global selection state
+    if (isHookTab) {
+      // Hook-based status tracking for Claude Code and pi (via the pi status extension).
+      // Uses stable projectId/taskId props, not global selection state.
+      // pi only emits working (agent_start) + notification (agent_end); the unused
+      // stopped/session-start callbacks simply never fire for it.
       hookStatusCallbacks.set(tabId, {
         onWorking: () => {
           const current = statusStore.getStatus(tabId)
@@ -447,7 +459,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       }, 3000)
     })
 
-    if (!isClaudeTab) {
+    if (!isHookTab) {
       term.onBell(() => {
         statusStore.setStatus(tabId, 'attention')
       })
@@ -551,7 +563,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
             const args = buildAiToolArgs(toolType, parsedExtra, resumeSessionId)
 
             let extraEnv: Record<string, string> | undefined
-            if (isClaudeTab) {
+            if (isHookTab) {
+              // DEVTOOL_TAB_ID lets the main process detect a Claude/pi launch and wire
+              // hook injection (Claude: settings hooks; pi: the `-e` status extension).
               extraEnv = { DEVTOOL_TAB_ID: tabId }
             }
 
@@ -713,7 +727,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           onMouseDown={() => setUserActivated(true)}
         >
           <div className="text-text text-[13px] px-4 py-2 rounded border border-border bg-surface-2 shadow-lg hover:border-accent-400">
-            Click to resume Claude session
+            Click to resume {AI_TAB_META[toolType].label} session
           </div>
         </div>
       )}
@@ -753,6 +767,7 @@ function disposeAiToolTerminal(
     }
     entry.scrollbarBinding?.dispose()
     entry.linkContextMenuBinding?.dispose()
+    disarmXtermDocMouseListeners()
     entry.term.dispose()
     terminals.delete(tabId)
   }

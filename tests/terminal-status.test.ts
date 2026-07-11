@@ -40,7 +40,7 @@ describe('PINNABLE_TAB_TYPES / isPinnable', () => {
     expect(PINNABLE_TAB_TYPES.has('terminal')).toBe(true)
     expect(PINNABLE_TAB_TYPES.has('claude')).toBe(true)
     expect(PINNABLE_TAB_TYPES.has('codex')).toBe(true)
-    expect(PINNABLE_TAB_TYPES.has('opencode')).toBe(true)
+    expect(PINNABLE_TAB_TYPES.has('pi')).toBe(true)
   })
   it('excludes non-PTY tab types', () => {
     expect(PINNABLE_TAB_TYPES.has('browser')).toBe(false)

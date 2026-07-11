@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask } from '../../shared/types'
-import type { Tab, Task, Project, Folder } from '../../shared/types'
+import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, projectMatchesTagFilter } from '../../shared/types'
+import type { Tab, Task, Project } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -18,17 +18,14 @@ import { paletteEvents } from '../palette/paletteEvents'
 import { dashboardIconUrl, fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
 
 type DragState = {
-  type: 'project' | 'task' | 'folder'
+  type: 'project' | 'task'
   id: string
-  sourceFolderId: string | null
   index: number
   projectId?: string
 }
 
 type DropTarget =
-  | { type: 'into-folder'; folderId: string }
-  | { type: 'between-root'; index: number }
-  | { type: 'between-folder-children'; folderId: string; index: number }
+  | { type: 'between-projects'; index: number }
   | { type: 'between-tasks'; projectId: string; index: number }
   | null
 
@@ -52,15 +49,59 @@ function getProjectStatus(tasks: Task[], allStatuses: Record<string, TabStatusVa
   return null
 }
 
-function getFolderStatus(folder: { projectIds: string[] }, projects: { id: string; tasks: Task[] }[], allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const folderProjects = folder.projectIds
-    .map(pid => projects.find(p => p.id === pid))
-    .filter(Boolean) as { tasks: Task[] }[]
-  const statuses = folderProjects.map(p => getProjectStatus(p.tasks.filter(t => !isHomeTask(t)), allStatuses)).filter(Boolean)
-  if (statuses.includes('attention')) return 'attention'
-  if (statuses.includes('working')) return 'working'
-  if (statuses.includes('exited')) return 'exited'
-  return null
+/** px-3 + chevron (12) + gap-2 (8) + icon slot (w-5 = 20) + 2px nest under name */
+const TASK_ROW_PL = 'pl-[54px]'
+const TASK_ROW_ML = 'ml-[54px]'
+
+function getProjectInitials(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return '?'
+  const words = trimmed.split(/[\s\-_/]+/).filter(Boolean)
+  if (words.length >= 2) {
+    const a = words[0]?.replace(/[^a-zA-Z0-9]/g, '')[0]
+    const b = words[1]?.replace(/[^a-zA-Z0-9]/g, '')[0]
+    if (a && b) return (a + b).toUpperCase()
+  }
+  const letters = (words[0] ?? trimmed).replace(/[^a-zA-Z0-9]/g, '')
+  if (!letters) return '?'
+  return letters.slice(0, 2).toUpperCase()
+}
+
+function ProjectIconSlot({
+  project,
+  theme,
+  metadata,
+}: {
+  project: Project
+  theme: 'dark' | 'light'
+  metadata: DashboardIconsMetadata | null
+}): React.ReactElement {
+  const [iconFailed, setIconFailed] = useState(false)
+  const iconUrl = project.icon && !iconFailed
+    ? dashboardIconUrl(project.icon, { theme, metadata: metadata ?? undefined })
+    : null
+
+  return (
+    <span className="w-5 shrink-0 flex items-center justify-center">
+      {iconUrl ? (
+        <img
+          src={iconUrl}
+          alt=""
+          className="w-3.5 h-3.5 object-contain"
+          onError={() => setIconFailed(true)}
+        />
+      ) : project.emoji ? (
+        <span className="text-[13px] leading-none">{project.emoji}</span>
+      ) : (
+        <span
+          className="w-3.5 h-3.5 rounded-sm bg-surface-3 text-text-muted text-[8px] font-semibold leading-none flex items-center justify-center"
+          title={project.name}
+        >
+          {getProjectInitials(project.name)}
+        </span>
+      )}
+    </span>
+  )
 }
 
 function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<string, TabStatusValue> }): React.ReactElement | null {
@@ -76,17 +117,14 @@ function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
   const {
-    projects, folders, rootOrder,
-    selectedProjectId, selectedTaskId,
+    projects, tags, projectOrder,
+    selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome,
-    addProject, addRemoteProject, addShellCommandProject, removeProject, renameProject, updateProject,
+    addProject, addRemoteProject, addShellCommandProject, addTag, removeProject, renameProject, updateProject,
     addTask, addWorkspaceTask, removeTask, renameTask,
-    addFolder, removeFolder, renameFolder,
-    moveProjectToFolder, moveProjectToRoot,
-    reorderRootItems, reorderProjectsInFolder,
-    reorderTasks, getProjectDir,
+    reorderProjects, reorderTasks, getProjectDir,
     config, updateConfig,
-    collapsedFolderIds, toggleFolderCollapse, setFolderCollapsed,
+    toggleTagFilter,
     expandedProjectIds, toggleProjectExpansion,
     effectiveTheme
   } = useApp()
@@ -118,7 +156,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [switchToTask, tabStatusStore])
 
   const [contextMenu, setContextMenu] = useState<{
-    x: number; y: number; type: 'project' | 'task' | 'folder'; projectId: string; taskId?: string
+    x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
   } | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -137,8 +175,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
-  const collapsedFolders = new Set(collapsedFolderIds)
   const expandedProjects = new Set(expandedProjectIds)
+  const projectsById = React.useMemo(() => new Map(projects.map(p => [p.id, p])), [projects])
+  const visibleProjectIds = React.useMemo(() => {
+    const filterActive = selectedTagIds.length > 0
+    return projectOrder.filter(id => {
+      const project = projectsById.get(id)
+      if (!project) return false
+      return filterActive ? projectMatchesTagFilter(project, selectedTagIds) : true
+    })
+  }, [projectOrder, projectsById, selectedTagIds])
+  const sortedTags = React.useMemo(
+    () => [...tags].sort((a, b) => a.name.localeCompare(b.name)),
+    [tags]
+  )
 
   useEffect(() => {
     if (switcherRequested) {
@@ -207,14 +257,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       })
     })
   }, [projects])
-
-  useEffect(() => {
-    if (!selectedProjectId) return
-    const folder = folders.find(f => f.projectIds.includes(selectedProjectId))
-    if (folder) {
-      setFolderCollapsed(folder.id, false)
-    }
-  }, [selectedProjectId, folders, setFolderCollapsed])
 
   const handleAddProject = async () => {
     const dir = await window.api.pickDirectory()
@@ -297,14 +339,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     removeTask(projectId, taskId)
   }
 
-  const handleRenameSubmit = (type: 'project' | 'task' | 'folder', projectId: string, taskId?: string) => {
+  const handleRenameSubmit = (type: 'project' | 'task', projectId: string, taskId?: string) => {
     if (!editValue.trim()) {
       setEditingId(null)
       return
     }
-    if (type === 'folder') {
-      renameFolder(projectId, editValue.trim())
-    } else if (type === 'project') {
+    if (type === 'project') {
       renameProject(projectId, editValue.trim())
     } else if (taskId) {
       renameTask(projectId, taskId, editValue.trim())
@@ -328,10 +368,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const handleDragMouseDown = useCallback((
     e: React.MouseEvent,
-    type: 'project' | 'task' | 'folder',
+    type: 'project' | 'task',
     id: string,
     index: number,
-    sourceFolderId: string | null = null,
     projectId?: string
   ) => {
     if (e.button !== 0 || editingId) return
@@ -343,7 +382,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (!dragging) {
         if (Math.abs(ev.clientY - startY) + Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return
         dragging = true
-        const nextDragState: DragState = { type, id, sourceFolderId, index, projectId }
+        const nextDragState: DragState = { type, id, index, projectId }
         dragStateRef.current = nextDragState
         setDragState(nextDragState)
       }
@@ -374,52 +413,25 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         return
       }
 
-      // Project or folder dragging
-      const allItems = sidebarList.querySelectorAll<HTMLElement>('[data-drag-type]')
+      const projectItems = sidebarList.querySelectorAll<HTMLElement>('[data-drag-type="project"]')
       let newTarget: typeof dropTarget = null
 
-      for (let i = 0; i < allItems.length; i++) {
-        const item = allItems[i]
+      for (let i = 0; i < projectItems.length; i++) {
+        const item = projectItems[i]
         const rect = item.getBoundingClientRect()
         if (ev.clientY < rect.top || ev.clientY > rect.bottom) continue
 
-        const itemType = item.dataset.dragType
         const itemId = item.dataset.dragId!
-        const itemFolderId = item.dataset.folderId || null
-
-        if (itemType === 'folder-heading') {
-          const quarter = rect.height * 0.25
-          if (ev.clientY < rect.top + quarter) {
-            const rootIdx = rootOrder.indexOf(itemId)
-            newTarget = { type: 'between-root', index: rootIdx }
-          } else if (ev.clientY > rect.bottom - quarter) {
-            const rootIdx = rootOrder.indexOf(itemId)
-            newTarget = { type: 'between-root', index: rootIdx + 1 }
-          } else {
-            if (type === 'project') {
-              newTarget = { type: 'into-folder', folderId: itemId }
-            }
-          }
-        } else if (itemType === 'project') {
-          const midY = rect.top + rect.height / 2
-          if (itemFolderId) {
-            const folder = folders.find(f => f.id === itemFolderId)
-            if (folder) {
-              const idxInFolder = folder.projectIds.indexOf(itemId)
-              const insertIdx = ev.clientY > midY ? idxInFolder + 1 : idxInFolder
-              newTarget = { type: 'between-folder-children', folderId: itemFolderId, index: insertIdx }
-            }
-          } else {
-            const rootIdx = rootOrder.indexOf(itemId)
-            const insertIdx = ev.clientY > midY ? rootIdx + 1 : rootIdx
-            newTarget = { type: 'between-root', index: insertIdx }
-          }
-        }
+        const listIdx = visibleProjectIds.indexOf(itemId)
+        if (listIdx < 0) break
+        const midY = rect.top + rect.height / 2
+        const insertIdx = ev.clientY > midY ? listIdx + 1 : listIdx
+        newTarget = { type: 'between-projects', index: insertIdx }
         break
       }
 
       if (!newTarget) {
-        newTarget = { type: 'between-root', index: rootOrder.length }
+        newTarget = { type: 'between-projects', index: visibleProjectIds.length }
       }
 
       dropTargetRef.current = newTarget
@@ -442,40 +454,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           if (toIndex !== null) {
             reorderTasks(currentDragState.projectId, currentDragState.index, toIndex)
           }
-        } else if (currentDragState.type === 'project') {
-          if (currentDropTarget.type === 'into-folder') {
-            if (currentDragState.sourceFolderId !== currentDropTarget.folderId) {
-              moveProjectToFolder(currentDragState.id, currentDropTarget.folderId)
+        } else if (currentDragState.type === 'project' && currentDropTarget.type === 'between-projects') {
+          const fromIdx = projectOrder.indexOf(currentDragState.id)
+          const orderDropIndex = currentDropTarget.index >= visibleProjectIds.length
+            ? projectOrder.length
+            : projectOrder.indexOf(visibleProjectIds[currentDropTarget.index] ?? '')
+          if (orderDropIndex >= 0) {
+            const toIdx = getReorderInsertIndex(fromIdx, orderDropIndex)
+            if (toIdx !== null) {
+              reorderProjects(fromIdx, toIdx)
             }
-          } else if (currentDropTarget.type === 'between-root') {
-            if (currentDragState.sourceFolderId) {
-              moveProjectToRoot(currentDragState.id, currentDropTarget.index)
-            } else {
-              const fromIdx = rootOrder.indexOf(currentDragState.id)
-              const toIdx = getReorderInsertIndex(fromIdx, currentDropTarget.index)
-              if (toIdx !== null) {
-                reorderRootItems(fromIdx, toIdx)
-              }
-            }
-          } else if (currentDropTarget.type === 'between-folder-children') {
-            if (currentDragState.sourceFolderId === currentDropTarget.folderId) {
-              const folder = folders.find(f => f.id === currentDropTarget.folderId)
-              if (folder) {
-                const fromIdx = folder.projectIds.indexOf(currentDragState.id)
-                const toIdx = getReorderInsertIndex(fromIdx, currentDropTarget.index)
-                if (toIdx !== null) {
-                  reorderProjectsInFolder(currentDropTarget.folderId, fromIdx, toIdx)
-                }
-              }
-            } else {
-              moveProjectToFolder(currentDragState.id, currentDropTarget.folderId)
-            }
-          }
-        } else if (currentDragState.type === 'folder' && currentDropTarget.type === 'between-root') {
-          const fromIdx = rootOrder.indexOf(currentDragState.id)
-          const toIdx = getReorderInsertIndex(fromIdx, currentDropTarget.index)
-          if (toIdx !== null) {
-            reorderRootItems(fromIdx, toIdx)
           }
         }
       }
@@ -488,9 +476,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [editingId, rootOrder, folders, reorderTasks, moveProjectToFolder, moveProjectToRoot, reorderRootItems, reorderProjectsInFolder])
+  }, [editingId, projectOrder, visibleProjectIds, reorderTasks, reorderProjects])
 
-  const renderProject = (project: Project, folderId: string | null) => {
+  const renderProject = (project: Project) => {
     const isExpanded = expandedProjects.has(project.id)
     // Project home lives on the project row itself (it's filtered out of the
     // visible task list), so the row needs the selection rail whenever the
@@ -518,15 +506,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         data-selected={isProjectSelected ? 'true' : undefined}
         data-drag-type="project"
         data-drag-id={project.id}
-        data-folder-id={folderId || ''}
         onClick={() => { selectProjectHome(project.id) }}
         onContextMenu={(e) => handleContextMenu(e, 'project', project.id)}
         onMouseDown={(e) => {
-          const folder = folderId ? folders.find(f => f.id === folderId) : null
-          const index = folder
-            ? folder.projectIds.indexOf(project.id)
-            : rootOrder.indexOf(project.id)
-          handleDragMouseDown(e, 'project', project.id, index, folderId)
+          const index = projectOrder.indexOf(project.id)
+          handleDragMouseDown(e, 'project', project.id, index)
         }}
       >
         {editingId === project.id ? (
@@ -548,25 +532,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); toggleProjectExpansion(project.id) }}
             >{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
-            {(() => {
-              const iconUrl = project.icon
-                ? dashboardIconUrl(project.icon, { theme: effectiveTheme, metadata: iconMetadata ?? undefined })
-                : null
-              if (iconUrl) {
-                return (
-                  <img
-                    src={iconUrl}
-                    alt=""
-                    className="w-3.5 h-3.5 object-contain mr-1.5 shrink-0"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                  />
-                )
-              }
-              if (project.emoji) {
-                return <span className="text-[13px] leading-none mr-1.5">{project.emoji}</span>
-              }
-              return null
-            })()}
+            <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} />
             <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
             {isRemoteProject(project) && (
               <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
@@ -614,12 +580,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             return (
               <React.Fragment key={task.id}>
                 {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === projectTaskIndex && (
-                  <div className="h-0.5 bg-accent-400 mr-2 rounded-sm ml-6" />
+                  <div className={`h-0.5 bg-accent-400 mr-2 rounded-sm ${TASK_ROW_ML}`} />
                 )}
                 <div
                   className={[
                     'flex items-center gap-2 px-3 py-1.5 text-text cursor-pointer hover:bg-surface-2',
-                    'pl-[34px] text-[12px]',
+                    TASK_ROW_PL,
+                    'text-[12px]',
                     'task-item',
                     // selection rail recipe
                     'data-[selected=true]:relative',
@@ -636,7 +603,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   data-task-index={projectTaskIndex}
                   style={recencyStyle}
                   onClick={() => handleSelectTask(project.id, task)}
-                  onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, projectTaskIndex, null, project.id)}
+                  onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, projectTaskIndex, project.id)}
                   onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
                 >
                   {editingId === task.id ? (
@@ -663,22 +630,24 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             )
           })}
           {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
-            <div className="h-0.5 bg-accent-400 mr-2 rounded-sm ml-6" />
+            <div className={`h-0.5 bg-accent-400 mr-2 rounded-sm ${TASK_ROW_ML}`} />
           )}
-          <button
-            className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] ml-[34px] text-[11px]"
-            onClick={() => handleAddTask(project.id)}
-          >
-            <Plus size={14} className="inline mr-0.5" /> Task
-          </button>
-          {!isShellCommandProject(project) && (
+          <div className={`flex items-center gap-0.5 flex-wrap ${TASK_ROW_PL} pr-2 py-0.5`}>
             <button
-              className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] ml-[34px] text-[11px]"
-              onClick={() => handleAddWorkspace(project.id)}
+              className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] text-[11px] whitespace-nowrap shrink-0"
+              onClick={() => handleAddTask(project.id)}
             >
-              <Plus size={14} className="inline mr-0.5" /> Workspace
+              <Plus size={12} className="inline mr-0.5" /> Task
             </button>
-          )}
+            {!isShellCommandProject(project) && (
+              <button
+                className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] text-[11px] whitespace-nowrap shrink-0"
+                onClick={() => handleAddWorkspace(project.id)}
+              >
+                <Plus size={12} className="inline mr-0.5" /> Workspace
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -710,12 +679,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
               <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
               <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
-                setAddMenuOpen(false)
-                const folderId = addFolder()
-                setEditingId(folderId)
-                setEditValue('New Folder')
-              }}>New Folder</button>
             </div>
           )}
         </div>
@@ -733,98 +696,43 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </button>
       </div>
 
-      <div className="sidebar-list flex-1 overflow-y-auto py-1">
-        {rootOrder.map((itemId, rootIdx) => {
-          const folder = folders.find(f => f.id === itemId)
-          if (folder) {
-            const isCollapsed = collapsedFolders.has(folder.id)
-            const folderStatus = getFolderStatus(folder, projects, allStatuses)
-            const isFolderDropTarget = dropTarget?.type === 'into-folder' && dropTarget.folderId === folder.id
-            const isFolderDragging = dragState?.type === 'folder' && dragState.id === folder.id
+      {sortedTags.length > 0 && (
+        <div className="px-3 pb-2 flex flex-wrap gap-1.5 [-webkit-app-region:no-drag]">
+          {sortedTags.map(tag => {
+            const isSelected = selectedTagIds.includes(tag.id)
             return (
-              <React.Fragment key={folder.id}>
-                {dropTarget?.type === 'between-root' && dropTarget.index === rootIdx && (
-                  <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
-                )}
-                <div
-                  className={[
-                    'flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-[10px] font-semibold uppercase tracking-[0.15em] text-text-subtle mt-2 first:mt-0 hover:bg-surface-2',
-                    isFolderDropTarget
-                      ? 'bg-accent-600/20 outline outline-1 outline-dashed outline-border-focus -outline-offset-1'
-                      : '',
-                    isFolderDragging ? 'opacity-40' : '',
-                  ].join(' ')}
-                  data-drag-type="folder-heading"
-                  data-drag-id={folder.id}
-                  onClick={() => toggleFolderCollapse(folder.id)}
-                  onMouseDown={(e) => handleDragMouseDown(e, 'folder', folder.id, rootOrder.indexOf(folder.id))}
-                  onContextMenu={(e) => {
-                    e.preventDefault()
-                    setContextMenu({ x: e.clientX, y: e.clientY, type: 'folder', projectId: folder.id })
-                  }}
-                >
-                  {editingId === folder.id ? (
-                    <input
-                      ref={editRef}
-                      className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={() => handleRenameSubmit('folder', folder.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRenameSubmit('folder', folder.id)
-                        if (e.key === 'Escape') setEditingId(null)
-                      }}
-                    />
-                  ) : (
-                    <>
-                      {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{folder.name}</span>
-                      {isCollapsed && folderStatus && (() => {
-                        const dotClass = folderStatus === 'working'
-                          ? 'bg-status-working animate-pulse'
-                          : folderStatus === 'attention'
-                          ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
-                          : 'bg-status-exited'
-                        return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-auto ${dotClass}`} />
-                      })()}
-                    </>
-                  )}
-                </div>
-                {!isCollapsed && (
-                  <div className="border-l border-border ml-4">
-                    {folder.projectIds.map((pid, childIdx) => {
-                      const project = projects.find(p => p.id === pid)
-                      if (!project) return null
-                      return (
-                        <React.Fragment key={pid}>
-                          {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === childIdx && (
-                            <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
-                          )}
-                          {renderProject(project, folder.id)}
-                        </React.Fragment>
-                      )
-                    })}
-                    {dropTarget?.type === 'between-folder-children' && dropTarget.folderId === folder.id && dropTarget.index === folder.projectIds.length && (
-                      <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
-                    )}
-                  </div>
-                )}
-              </React.Fragment>
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() => toggleTagFilter(tag.id)}
+                className={[
+                  'px-2 py-0.5 rounded-full text-[11px] border cursor-pointer transition-colors',
+                  isSelected
+                    ? 'bg-accent-500/25 border-accent-400 text-accent-50'
+                    : 'bg-surface-2 border-border text-text-muted hover:text-text hover:bg-surface-3',
+                ].join(' ')}
+              >
+                {tag.name}
+              </button>
             )
-          }
+          })}
+        </div>
+      )}
 
-          const project = projects.find(p => p.id === itemId)
+      <div className="sidebar-list flex-1 overflow-y-auto py-1">
+        {visibleProjectIds.map((projectId, listIdx) => {
+          const project = projectsById.get(projectId)
           if (!project) return null
           return (
             <React.Fragment key={project.id}>
-              {dropTarget?.type === 'between-root' && dropTarget.index === rootIdx && (
+              {dropTarget?.type === 'between-projects' && dropTarget.index === listIdx && (
                 <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
               )}
-              {renderProject(project, null)}
+              {renderProject(project)}
             </React.Fragment>
           )
         })}
-        {dropTarget?.type === 'between-root' && dropTarget.index === rootOrder.length && (
+        {dropTarget?.type === 'between-projects' && dropTarget.index === visibleProjectIds.length && (
           <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
         )}
       </div>
@@ -849,22 +757,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {contextMenu && (
         <div className="fixed bg-surface-2 border border-border rounded-md py-1 shadow-lg z-[1000]" style={{ top: contextMenu.y, left: contextMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
-          {contextMenu.type === 'folder' ? (
-            <>
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
-                setEditingId(contextMenu.projectId)
-                const folder = folders.find(f => f.id === contextMenu.projectId)
-                setEditValue(folder?.name ?? '')
-                setContextMenu(null)
-              }}>Rename</button>
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
-                removeFolder(contextMenu.projectId)
-                setContextMenu(null)
-              }}>Delete</button>
-            </>
-          ) : (
-            <>
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
+          <>
+            <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
                 const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
                 setEditingId(id)
                 const item = contextMenu.type === 'project'
@@ -922,8 +816,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   </div>
                 )
               })()}
-            </>
-          )}
+          </>
         </div>
       )}
 
@@ -935,8 +828,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {remoteModalOpen && (
         <AddRemoteProject
-          onAdd={(name, ssh, aiToolArgs) => {
-            addRemoteProject(name, ssh, aiToolArgs)
+          allTags={tags}
+          onEnsureTag={addTag}
+          onAdd={(name, ssh, aiToolArgs, tagIds) => {
+            addRemoteProject(name, ssh, aiToolArgs, tagIds)
             setRemoteModalOpen(false)
           }}
           onCancel={() => setRemoteModalOpen(false)}
@@ -945,8 +840,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {shellCommandModalOpen && (
         <AddShellCommandProject
-          onAdd={(name, command) => {
-            addShellCommandProject(name, command)
+          allTags={tags}
+          onEnsureTag={addTag}
+          onAdd={(name, command, tagIds) => {
+            addShellCommandProject(name, command, tagIds)
             setShellCommandModalOpen(false)
           }}
           onCancel={() => setShellCommandModalOpen(false)}
@@ -971,6 +868,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         if (isRemoteProject(project)) {
           return (
             <AddRemoteProject
+              allTags={tags}
+              onEnsureTag={addTag}
               initialValues={{
                 host: project.ssh!.host,
                 port: project.ssh!.port,
@@ -979,8 +878,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 remoteDir: project.ssh!.remoteDir,
                 aiToolArgs: project.aiToolArgs
               }}
-              onAdd={(name, ssh, aiToolArgs) => {
-                addRemoteProject(name, ssh, aiToolArgs)
+              onAdd={(name, ssh, aiToolArgs, tagIds) => {
+                addRemoteProject(name, ssh, aiToolArgs, tagIds)
                 setDuplicateProjectId(null)
               }}
               onCancel={() => setDuplicateProjectId(null)}
@@ -990,12 +889,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         if (isShellCommandProject(project)) {
           return (
             <AddShellCommandProject
+              allTags={tags}
+              onEnsureTag={addTag}
               initialValues={{
                 name: project.name,
                 command: project.shellCommand!.command
               }}
-              onAdd={(name, command) => {
-                addShellCommandProject(name, command)
+              onAdd={(name, command, tagIds) => {
+                addShellCommandProject(name, command, tagIds)
                 setDuplicateProjectId(null)
               }}
               onCancel={() => setDuplicateProjectId(null)}
@@ -1004,12 +905,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         }
         return (
           <AddLocalProject
+            allTags={tags}
+            onEnsureTag={addTag}
             initialValues={{
               name: project.name,
               directory: project.directory
             }}
-            onAdd={(name, directory) => {
-              addProject(name, directory)
+            onAdd={(name, directory, tagIds) => {
+              addProject(name, directory, tagIds)
               setDuplicateProjectId(null)
             }}
             onCancel={() => setDuplicateProjectId(null)}

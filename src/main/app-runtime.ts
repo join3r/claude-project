@@ -14,6 +14,12 @@ import { WorkspaceManager } from './workspace-manager'
 import { NotesStorage } from './notes-storage'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import { parseNumstat } from './git-diff-summary'
+import { AI_TAB_META } from '../shared/types'
+import {
+  piExtensionLocalPath,
+  piExtensionRemotePath,
+  buildRemotePiExtensionScript
+} from './pi-extension-injector'
 import type {
   AppConfig,
   CommitHistoryResult,
@@ -986,23 +992,43 @@ export class AppRuntime {
 
       const remoteCwd = cwd || sshConfig.remoteDir
       const isClaudeRemote = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      const isPiRemote = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       let hookInjectPrefix = ''
+      let remoteArgs = args
+      let remoteEnv = extraEnv
       if (isClaudeRemote) {
         const remotePort = this.sshManager.getRemotePort(projectId)
         if (remotePort) {
           this.hookInjector.remoteInject(projectId, remoteCwd)
           hookInjectPrefix = this.hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
         }
+      } else if (isPiRemote) {
+        // pi loads the status extension via `-e`; write it to the remote host and
+        // point its callback at the reverse-tunnel port (reaches the local hook-server).
+        const remotePort = this.sshManager.getRemotePort(projectId)
+        if (remotePort) {
+          const remoteExtPath = piExtensionRemotePath(sshConfig.username)
+          hookInjectPrefix = buildRemotePiExtensionScript(remoteExtPath) + ' && '
+          remoteArgs = [...(args ?? []), '-e', remoteExtPath]
+          remoteEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(remotePort) }
+        }
       }
 
-      const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, args, extraEnv, hookInjectPrefix, remoteCwd)
+      const sshArgs = this.sshManager.buildSpawnArgs(projectId, sshConfig, shell, remoteArgs, remoteEnv, hookInjectPrefix, remoteCwd)
       this.ptyManager.spawn(id, 'ssh', os.tmpdir(), cols, rows, sshArgs, undefined, callbacks)
     } else {
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
+      const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       if (isClaudeLocal) {
         this.hookInjector.inject(cwd)
       }
-      this.ptyManager.spawn(id, shell, cwd, cols, rows, args, extraEnv, callbacks)
+      let localArgs = args
+      let localEnv = extraEnv
+      if (isPiLocal) {
+        localArgs = [...(args ?? []), '-e', piExtensionLocalPath()]
+        localEnv = { ...extraEnv, DEVTOOL_HOOK_PORT: String(this.hookServer.getPort()) }
+      }
+      this.ptyManager.spawn(id, shell, cwd, cols, rows, localArgs, localEnv, callbacks)
     }
   }
 

@@ -26,8 +26,8 @@ function seed(): ProjectsData {
         ]
       } as any
     ],
-    folders: [],
-    rootOrder: ['p1']
+    tags: [],
+    projectOrder: ['p1']
   }
 }
 

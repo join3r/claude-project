@@ -11,7 +11,7 @@ describe('isRenamableTab', () => {
     expect(isRenamableTab(makeTab({ type: 'browser' }))).toBe(true)
     expect(isRenamableTab(makeTab({ type: 'claude' }))).toBe(true)
     expect(isRenamableTab(makeTab({ type: 'codex' }))).toBe(true)
-    expect(isRenamableTab(makeTab({ type: 'opencode' }))).toBe(true)
+    expect(isRenamableTab(makeTab({ type: 'pi' }))).toBe(true)
   })
 
   it('returns false for derived-title and home tabs', () => {

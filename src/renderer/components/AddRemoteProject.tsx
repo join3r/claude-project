@@ -1,10 +1,18 @@
 import React, { useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META } from '../../shared/types'
-import type { AiTabType } from '../../shared/types'
+import type { AiTabType, Tag } from '../../shared/types'
+import TagPicker from './TagPicker'
 
 interface Props {
-  onAdd: (name: string, ssh: { host: string; port: number; username: string; keyFile?: string; remoteDir: string }, aiToolArgs?: Partial<Record<AiTabType, string>>) => void
+  onAdd: (
+    name: string,
+    ssh: { host: string; port: number; username: string; keyFile?: string; remoteDir: string },
+    aiToolArgs?: Partial<Record<AiTabType, string>>,
+    tagIds?: string[]
+  ) => void
   onCancel: () => void
+  allTags: readonly Tag[]
+  onEnsureTag: (name: string) => string
   initialValues?: {
     host: string
     port: number
@@ -15,7 +23,7 @@ interface Props {
   }
 }
 
-export default function AddRemoteProject({ onAdd, onCancel, initialValues }: Props): React.ReactElement {
+export default function AddRemoteProject({ onAdd, onCancel, initialValues, allTags, onEnsureTag }: Props): React.ReactElement {
   const [host, setHost] = useState(initialValues?.host ?? '')
   const [port, setPort] = useState(initialValues?.port ?? 22)
   const [username, setUsername] = useState(initialValues?.username ?? '')
@@ -25,6 +33,7 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues }: Pro
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'success' | 'fail' | null>(null)
   const [error, setError] = useState('')
+  const [tagIds, setTagIds] = useState<string[]>([])
 
   const isValid = host.trim() && username.trim() && remoteDir.trim()
 
@@ -71,7 +80,7 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues }: Pro
       username: username.trim(),
       keyFile: keyFile.trim() || undefined,
       remoteDir: remoteDir.trim()
-    }, Object.keys(cleaned).length > 0 ? cleaned : undefined)
+    }, Object.keys(cleaned).length > 0 ? cleaned : undefined, tagIds.length > 0 ? tagIds : undefined)
   }
 
   const handlePickKey = async () => {
@@ -162,6 +171,13 @@ export default function AddRemoteProject({ onAdd, onCancel, initialValues }: Pro
               ))}
             </div>
           </div>
+
+          <TagPicker
+            selectedTagIds={tagIds}
+            onChange={setTagIds}
+            allTags={allTags}
+            onEnsureTag={onEnsureTag}
+          />
 
           {error && <div className="text-[12px] text-red-400">{error}</div>}
           {testResult === 'success' && <div className="text-[12px] text-emerald-400">Connection successful</div>}

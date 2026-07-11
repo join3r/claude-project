@@ -33,12 +33,14 @@ describe('window view state', () => {
   it('builds an initial window view state from stored selection', () => {
     const state = buildWindowViewState(
       projects,
-      { ...DEFAULT_CONFIG, lastProjectId: 'project-1', lastTaskId: 'task-1', collapsedFolderIds: ['folder-1'] }
+      { ...DEFAULT_CONFIG, lastProjectId: 'project-1', lastTaskId: 'task-1' },
+      { selectedTagIds: ['tag-1', 'missing-tag'] },
+      [{ id: 'tag-1', name: 'work' }]
     )
 
     expect(state.selectedProjectId).toBe('project-1')
     expect(state.selectedTaskId).toBe('task-1')
-    expect(state.collapsedFolderIds).toEqual(['folder-1'])
+    expect(state.selectedTagIds).toEqual(['tag-1'])
   })
 
   it('prefers a seeded view state when opening a second window', () => {
@@ -64,7 +66,7 @@ describe('window view state', () => {
     const state: WindowViewState = {
       selectedProjectId: 'project-1',
       selectedTaskId: 'task-1',
-      collapsedFolderIds: [],
+      selectedTagIds: [],
       expandedProjectIds: [],
       taskStates: {
         'task-1': {
@@ -142,7 +144,7 @@ describe('window view state', () => {
   it('seeds expandedProjectIds from the resolved selection when seed has none', () => {
     const state = buildWindowViewState(
       projects,
-      { ...DEFAULT_CONFIG, lastProjectId: 'project-1', lastTaskId: 'task-1', collapsedFolderIds: [] }
+      { ...DEFAULT_CONFIG, lastProjectId: 'project-1', lastTaskId: 'task-1' }
     )
 
     expect(state.expandedProjectIds).toEqual(['project-1'])
@@ -164,7 +166,7 @@ describe('window view state', () => {
       {
         selectedProjectId: 'project-1',
         selectedTaskId: null,
-        collapsedFolderIds: [],
+        selectedTagIds: [],
         expandedProjectIds: ['project-1', 'missing-project'],
         taskStates: {},
         fileBrowserOpen: false,

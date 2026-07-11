@@ -1,23 +1,28 @@
 import React, { useState } from 'react'
+import type { Tag } from '../../shared/types'
+import TagPicker from './TagPicker'
 
 interface Props {
-  onAdd: (name: string, directory: string) => void
+  onAdd: (name: string, directory: string, tagIds?: string[]) => void
   onCancel: () => void
   initialValues: {
     name: string
     directory: string
   }
+  allTags: readonly Tag[]
+  onEnsureTag: (name: string) => string
 }
 
-export default function AddLocalProject({ onAdd, onCancel, initialValues }: Props): React.ReactElement {
+export default function AddLocalProject({ onAdd, onCancel, initialValues, allTags, onEnsureTag }: Props): React.ReactElement {
   const [name, setName] = useState(initialValues.name)
   const [directory, setDirectory] = useState(initialValues.directory)
+  const [tagIds, setTagIds] = useState<string[]>([])
 
   const isValid = name.trim() && directory.trim()
 
   const handleAdd = () => {
     if (!isValid) return
-    onAdd(name.trim(), directory.trim())
+    onAdd(name.trim(), directory.trim(), tagIds.length > 0 ? tagIds : undefined)
   }
 
   const handlePickDir = async () => {
@@ -68,6 +73,13 @@ export default function AddLocalProject({ onAdd, onCancel, initialValues }: Prop
               </button>
             </div>
           </label>
+
+          <TagPicker
+            selectedTagIds={tagIds}
+            onChange={setTagIds}
+            allTags={allTags}
+            onEnsureTag={onEnsureTag}
+          />
         </div>
 
         <footer className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">

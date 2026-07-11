@@ -1,23 +1,28 @@
 import React, { useState } from 'react'
+import type { Tag } from '../../shared/types'
+import TagPicker from './TagPicker'
 
 interface Props {
-  onAdd: (name: string, command: string) => void
+  onAdd: (name: string, command: string, tagIds?: string[]) => void
   onCancel: () => void
+  allTags: readonly Tag[]
+  onEnsureTag: (name: string) => string
   initialValues?: {
     name: string
     command: string
   }
 }
 
-export default function AddShellCommandProject({ onAdd, onCancel, initialValues }: Props): React.ReactElement {
+export default function AddShellCommandProject({ onAdd, onCancel, initialValues, allTags, onEnsureTag }: Props): React.ReactElement {
   const [name, setName] = useState(initialValues?.name ?? '')
   const [command, setCommand] = useState(initialValues?.command ?? '')
+  const [tagIds, setTagIds] = useState<string[]>([])
 
   const isValid = name.trim() && command.trim()
 
   const handleAdd = () => {
     if (!isValid) return
-    onAdd(name.trim(), command.trim())
+    onAdd(name.trim(), command.trim(), tagIds.length > 0 ? tagIds : undefined)
   }
 
   return (
@@ -62,6 +67,13 @@ export default function AddShellCommandProject({ onAdd, onCancel, initialValues 
               <code className="block py-px text-[11px] text-text-muted opacity-80 font-mono">orb shell -m vm-name bash -c &quot;cd dir &amp;&amp; bash&quot;</code>
             </div>
           </label>
+
+          <TagPicker
+            selectedTagIds={tagIds}
+            onChange={setTagIds}
+            allTags={allTags}
+            onEnsureTag={onEnsureTag}
+          />
         </div>
 
         <footer className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">

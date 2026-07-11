@@ -133,7 +133,7 @@ describe('Storage', () => {
     expect(isRemoteProject({ id: '2', name: 'L', directory: '/local', tasks: [] })).toBe(false)
   })
 
-  it('normalizes legacy data without folders or rootOrder', () => {
+  it('defaults projectOrder from projects when missing', () => {
     const legacyData = {
       projects: [
         { id: 'p1', name: 'Project 1', directory: '/tmp/p1', tasks: [] },
@@ -142,58 +142,53 @@ describe('Storage', () => {
     }
     fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(legacyData))
     const loaded = storage.loadProjects()
-    expect(loaded.folders).toEqual([])
-    expect(loaded.rootOrder).toEqual(['p1', 'p2'])
+    expect(loaded.tags).toEqual([])
+    expect(loaded.projectOrder).toEqual(['p1', 'p2'])
   })
 
-  it('returns empty folders and rootOrder on error fallback', () => {
+  it('returns empty tags and projectOrder on error fallback', () => {
     const loaded = storage.loadProjects()
-    expect(loaded.folders).toEqual([])
-    expect(loaded.rootOrder).toEqual([])
+    expect(loaded.tags).toEqual([])
+    expect(loaded.projectOrder).toEqual([])
   })
 
-  it('removes orphaned IDs from rootOrder and folder.projectIds', () => {
+  it('ignores legacy folders and rootOrder', () => {
     const data = {
       projects: [{ id: 'p1', name: 'P1', directory: '/tmp', tasks: [] }],
-      folders: [{ id: 'f1', name: 'Folder', projectIds: ['p1', 'deleted-project'] }],
-      rootOrder: ['f1', 'also-deleted']
+      folders: [{ id: 'f1', name: 'Folder', projectIds: ['p1'] }],
+      rootOrder: ['f1']
     }
     fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(data))
     const loaded = storage.loadProjects()
-    expect(loaded.folders[0].projectIds).toEqual(['p1'])
-    expect(loaded.rootOrder).toEqual(['f1'])
+    expect(loaded.tags).toEqual([])
+    expect(loaded.projectOrder).toEqual(['p1'])
   })
 
-  it('deduplicates project appearing in multiple folders', () => {
+  it('prunes orphan projectOrder and tagIds', () => {
+    const data = {
+      projects: [{ id: 'p1', name: 'P1', directory: '/tmp', tasks: [], tagIds: ['t1', 'missing'] }],
+      tags: [{ id: 't1', name: 'work' }, { id: 'orphan', name: 'unused' }],
+      projectOrder: ['p1', 'deleted']
+    }
+    fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(data))
+    const loaded = storage.loadProjects()
+    expect(loaded.projectOrder).toEqual(['p1'])
+    expect(loaded.projects[0].tagIds).toEqual(['t1'])
+    expect(loaded.tags).toEqual([{ id: 't1', name: 'work' }])
+  })
+
+  it('appends unplaced projects to projectOrder', () => {
     const data = {
       projects: [
         { id: 'p1', name: 'P1', directory: '/tmp', tasks: [] },
         { id: 'p2', name: 'P2', directory: '/tmp', tasks: [] }
       ],
-      folders: [
-        { id: 'f1', name: 'F1', projectIds: ['p1'] },
-        { id: 'f2', name: 'F2', projectIds: ['p1', 'p2'] }
-      ],
-      rootOrder: ['f1', 'f2']
+      tags: [],
+      projectOrder: ['p1']
     }
     fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(data))
     const loaded = storage.loadProjects()
-    expect(loaded.folders[0].projectIds).toEqual(['p1'])
-    expect(loaded.folders[1].projectIds).toEqual(['p2'])
-  })
-
-  it('appends unplaced projects to rootOrder', () => {
-    const data = {
-      projects: [
-        { id: 'p1', name: 'P1', directory: '/tmp', tasks: [] },
-        { id: 'p2', name: 'P2', directory: '/tmp', tasks: [] }
-      ],
-      folders: [],
-      rootOrder: ['p1']
-    }
-    fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(data))
-    const loaded = storage.loadProjects()
-    expect(loaded.rootOrder).toEqual(['p1', 'p2'])
+    expect(loaded.projectOrder).toEqual(['p1', 'p2'])
   })
 
   it('preserves sessionId on tabs', () => {
@@ -232,8 +227,8 @@ describe('Storage', () => {
           splitRatio: 0.5
         }]
       }],
-      folders: [{ id: 'folder-1', name: 'Folder', projectIds: ['project-1'] }],
-      rootOrder: ['folder-1']
+      tags: [{ id: 'tag-1', name: 'work' }],
+      projectOrder: ['project-1']
     }
     const session = {
       windows: [{
@@ -241,7 +236,7 @@ describe('Storage', () => {
         viewState: {
           selectedProjectId: 'project-1',
           selectedTaskId: 'task-1',
-          collapsedFolderIds: ['folder-1'],
+          selectedTagIds: ['tag-1'],
           taskStates: {
             'task-1': {
               activeTab: { left: 'left-1', right: null },
@@ -266,13 +261,14 @@ describe('Storage', () => {
           fileBrowserOpen: false,
           fileBrowserWidth: 250,
           fileBrowserActiveTab: 'files',
-          watchStripHidden: false
+          watchStripHidden: false,
+          pinOrder: []
         }
       }]
     })
   })
 
-  it('normalizes persisted window sessions against current projects and folders', () => {
+  it('normalizes persisted window sessions against current projects and tags', () => {
     const projectsData: ProjectsData = {
       projects: [{
         id: 'project-1',
@@ -290,8 +286,8 @@ describe('Storage', () => {
           splitRatio: 0.6
         }]
       }],
-      folders: [{ id: 'folder-1', name: 'Folder', projectIds: ['project-1'] }],
-      rootOrder: ['folder-1']
+      tags: [{ id: 'tag-1', name: 'work' }],
+      projectOrder: ['project-1']
     }
 
     fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({
@@ -301,7 +297,7 @@ describe('Storage', () => {
           viewState: {
             selectedProjectId: 'project-1',
             selectedTaskId: 'task-1',
-            collapsedFolderIds: ['folder-1'],
+            selectedTagIds: ['tag-1'],
             taskStates: {}
           }
         },
@@ -310,7 +306,7 @@ describe('Storage', () => {
           viewState: {
             selectedProjectId: 'missing-project',
             selectedTaskId: 'missing-task',
-            collapsedFolderIds: ['folder-1', 'missing-folder'],
+            selectedTagIds: ['tag-1', 'missing-tag'],
             taskStates: {
               'task-1': {
                 activeTab: { left: 'missing-tab', right: 'right-1' },
@@ -329,7 +325,7 @@ describe('Storage', () => {
     expect(loaded.windows[0].geometry).toEqual({ x: 50, y: 60, width: 1200, height: 800, isMaximized: false })
     expect(loaded.windows[0].viewState.selectedProjectId).toBeNull()
     expect(loaded.windows[0].viewState.selectedTaskId).toBeNull()
-    expect(loaded.windows[0].viewState.collapsedFolderIds).toEqual(['folder-1'])
+    expect(loaded.windows[0].viewState.selectedTagIds).toEqual(['tag-1'])
     expect(loaded.windows[0].viewState.taskStates['task-1']).toEqual({
       activeTab: { left: 'left-1', right: 'right-1' },
       splitOpen: true,
@@ -362,11 +358,10 @@ describe('Storage', () => {
         }],
         tabIdCounter: 0
       }],
-      folders: [],
-      rootOrder: ['p1']
+      projectOrder: ['p1']
     }
 
-    const normalized = Storage.normalizeProjectsData(legacy as any)
+    const normalized = Storage.normalizeProjectsData(legacy as Record<string, unknown>)
     const tasks = normalized.projects[0].tasks
     expect(tasks[0].lastInteractedAt).toBe(12345)
     expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
@@ -392,11 +387,10 @@ describe('Storage', () => {
         }],
         tabIdCounter: 0
       }],
-      folders: [],
-      rootOrder: ['p1']
+      projectOrder: ['p1']
     }
 
-    const normalized = Storage.normalizeProjectsData(data as any)
+    const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
     const tasks = normalized.projects[0].tasks
     expect(tasks[0].lastInteractedAt).toBe(999)
     expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
@@ -404,7 +398,7 @@ describe('Storage', () => {
 
   it('returns empty window session when the file contains no saved windows', () => {
     fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({ windows: [] }))
-    const loaded = storage.loadWindowSession({ projects: [], folders: [], rootOrder: [] })
+    const loaded = storage.loadWindowSession({ projects: [], tags: [], projectOrder: [] })
     expect(loaded.windows).toEqual([])
   })
 })

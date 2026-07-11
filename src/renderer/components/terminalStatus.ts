@@ -18,7 +18,7 @@ export const PINNABLE_TAB_TYPES: ReadonlySet<TabType> = new Set<TabType>([
   'terminal',
   'claude',
   'codex',
-  'opencode'
+  'pi'
 ])
 
 export function isPinnable(tab: Tab): boolean {

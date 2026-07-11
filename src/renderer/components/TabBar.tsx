@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Pin, PinOff } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isHomeTab, isRenamableTab, isShellCommandProject } from '../../shared/types'
+import { isHomeTab, isRenamableTab, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -28,7 +28,7 @@ function tabIcon(type: TabType): string {
   if (type === 'browser') return '◉'
   if (type === 'claude') return '✦'
   if (type === 'codex') return '◫'
-  if (type === 'opencode') return '◇'
+  if (type === 'pi') return 'π'
   return '>'
 }
 
@@ -344,9 +344,9 @@ export default function TabBar({
             &#9707;
           </button>
         )}
-        {config?.enableOpencode && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('opencode')} title="New OpenCode">
-            &#9671;
+        {config?.enablePi && selectedProject && !isShellCommandProject(selectedProject) && (
+          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('pi')} title="New Pi">
+            &#960;
           </button>
         )}
       </div>

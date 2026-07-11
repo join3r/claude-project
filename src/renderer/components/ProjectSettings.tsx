@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META } from '../../shared/types'
 import type { Project, AiTabType } from '../../shared/types'
 import { useApp } from '../context/AppContext'
+import TagPicker from './TagPicker'
 import {
   dashboardIconUrl,
   fetchDashboardIconsMetadata,
@@ -11,12 +12,17 @@ import {
 
 interface Props {
   project: Project
-  onSave: (payload: { aiToolArgs: Partial<Record<AiTabType, string>>; emoji?: string; icon?: string }) => void
+  onSave: (payload: {
+    aiToolArgs: Partial<Record<AiTabType, string>>
+    emoji?: string
+    icon?: string
+    tagIds?: string[]
+  }) => void
   onClose: () => void
 }
 
 export default function ProjectSettings({ project, onSave, onClose }: Props): React.ReactElement {
-  const { effectiveTheme } = useApp()
+  const { effectiveTheme, tags, addTag } = useApp()
   const [args, setArgs] = useState<Partial<Record<AiTabType, string>>>(
     project.aiToolArgs ?? {}
   )
@@ -26,6 +32,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   const [iconMetadata, setIconMetadata] = useState<DashboardIconsMetadata | null>(null)
   const [iconError, setIconError] = useState<string | null>(null)
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [tagIds, setTagIds] = useState<string[]>(project.tagIds ?? [])
   const suggestionsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -56,6 +63,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
       aiToolArgs: cleaned,
       emoji: emoji.trim() || undefined,
       icon: icon.trim() || undefined,
+      tagIds,
     })
     onClose()
   }
@@ -151,6 +159,13 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
               )}
             </div>
           </div>
+
+          <TagPicker
+            selectedTagIds={tagIds}
+            onChange={setTagIds}
+            allTags={tags}
+            onEnsureTag={addTag}
+          />
 
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Emoji (fallback)</span>

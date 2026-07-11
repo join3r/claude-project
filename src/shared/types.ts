@@ -1,12 +1,12 @@
-export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'opencode' | 'diff' | 'editor' | 'note' | 'home'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'codex' | 'pi' | 'diff' | 'editor' | 'note' | 'home'
 
-export const AI_TAB_TYPES = ['claude', 'codex', 'opencode'] as const
+export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
 
 export const AI_TAB_META: Record<AiTabType, { label: string; command: string }> = {
   claude: { label: 'Claude Code', command: 'claude' },
   codex: { label: 'Codex', command: 'codex' },
-  opencode: { label: 'OpenCode', command: 'opencode' }
+  pi: { label: 'Pi', command: 'pi' }
 }
 
 export interface Tab {
@@ -98,7 +98,7 @@ export function isHomeTab(tab: Tab): boolean {
   return tab.system === 'home'
 }
 
-const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'codex', 'opencode']
+const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'codex', 'pi']
 
 export function isRenamableTab(tab: Tab): boolean {
   if (isHomeTab(tab)) return false
@@ -149,6 +149,7 @@ export interface Project {
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
   lifetimeStats?: { tasksCreated: number; notesCreated: number }
+  tagIds?: string[]
 }
 
 export function isRemoteProject(project: Project): boolean {
@@ -184,16 +185,45 @@ export function isShellCommandProject(project: Project): boolean {
   return !!project.shellCommand
 }
 
-export interface Folder {
+export interface Tag {
   id: string
   name: string
-  projectIds: string[]
 }
 
 export interface ProjectsData {
   projects: Project[]
-  folders: Folder[]
-  rootOrder: string[]
+  tags: Tag[]
+  projectOrder: string[]
+}
+
+/** OR filter: empty selection shows all; otherwise project must have at least one selected tag. */
+export function projectMatchesTagFilter(project: Project, selectedTagIds: readonly string[]): boolean {
+  if (selectedTagIds.length === 0) return true
+  const projectTags = project.tagIds ?? []
+  return selectedTagIds.some(tagId => projectTags.includes(tagId))
+}
+
+export function filterProjectsByTags<T extends Project>(
+  projects: readonly T[],
+  selectedTagIds: readonly string[]
+): T[] {
+  return projects.filter(p => projectMatchesTagFilter(p, selectedTagIds))
+}
+
+export function pruneUnusedTags(data: ProjectsData): ProjectsData {
+  const usedTagIds = new Set<string>()
+  for (const project of data.projects) {
+    for (const tagId of project.tagIds ?? []) {
+      usedTagIds.add(tagId)
+    }
+  }
+  const tags = (data.tags ?? []).filter(tag => usedTagIds.has(tag.id))
+  const tagIds = new Set(tags.map(t => t.id))
+  const projects = data.projects.map(project => ({
+    ...project,
+    tagIds: (project.tagIds ?? []).filter(id => tagIds.has(id))
+  }))
+  return { ...data, tags, projects }
 }
 
 export interface AppConfig {
@@ -215,11 +245,10 @@ export interface AppConfig {
   diffIgnoreTrimWhitespace: boolean
   enableClaude: boolean
   enableCodex: boolean
-  enableOpencode: boolean
+  enablePi: boolean
   lazyLoadClaude: boolean
   lastProjectId: string | null
   lastTaskId: string | null
-  collapsedFolderIds: string[]
   taskRecencyHighlight: {
     enabled: boolean
     mode: 'rank' | 'time'
@@ -303,7 +332,7 @@ export interface GitOperationResult {
 export interface WindowViewState {
   selectedProjectId: string | null
   selectedTaskId: string | null
-  collapsedFolderIds: string[]
+  selectedTagIds: string[]
   expandedProjectIds: string[]
   taskStates: Record<string, TaskViewState>
   fileBrowserOpen: boolean
@@ -367,11 +396,10 @@ export const DEFAULT_CONFIG: AppConfig = {
   diffIgnoreTrimWhitespace: true,
   enableClaude: false,
   enableCodex: false,
-  enableOpencode: false,
+  enablePi: false,
   lazyLoadClaude: true,
   lastProjectId: null,
   lastTaskId: null,
-  collapsedFolderIds: [],
   taskRecencyHighlight: {
     enabled: true,
     mode: 'rank',
@@ -409,7 +437,7 @@ export function createDefaultWindowViewState(): WindowViewState {
   return {
     selectedProjectId: null,
     selectedTaskId: null,
-    collapsedFolderIds: [],
+    selectedTagIds: [],
     expandedProjectIds: [],
     taskStates: {},
     fileBrowserOpen: false,
@@ -424,7 +452,7 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
   return {
     selectedProjectId: state.selectedProjectId,
     selectedTaskId: state.selectedTaskId,
-    collapsedFolderIds: [...state.collapsedFolderIds],
+    selectedTagIds: [...state.selectedTagIds],
     expandedProjectIds: [...state.expandedProjectIds],
     taskStates: Object.fromEntries(
       Object.entries(state.taskStates).map(([taskId, taskState]) => [
@@ -537,7 +565,7 @@ export function reconcileTaskViewState(task: Task, state?: TaskViewState): TaskV
 export function reconcileWindowViewState(
   state: WindowViewState,
   projects: Project[],
-  collapsedFolderIds?: string[]
+  tagIds?: Set<string>
 ): WindowViewState {
   const projectById = new Map(projects.map(project => [project.id, project]))
   const selectedProject = state.selectedProjectId ? projectById.get(state.selectedProjectId) ?? null : null
@@ -557,6 +585,9 @@ export function reconcileWindowViewState(
 
   const expandedProjectIds = (state.expandedProjectIds ?? []).filter(id => projectById.has(id))
 
+  const validTagIds = tagIds ?? new Set<string>()
+  const selectedTagIds = (state.selectedTagIds ?? []).filter(id => validTagIds.has(id))
+
   const currentPinKeys = new Set(collectPinKeys(projects))
   const seenPinKeys = new Set<string>()
   const reconciledPinOrder: string[] = []
@@ -570,7 +601,7 @@ export function reconcileWindowViewState(
   return {
     selectedProjectId: selectedProject?.id ?? null,
     selectedTaskId: selectedTask?.id ?? null,
-    collapsedFolderIds: collapsedFolderIds ? [...collapsedFolderIds] : [...state.collapsedFolderIds],
+    selectedTagIds,
     expandedProjectIds,
     taskStates,
     fileBrowserOpen: state.fileBrowserOpen ?? false,
@@ -584,8 +615,10 @@ export function reconcileWindowViewState(
 export function buildWindowViewState(
   projects: Project[],
   config: AppConfig,
-  seed?: Partial<WindowViewState> | null
+  seed?: Partial<WindowViewState> | null,
+  tags: readonly Tag[] = []
 ): WindowViewState {
+  const tagIds = new Set(tags.map(t => t.id))
   const storedSelection = resolveStoredSelection(projects, config)
   const taskStates = createDefaultTaskStates(projects)
   if (seed?.taskStates) {
@@ -613,7 +646,7 @@ export function buildWindowViewState(
   return reconcileWindowViewState({
     selectedProjectId,
     selectedTaskId,
-    collapsedFolderIds: seed?.collapsedFolderIds ? [...seed.collapsedFolderIds] : [...config.collapsedFolderIds],
+    selectedTagIds: seed?.selectedTagIds ? [...seed.selectedTagIds] : [],
     expandedProjectIds,
     taskStates,
     fileBrowserOpen: seed?.fileBrowserOpen ?? false,
@@ -621,5 +654,5 @@ export function buildWindowViewState(
     fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
     watchStripHidden: seed?.watchStripHidden ?? false,
     pinOrder: seed?.pinOrder ? [...seed.pinOrder] : []
-  }, projects)
+  }, projects, tagIds)
 }

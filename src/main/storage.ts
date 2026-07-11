@@ -6,10 +6,11 @@ import {
   ProjectsData,
   createDefaultWindowSessionState,
   createDefaultWindowViewState,
+  pruneUnusedTags,
   reconcileWindowViewState,
-  type Folder,
   type PersistedWindowState,
   type Project,
+  type Tag,
   type TaskViewState,
   type WindowGeometry,
   type WindowSessionState,
@@ -41,7 +42,9 @@ export class Storage {
   loadConfig(): AppConfig {
     try {
       const raw = fs.readFileSync(this.configPath, 'utf-8')
-      return { ...DEFAULT_CONFIG, ...JSON.parse(raw) }
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      const { collapsedFolderIds: _legacy, ...rest } = parsed
+      return { ...DEFAULT_CONFIG, ...rest } as AppConfig
     } catch {
       return { ...DEFAULT_CONFIG }
     }
@@ -57,44 +60,43 @@ export class Storage {
       const data = JSON.parse(raw)
       return Storage.normalizeProjectsData(data)
     } catch {
-      return { projects: [], folders: [], rootOrder: [] }
+      return { projects: [], tags: [], projectOrder: [] }
     }
   }
 
   static normalizeProjectsData(data: Record<string, unknown>): ProjectsData {
     const projects: Project[] = Array.isArray(data.projects) ? data.projects : []
     const projectIds = new Set(projects.map(p => p.id))
-    let folders: Folder[] = Array.isArray(data.folders) ? data.folders : []
-    let rootOrder: string[] = Array.isArray(data.rootOrder) ? data.rootOrder : projects.map(p => p.id)
+    const tagIds = new Set(
+      (Array.isArray(data.tags) ? data.tags as Tag[] : [])
+        .filter((t): t is Tag => typeof t?.id === 'string' && typeof t?.name === 'string')
+        .map(t => t.id)
+    )
 
-    const placedProjects = new Set<string>()
+    let tags: Tag[] = Array.isArray(data.tags)
+      ? (data.tags as Tag[]).filter(
+          (t): t is Tag => typeof t?.id === 'string' && typeof t?.name === 'string' && tagIds.has(t.id)
+        )
+      : []
 
-    const folderIds = new Set(folders.map(f => f.id))
-    folders = folders.map(f => ({
-      ...f,
-      projectIds: f.projectIds.filter(pid => {
-        if (!projectIds.has(pid) || placedProjects.has(pid)) return false
-        placedProjects.add(pid)
-        return true
-      })
-    }))
+    let projectOrder: string[] = Array.isArray(data.projectOrder)
+      ? data.projectOrder.filter((id): id is string => typeof id === 'string' && projectIds.has(id))
+      : projects.map(p => p.id)
 
-    rootOrder = rootOrder.filter(id => {
-      if (folderIds.has(id)) return true
-      if (projectIds.has(id) && !placedProjects.has(id)) {
-        placedProjects.add(id)
-        return true
-      }
-      return false
-    })
-
+    const orderSet = new Set(projectOrder)
     for (const p of projects) {
-      if (!placedProjects.has(p.id)) {
-        rootOrder.push(p.id)
+      if (!orderSet.has(p.id)) {
+        projectOrder.push(p.id)
+        orderSet.add(p.id)
       }
     }
 
-    for (const project of projects) {
+    const normalizedProjects = projects.map(project => ({
+      ...project,
+      tagIds: (project.tagIds ?? []).filter(id => tagIds.has(id))
+    }))
+
+    for (const project of normalizedProjects) {
       if (!Array.isArray(project.tasks)) continue
       for (const task of project.tasks) {
         const legacy = (task as { lastFocusedAt?: unknown }).lastFocusedAt
@@ -105,11 +107,12 @@ export class Storage {
       }
     }
 
-    return { projects, folders, rootOrder }
+    return pruneUnusedTags({ projects: normalizedProjects, tags, projectOrder })
   }
 
   saveProjects(data: ProjectsData): void {
-    fs.writeFileSync(this.projectsPath, JSON.stringify(data, null, 2))
+    const normalized = Storage.normalizeProjectsData(data as unknown as Record<string, unknown>)
+    fs.writeFileSync(this.projectsPath, JSON.stringify(normalized, null, 2))
   }
 
   loadWindowSession(projectsData: ProjectsData): WindowSessionState {
@@ -131,9 +134,9 @@ export class Storage {
       return createDefaultWindowSessionState()
     }
 
-    const folderIds = new Set(projectsData.folders.map(folder => folder.id))
+    const tagIds = new Set(projectsData.tags.map(tag => tag.id))
     const windows = data.windows
-      .map((entry) => Storage.normalizePersistedWindowState(entry, projectsData.projects, folderIds))
+      .map((entry) => Storage.normalizePersistedWindowState(entry, projectsData.projects, tagIds))
       .filter((entry): entry is PersistedWindowState => entry !== null)
 
     return { windows }
@@ -142,14 +145,14 @@ export class Storage {
   private static normalizePersistedWindowState(
     value: unknown,
     projects: Project[],
-    folderIds: Set<string>
+    tagIds: Set<string>
   ): PersistedWindowState | null {
     if (!isRecord(value)) return null
 
     const geometry = Storage.normalizeWindowGeometry(value.geometry)
     if (!geometry) return null
 
-    const viewState = Storage.normalizeWindowViewState(value.viewState, projects, folderIds)
+    const viewState = Storage.normalizeWindowViewState(value.viewState, projects, tagIds)
     return { geometry, viewState }
   }
 
@@ -174,7 +177,7 @@ export class Storage {
   private static normalizeWindowViewState(
     value: unknown,
     projects: Project[],
-    folderIds: Set<string>
+    tagIds: Set<string>
   ): WindowViewState {
     if (!isRecord(value)) {
       return createDefaultWindowViewState()
@@ -182,9 +185,12 @@ export class Storage {
 
     const projectIds = new Set(projects.map(p => p.id))
     const taskStates = Storage.normalizeTaskStates(value.taskStates)
-    const collapsedFolderIds = Array.isArray(value.collapsedFolderIds)
-      ? value.collapsedFolderIds.filter((folderId): folderId is string => typeof folderId === 'string' && folderIds.has(folderId))
+    const legacySelected = Array.isArray(value.selectedTagIds)
+      ? value.selectedTagIds
       : []
+    const selectedTagIds = legacySelected.filter(
+      (id): id is string => typeof id === 'string' && tagIds.has(id)
+    )
     const expandedProjectIds = Array.isArray(value.expandedProjectIds)
       ? value.expandedProjectIds.filter((id): id is string => typeof id === 'string' && projectIds.has(id))
       : []
@@ -196,16 +202,19 @@ export class Storage {
       {
         selectedProjectId: typeof value.selectedProjectId === 'string' ? value.selectedProjectId : null,
         selectedTaskId: typeof value.selectedTaskId === 'string' ? value.selectedTaskId : null,
-        collapsedFolderIds,
+        selectedTagIds,
         expandedProjectIds,
         taskStates,
         fileBrowserOpen: typeof value.fileBrowserOpen === 'boolean' ? value.fileBrowserOpen : false,
         fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,
         fileBrowserActiveTab,
-        watchStripHidden: typeof value.watchStripHidden === 'boolean' ? value.watchStripHidden : false
+        watchStripHidden: typeof value.watchStripHidden === 'boolean' ? value.watchStripHidden : false,
+        pinOrder: Array.isArray(value.pinOrder)
+          ? value.pinOrder.filter((k): k is string => typeof k === 'string')
+          : []
       },
       projects,
-      collapsedFolderIds
+      tagIds
     )
   }
 

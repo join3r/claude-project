@@ -19,10 +19,10 @@ function activePinnableTab(actions: any): { projectId: string; taskId: string; p
   return { projectId: selectedProjectId, taskId: selectedTaskId, pane, tabId, pinned: !!tab.pinned }
 }
 
-const ENABLE_FLAG: Record<AiTabType, 'enableClaude' | 'enableCodex' | 'enableOpencode'> = {
+const ENABLE_FLAG: Record<AiTabType, 'enableClaude' | 'enableCodex' | 'enablePi'> = {
   claude: 'enableClaude',
   codex: 'enableCodex',
-  opencode: 'enableOpencode'
+  pi: 'enablePi'
 }
 
 commandRegistry.register({

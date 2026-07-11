@@ -12,6 +12,7 @@ import {
   isHomeTab,
   isHomeTask,
   isRemoteProject,
+  pruneUnusedTags,
   reconcileTaskViewState,
   reconcileWindowViewState
 } from '../../shared/types'
@@ -19,6 +20,7 @@ import type {
   Project,
   ProjectNote,
   ProjectsData,
+  Tag,
   Task,
   Tab,
   AppConfig,
@@ -40,7 +42,7 @@ import {
 } from '../recentlyClosedTabs'
 import { createInteractionStampGate } from '../components/taskRecency'
 
-export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon'>>
+export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
 type AddTabOptions = {
   filePath?: string
   url?: string
@@ -105,7 +107,7 @@ function cloneTaskState(state: TaskViewState): TaskViewState {
 }
 
 export function useAppState() {
-  const [projectsData, setProjectsData] = useState<ProjectsData>({ projects: [], folders: [], rootOrder: [] })
+  const [projectsData, setProjectsData] = useState<ProjectsData>({ projects: [], tags: [], projectOrder: [] })
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [windowViewState, setWindowViewState] = useState<WindowViewState>(createDefaultWindowViewState())
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -114,13 +116,14 @@ export function useAppState() {
   const [browserZoomFactor, setBrowserZoomFactor] = useState(1.0)
 
   const projects = projectsData.projects
-  const folders = projectsData.folders
-  const rootOrder = projectsData.rootOrder
+  const tags = projectsData.tags
+  const projectOrder = projectsData.projectOrder
 
   const projectsDataRef = useRef(projectsData)
   projectsDataRef.current = projectsData
   const projectsRef = useRef(projects)
   projectsRef.current = projects
+  const pendingTagsRef = useRef<Map<string, Tag>>(new Map())
   const windowViewStateRef = useRef(windowViewState)
   windowViewStateRef.current = windowViewState
   const projectsLoadedRef = useRef(false)
@@ -172,7 +175,8 @@ export function useAppState() {
       const hydratedWindowViewState = buildWindowViewState(
         migratedProjects,
         hydratedConfig,
-        loadedWindowViewState
+        loadedWindowViewState,
+        finalProjectsData.tags
       )
 
       pendingProjectUpdatersRef.current = []
@@ -262,18 +266,17 @@ export function useAppState() {
   }, [windowViewState])
 
   useEffect(() => {
-    const folderIds = new Set(folders.map(folder => folder.id))
+    const tagIds = new Set(tags.map(tag => tag.id))
     updateWindowViewState((prev) => {
-      const next = reconcileWindowViewState(
-        {
-          ...prev,
-          collapsedFolderIds: prev.collapsedFolderIds.filter(folderId => folderIds.has(folderId))
-        },
-        projects
+      const filtered = prev.selectedTagIds.filter(id => tagIds.has(id))
+      if (filtered.length === prev.selectedTagIds.length) return prev
+      return reconcileWindowViewState(
+        { ...prev, selectedTagIds: filtered },
+        projects,
+        tagIds
       )
-      return next
     })
-  }, [folders, projects, updateWindowViewState])
+  }, [tags, projects, updateWindowViewState])
 
   useEffect(() => {
     if (!projectsLoadedRef.current || !configLoadedRef.current || !config) return
@@ -349,10 +352,21 @@ export function useAppState() {
   }, [projects, windowViewState.selectedTaskId, windowViewState.taskStates, windowViewState.fileBrowserOpen, windowViewState.fileBrowserActiveTab, updateWindowViewState])
 
   const persistProjects = useCallback((updater: (prev: ProjectsData) => ProjectsData) => {
+    const wrapped = (prev: ProjectsData) => pruneUnusedTags(updater(prev))
     if (!projectsLoadedRef.current) {
-      pendingProjectUpdatersRef.current.push(updater)
+      pendingProjectUpdatersRef.current.push(wrapped)
     }
-    setProjectsData(prev => updater(prev))
+    setProjectsData(prev => wrapped(prev))
+  }, [])
+
+  const includePendingTags = useCallback((data: ProjectsData, tagIds?: readonly string[]): ProjectsData => {
+    if (!tagIds?.length) return data
+    const existingTagIds = new Set(data.tags.map(tag => tag.id))
+    const pendingTags = tagIds
+      .map(tagId => pendingTagsRef.current.get(tagId))
+      .filter((tag): tag is Tag => !!tag && !existingTagIds.has(tag.id))
+    if (pendingTags.length === 0) return data
+    return { ...data, tags: [...data.tags, ...pendingTags] }
   }, [])
 
   const markTaskInteracted = useCallback((projectId: string, taskId: string) => {
@@ -500,45 +514,80 @@ export function useAppState() {
     }))
   }, [persistProjects])
 
-  const addProject = useCallback((name: string, directory: string) => {
+  const addProject = useCallback((name: string, directory: string, tagIds?: string[]) => {
     const id = uuid()
     const { task: homeTask } = createHomeTask(id)
-    const project: Project = { id, name, directory, tasks: [homeTask] }
-    persistProjects(prev => ({
-      ...prev,
-      projects: [...prev.projects, project],
-      rootOrder: [...prev.rootOrder, project.id]
-    }))
+    const project: Project = {
+      id,
+      name,
+      directory,
+      tasks: [homeTask],
+      ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
+    }
+    persistProjects(prev => {
+      const data = includePendingTags(prev, tagIds)
+      return {
+        ...data,
+        projects: [...data.projects, project],
+        projectOrder: [...data.projectOrder, project.id]
+      }
+    })
     selectProject(project.id)
     return project
-  }, [persistProjects, selectProject])
+  }, [includePendingTags, persistProjects, selectProject])
 
-  const addRemoteProject = useCallback((name: string, sshConfig: SshConfig, aiToolArgs?: Partial<Record<AiTabType, string>>) => {
+  const addRemoteProject = useCallback((
+    name: string,
+    sshConfig: SshConfig,
+    aiToolArgs?: Partial<Record<AiTabType, string>>,
+    tagIds?: string[]
+  ) => {
     const id = uuid()
     const { task: homeTask } = createHomeTask(id)
-    const project: Project = { id, name, directory: '', ssh: sshConfig, tasks: [homeTask], ...(aiToolArgs ? { aiToolArgs } : {}) }
-    persistProjects(prev => ({
-      ...prev,
-      projects: [...prev.projects, project],
-      rootOrder: [...prev.rootOrder, project.id]
-    }))
+    const project: Project = {
+      id,
+      name,
+      directory: '',
+      ssh: sshConfig,
+      tasks: [homeTask],
+      ...(aiToolArgs ? { aiToolArgs } : {}),
+      ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
+    }
+    persistProjects(prev => {
+      const data = includePendingTags(prev, tagIds)
+      return {
+        ...data,
+        projects: [...data.projects, project],
+        projectOrder: [...data.projectOrder, project.id]
+      }
+    })
     selectProject(project.id)
     window.api.sshConnect(project.id, sshConfig).catch(() => {})
     return project
-  }, [persistProjects, selectProject])
+  }, [includePendingTags, persistProjects, selectProject])
 
-  const addShellCommandProject = useCallback((name: string, command: string) => {
+  const addShellCommandProject = useCallback((name: string, command: string, tagIds?: string[]) => {
     const id = uuid()
     const { task: homeTask } = createHomeTask(id)
-    const project: Project = { id, name, directory: '', shellCommand: { command }, tasks: [homeTask] }
-    persistProjects(prev => ({
-      ...prev,
-      projects: [...prev.projects, project],
-      rootOrder: [...prev.rootOrder, project.id]
-    }))
+    const project: Project = {
+      id,
+      name,
+      directory: '',
+      shellCommand: { command },
+      tasks: [homeTask],
+      ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
+    }
+    persistProjects(prev => {
+      const data = includePendingTags(prev, tagIds)
+      return {
+        ...data,
+        projects: [...data.projects, project],
+        projectOrder: [...data.projectOrder, project.id]
+      }
+    })
     selectProject(project.id)
     return project
-  }, [persistProjects, selectProject])
+  }, [includePendingTags, persistProjects, selectProject])
 
   const getProjectDir = useCallback((project: Project): string => {
     return project.ssh ? project.ssh.remoteDir : project.directory
@@ -574,11 +623,7 @@ export function useAppState() {
     persistProjects(prev => ({
       ...prev,
       projects: prev.projects.filter(project => project.id !== id),
-      rootOrder: prev.rootOrder.filter(rootId => rootId !== id),
-      folders: prev.folders.map(folder => ({
-        ...folder,
-        projectIds: folder.projectIds.filter(projectId => projectId !== id)
-      }))
+      projectOrder: prev.projectOrder.filter(rootId => rootId !== id)
     }))
 
     updateWindowViewState(prev => ({
@@ -597,95 +642,65 @@ export function useAppState() {
   }, [persistProjects])
 
   const updateProject = useCallback((id: string, updates: ProjectUpdate) => {
-    persistProjects(prev => ({
-      ...prev,
-      projects: prev.projects.map(project => (project.id === id ? { ...project, ...updates } : project))
-    }))
-  }, [persistProjects])
-
-  const addFolder = useCallback((): string => {
-    const id = uuid()
-    persistProjects(prev => ({
-      ...prev,
-      folders: [...prev.folders, { id, name: 'New Folder', projectIds: [] }],
-      rootOrder: [...prev.rootOrder, id]
-    }))
-    return id
-  }, [persistProjects])
-
-  const removeFolder = useCallback((folderId: string) => {
     persistProjects(prev => {
-      const folder = prev.folders.find(candidate => candidate.id === folderId)
-      if (!folder) return prev
-      const folderIndex = prev.rootOrder.indexOf(folderId)
-      const newRootOrder = [...prev.rootOrder]
-      newRootOrder.splice(folderIndex, 1, ...folder.projectIds)
+      const data = includePendingTags(prev, updates.tagIds)
       return {
-        ...prev,
-        folders: prev.folders.filter(candidate => candidate.id !== folderId),
-        rootOrder: newRootOrder
+        ...data,
+        projects: data.projects.map(project => (project.id === id ? { ...project, ...updates } : project))
       }
     })
-    updateWindowViewState(prev => ({
-      ...prev,
-      collapsedFolderIds: prev.collapsedFolderIds.filter(id => id !== folderId)
-    }))
-  }, [getProjectDir, persistProjects, updateWindowViewState])
+  }, [includePendingTags, persistProjects])
 
-  const renameFolder = useCallback((folderId: string, name: string) => {
+  const findOrCreateTagId = useCallback((data: ProjectsData, name: string): { data: ProjectsData; tagId: string } => {
+    const trimmed = name.trim()
+    if (!trimmed) return { data, tagId: '' }
+    const existing = data.tags.find(t => t.name.toLowerCase() === trimmed.toLowerCase())
+    if (existing) return { data, tagId: existing.id }
+    const tagId = uuid()
+    const tag: Tag = { id: tagId, name: trimmed }
+    return { data: { ...data, tags: [...data.tags, tag] }, tagId }
+  }, [])
+
+  const addTag = useCallback((name: string): string => {
+    const trimmed = name.trim()
+    if (!trimmed) return ''
+    const existing = projectsDataRef.current.tags.find(t => t.name.toLowerCase() === trimmed.toLowerCase())
+    if (existing) return existing.id
+    const pending = [...pendingTagsRef.current.values()].find(t => t.name.toLowerCase() === trimmed.toLowerCase())
+    if (pending) return pending.id
+    const tag: Tag = { id: uuid(), name: trimmed }
+    pendingTagsRef.current.set(tag.id, tag)
+    return tag.id
+  }, [])
+
+  const renameTag = useCallback((tagId: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
     persistProjects(prev => ({
       ...prev,
-      folders: prev.folders.map(folder => (folder.id === folderId ? { ...folder, name } : folder))
+      tags: prev.tags.map(tag => (tag.id === tagId ? { ...tag, name: trimmed } : tag))
     }))
   }, [persistProjects])
 
-  const moveProjectToFolder = useCallback((projectId: string, folderId: string) => {
-    persistProjects(prev => ({
-      ...prev,
-      folders: prev.folders.map(folder => (
-        folder.id === folderId
-          ? { ...folder, projectIds: [...folder.projectIds.filter(id => id !== projectId), projectId] }
-          : { ...folder, projectIds: folder.projectIds.filter(id => id !== projectId) }
-      )),
-      rootOrder: prev.rootOrder.filter(id => id !== projectId)
-    }))
-  }, [persistProjects])
-
-  const moveProjectToRoot = useCallback((projectId: string, index: number) => {
+  const setProjectTags = useCallback((projectId: string, tagIds: string[]) => {
     persistProjects(prev => {
-      const newRootOrder = prev.rootOrder.filter(id => id !== projectId)
-      newRootOrder.splice(index, 0, projectId)
+      const data = includePendingTags(prev, tagIds)
       return {
-        ...prev,
-        folders: prev.folders.map(folder => ({
-          ...folder,
-          projectIds: folder.projectIds.filter(id => id !== projectId)
-        })),
-        rootOrder: newRootOrder
+        ...data,
+        projects: data.projects.map(project =>
+          project.id === projectId ? { ...project, tagIds } : project
+        )
       }
     })
-  }, [persistProjects])
+  }, [includePendingTags, persistProjects])
 
-  const reorderRootItems = useCallback((fromIndex: number, toIndex: number) => {
+  const reorderProjects = useCallback((fromIndex: number, toIndex: number) => {
     persistProjects(prev => {
-      const newRootOrder = [...prev.rootOrder]
-      const [moved] = newRootOrder.splice(fromIndex, 1)
-      newRootOrder.splice(toIndex, 0, moved)
-      return { ...prev, rootOrder: newRootOrder }
+      const newOrder = [...prev.projectOrder]
+      const [moved] = newOrder.splice(fromIndex, 1)
+      newOrder.splice(toIndex, 0, moved)
+      return { ...prev, projectOrder: newOrder }
     })
-  }, [persistProjects])
-
-  const reorderProjectsInFolder = useCallback((folderId: string, fromIndex: number, toIndex: number) => {
-    persistProjects(prev => ({
-      ...prev,
-      folders: prev.folders.map(folder => {
-        if (folder.id !== folderId) return folder
-        const projectIds = [...folder.projectIds]
-        const [moved] = projectIds.splice(fromIndex, 1)
-        projectIds.splice(toIndex, 0, moved)
-        return { ...folder, projectIds }
-      })
-    }))
   }, [persistProjects])
 
   const addTask = useCallback((projectId: string, name: string) => {
@@ -861,6 +876,9 @@ export function useAppState() {
       id: uuid(),
       type,
       title,
+      // pi resumes via `--session-id <uuid>`; pre-generate a stable id at creation so
+      // the same session is reloaded across app restarts (pi creates it if missing).
+      ...(type === 'pi' ? { sessionId: uuid() } : {}),
       ...(filePath ? { filePath } : {}),
       ...(url ? { url } : {}),
       ...(noteId ? { noteId } : {})
@@ -1214,26 +1232,19 @@ export function useAppState() {
     })
   }, [updateWindowViewState])
 
-  const toggleFolderCollapse = useCallback((folderId: string) => {
+  const toggleTagFilter = useCallback((tagId: string) => {
     updateWindowViewState(prev => ({
       ...prev,
-      collapsedFolderIds: prev.collapsedFolderIds.includes(folderId)
-        ? prev.collapsedFolderIds.filter(id => id !== folderId)
-        : [...prev.collapsedFolderIds, folderId]
+      selectedTagIds: prev.selectedTagIds.includes(tagId)
+        ? prev.selectedTagIds.filter(id => id !== tagId)
+        : [...prev.selectedTagIds, tagId]
     }))
   }, [updateWindowViewState])
 
-  const setFolderCollapsed = useCallback((folderId: string, collapsed: boolean) => {
-    updateWindowViewState(prev => {
-      const isCollapsed = prev.collapsedFolderIds.includes(folderId)
-      if (isCollapsed === collapsed) return prev
-      return {
-        ...prev,
-        collapsedFolderIds: collapsed
-          ? [...prev.collapsedFolderIds, folderId]
-          : prev.collapsedFolderIds.filter(id => id !== folderId)
-      }
-    })
+  const clearTagFilters = useCallback(() => {
+    updateWindowViewState(prev => (
+      prev.selectedTagIds.length === 0 ? prev : { ...prev, selectedTagIds: [] }
+    ))
   }, [updateWindowViewState])
 
   const toggleProjectExpansion = useCallback((projectId: string) => {
@@ -1547,14 +1558,14 @@ export function useAppState() {
 
   return {
     projects,
-    folders,
-    rootOrder,
+    tags,
+    projectOrder,
     config,
     selectedProject,
     selectedTask,
     selectedProjectId,
     selectedTaskId,
-    collapsedFolderIds: windowViewState.collapsedFolderIds,
+    selectedTagIds: windowViewState.selectedTagIds,
     expandedProjectIds: windowViewState.expandedProjectIds,
     effectiveTheme,
     effectiveTerminalTheme,
@@ -1570,13 +1581,13 @@ export function useAppState() {
     removeProject,
     renameProject,
     updateProject,
-    addFolder,
-    removeFolder,
-    renameFolder,
-    moveProjectToFolder,
-    moveProjectToRoot,
-    reorderRootItems,
-    reorderProjectsInFolder,
+    addTag,
+    renameTag,
+    setProjectTags,
+    findOrCreateTagId,
+    toggleTagFilter,
+    clearTagFilters,
+    reorderProjects,
     addTask,
     addWorkspaceTask,
     removeTask,
@@ -1594,8 +1605,6 @@ export function useAppState() {
     getTaskViewState: getTaskViewStateForTask,
     toggleSplit,
     setSplitRatio,
-    toggleFolderCollapse,
-    setFolderCollapsed,
     toggleProjectExpansion,
     setProjectExpanded,
     exportWindowViewState,
