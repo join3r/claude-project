@@ -38,6 +38,11 @@ export default defineConfig({
   renderer: {
     plugins: [react(), tailwindcss()],
     root: resolve('src/renderer'),
+    // Fixed dev port so the window never picks up another project's vite server on 5173
+    server: {
+      port: 5197,
+      strictPort: true
+    },
     build: {
       outDir: resolve('out/renderer'),
       rollupOptions: {
