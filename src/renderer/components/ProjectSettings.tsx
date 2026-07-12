@@ -3,6 +3,7 @@ import { AI_TAB_TYPES, AI_TAB_META } from '../../shared/types'
 import type { Project, AiTabType } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import TagPicker from './TagPicker'
+import { Modal, SetBlock, Field, HelperText, PrimaryButton } from './ui'
 import {
   dashboardIconUrl,
   fetchDashboardIconsMetadata,
@@ -75,138 +76,108 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div
-        className="w-[440px] max-w-[90vw] rounded-xl border border-border bg-surface-2 shadow-2xl flex flex-col max-h-[85vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
-          <h2 className="text-[14px] font-semibold text-text m-0">Project Settings</h2>
-          <button
-            onClick={onClose}
-            className="bg-transparent border-0 text-text-muted cursor-pointer text-[18px] leading-none px-1 rounded-sm hover:text-text"
-          >
-            &times;
-          </button>
-        </div>
-
-        {/* body */}
-        <div className="p-5 flex flex-col gap-4 overflow-y-auto">
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Dashboard Icon</span>
-            <div className="flex items-center gap-2.5 relative">
-              <div className="w-9 h-9 rounded-md border border-border bg-surface-1 flex items-center justify-center shrink-0 overflow-hidden">
-                {previewUrl ? (
-                  <img
-                    src={previewUrl}
-                    alt=""
-                    className="w-6 h-6 object-contain"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }}
-                    onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'visible' }}
-                  />
-                ) : emoji ? (
-                  <span className="text-[18px] leading-none">{emoji}</span>
-                ) : (
-                  <span className="text-text-subtle text-[10px]">none</span>
-                )}
-              </div>
-              <div className="flex-1 flex flex-col gap-1 min-w-0">
-                <input
-                  value={icon}
-                  onChange={(e) => { setIcon(e.target.value); setIconQuery(e.target.value); setShowSuggestions(true) }}
-                  onFocus={() => setShowSuggestions(true)}
-                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                  placeholder="slug (e.g. vscode) or full URL"
-                  className="h-9 rounded-md bg-surface-2 border border-border px-2.5 text-text focus:border-border-focus outline-none text-[13px]"
-                />
-                <span className="text-[11px] text-text-subtle">
-                  Search icons at{' '}
-                  <a
-                    href="https://dashboardicons.com/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline hover:text-text"
-                  >
-                    dashboardicons.com
-                  </a>
-                  {iconError && <span className="ml-2 text-text-muted">({iconError})</span>}
-                </span>
-              </div>
-              {showSuggestions && suggestions.length > 0 && (
-                <div
-                  ref={suggestionsRef}
-                  className="absolute left-[46px] right-0 top-[40px] z-10 max-h-60 overflow-y-auto rounded-md border border-border bg-surface-2 shadow-lg"
-                >
-                  {suggestions.map((hit) => {
-                    const url = dashboardIconUrl(hit.slug, { theme: effectiveTheme, metadata: iconMetadata ?? undefined })
-                    return (
-                      <button
-                        key={hit.slug}
-                        type="button"
-                        onMouseDown={(e) => { e.preventDefault(); pickSuggestion(hit.slug) }}
-                        className="w-full flex items-center gap-2 px-2 py-1.5 text-left bg-transparent border-0 cursor-pointer hover:bg-surface-3 text-text text-[13px]"
-                      >
-                        {url && <img src={url} alt="" className="w-4 h-4 object-contain shrink-0" />}
-                        <span className="truncate">{hit.slug}</span>
-                        {hit.matchedAlias && (
-                          <span className="text-text-subtle text-[11px] truncate">— {hit.matchedAlias}</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+    <Modal
+      title="Project Settings"
+      onClose={onClose}
+      footer={<PrimaryButton onClick={handleSave}>Save</PrimaryButton>}
+    >
+      <SetBlock label="Dashboard icon">
+        <div className="flex items-center gap-2.5 relative">
+          <div className="size-(--ctl-h-lg) rounded-md border border-border bg-field flex items-center justify-center shrink-0 overflow-hidden">
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt=""
+                className="w-6 h-6 object-contain"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }}
+                onLoad={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'visible' }}
+              />
+            ) : emoji ? (
+              <span className="text-lg leading-none">{emoji}</span>
+            ) : (
+              <span className="text-text-subtle text-2xs">none</span>
+            )}
           </div>
-
-          <TagPicker
-            selectedTagIds={tagIds}
-            onChange={setTagIds}
-            allTags={tags}
-            onEnsureTag={addTag}
-          />
-
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Emoji (fallback)</span>
-            <input
-              value={emoji}
-              onChange={(e) => setEmoji(e.target.value.slice(0, 4))}
-              placeholder="e.g. 📁"
-              className="w-20 h-9 rounded-md bg-surface-2 border border-border px-2.5 text-text"
+          <div className="flex-1 flex flex-col gap-1 min-w-0">
+            <Field
+              value={icon}
+              onChange={(e) => { setIcon(e.target.value); setIconQuery(e.target.value); setShowSuggestions(true) }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              placeholder="slug (e.g. vscode) or full URL"
             />
-          </label>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">
-              AI Tool Arguments
-            </label>
-            <div className="flex flex-col gap-2 mt-1">
-              {AI_TAB_TYPES.map((tool) => (
-                <div key={tool} className="flex items-center gap-2.5">
-                  <span className="text-[13px] text-text min-w-[90px] shrink-0">{AI_TAB_META[tool].label}</span>
-                  <input
-                    className="flex-1 h-9 px-3 rounded-md bg-surface-2 border border-border text-text focus:border-border-focus outline-none text-[13px]"
-                    value={args[tool] ?? ''}
-                    onChange={(e) => setArgs({ ...args, [tool]: e.target.value })}
-                    placeholder="e.g. --model sonnet"
-                  />
-                </div>
-              ))}
-            </div>
+            <span className="text-xs text-text-subtle">
+              Search icons at{' '}
+              <a
+                href="https://dashboardicons.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-text"
+              >
+                dashboardicons.com
+              </a>
+              {iconError && <span className="ml-2 text-text-muted">({iconError})</span>}
+            </span>
           </div>
+          {showSuggestions && suggestions.length > 0 && (
+            <div
+              ref={suggestionsRef}
+              className="absolute left-[42px] right-0 top-[32px] z-(--z-popover) max-h-60 overflow-y-auto rounded-lg border border-border bg-surface shadow-pop p-1"
+            >
+              {suggestions.map((hit) => {
+                const url = dashboardIconUrl(hit.slug, { theme: effectiveTheme, metadata: iconMetadata ?? undefined })
+                return (
+                  <button
+                    key={hit.slug}
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); pickSuggestion(hit.slug) }}
+                    className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-left bg-transparent border-0 cursor-pointer hover:bg-sel text-text text-base"
+                  >
+                    {url && <img src={url} alt="" className="w-4 h-4 object-contain shrink-0" />}
+                    <span className="truncate">{hit.slug}</span>
+                    {hit.matchedAlias && (
+                      <span className="text-text-subtle text-xs truncate">— {hit.matchedAlias}</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
+      </SetBlock>
 
-        {/* footer */}
-        <div className="flex items-center justify-end px-5 py-3 border-t border-border shrink-0">
-          <button
-            onClick={handleSave}
-            className="h-8 px-4 rounded-md bg-accent-500 hover:bg-accent-600 text-white text-[13px] font-medium border-0 cursor-pointer transition-colors"
-          >
-            Save
-          </button>
+      <TagPicker
+        selectedTagIds={tagIds}
+        onChange={setTagIds}
+        allTags={tags}
+        onEnsureTag={addTag}
+      />
+
+      <SetBlock label="Emoji (fallback)">
+        <Field
+          className="w-20"
+          value={emoji}
+          onChange={(e) => setEmoji(e.target.value.slice(0, 4))}
+          placeholder="e.g. 📁"
+        />
+      </SetBlock>
+
+      <SetBlock label="AI tool arguments">
+        <div className="flex flex-col gap-1.5">
+          {AI_TAB_TYPES.map((tool) => (
+            <div key={tool} className="flex items-center gap-2.5">
+              <span className="text-base text-text min-w-[90px] shrink-0">{AI_TAB_META[tool].label}</span>
+              <Field
+                className="flex-1"
+                value={args[tool] ?? ''}
+                onChange={(e) => setArgs({ ...args, [tool]: e.target.value })}
+                placeholder="e.g. --model sonnet"
+              />
+            </div>
+          ))}
         </div>
-      </div>
-    </div>
+        <HelperText>Extra CLI arguments passed when the tool starts in this project.</HelperText>
+      </SetBlock>
+    </Modal>
   )
 }

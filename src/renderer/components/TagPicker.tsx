@@ -74,14 +74,14 @@ export default function TagPicker({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-text-subtle">Tags</span>
+    <div className="flex flex-col gap-1.5">
+      <span className="text-base text-text">Tags</span>
       {selectedTags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {selectedTags.map(tag => (
             <span
               key={tag.id}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-3 border border-border text-[11px] text-text"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sel text-xs text-text"
             >
               {tag.name}
               <button
@@ -98,7 +98,7 @@ export default function TagPicker({
       )}
       <div className="relative">
         <input
-          className="h-9 w-full px-3 rounded-md bg-surface-2 border border-border text-text text-[13px] focus:border-border-focus outline-none"
+          className="h-(--ctl-h) w-full px-2.5 rounded-md bg-field border border-border text-text text-base focus:border-border-focus focus:shadow-focus outline-none placeholder:text-text-subtle"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setShowSuggestions(true) }}
           onFocus={() => setShowSuggestions(true)}
@@ -119,12 +119,12 @@ export default function TagPicker({
           placeholder="Add tag…"
         />
         {showSuggestions && (suggestions.length > 0 || query.trim()) && (
-          <div className="absolute left-0 right-0 top-full mt-1 z-10 max-h-40 overflow-y-auto rounded-md border border-border bg-surface-2 shadow-lg">
+          <div className="absolute left-0 right-0 top-full mt-1 z-(--z-popover) max-h-40 overflow-y-auto rounded-lg border border-border bg-surface shadow-pop p-1">
             {suggestions.map(tag => (
               <button
                 key={tag.id}
                 type="button"
-                className="w-full px-3 py-1.5 text-left bg-transparent border-0 cursor-pointer hover:bg-surface-3 text-text text-[13px]"
+                className="w-full rounded-md px-2 py-1 text-left bg-transparent border-0 cursor-pointer hover:bg-sel text-text text-base"
                 onMouseDown={(e) => { e.preventDefault(); addTagById(tag.id) }}
               >
                 {tag.name}
@@ -133,7 +133,7 @@ export default function TagPicker({
             {query.trim() && !suggestions.some(t => t.name.toLowerCase() === query.trim().toLowerCase()) && (
               <button
                 type="button"
-                className="w-full px-3 py-1.5 text-left bg-transparent border-0 cursor-pointer hover:bg-surface-3 text-text-subtle text-[13px] italic"
+                className="w-full rounded-md px-2 py-1 text-left bg-transparent border-0 cursor-pointer hover:bg-sel text-text-subtle text-base italic"
                 onMouseDown={(e) => { e.preventDefault(); commitQuery() }}
               >
                 Create &quot;{query.trim()}&quot;
