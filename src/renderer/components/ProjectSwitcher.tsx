@@ -156,13 +156,13 @@ export default function ProjectSwitcher({
   return (
     /* Backdrop */
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/60 [-webkit-app-region:no-drag]"
+      className="fixed inset-0 z-(--z-overlay) flex items-start justify-center pt-[15vh] bg-black/50 [-webkit-app-region:no-drag]"
       onClick={handleDeactivate}
     >
       {/* Card */}
       <div
         ref={containerRef}
-        className="w-[440px] max-w-[90vw] rounded-xl border border-border bg-surface-2 shadow-2xl overflow-hidden"
+        className="w-[440px] max-w-[90vw] rounded-xl border border-border bg-surface shadow-pop overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Body */}
@@ -171,35 +171,27 @@ export default function ProjectSwitcher({
           <div className="relative flex items-center">
             <input
               ref={inputRef}
-              className="w-full h-9 px-3 rounded-md bg-surface border border-border text-text text-[13px] outline-none focus:border-border-focus"
+              className="w-full h-(--ctl-h) px-2.5 rounded-md bg-field border border-border text-text text-base outline-none focus:border-border-focus focus:shadow-focus placeholder:text-text-subtle"
               placeholder="Search projects and tasks..."
               value={query}
               onChange={e => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
             />
-            <span className="absolute right-2 text-[10px] text-text-subtle pointer-events-none px-1.5 py-px rounded bg-surface-3">
+            <span className="absolute right-2 text-2xs text-text-subtle pointer-events-none px-1.5 py-px rounded-sm bg-surface-3">
               esc
             </span>
           </div>
           {/* Results */}
           <div className="flex-1 overflow-y-auto -mx-1 px-1" ref={resultsRef}>
             {filteredResults.length === 0 ? (
-              <div className="p-3 text-center text-text-muted text-[12px]">No results</div>
+              <div className="p-3 text-center text-text-muted text-sm">No results</div>
             ) : (
               filteredResults.map((result, i) => (
                 <div
                   key={result.type + ':' + (result.taskId || result.projectId)}
-                  data-active={i === selectedIndex ? 'true' : undefined}
                   className={[
-                    'px-3 py-1.5 rounded-md cursor-pointer text-[12px] text-text',
-                    // Selection rail recipe
-                    'data-[active=true]:relative',
-                    'data-[active=true]:before:absolute data-[active=true]:before:inset-y-0 data-[active=true]:before:left-0',
-                    'data-[active=true]:before:w-0.5 data-[active=true]:before:bg-accent-400',
-                    'data-[active=true]:bg-gradient-to-r data-[active=true]:from-accent-600/30 data-[active=true]:to-transparent',
-                    'data-[active=true]:text-accent-50',
-                    '[.theme-light_&[data-active=true]]:from-accent-200',
-                    '[.theme-light_&[data-active=true]]:text-accent-700',
+                    'px-3 py-1.5 rounded-md cursor-pointer text-sm text-text',
+                    i === selectedIndex ? 'bg-sel' : '',
                   ].join(' ')}
                   onClick={() => handleSelect(result)}
                   onMouseEnter={() => setSelectedIndex(i)}
@@ -207,15 +199,15 @@ export default function ProjectSwitcher({
                   <div className="flex items-center gap-1.5">
                     <span className={[
                       'overflow-hidden text-ellipsis whitespace-nowrap',
-                      result.type === 'project' ? 'font-semibold' : ''
+                      result.type === 'project' ? 'font-medium' : ''
                     ].join(' ').trim()}>
                       {result.name}
                     </span>
-                    <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0 ml-auto uppercase tracking-wide">
+                    <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0 ml-auto uppercase tracking-wide">
                       {result.type}
                     </span>
                   </div>
-                  <div className="text-[10px] text-text-muted overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
+                  <div className="text-2xs text-text-muted overflow-hidden text-ellipsis whitespace-nowrap mt-0.5">
                     {result.context}
                   </div>
                 </div>

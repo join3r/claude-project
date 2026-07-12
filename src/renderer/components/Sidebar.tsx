@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
 import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, projectMatchesTagFilter } from '../../shared/types'
-import type { Tab, Task, Project } from '../../shared/types'
+import type { Task, Project } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -13,7 +13,8 @@ import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
-import { ChevronDown, ChevronRight, Plus, Search, Settings as SettingsIcon, Plug, Terminal as TerminalIcon } from 'lucide-react'
+import { ChevronRight, Plus, Search, Settings as SettingsIcon, Plug, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
+import { RowActions, RowAction } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { dashboardIconUrl, fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
 
@@ -49,9 +50,15 @@ function getProjectStatus(tasks: Task[], allStatuses: Record<string, TabStatusVa
   return null
 }
 
-/** px-3 + chevron (12) + gap-2 (8) + icon slot (w-5 = 20) + 2px nest under name */
-const TASK_ROW_PL = 'pl-[54px]'
-const TASK_ROW_ML = 'ml-[54px]'
+/** Rows carry mx-1.5 (6px); project name starts 64px from the sidebar edge:
+    6 (mx) + 10 (px-2.5) + 12 (chevron) + 8 (gap) + 20 (icon) + 8 (gap).
+    Task rows indent to it with pl (inside mx), drop indicators with ml (no mx). */
+const TASK_ROW_PL = 'pl-[58px]'
+const TASK_ROW_ML = 'ml-[64px]'
+
+/** Stem ctx-menu row */
+const menuItemCls = 'block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel'
+const menuCls = 'bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop'
 
 function getProjectInitials(name: string): string {
   const trimmed = name.trim()
@@ -91,7 +98,7 @@ function ProjectIconSlot({
           onError={() => setIconFailed(true)}
         />
       ) : project.emoji ? (
-        <span className="text-[13px] leading-none">{project.emoji}</span>
+        <span className="text-base leading-none">{project.emoji}</span>
       ) : (
         <span
           className="w-3.5 h-3.5 rounded-sm bg-surface-3 text-text-muted text-[8px] font-semibold leading-none flex items-center justify-center"
@@ -112,7 +119,7 @@ function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<
     : status === 'attention'
     ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
     : 'bg-status-exited'
-  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-auto ${dotClass}`} />
+  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden ${dotClass}`} />
 }
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
@@ -492,18 +499,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
         className={[
-          'flex items-center gap-2 px-3 py-1.5 text-[13px] text-text cursor-pointer hover:bg-surface-2',
-          // selection rail recipe
-          'data-[selected=true]:relative',
-          'data-[selected=true]:before:absolute data-[selected=true]:before:inset-y-0 data-[selected=true]:before:left-0',
-          'data-[selected=true]:before:w-0.5 data-[selected=true]:before:bg-accent-400',
-          'data-[selected=true]:bg-gradient-to-r data-[selected=true]:from-accent-600/30 data-[selected=true]:to-transparent',
-          'data-[selected=true]:text-accent-50',
-          '[.theme-light_&[data-selected=true]]:from-accent-200',
-          '[.theme-light_&[data-selected=true]]:text-accent-700',
+          'group flex items-center gap-2 mx-1.5 px-2.5 h-7 rounded-md text-base text-text cursor-pointer',
+          'transition-colors duration-(--motion-fast)',
+          isProjectSelected ? 'bg-sel' : 'hover:bg-surface-3',
           isProjectDragging ? 'opacity-40' : '',
         ].join(' ')}
-        data-selected={isProjectSelected ? 'true' : undefined}
         data-drag-type="project"
         data-drag-id={project.id}
         onClick={() => { selectProjectHome(project.id) }}
@@ -516,7 +516,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         {editingId === project.id ? (
           <input
             ref={editRef}
-            className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
+            className="bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onBlur={() => handleRenameSubmit('project', project.id)}
@@ -531,16 +531,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               className="text-text-subtle hover:text-text bg-transparent border-0 cursor-pointer p-0 flex items-center shrink-0"
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); toggleProjectExpansion(project.id) }}
-            >{isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
+            >
+              <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isExpanded ? 'rotate-90' : ''}`} />
+            </button>
             <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} />
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{project.name}</span>
             {isRemoteProject(project) && (
-              <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
+              <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
                 <Plug size={10} className="inline mr-0.5" />ssh
               </span>
             )}
             {isShellCommandProject(project) && (
-              <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
+              <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
                 <TerminalIcon size={10} className="inline mr-0.5" />shell
               </span>
             )}
@@ -553,16 +555,26 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 : 'bg-ssh-disconnected'
               return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-1 ${dotClass}`} />
             })()}
-            {!isExpanded && (() => {
-              const projectStatus = getProjectStatus(project.tasks.filter(t => !isHomeTask(t)), allStatuses)
-              if (!projectStatus) return null
-              const dotClass = projectStatus === 'working'
-                ? 'bg-status-working animate-pulse'
-                : projectStatus === 'attention'
-                ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
-                : 'bg-status-exited'
-              return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-auto ${dotClass}`} />
-            })()}
+            <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+              {!isExpanded && (() => {
+                const projectStatus = getProjectStatus(project.tasks.filter(t => !isHomeTask(t)), allStatuses)
+                if (!projectStatus) return null
+                const dotClass = projectStatus === 'working'
+                  ? 'bg-status-working animate-pulse'
+                  : projectStatus === 'attention'
+                  ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+                  : 'bg-status-exited'
+                return <span className={`w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden ${dotClass}`} />
+              })()}
+              <RowActions>
+                <RowAction title="New task" onClick={() => handleAddTask(project.id)}>
+                  <Plus size={13} />
+                </RowAction>
+                <RowAction title="Project settings" onClick={() => setProjectSettingsId(project.id)}>
+                  <Cog size={13} />
+                </RowAction>
+              </RowActions>
+            </span>
           </>
         )}
       </div>
@@ -580,25 +592,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             return (
               <React.Fragment key={task.id}>
                 {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === projectTaskIndex && (
-                  <div className={`h-0.5 bg-accent-400 mr-2 rounded-sm ${TASK_ROW_ML}`} />
+                  <div className={`h-0.5 bg-accent mr-2 rounded-sm ${TASK_ROW_ML}`} />
                 )}
                 <div
                   className={[
-                    'flex items-center gap-2 px-3 py-1.5 text-text cursor-pointer hover:bg-surface-2',
+                    'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-text cursor-pointer',
                     TASK_ROW_PL,
-                    'text-[12px]',
+                    'text-sm',
                     'task-item',
-                    // selection rail recipe
-                    'data-[selected=true]:relative',
-                    'data-[selected=true]:before:absolute data-[selected=true]:before:inset-y-0 data-[selected=true]:before:left-0',
-                    'data-[selected=true]:before:w-0.5 data-[selected=true]:before:bg-accent-400',
-                    'data-[selected=true]:bg-gradient-to-r data-[selected=true]:from-accent-600/30 data-[selected=true]:to-transparent',
-                    'data-[selected=true]:text-accent-50',
-                    '[.theme-light_&[data-selected=true]]:from-accent-200',
-                    '[.theme-light_&[data-selected=true]]:text-accent-700',
+                    'transition-colors duration-(--motion-fast)',
+                    isSelected ? 'bg-sel' : 'hover:bg-surface-3',
                     isTaskDragging ? 'opacity-40' : '',
                   ].join(' ')}
-                  data-selected={isSelected ? 'true' : undefined}
                   data-task-id={task.id}
                   data-task-index={projectTaskIndex}
                   style={recencyStyle}
@@ -609,7 +614,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   {editingId === task.id ? (
                     <input
                       ref={editRef}
-                      className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
+                      className="bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
                       onBlur={() => handleRenameSubmit('task', project.id, task.id)}
@@ -621,8 +626,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   ) : (
                     <>
                       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
-                      {isWorkspaceTask(task) && <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
-                      <TaskStatusDot task={task} allStatuses={allStatuses} />
+                      {isWorkspaceTask(task) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
+                      <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+                        <TaskStatusDot task={task} allStatuses={allStatuses} />
+                        <RowActions>
+                          <RowAction danger title="Delete task" onClick={() => handleDeleteTask(project.id, task.id)}>
+                            <X size={13} />
+                          </RowAction>
+                        </RowActions>
+                      </span>
                     </>
                   )}
                 </div>
@@ -630,18 +642,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             )
           })}
           {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
-            <div className={`h-0.5 bg-accent-400 mr-2 rounded-sm ${TASK_ROW_ML}`} />
+            <div className={`h-0.5 bg-accent mr-2 rounded-sm ${TASK_ROW_ML}`} />
           )}
-          <div className={`flex items-center gap-0.5 flex-wrap ${TASK_ROW_PL} pr-2 py-0.5`}>
+          <div className={`flex items-center gap-0.5 flex-wrap mx-1.5 ${TASK_ROW_PL} pr-2 py-0.5`}>
             <button
-              className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] text-[11px] whitespace-nowrap shrink-0"
+              className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
               onClick={() => handleAddTask(project.id)}
             >
               <Plus size={12} className="inline mr-0.5" /> Task
             </button>
             {!isShellCommandProject(project) && (
               <button
-                className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] text-[11px] whitespace-nowrap shrink-0"
+                className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
                 onClick={() => handleAddWorkspace(project.id)}
               >
                 <Plus size={12} className="inline mr-0.5" /> Workspace
@@ -655,7 +667,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }
 
   return (
-    <div className="sidebar flex flex-col w-60 min-w-[200px] bg-surface border-r border-border select-none [--recency-rgb:100,150,230] [.theme-light_&]:[--recency-rgb:230,160,80]">
+    <div className="sidebar flex flex-col w-60 min-w-[200px] bg-surface border-r-[0.5px] border-border select-none [--recency-rgb:199,146,87] [.theme-light_&]:[--recency-rgb:154,98,48]">
       <ProjectSwitcher
         projects={projects}
         selectProjectHome={selectProjectHome}
@@ -666,19 +678,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {switcherActive ? null : (<>
       <div className="flex items-center justify-between px-3 pt-9 pb-2 [-webkit-app-region:drag]">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-text-subtle">Projects</span>
+        <span className="text-2xs font-bold uppercase tracking-[0.06em] text-text-muted">Projects</span>
         <div className="relative [-webkit-app-region:no-drag]">
           <button
-            className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded text-[13px] hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag]"
+            className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-base hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }}
             title="Add project"
           ><Plus size={14} /></button>
           {addMenuOpen && (
-            <div className="absolute top-full right-0 bg-surface-2 border border-border rounded-md py-1 shadow-lg z-[1000] whitespace-nowrap" onMouseDown={(e) => e.stopPropagation()}>
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
+            <div className={`absolute top-full right-0 z-(--z-menu) whitespace-nowrap ${menuCls}`} onMouseDown={(e) => e.stopPropagation()}>
+              <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
+              <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
+              <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
             </div>
           )}
         </div>
@@ -688,11 +700,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         <button
           type="button"
           onClick={() => setSwitcherActive(true)}
-          className="flex items-center gap-2 w-full h-7 px-2.5 rounded-md bg-surface-2 border border-border text-text-subtle text-[11.5px] hover:text-text-muted"
+          className="flex items-center gap-2 w-full h-(--ctl-h) px-2.5 rounded-md bg-field border border-border text-text-subtle text-xs hover:text-text-muted transition-colors duration-(--motion-fast)"
         >
           <Search size={12} />
           <span>Quick switch…</span>
-          <span className="ml-auto text-[10px] opacity-70">⌘P</span>
+          <span className="ml-auto text-2xs opacity-70">⌘P</span>
         </button>
       </div>
 
@@ -706,10 +718,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 type="button"
                 onClick={() => toggleTagFilter(tag.id)}
                 className={[
-                  'px-2 py-0.5 rounded-full text-[11px] border cursor-pointer transition-colors',
+                  'px-2 py-0.5 rounded-full text-xs border cursor-pointer transition-colors duration-(--motion-fast)',
                   isSelected
-                    ? 'bg-accent-500/25 border-accent-400 text-accent-50'
-                    : 'bg-surface-2 border-border text-text-muted hover:text-text hover:bg-surface-3',
+                    ? 'bg-sel border-transparent text-text'
+                    : 'bg-field border-border text-text-muted hover:text-text hover:bg-surface-3',
                 ].join(' ')}
               >
                 {tag.name}
@@ -726,14 +738,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           return (
             <React.Fragment key={project.id}>
               {dropTarget?.type === 'between-projects' && dropTarget.index === listIdx && (
-                <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
+                <div className="h-0.5 bg-accent mx-2 rounded-sm" />
               )}
               {renderProject(project)}
             </React.Fragment>
           )
         })}
         {dropTarget?.type === 'between-projects' && dropTarget.index === visibleProjectIds.length && (
-          <div className="h-0.5 bg-accent-400 mx-2 rounded-sm" />
+          <div className="h-0.5 bg-accent mx-2 rounded-sm" />
         )}
       </div>
 
@@ -756,9 +768,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       </>)}
 
       {contextMenu && (
-        <div className="fixed bg-surface-2 border border-border rounded-md py-1 shadow-lg z-[1000]" style={{ top: contextMenu.y, left: contextMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
+        <div className={`fixed z-(--z-menu) ${menuCls}`} style={{ top: contextMenu.y, left: contextMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
           <>
-            <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
+            <button className={menuItemCls} onClick={() => {
                 const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
                 setEditingId(id)
                 const item = contextMenu.type === 'project'
@@ -768,13 +780,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 setContextMenu(null)
               }}>Rename</button>
               {contextMenu.type === 'project' && (
-                <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
+                <button className={menuItemCls} onClick={() => {
                   setDuplicateProjectId(contextMenu.projectId)
                   setContextMenu(null)
                 }}>Duplicate</button>
               )}
               {contextMenu.type === 'project' && (
-                <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
+                <button className={menuItemCls} onClick={() => {
                   setProjectSettingsId(contextMenu.projectId)
                   setContextMenu(null)
                 }}>Settings</button>
@@ -783,13 +795,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project || !isRemoteProject(project)) return null
                 return (
-                  <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
+                  <button className={menuItemCls} onClick={() => {
                     window.api.sshConnect(project.id, project.ssh!).catch(() => {})
                     setContextMenu(null)
                   }}>Reconnect SSH</button>
                 )
               })()}
-              <button className="block w-full px-4 py-1.5 bg-transparent border-0 text-text text-[13px] text-left cursor-pointer hover:bg-surface-3" onClick={() => {
+              <button className={`${menuItemCls} text-danger`} onClick={() => {
                 if (contextMenu.type === 'project') removeProject(contextMenu.projectId)
                 else handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
                 setContextMenu(null)
@@ -807,9 +819,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   details.push({ label: 'Dir', value: project.directory })
                 }
                 return (
-                  <div className="border-t border-border mt-1 px-4 pt-1.5 pb-1">
+                  <div className="border-t border-hair mt-1 px-2.5 pt-1.5 pb-1">
                     {details.map(d => (
-                      <div key={d.label} className="text-text-subtle text-[11px] leading-snug overflow-hidden text-ellipsis whitespace-nowrap max-w-[260px] select-text cursor-text" title={d.value}>
+                      <div key={d.label} className="text-text-subtle text-xs leading-snug overflow-hidden text-ellipsis whitespace-nowrap max-w-[260px] select-text cursor-text" title={d.value}>
                         <span className="opacity-70">{d.label}:</span> {d.value}
                       </div>
                     ))}
@@ -820,8 +832,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </div>
       )}
 
-      <div className="px-3 py-2 border-t border-border">
-        <button className="bg-transparent border-0 text-text-subtle cursor-pointer px-2 py-1 rounded hover:bg-surface-2 hover:text-text [-webkit-app-region:no-drag] text-base" onClick={() => setSettingsOpen(true)} title="Settings"><SettingsIcon size={16} /></button>
+      <div className="px-3 py-2 border-t border-hair">
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-base transition-colors duration-(--motion-fast)" onClick={() => setSettingsOpen(true)} title="Settings"><SettingsIcon size={16} /></button>
       </div>
 
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}

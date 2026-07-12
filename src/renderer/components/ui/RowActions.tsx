@@ -12,7 +12,14 @@ interface RowActionsProps {
 export function RowActions({ children, className }: RowActionsProps): React.ReactElement {
   return (
     <span
-      className={`flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-(--motion-fast) ${className ?? ''}`}
+      className={[
+        // Collapsed to zero width at rest so hidden actions never steal row space;
+        // expands and fades in on row hover.
+        'flex items-center gap-0.5 max-w-0 overflow-hidden opacity-0',
+        'group-hover:max-w-[120px] group-hover:opacity-100 focus-within:max-w-[120px] focus-within:opacity-100',
+        'transition-all duration-(--motion-fast)',
+        className ?? ''
+      ].join(' ')}
     >
       {children}
     </span>

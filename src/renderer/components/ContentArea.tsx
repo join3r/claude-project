@@ -34,7 +34,7 @@ function FileBrowserTabButton({
   const active = fileBrowserOpen && fileBrowserActiveTab === tab
   return (
     <button
-      className={`bg-transparent border-0 cursor-pointer px-1.5 py-0.5 rounded-sm leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] ${active ? 'text-accent-400' : 'text-text-muted hover:text-text'}`}
+      className={`bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${active ? 'text-accent' : 'text-text-muted hover:text-text'}`}
       onClick={() => onActivate(tab)}
       title={active ? `Close ${label}` : `Open ${label}`}
     >
@@ -370,14 +370,14 @@ export default function ContentArea(): React.ReactElement {
   const gitStatus = useGitStatus(selectedProjectDir, shouldShowGitSummary)
   const gitSummary = gitStatus?.summary ?? null
   const hasGitSummary = !!gitSummary && (gitSummary.added > 0 || gitSummary.deleted > 0)
-  const baseTunnelClasses = 'bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-0.5 rounded-sm text-[15px] leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag]'
+  const baseTunnelClasses = 'bg-transparent border-0 text-text-muted cursor-pointer w-[30px] h-6 rounded-md text-md leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
   const tunnelButtonClassName = selectedProject && isRemoteProject(selectedProject)
     ? [
         baseTunnelClasses,
         selectedTunnelState?.status === 'error'
-          ? 'text-red-400'
+          ? 'text-danger'
           : selectedProject.tunnel && selectedTunnelState?.status === 'active'
-            ? 'text-accent-400'
+            ? 'text-accent'
             : ''
       ].filter(Boolean).join(' ')
     : baseTunnelClasses
@@ -385,9 +385,9 @@ export default function ContentArea(): React.ReactElement {
   return (
     <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {selectedProject && (
-        <div className="content-toolbar flex items-center justify-between gap-1.5 px-2 py-0.5 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
-          <div className="flex items-center gap-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-text-muted" title={windowBarTitle}>
-            <span className="text-text font-semibold">{selectedProject.name}</span>
+        <div className="content-toolbar flex items-center justify-between gap-1.5 px-2 py-0.5 bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]">
+          <div className="flex items-center gap-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-text-muted" title={windowBarTitle}>
+            <span className="text-text font-medium">{selectedProject.name}</span>
             {selectedTask && selectedTask.system !== 'home' && (
               <>
                 <span className="text-text-muted"> / </span>
@@ -400,10 +400,10 @@ export default function ContentArea(): React.ReactElement {
                 title={`${gitSummary.added} added, ${gitSummary.deleted} removed`}
               >
                 {gitSummary.added > 0 && (
-                  <span className="text-emerald-400">+{gitSummary.added}</span>
+                  <span className="text-success">+{gitSummary.added}</span>
                 )}
                 {gitSummary.deleted > 0 && (
-                  <span className="text-red-400">-{gitSummary.deleted}</span>
+                  <span className="text-danger">-{gitSummary.deleted}</span>
                 )}
               </span>
             )}
@@ -452,7 +452,7 @@ export default function ContentArea(): React.ReactElement {
           )}
           {selectedTask && (
             <button
-              className={`bg-transparent border-0 cursor-pointer px-1.5 py-0.5 rounded-sm leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] ${selectedTaskView?.splitOpen ? 'text-accent-400' : 'text-text-muted hover:text-text'}`}
+              className={`bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${selectedTaskView?.splitOpen ? 'text-accent' : 'text-text-muted hover:text-text'}`}
               onClick={() => toggleSplit(selectedProject.id, selectedTask.id)}
               title={selectedTaskView?.splitOpen ? 'Close right pane (⌘D)' : 'Open right pane (⌘D)'}
             >
@@ -466,7 +466,7 @@ export default function ContentArea(): React.ReactElement {
       )}
 
       {!hasProjectSelection && (
-        <div className="flex-1 flex items-center justify-center text-text-muted text-[14px]">Select or create a task to get started</div>
+        <div className="flex-1 flex items-center justify-center text-text-muted text-md">Select or create a task to get started</div>
       )}
       {projects.flatMap((project) =>
         project.tasks.map((task) => {
@@ -486,12 +486,12 @@ export default function ContentArea(): React.ReactElement {
               <div className="flex-1 flex overflow-hidden relative" ref={isVisible ? panesRef : undefined}>
                 {isDragging && <div className="absolute inset-0 z-10 cursor-col-resize" />}
                 {isRemoteProject(project) && sshStatuses[project.id] !== 'connected' && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-[100]">
-                    <div className="flex flex-col items-center gap-3 text-text text-[14px]">
-                      <span className="text-[32px] text-red-400">&#9888;</span>
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-(--z-overlay)">
+                    <div className="flex flex-col items-center gap-3 text-text text-md">
+                      <span className="text-[32px] text-danger">&#9888;</span>
                       <span>SSH connection lost</span>
                       <button
-                        className="inline-flex items-center justify-center h-9 px-4 rounded-md bg-accent-500 text-accent-50 hover:bg-accent-400 disabled:opacity-50 cursor-pointer border-0"
+                        className="inline-flex items-center justify-center h-(--ctl-h) px-4 rounded-md border-0 cursor-pointer text-base font-medium text-accent-ink shadow-btn bg-gradient-to-b from-[color-mix(in_srgb,var(--color-accent)_86%,white)] to-accent hover:brightness-105 disabled:opacity-50"
                         onClick={() => {
                           if (project.ssh) {
                             window.api.sshConnect(project.id, project.ssh).catch(() => {})
@@ -525,7 +525,7 @@ export default function ContentArea(): React.ReactElement {
                 {isSplitOpen && (
                   <>
                     <div
-                      className="w-[3px] shrink-0 bg-border cursor-col-resize hover:bg-accent-400 active:bg-accent-400"
+                      className="w-[3px] shrink-0 bg-border cursor-col-resize hover:bg-accent active:bg-accent transition-colors duration-(--motion-fast)"
                       onMouseDown={handleDividerMouseDown(project.id, task.id)}
                     />
                     <Pane

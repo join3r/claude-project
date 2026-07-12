@@ -23,6 +23,10 @@ interface Props {
 
 const DRAG_THRESHOLD = 5
 
+/** Stem ctx-menu row */
+const menuItemCls = 'block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel'
+const menuCls = 'bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop'
+
 function tabIcon(type: TabType): string {
   if (type === 'terminal') return '>'
   if (type === 'browser') return '◉'
@@ -161,7 +165,7 @@ export default function TabBar({
       renameInputRef.current.select()
     }
   }, [renamingTabId])
-  if (!selectedProject) return <div className="tab-bar flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]" />
+  if (!selectedProject) return <div className="tab-bar flex items-stretch h-(--ctl-h-lg) bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]" />
 
   const isTabDragActive = tabDragState?.projectId === projectId && tabDragState.taskId === taskId
   const isDropTargetPane = isTabDragActive && tabDropTarget?.pane === pane
@@ -227,12 +231,12 @@ export default function TabBar({
 
   return (
     <>
-    <div className="tab-bar flex items-stretch h-9 bg-surface-2 border-b border-border [-webkit-app-region:drag]">
+    <div className="tab-bar flex items-stretch h-(--ctl-h-lg) bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]">
       <div
         className={[
           'tab-list',
           'flex flex-1 overflow-x-auto overflow-y-hidden relative [&::-webkit-scrollbar]:h-0 [-webkit-app-region:no-drag]',
-          isDropTargetPane ? 'shadow-[inset_0_-2px_0_var(--color-accent-400)]' : ''
+          isDropTargetPane ? 'shadow-[inset_0_-2px_0_var(--color-accent)]' : ''
         ].join(' ')}
         data-project-id={projectId}
         data-task-id={taskId}
@@ -241,14 +245,14 @@ export default function TabBar({
         {tabs.map((tab, index) => (
           <React.Fragment key={tab.id}>
             {isDropTargetPane && tabDropTarget?.index === index && (
-              <div className="w-0.5 shrink-0 self-stretch bg-accent-400 shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent-400)_55%,transparent)]" />
+              <div className="w-0.5 shrink-0 self-stretch bg-accent shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]" />
             )}
             <div
               className={[
                 'tab',
-                'group relative flex items-center gap-1.5 h-full px-3 text-[12.5px] cursor-pointer whitespace-nowrap text-text-muted min-w-0 select-none hover:text-text',
-                'data-[active=true]:text-text',
-                'data-[active=true]:after:absolute data-[active=true]:after:inset-x-2 data-[active=true]:after:bottom-0 data-[active=true]:after:h-0.5 data-[active=true]:after:bg-accent-400',
+                'group relative flex items-center gap-1.5 h-full px-3 text-base cursor-pointer whitespace-nowrap text-text-muted min-w-0 select-none hover:text-text',
+                'transition-colors duration-(--motion-fast)',
+                'data-[active=true]:text-text data-[active=true]:bg-bg',
                 tabDragState?.tabId === tab.id ? 'opacity-[0.45]' : ''
               ].join(' ')}
               data-tab-id={tab.id}
@@ -266,16 +270,16 @@ export default function TabBar({
               }}
             >
               {index < 9 && (
-                <span className="text-[10px] text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.meta-held_&]:visible">
+                <span className="text-2xs text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.meta-held_&]:visible">
                   {pane === 'left' ? `⌘${index + 1}` : `⇧${index + 1}`}
                 </span>
               )}
-              <span className="text-[11px] shrink-0">{tabIcon(tab.type)}</span>
+              <span className="text-xs shrink-0">{tabIcon(tab.type)}</span>
               <TabStatusIndicator tabId={tab.id} />
               {renamingTabId === tab.id ? (
                 <input
                   ref={renameInputRef}
-                  className="bg-surface-2 border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none min-w-0 w-28"
+                  className="bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none min-w-0 w-28"
                   value={renameValue}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
@@ -296,7 +300,7 @@ export default function TabBar({
               )}
               {isPinnable(tab) && (
                 <button
-                  className={`bg-transparent border-0 cursor-pointer text-[12px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 transition-opacity ${tab.pinned ? 'opacity-100 text-accent' : 'opacity-0 group-hover:opacity-100 text-text-muted hover:text-text'}`}
+                  className={`bg-transparent border-0 cursor-pointer text-sm px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 transition-opacity duration-(--motion-fast) ${tab.pinned ? 'opacity-100 text-accent' : 'opacity-0 group-hover:opacity-100 text-text-muted hover:text-text'}`}
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -309,7 +313,7 @@ export default function TabBar({
               )}
               {!isHomeTab(tab) && (
                 <button
-                  className="bg-transparent border-0 text-text-muted cursor-pointer text-[14px] px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="bg-transparent border-0 text-text-muted cursor-pointer text-md px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)"
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -328,24 +332,24 @@ export default function TabBar({
         )}
       </div>
       <div className="flex px-1 gap-0.5 [-webkit-app-region:no-drag]">
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('terminal')} title="New terminal (⌘T)">
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('terminal')} title="New terminal (⌘T)">
           &gt;_
         </button>
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('browser')} title="New browser">
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('browser')} title="New browser">
           &#9673;
         </button>
         {config?.enableClaude && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('claude')} title="New Claude Code">
+          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('claude')} title="New Claude Code">
             &#10022;
           </button>
         )}
         {config?.enableCodex && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('codex')} title="New Codex">
+          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('codex')} title="New Codex">
             &#9707;
           </button>
         )}
         {config?.enablePi && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded text-[11px] font-mono hover:bg-surface-3 hover:text-text" onClick={() => handleAdd('pi')} title="New Pi">
+          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('pi')} title="New Pi">
             &#960;
           </button>
         )}
@@ -357,15 +361,15 @@ export default function TabBar({
       const close = () => setTabMenu(null)
       return (
         <>
-          <div className="fixed inset-0 z-30" onClick={close} onContextMenu={e => { e.preventDefault(); close() }} />
+          <div className="fixed inset-0 z-(--z-menu)" onClick={close} onContextMenu={e => { e.preventDefault(); close() }} />
           <div
             style={{ left: tabMenu.x, top: tabMenu.y }}
-            className="fixed z-40 min-w-[180px] bg-surface border border-border rounded shadow-lg text-sm py-1"
+            className={`fixed z-(--z-menu) min-w-[180px] ${menuCls}`}
           >
             {isRenamableTab(tab) && (
               <button
                 type="button"
-                className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+                className={menuItemCls}
                 onClick={() => {
                   beginRename(tab)
                   close()
@@ -377,7 +381,7 @@ export default function TabBar({
             {isPinnable(tab) && (
               <button
                 type="button"
-                className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+                className={menuItemCls}
                 onClick={() => {
                   setTabPinned(projectId, taskId, pane, tab.id, !tab.pinned)
                   close()
@@ -389,7 +393,7 @@ export default function TabBar({
             {!isHomeTab(tab) && (
               <button
                 type="button"
-                className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+                className={menuItemCls}
                 onClick={() => { removeTab(projectId, taskId, pane, tab.id); close() }}
               >
                 Close tab

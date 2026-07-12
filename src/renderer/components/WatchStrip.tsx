@@ -110,12 +110,12 @@ export function WatchStrip(): React.ReactElement | null {
   const draggingActive = dragKey !== null && dropIndex !== null
 
   return (
-    <div className="border-t border-border bg-surface flex items-stretch gap-px overflow-x-auto h-8 shrink-0">
+    <div className="border-t-[0.5px] border-border bg-surface-2 flex items-stretch gap-px overflow-x-auto h-8 shrink-0">
       <div ref={listRef} className="flex items-stretch gap-px shrink-0 relative">
         {ordered.map((ref, index) => (
           <React.Fragment key={ref.key}>
             {draggingActive && dropIndex === index && (
-              <div className="w-0.5 shrink-0 self-stretch bg-accent-400 shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent-400)_55%,transparent)]" />
+              <div className="w-0.5 shrink-0 self-stretch bg-accent shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]" />
             )}
             <WatchTile
               {...ref}
@@ -128,7 +128,7 @@ export function WatchStrip(): React.ReactElement | null {
           </React.Fragment>
         ))}
         {draggingActive && dropIndex === ordered.length && (
-          <div className="w-0.5 shrink-0 self-stretch bg-accent-400 shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent-400)_55%,transparent)]" />
+          <div className="w-0.5 shrink-0 self-stretch bg-accent shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]" />
         )}
       </div>
       <button

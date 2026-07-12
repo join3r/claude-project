@@ -102,9 +102,10 @@ export function WatchTile({
         onMouseLeave={onLeave}
         className={[
           'px-3 flex items-center gap-2 min-w-[180px] max-w-[260px] bg-transparent border-0 cursor-pointer text-text shrink select-none',
+          'transition-colors duration-(--motion-fast)',
           isActive
-            ? 'bg-surface-2 shadow-[inset_0_2px_0_var(--color-accent-400)]'
-            : 'hover:bg-surface-2',
+            ? 'bg-sel'
+            : 'hover:bg-surface-3',
           isDragging ? 'opacity-[0.45]' : ''
         ].join(' ')}
         title={tab.title}
