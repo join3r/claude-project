@@ -17,7 +17,7 @@ function highlight(title: string, spans: [number, number][]): React.ReactNode[] 
   let cursor = 0
   spans.forEach(([s, e], i) => {
     if (s > cursor) out.push(title.slice(cursor, s))
-    out.push(<mark key={i} className="bg-transparent text-accent-400 font-semibold">{title.slice(s, e)}</mark>)
+    out.push(<mark key={i} className="bg-transparent text-accent font-semibold">{title.slice(s, e)}</mark>)
     cursor = e
   })
   if (cursor < title.length) out.push(title.slice(cursor))
@@ -45,14 +45,14 @@ export function PaletteList({ results, selectedIndex, scopeLabel, onSelect, onCo
     )
   }
   return (
-    <div className="max-h-[60vh] overflow-y-auto">
+    <div className="max-h-[60vh] overflow-y-auto p-2 flex flex-col gap-0.5">
       {SECTION_ORDER.map(kind => {
         const items = grouped.get(kind)
         if (!items || items.length === 0) return null
         const showScope = kind === 'task' || kind === 'note' || kind === 'tab'
         return (
           <div key={kind}>
-            <div className="px-3 pt-2 pb-1 text-[10px] tracking-wider text-text-subtle">
+            <div className="px-1.5 pt-2 pb-1 text-2xs font-bold tracking-[0.06em] text-text-muted">
               {SECTION_LABELS[kind]}{showScope ? ` · ${scopeLabel}` : ''}
             </div>
             {items.map(({ result, flatIndex }) => {
@@ -63,7 +63,7 @@ export function PaletteList({ results, selectedIndex, scopeLabel, onSelect, onCo
                   type="button"
                   onMouseEnter={() => onSelect(flatIndex)}
                   onClick={() => onCommit(flatIndex)}
-                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 ${selected ? 'bg-surface-2 text-text' : 'text-text bg-transparent'} border-0 cursor-pointer`}
+                  className={`w-full text-left rounded-md px-1.5 py-1.5 flex items-center justify-between gap-3 text-base ${selected ? 'bg-sel' : 'bg-transparent'} text-text border-0 cursor-pointer`}
                 >
                   <span className="truncate">
                     <span>▸ </span>

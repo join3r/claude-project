@@ -5,7 +5,8 @@ interface Props {
   isoTimestamps: string[]
 }
 
-const CELL_BG = ['bg-surface-2', 'bg-emerald-900', 'bg-emerald-700', 'bg-emerald-500', 'bg-emerald-300']
+// Intensity ramp as accent washes so it reads correctly in both themes
+const CELL_BG = ['bg-surface-2', 'bg-accent/25', 'bg-accent/45', 'bg-accent/70', 'bg-accent']
 const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -94,13 +95,13 @@ export function CommitHeatmap({ isoTimestamps }: Props): React.ReactElement {
         <div className="inline-block">
           <div className="grid grid-cols-[auto_1fr] gap-x-2">
             <div />
-            <div className="grid grid-flow-col auto-cols-[12px] gap-[2px] mb-1 text-[10px] text-text-subtle">
+            <div className="grid grid-flow-col auto-cols-[12px] gap-[2px] mb-1 text-2xs text-text-subtle">
               {Array.from({ length: 53 }, (_, i) => {
                 const lbl = monthHeader.find(l => l.col === i)
                 return <div key={i} className="h-3">{lbl?.text ?? ''}</div>
               })}
             </div>
-            <div className="grid grid-rows-7 grid-flow-row auto-rows-[12px] gap-[2px] text-[10px] text-text-subtle pr-1">
+            <div className="grid grid-rows-7 grid-flow-row auto-rows-[12px] gap-[2px] text-2xs text-text-subtle pr-1">
               {WEEKDAY_LABELS.map((d, i) => <div key={i} className="leading-3">{i % 2 === 0 ? d : ''}</div>)}
             </div>
             <div className="grid grid-flow-col auto-cols-[12px] grid-rows-7 gap-[2px]">
@@ -119,7 +120,7 @@ export function CommitHeatmap({ isoTimestamps }: Props): React.ReactElement {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1 mt-2 text-[10px] text-text-subtle">
+        <div className="flex items-center gap-1 mt-2 text-2xs text-text-subtle">
           <span>Less</span>
           {CELL_BG.map((cls, i) => <div key={i} className={`h-3 w-3 rounded-[2px] ${cls}`} />)}
           <span>More</span>

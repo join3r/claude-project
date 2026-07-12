@@ -57,7 +57,7 @@ export default function Pane({
 
   return (
     <div
-      className={`pane flex-1 flex flex-col overflow-hidden min-w-0${isEmptyDropTarget ? ' shadow-[inset_0_0_0_1px_var(--color-accent-400)]' : ''}`}
+      className={`pane flex-1 flex flex-col overflow-hidden min-w-0${isEmptyDropTarget ? ' shadow-[inset_0_0_0_1px_var(--color-accent)]' : ''}`}
       style={style}
       data-pane={pane}
       data-project-id={projectId}
@@ -79,7 +79,7 @@ export default function Pane({
       />
       <div className="flex-1 overflow-hidden relative">
         {tabs.length === 0 && (
-          <div className="flex-1 flex items-center justify-center h-full text-text-muted text-[13px]">Open a terminal or browser tab</div>
+          <div className="flex-1 flex items-center justify-center h-full text-text-muted text-base">Open a terminal or browser tab</div>
         )}
         {tabs.map((tab) => {
           if (tab.type === 'terminal') {

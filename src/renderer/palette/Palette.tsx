@@ -203,19 +203,19 @@ export function Palette(): React.ReactElement | null {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center pt-[15vh]"
+      className="fixed inset-0 z-(--z-modal) bg-black/40 flex items-start justify-center pt-[15vh]"
       onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false) }}
     >
-      <div className="w-[min(600px,90vw)] bg-surface text-text rounded-lg shadow-xl border border-border overflow-hidden">
-        <div className="px-3 py-2 flex items-center gap-2 border-b border-border">
-          <span aria-hidden>🔍</span>
+      <div className="w-[min(600px,90vw)] bg-surface text-text rounded-xl shadow-pop border border-border overflow-hidden">
+        <div className="m-2 mb-0 px-2.5 h-(--ctl-h-lg) flex items-center gap-2 rounded-md bg-field border border-border focus-within:border-border-focus focus-within:shadow-focus transition-shadow duration-(--motion-med)">
+          <span aria-hidden className="text-sm">🔍</span>
           <input
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="type to search…"
-            className="flex-1 bg-transparent border-0 outline-none text-text placeholder:text-text-subtle"
+            className="flex-1 bg-transparent border-0 outline-none text-md text-text placeholder:text-text-subtle"
           />
           <span className="text-xs text-text-subtle font-mono">↑↓ ↵ esc</span>
         </div>

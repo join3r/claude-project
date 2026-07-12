@@ -10,7 +10,7 @@ export interface TerminalSchemeOption {
 }
 
 export const TERMINAL_SCHEME_OPTIONS: TerminalSchemeOption[] = [
-  { value: 'auto', label: 'Auto (Gold)', description: 'Matches the app theme; warm gold palette.' },
+  { value: 'auto', label: 'Auto (Sienna)', description: 'Matches the app theme; warm sienna palette.' },
   { value: 'solarized-dark', label: 'Solarized Dark', description: 'Ethan Schoonover’s Solarized Dark.' },
   { value: 'solarized-light', label: 'Solarized Light', description: 'Ethan Schoonover’s Solarized Light.' },
   { value: 'one-dark', label: 'One Dark', description: 'Atom’s One Dark.' },
@@ -38,34 +38,34 @@ interface AnsiPalette {
   brightWhite: string
 }
 
-const goldDarkAnsi: AnsiPalette = {
-  black: '#1f1f24',
-  red: '#d97757',
-  green: '#87a96b',
-  yellow: '#d4a05a',
-  blue: '#7ba3c7',
-  magenta: '#b87a9e',
-  cyan: '#8aaba8',
-  white: '#d4d4d8',
-  brightBlack: '#52525b',
-  brightRed: '#e89478',
+const siennaDarkAnsi: AnsiPalette = {
+  black: '#2a2722',
+  red: '#d97b6c',
+  green: '#8aa671',
+  yellow: '#c79257',
+  blue: '#7ba0c0',
+  magenta: '#b57e9c',
+  cyan: '#8aaba4',
+  white: '#d8d2c6',
+  brightBlack: '#5c564d',
+  brightRed: '#e8987f',
   brightGreen: '#a8c592',
-  brightYellow: '#e8be7e',
+  brightYellow: '#ddb684',
   brightBlue: '#9bb9d4',
   brightMagenta: '#d09bba',
-  brightCyan: '#a3c5c2',
-  brightWhite: '#f4f4f5'
+  brightCyan: '#a3c5be',
+  brightWhite: '#f0ece4'
 }
 
-const goldLightAnsi: AnsiPalette = {
-  black: '#2a1f0d',
+const siennaLightAnsi: AnsiPalette = {
+  black: '#2a1a0c',
   red: '#a04030',
   green: '#5e7d3c',
-  yellow: '#8a6730',
+  yellow: '#9a6230',
   blue: '#3d6a8a',
   magenta: '#874a6e',
   cyan: '#487872',
-  white: '#6b7280',
+  white: '#7c766c',
   brightBlack: '#5b5447',
   brightRed: '#b54f2c',
   brightGreen: '#6e8d4c',
@@ -73,7 +73,7 @@ const goldLightAnsi: AnsiPalette = {
   brightBlue: '#4d7a9a',
   brightMagenta: '#97607e',
   brightCyan: '#588882',
-  brightWhite: '#1f1d18'
+  brightWhite: '#23211d'
 }
 
 interface FixedScheme {
@@ -238,7 +238,7 @@ function scrollbarColors(appearance: 'dark' | 'light') {
  * Build an xterm theme for a given scheme + light/dark mode.
  *
  * - `auto`: pulls bg/fg/cursor/selection from app CSS vars (so the terminal blends
- *   with app chrome) and applies a hand-picked gold-leaning ANSI palette.
+ *   with app chrome) and applies a hand-picked sienna-leaning ANSI palette.
  * - `classic`: returns only chrome colors (no ANSI) so xterm's defaults remain.
  * - Named schemes (Solarized, One Dark, etc.): canonical palette regardless of
  *   app theme — the user explicitly chose that look.
@@ -256,7 +256,7 @@ export function buildXtermTheme(theme: 'dark' | 'light', scheme: TerminalColorSc
   }
 
   if (scheme === 'auto') {
-    const ansi = theme === 'light' ? goldLightAnsi : goldDarkAnsi
+    const ansi = theme === 'light' ? siennaLightAnsi : siennaDarkAnsi
     return {
       background: readCssVar('--color-bg'),
       foreground: readCssVar('--color-text'),

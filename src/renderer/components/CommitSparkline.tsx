@@ -38,10 +38,10 @@ export function CommitSparkline({ isoTimestamps }: Props): React.ReactElement | 
   return (
     <section className="px-4 py-3">
       <h2 className="text-sm font-semibold uppercase tracking-wider text-text-subtle mb-2">Lifetime monthly</h2>
-      <div className="font-mono text-[14px] leading-[1.2] tracking-[0.05em] text-emerald-400 break-all">
+      <div className="font-mono text-md leading-[1.2] tracking-[0.05em] text-success break-all">
         {spark}
       </div>
-      <div className="mt-1 flex text-[10px] text-text-subtle font-mono">
+      <div className="mt-1 flex text-2xs text-text-subtle font-mono">
         {yearBands.map(band => (
           <div
             key={band.year}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import type { Project, AppConfig } from '../../shared/types'
 import { AI_TAB_TYPES, isHomeTask, isWorkspaceTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
@@ -122,23 +122,21 @@ export default function ActivityPanel({
         />
       )}
       <div
-        className="border-t border-border flex flex-col shrink-0 overflow-hidden"
+        className="border-t border-hair flex flex-col shrink-0 overflow-hidden"
         style={panelStyle}
         ref={panelRef}
       >
         <div
-          className="flex items-center px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-text-muted cursor-pointer shrink-0 hover:bg-surface-2"
+          className="flex items-center px-3 py-1.5 text-2xs font-bold uppercase tracking-[0.06em] text-text-muted cursor-pointer shrink-0 hover:text-text transition-colors duration-(--motion-fast)"
           onClick={toggleCollapse}
         >
-          {collapsed
-            ? <ChevronRight size={12} className="mr-1.5" />
-            : <ChevronDown size={12} className="mr-1.5" />}
-          Recent
+          <ChevronRight size={12} className={`mr-1.5 transition-transform duration-(--motion-fast) ${collapsed ? '' : 'rotate-90'}`} />
+          Recent{collapsed ? ` (${sortedByRecency.length})` : ''}
         </div>
         {!collapsed && (
           <div className="overflow-y-auto flex-1 min-h-0 pt-0.5 pb-1">
             {sortedByRecency.length === 0 ? (
-              <div className="p-3 text-text-muted text-[12px] italic text-center">No recent activity</div>
+              <div className="p-3 text-text-muted text-sm italic text-center">No recent activity</div>
             ) : (
               sortedByRecency.map(task => {
                 const project = projectByTaskId.get(task.id)
@@ -151,24 +149,18 @@ export default function ActivityPanel({
                   <div
                     key={task.id}
                     className={[
-                      'px-3 py-1.5 cursor-pointer text-[12px] text-text flex items-center gap-1.5 hover:bg-surface-2',
-                      'data-[selected=true]:relative',
-                      'data-[selected=true]:before:absolute data-[selected=true]:before:inset-y-0 data-[selected=true]:before:left-0',
-                      'data-[selected=true]:before:w-0.5 data-[selected=true]:before:bg-accent-400',
-                      'data-[selected=true]:bg-gradient-to-r data-[selected=true]:from-accent-600/30 data-[selected=true]:to-transparent',
-                      'data-[selected=true]:text-accent-50',
-                      '[.theme-light_&[data-selected=true]]:from-accent-200',
-                      '[.theme-light_&[data-selected=true]]:text-accent-700',
+                      'mx-1.5 px-1.5 py-1 rounded-md cursor-pointer text-sm text-text flex items-center gap-1.5',
+                      'transition-colors duration-(--motion-fast)',
+                      isSelected ? 'bg-sel' : 'hover:bg-surface-3',
                     ].join(' ')}
-                    data-selected={isSelected ? 'true' : undefined}
                     style={style}
                     onClick={() => switchToTask(project.id, task.id)}
                     onContextMenu={(e) => onTaskContextMenu(e, project.id, task.id)}
                   >
-                    <span className="text-text-muted text-[11px] shrink-0 max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">{project.name}</span>
+                    <span className="text-text-muted text-xs shrink-0 max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">{project.name}</span>
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{task.name}</span>
                     {isWorkspaceTask(task) && (
-                      <span className="text-[9px] px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>
+                      <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>
                     )}
                     {status && <StatusDot status={status} />}
                   </div>

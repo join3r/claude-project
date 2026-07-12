@@ -51,7 +51,7 @@ export default function TerminalSearchBar({ searchAddon, terminal, visible, onCl
           searchAddon.clearDecorations()
           onClose()
         }}
-        className="bg-surface-2 text-text border border-border rounded-md px-2 py-0.5 text-[12px] outline-none w-[200px] focus:border-border-focus"
+        className="bg-field text-text border border-border rounded-md px-2 h-(--ctl-h-sm) text-sm outline-none w-[200px] focus:border-border-focus focus:shadow-focus placeholder:text-text-subtle"
       />
     </div>
   )

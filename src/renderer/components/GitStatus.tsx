@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import type { GitStatusResult, GitStatusEntry } from '../../shared/types'
+import { LinkBtn } from './ui'
 
 interface Props {
   gitStatus: GitStatusResult | null
@@ -8,10 +9,10 @@ interface Props {
   onFileClick: (filePath: string) => void
 }
 
-const BADGE_COLORS = {
-  staged: { background: '#2ea04380', color: '#4ec9b0' },
-  unstaged: { background: '#e5c07b40', color: '#e5c07b' },
-  untracked: { background: '#88888840', color: '#888888' },
+const BADGE_CLASSES = {
+  staged: 'bg-success/20 text-success',
+  unstaged: 'bg-warn/20 text-warn',
+  untracked: 'bg-surface-3 text-text-muted',
 } as const
 
 type SectionKey = 'staged' | 'unstaged' | 'untracked'
@@ -186,47 +187,39 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
   }, [handleStage, handleUnstage])
 
   return (
-    <div className="overflow-y-auto text-[13px]">
-      <div className="p-2 border-b border-border flex flex-col gap-1.5">
-        <div className="flex gap-1">
-          <button className="bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default" onClick={handlePull} disabled={busy} title="Git Pull">
-            {busy ? '...' : 'Pull'}
-          </button>
-          <button className="bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default" onClick={handlePush} disabled={busy} title="Git Push">
-            Push
-          </button>
+    <div className="overflow-y-auto text-base">
+      <div className="p-2 border-b border-hair flex flex-col gap-1.5">
+        <div className="flex items-center gap-3 px-0.5">
+          <LinkBtn onClick={handlePull} disabled={busy} title="Git Pull">{busy ? '…' : 'Pull'}</LinkBtn>
+          <LinkBtn onClick={handlePush} disabled={busy} title="Git Push">Push</LinkBtn>
           {hasUnstagedOrUntracked && (
-            <button
-              className="ml-auto bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default"
-              onClick={handleStageAll}
-              disabled={busy}
-              title="Stage all unstaged and untracked files"
-            >
-              Stage All
-            </button>
+            <span className="ml-auto">
+              <LinkBtn onClick={handleStageAll} disabled={busy} title="Stage all unstaged and untracked files">
+                Stage all
+              </LinkBtn>
+            </span>
           )}
         </div>
-        <div className="flex gap-1">
+        <div className="flex items-center gap-2">
           <input
-            className="flex-1 min-w-0 bg-surface-2 text-text border border-border rounded-sm px-1.5 py-0.5 text-[11px] outline-none focus:border-border-focus placeholder:text-text-muted"
+            className="flex-1 min-w-0 h-(--ctl-h-sm) bg-field text-text border border-border rounded-md px-2 text-sm outline-none focus:border-border-focus placeholder:text-text-subtle"
             type="text"
-            placeholder="Commit message..."
+            placeholder="Commit message…"
             value={commitMsg}
             onChange={(e) => setCommitMsg(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleCommit() }}
             disabled={busy}
           />
-          <button
-            className="bg-surface-2 text-text border border-border rounded-sm px-2.5 py-0.5 text-[11px] cursor-pointer leading-snug whitespace-nowrap hover:enabled:bg-surface-3 disabled:opacity-40 disabled:cursor-default"
+          <LinkBtn
             onClick={handleCommit}
             disabled={busy || !commitMsg.trim() || !hasStagedFiles}
             title="Commit staged files"
           >
             Commit
-          </button>
+          </LinkBtn>
         </div>
         {feedback && (
-          <div className={`text-[11px] px-1 py-0.5 rounded-sm overflow-hidden text-ellipsis whitespace-nowrap ${feedback.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div className={`text-xs px-1 py-0.5 rounded-sm overflow-hidden text-ellipsis whitespace-nowrap ${feedback.type === 'success' ? 'text-success' : 'text-danger'}`}>
             {feedback.text}
           </div>
         )}
@@ -240,14 +233,14 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
           const collapsed = collapsedSections.has(key)
           return (
             <div key={key} className="mb-1">
-              <div className="group flex items-center px-2 py-1 cursor-pointer font-semibold text-[11px] uppercase text-text-muted select-none hover:bg-surface-2" onClick={() => toggleSection(key)}>
+              <div className="group flex items-center px-2 py-1 cursor-pointer text-base font-normal text-text-muted hover:text-text select-none transition-colors duration-(--motion-fast)" onClick={() => toggleSection(key)}>
                 <span className="w-4 flex items-center justify-center text-text-muted shrink-0">
-                  {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                  <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${collapsed ? '' : 'rotate-90'}`} />
                 </span>
                 {label}
-                <span className="ml-1.5 font-normal opacity-70">{entries.length}</span>
+                <span className="ml-1.5 opacity-70">({entries.length})</span>
                 <button
-                  className="ml-auto bg-transparent border border-border rounded-sm text-text-muted cursor-pointer text-[13px] font-semibold leading-none w-5 h-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:enabled:bg-surface-3 hover:enabled:text-text disabled:opacity-0 disabled:cursor-default"
+                  className="ml-auto bg-transparent border-0 rounded-md text-text-muted cursor-pointer text-base font-semibold leading-none size-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast) hover:enabled:bg-sel hover:enabled:text-text disabled:opacity-0 disabled:cursor-default"
                   title={key === 'staged' ? 'Unstage All' : 'Stage All'}
                   disabled={busy}
                   onClick={(e) => { e.stopPropagation(); handleSectionAction(key) }}
@@ -285,7 +278,7 @@ interface FileRowProps {
 }
 
 function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: FileRowProps) {
-  const colors = BADGE_COLORS[sectionKey]
+  const badgeCls = BADGE_CLASSES[sectionKey]
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -311,19 +304,18 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: 
 
   return (
     <div
-      className="group flex items-center px-2 pl-6 py-0.5 cursor-pointer gap-2 select-none hover:bg-surface-2"
+      className="group flex items-center px-2 pl-6 py-0.5 cursor-pointer gap-2 select-none hover:bg-surface-3 transition-colors duration-(--motion-fast)"
       onClick={() => onFileClick(entry.relativePath)}
     >
       <span
-        className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-sm text-[11px] font-semibold shrink-0"
-        style={{ background: colors.background, color: colors.color }}
+        className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded-sm text-xs font-semibold shrink-0 ${badgeCls}`}
       >
         {entry.status}
       </span>
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{entry.relativePath}</span>
       {onDiscard && (
         <button
-          className={`bg-transparent border border-border rounded-sm text-text-muted cursor-pointer text-[11px] leading-none w-5 h-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:enabled:bg-red-400/25 hover:enabled:text-red-400 hover:enabled:border-red-400 disabled:opacity-0 disabled:cursor-default${confirmDiscard ? ' !opacity-100 bg-red-400/25 text-red-400 border-red-400 font-bold' : ''}`}
+          className={`bg-transparent border-0 rounded-md text-text-muted cursor-pointer text-xs leading-none size-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast) hover:enabled:bg-danger/15 hover:enabled:text-danger disabled:opacity-0 disabled:cursor-default${confirmDiscard ? ' !opacity-100 bg-danger/15 text-danger font-bold' : ''}`}
           title={confirmDiscard ? 'Click again to confirm discard' : 'Discard changes'}
           disabled={busy}
           onClick={handleDiscardClick}
@@ -332,7 +324,7 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: 
         </button>
       )}
       <button
-        className="ml-auto bg-transparent border border-border rounded-sm text-text-muted cursor-pointer text-[13px] font-semibold leading-none w-5 h-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:enabled:bg-surface-3 hover:enabled:text-text disabled:opacity-0 disabled:cursor-default"
+        className="ml-auto bg-transparent border-0 rounded-md text-text-muted cursor-pointer text-base font-semibold leading-none size-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast) hover:enabled:bg-sel hover:enabled:text-text disabled:opacity-0 disabled:cursor-default"
         title={sectionKey === 'staged' ? 'Unstage' : 'Stage'}
         disabled={busy}
         onClick={(e) => { e.stopPropagation(); onAction(sectionKey, entry.relativePath) }}

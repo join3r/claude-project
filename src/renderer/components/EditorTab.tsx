@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { buildMonacoEditorOptions, getLanguageFromPath } from './monacoOptions'
+import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
 
 interface Props {
@@ -174,7 +175,8 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
         <Editor
           defaultValue={content}
           language={getLanguageFromPath(filePath)}
-          theme={effectiveTheme === 'dark' ? 'vs-dark' : 'vs'}
+          theme={monacoThemeFor(effectiveTheme)}
+          beforeMount={defineMonacoThemes}
           options={buildMonacoEditorOptions(monacoConfig)}
           onMount={handleEditorDidMount}
           onChange={handleChange}
@@ -185,14 +187,14 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       )}
       {isMarkdown && (
         <button
-          className="absolute top-1.5 right-7 z-10 bg-surface border border-border text-text-muted cursor-pointer px-2 py-0.5 rounded-md text-[12px] leading-snug hover:bg-surface-2 hover:text-text hover:border-border-focus"
+          className="absolute top-1.5 right-7 z-(--z-sticky) bg-surface border border-border text-accent cursor-pointer px-2 py-0.5 rounded-md text-sm leading-snug hover:underline"
           onClick={handleToggleView}
           title={viewMode === 'source' ? 'Show preview (⌘⇧V)' : 'Show source (⌘⇧V)'}
         >
           {viewMode === 'source' ? 'Preview' : 'Source'}
         </button>
       )}
-      {dirty && <div style={{ position: 'absolute', top: 4, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--color-accent-400)', zIndex: 5 }} />}
+      {dirty && <div style={{ position: 'absolute', top: 4, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--color-accent)', zIndex: 5 }} />}
     </div>
   )
 }

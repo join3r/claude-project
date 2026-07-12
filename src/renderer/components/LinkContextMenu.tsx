@@ -36,7 +36,7 @@ export default function LinkContextMenu({ menu, onClose, onOpenInApp }: Props): 
   return (
     <>
       <div
-        className="fixed inset-0 z-30"
+        className="fixed inset-0 z-(--z-menu)"
         onClick={onClose}
         onContextMenu={(e) => {
           e.preventDefault()
@@ -45,26 +45,26 @@ export default function LinkContextMenu({ menu, onClose, onOpenInApp }: Props): 
       />
       <div
         style={{ left: menu.x, top: menu.y }}
-        className="fixed z-40 min-w-[180px] bg-surface border border-border rounded shadow-lg text-sm py-1"
+        className="fixed z-(--z-menu) min-w-[180px] bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <button
           type="button"
-          className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+          className="block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel"
           onClick={handleOpenInApp}
         >
           Open in Browser Tab
         </button>
         <button
           type="button"
-          className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+          className="block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel"
           onClick={handleCopyLink}
         >
           Copy Link
         </button>
         <button
           type="button"
-          className="block w-full text-left px-3 py-1 hover:bg-surface-2 bg-transparent border-0 cursor-pointer text-text"
+          className="block w-full rounded-md px-2.5 py-1 bg-transparent border-0 text-text text-sm text-left cursor-pointer hover:bg-sel"
           onClick={handleOpenExternal}
         >
           Open in System Browser

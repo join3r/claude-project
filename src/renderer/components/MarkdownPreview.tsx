@@ -33,8 +33,8 @@ export default function MarkdownPreview({ content, variant = 'absolute' }: Props
   }, [content])
 
   const className = variant === 'absolute'
-    ? 'note-preview absolute inset-0 overflow-y-auto px-8 py-6 font-sans text-[14px] leading-[1.6] text-text bg-bg'
-    : 'note-preview font-sans text-[14px] leading-[1.6] text-text'
+    ? 'note-preview absolute inset-0 overflow-y-auto px-8 py-6 font-sans text-md leading-[1.6] text-text bg-bg'
+    : 'note-preview font-sans text-md leading-[1.6] text-text'
 
   // Content is sanitized via DOMPurify above before being inserted as innerHTML
   return (

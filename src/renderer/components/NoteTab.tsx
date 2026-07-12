@@ -32,14 +32,14 @@ export default function NoteTab({ noteId, projectId, taskId, visible, effectiveT
   }, [projectId, taskId, noteId, updateNoteContent, markTaskInteracted])
 
   if (!visible) return <div style={{ display: 'none' }} />
-  if (!note) return <div className="flex-1 flex items-center justify-center h-full text-text-muted text-[13px]">Note not found.</div>
+  if (!note) return <div className="flex-1 flex items-center justify-center h-full text-text-muted text-base">Note not found.</div>
 
   return (
     <div className="absolute inset-0 flex flex-col">
-      <div className="flex items-center px-2 py-1 border-b border-border bg-surface-2 shrink-0 gap-2">
-        <span className="flex-1 text-[13px] text-text-muted overflow-hidden text-ellipsis whitespace-nowrap">{note.name}</span>
+      <div className="flex items-center px-2 py-1 border-b border-hair bg-surface-2 shrink-0 gap-2">
+        <span className="flex-1 text-base text-text-muted overflow-hidden text-ellipsis whitespace-nowrap">{note.name}</span>
         <button
-          className="bg-surface border border-border text-text-muted cursor-pointer px-2 py-0.5 rounded-md text-[12px] leading-snug shrink-0 hover:bg-surface-2 hover:text-text hover:border-border-focus"
+          className="bg-transparent border-0 p-0 text-sm text-accent cursor-pointer shrink-0 hover:underline"
           onClick={handleToggleView}
           title={viewMode === 'source' ? 'Show preview' : 'Show source'}
         >

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
-import { ChevronDown, ChevronRight, Folder, FileText } from 'lucide-react'
+import { ChevronRight, Folder, FileText } from 'lucide-react'
 
 interface Props {
   projectDir: string
@@ -8,26 +8,26 @@ interface Props {
   onFileClick: (filePath: string) => void
 }
 
-type StatusColor = '#f44747' | '#e5c07b' | '#4ec9b0' | undefined
+type StatusColor = 'var(--color-danger)' | 'var(--color-warn)' | 'var(--color-success)' | undefined
 
 function statusToColor(status: GitFileStatus): StatusColor {
   switch (status) {
     case 'D':
-      return '#f44747'
+      return 'var(--color-danger)'
     case 'M':
-      return '#e5c07b'
+      return 'var(--color-warn)'
     case 'A':
     case '?':
-      return '#4ec9b0'
+      return 'var(--color-success)'
     default:
       return undefined
   }
 }
 
 function colorSeverity(color: StatusColor): number {
-  if (color === '#f44747') return 3
-  if (color === '#e5c07b') return 2
-  if (color === '#4ec9b0') return 1
+  if (color === 'var(--color-danger)') return 3
+  if (color === 'var(--color-warn)') return 2
+  if (color === 'var(--color-success)') return 1
   return 0
 }
 
@@ -113,12 +113,12 @@ function TreeNode({
   return (
     <>
       <div
-        className="flex items-center px-2 py-0.5 cursor-pointer whitespace-nowrap select-none hover:bg-surface-2"
+        className="flex items-center px-2 py-0.5 cursor-pointer whitespace-nowrap select-none hover:bg-surface-3 transition-colors duration-(--motion-fast)"
         style={{ paddingLeft: 8 + level * 16, color: color || 'var(--color-text)' }}
         onClick={handleClick}
       >
         <span className="w-4 flex items-center justify-center shrink-0 text-text-muted">
-          {isDirectory ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
+          {isDirectory ? <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isExpanded ? 'rotate-90' : ''}`} /> : null}
         </span>
         {isDirectory
           ? <Folder size={12} className="mr-1.5 text-text-muted shrink-0" />
@@ -207,7 +207,7 @@ export default function FileTree({ projectDir, gitStatus, onFileClick }: Props) 
   const rootEntries = childrenCache['']
 
   return (
-    <div className="overflow-y-auto text-[13px]">
+    <div className="overflow-y-auto text-base">
       {!rootEntries && loadingDirs.has('') && (
         <div className="text-text-muted px-2 py-0.5 italic">Loading...</div>
       )}

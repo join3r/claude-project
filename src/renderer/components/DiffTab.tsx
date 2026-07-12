@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { buildMonacoDiffOptions, getLanguageFromPath } from './monacoOptions'
+import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 
 interface Props {
   tabId: string
@@ -112,8 +113,9 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
       if (cancelled || !containerRef.current || editorRef.current) return
 
       monacoRef.current = monaco
+      defineMonacoThemes(monaco)
       editorRef.current = monaco.editor.createDiffEditor(containerRef.current, buildMonacoDiffOptions(monacoConfig))
-      monaco.editor.setTheme(effectiveTheme === 'dark' ? 'vs-dark' : 'vs')
+      monaco.editor.setTheme(monacoThemeFor(effectiveTheme))
       setEditorReady(true)
     }).catch((error) => {
       if (!cancelled) {
@@ -164,7 +166,7 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
   useEffect(() => {
     const monaco = monacoRef.current
     if (!editorReady || !monaco) return
-    monaco.editor.setTheme(effectiveTheme === 'dark' ? 'vs-dark' : 'vs')
+    monaco.editor.setTheme(monacoThemeFor(effectiveTheme))
   }, [editorReady, effectiveTheme])
 
   useEffect(() => {

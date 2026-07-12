@@ -30,7 +30,7 @@ export function PaletteFooter({ activePrefix, allProjects, onClickPrefix }: Prop
   const onlyAllProjects = activePrefix === null && allProjects
   if (activePrefix !== null) {
     return (
-      <div className="px-3 py-2 text-xs text-text-subtle border-t border-border font-mono">
+      <div className="px-3 py-2 text-xs text-text-subtle border-t border-hair font-mono">
         <span className="font-semibold text-text">{activePrefix}</span>{' '}
         {DESCRIPTIONS[activePrefix]}
       </div>
@@ -38,14 +38,14 @@ export function PaletteFooter({ activePrefix, allProjects, onClickPrefix }: Prop
   }
   if (onlyAllProjects) {
     return (
-      <div className="px-3 py-2 text-xs text-text-subtle border-t border-border font-mono">
+      <div className="px-3 py-2 text-xs text-text-subtle border-t border-hair font-mono">
         <span className="font-semibold text-text">*</span> {DESCRIPTIONS['*']}
       </div>
     )
   }
   const items: FooterPrefix[] = ['>', '@', '#', ':', '*']
   return (
-    <div className="px-3 py-2 text-xs text-text-subtle border-t border-border font-mono flex flex-wrap gap-x-4 gap-y-1">
+    <div className="px-3 py-2 text-xs text-text-subtle border-t border-hair font-mono flex flex-wrap gap-x-4 gap-y-1">
       {items.map(p => (
         <button
           key={p}

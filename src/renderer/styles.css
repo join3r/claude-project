@@ -162,7 +162,7 @@
   .note-preview strong { font-weight: 600; }
   .note-preview em { font-style: italic; }
 
-  .note-preview a { color: var(--color-accent-400); text-decoration: none; }
+  .note-preview a { color: var(--color-accent); text-decoration: none; }
   .note-preview a:hover { text-decoration: underline; }
 
   .note-preview ul, .note-preview ol { margin-bottom: 12px; padding-left: 24px; }
@@ -171,7 +171,7 @@
 
   .note-preview blockquote {
     margin: 0 0 12px 0; padding: 8px 16px;
-    border-left: 3px solid var(--color-accent-400);
+    border-left: 3px solid var(--color-accent);
     color: var(--color-text-muted);
     background: var(--color-surface-2);
     border-radius: 0 4px 4px 0;
