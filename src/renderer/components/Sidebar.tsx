@@ -512,6 +512,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [pinDragIndex, setPinDragIndex] = useState<number | null>(null)
   const [pinDropIndex, setPinDropIndex] = useState<number | null>(null)
   const pinDropIndexRef = useRef<number | null>(null)
+  const [expandedPinnedProjectIds, setExpandedPinnedProjectIds] = useState<string[]>([])
+  const togglePinnedProjectExpansion = useCallback((projectId: string) => {
+    setExpandedPinnedProjectIds(prev =>
+      prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId]
+    )
+  }, [])
 
   const handlePinMouseDown = useCallback((e: React.MouseEvent, key: string, index: number) => {
     if (e.button !== 0) return
@@ -794,6 +800,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   && pin.project.tasks.some(t => t.id === selectedTaskId && isHomeTask(t))
                 : selectedTaskId === pin.task!.id
               const isDraggingPin = pinDragIndex === index
+              const isPinExpanded = isProjectPin && expandedPinnedProjectIds.includes(pin.project.id)
+              const pinnedProjectTasks = isProjectPin ? pin.project.tasks.filter(t => !isHomeTask(t)) : []
               return (
                 <React.Fragment key={pin.key}>
                   {pinDropIndex === index && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
@@ -818,6 +826,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                       isProjectPin ? undefined : pin.task!.id
                     )}
                   >
+                    {isProjectPin && (
+                      <button
+                        className="text-text-subtle hover:text-text bg-transparent border-0 cursor-pointer p-0 flex items-center shrink-0"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); togglePinnedProjectExpansion(pin.project.id) }}
+                      >
+                        <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isPinExpanded ? 'rotate-90' : ''}`} />
+                      </button>
+                    )}
                     <ProjectIconSlot project={pin.project} theme={effectiveTheme} metadata={iconMetadata} />
                     {isProjectPin ? (
                       <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{pin.project.name}</span>
@@ -851,6 +868,27 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                       </RowActions>
                     </span>
                   </div>
+                  {isPinExpanded && pinnedProjectTasks.map(task => {
+                    const isTaskSelected = selectedTaskId === task.id
+                    return (
+                      <div
+                        key={task.id}
+                        className={[
+                          'group flex items-center gap-2 mx-1.5 px-2.5 pl-[40px] h-6 rounded-md text-sm text-text cursor-pointer',
+                          'transition-colors duration-(--motion-fast)',
+                          isTaskSelected ? 'bg-sel' : 'hover:bg-surface-3',
+                        ].join(' ')}
+                        onClick={() => handleSelectTask(pin.project.id, task)}
+                        onContextMenu={(e) => handleContextMenu(e, 'task', pin.project.id, task.id)}
+                      >
+                        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
+                        {isWorkspaceTask(task) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
+                        <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+                          <TaskStatusDot task={task} allStatuses={allStatuses} />
+                        </span>
+                      </div>
+                    )
+                  })}
                 </React.Fragment>
               )
             })}
