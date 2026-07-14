@@ -13,6 +13,7 @@ import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import { getReorderInsertIndex, getTaskDropIndex } from './sidebarDrag'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
+import { useResizeHandle } from '../hooks/useResizeHandle'
 import { ChevronRight, Plus, Search, Settings as SettingsIcon, Plug, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
 import { RowActions, RowAction } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
@@ -134,8 +135,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     config, updateConfig,
     toggleTagFilter,
     expandedProjectIds, toggleProjectExpansion,
-    effectiveTheme
+    effectiveTheme,
+    sidebarWidth, setSidebarWidth
   } = useApp()
+  const resizeHandle = useResizeHandle({ width: sidebarWidth, onWidthChange: setSidebarWidth, edge: 'right' })
   const allStatuses = useAllTabStatuses()
   const tabStatusStore = useTabStatusStore()
 
@@ -748,7 +751,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }
 
   return (
-    <div className="sidebar flex flex-col w-60 min-w-[200px] bg-surface border-r-[0.5px] border-border select-none [--recency-rgb:199,146,87] [.theme-light_&]:[--recency-rgb:154,98,48]">
+    <div
+      className="sidebar relative flex flex-col bg-surface border-r-[0.5px] border-border select-none [--recency-rgb:199,146,87] [.theme-light_&]:[--recency-rgb:154,98,48]"
+      style={{ width: sidebarWidth, minWidth: sidebarWidth, maxWidth: sidebarWidth }}
+    >
       <ProjectSwitcher
         projects={projects}
         selectProjectHome={selectProjectHome}
@@ -1112,6 +1118,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           />
         )
       })()}
+
+      <div
+        className="absolute right-0 top-0 bottom-0 w-[3px] cursor-col-resize hover:bg-accent active:bg-accent transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
+        onMouseDown={resizeHandle.onMouseDown}
+      />
     </div>
   )
 }

@@ -213,7 +213,8 @@ export class Storage {
         taskStates,
         fileBrowserOpen: typeof value.fileBrowserOpen === 'boolean' ? value.fileBrowserOpen : false,
         fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,
-        fileBrowserActiveTab
+        fileBrowserActiveTab,
+        sidebarWidth: isFiniteNumber(value.sidebarWidth) ? value.sidebarWidth : 240
       },
       projects,
       tagIds

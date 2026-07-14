@@ -1304,6 +1304,10 @@ export function useAppState() {
     updateWindowViewState(prev => ({ ...prev, fileBrowserWidth: Math.min(400, Math.max(150, width)) }))
   }, [updateWindowViewState])
 
+  const setSidebarWidth = useCallback((width: number) => {
+    updateWindowViewState(prev => ({ ...prev, sidebarWidth: Math.min(420, Math.max(180, width)) }))
+  }, [updateWindowViewState])
+
   const setFileBrowserOpen = useCallback((open: boolean) => {
     updateWindowViewState(prev => writeSidebarToCurrentTask(prev, { fileBrowserOpen: open }))
   }, [updateWindowViewState, writeSidebarToCurrentTask])
@@ -1592,6 +1596,8 @@ export function useAppState() {
     toggleFileBrowser,
     setFileBrowserOpen,
     setFileBrowserWidth,
+    sidebarWidth: windowViewState.sidebarWidth,
+    setSidebarWidth,
     setFileBrowserActiveTab,
     openOrFocusDiffTab,
     openOrFocusEditorTab,

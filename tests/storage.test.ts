@@ -261,7 +261,8 @@ describe('Storage', () => {
           expandedProjectIds: [],
           fileBrowserOpen: false,
           fileBrowserWidth: 250,
-          fileBrowserActiveTab: 'files'
+          fileBrowserActiveTab: 'files',
+          sidebarWidth: 240
         }
       }]
     })

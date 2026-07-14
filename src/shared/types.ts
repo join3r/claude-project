@@ -375,6 +375,7 @@ export interface WindowViewState {
   fileBrowserOpen: boolean
   fileBrowserWidth: number
   fileBrowserActiveTab: FileBrowserTab
+  sidebarWidth: number
 }
 
 export interface WindowGeometry {
@@ -459,7 +460,8 @@ export function createDefaultWindowViewState(): WindowViewState {
     taskStates: {},
     fileBrowserOpen: false,
     fileBrowserWidth: 250,
-    fileBrowserActiveTab: 'files'
+    fileBrowserActiveTab: 'files',
+    sidebarWidth: 240
   }
 }
 
@@ -486,7 +488,8 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     ),
     fileBrowserOpen: state.fileBrowserOpen,
     fileBrowserWidth: state.fileBrowserWidth,
-    fileBrowserActiveTab: state.fileBrowserActiveTab
+    fileBrowserActiveTab: state.fileBrowserActiveTab,
+    sidebarWidth: state.sidebarWidth
   }
 }
 
@@ -609,7 +612,8 @@ export function reconcileWindowViewState(
     taskStates,
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
-    fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files'
+    fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
+    sidebarWidth: state.sidebarWidth ?? 240
   }
 }
 
@@ -652,6 +656,7 @@ export function buildWindowViewState(
     taskStates,
     fileBrowserOpen: seed?.fileBrowserOpen ?? false,
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,
-    fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files'
+    fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
+    sidebarWidth: seed?.sidebarWidth ?? 240
   }, projects, tagIds)
 }
