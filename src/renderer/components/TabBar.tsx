@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Pin, PinOff } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
 import { isHomeTab, isRenamableTab, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
-import { isPinnable } from './terminalStatus'
 
 interface Props {
   tabs: Tab[]
@@ -120,7 +118,7 @@ export default function TabBar({
   onTabDropTargetChange,
   onTabDragComplete
 }: Props): React.ReactElement {
-  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, setTabPinned, renameTab } = useApp()
+  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, renameTab } = useApp()
   const suppressClickRef = useRef(false)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
@@ -298,19 +296,6 @@ export default function TabBar({
               ) : (
                 <span className="overflow-hidden text-ellipsis">{tab.title}</span>
               )}
-              {isPinnable(tab) && (
-                <button
-                  className={`bg-transparent border-0 cursor-pointer text-sm px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 transition-opacity duration-(--motion-fast) ${tab.pinned ? 'opacity-100 text-accent' : 'opacity-0 group-hover:opacity-100 text-text-muted hover:text-text'}`}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setTabPinned(projectId, taskId, pane, tab.id, !tab.pinned)
-                  }}
-                  title={tab.pinned ? 'Unpin from watch strip' : 'Pin to watch strip'}
-                >
-                  {tab.pinned ? <PinOff size={12} /> : <Pin size={12} />}
-                </button>
-              )}
               {!isHomeTab(tab) && (
                 <button
                   className="bg-transparent border-0 text-text-muted cursor-pointer text-md px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)"
@@ -376,18 +361,6 @@ export default function TabBar({
                 }}
               >
                 Rename tab
-              </button>
-            )}
-            {isPinnable(tab) && (
-              <button
-                type="button"
-                className={menuItemCls}
-                onClick={() => {
-                  setTabPinned(projectId, taskId, pane, tab.id, !tab.pinned)
-                  close()
-                }}
-              >
-                {tab.pinned ? 'Unpin from watch strip' : 'Pin to watch strip'}
               </button>
             )}
             {!isHomeTab(tab) && (

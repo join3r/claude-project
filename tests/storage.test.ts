@@ -260,9 +260,7 @@ describe('Storage', () => {
           expandedProjectIds: [],
           fileBrowserOpen: false,
           fileBrowserWidth: 250,
-          fileBrowserActiveTab: 'files',
-          watchStripHidden: false,
-          pinOrder: []
+          fileBrowserActiveTab: 'files'
         }
       }]
     })

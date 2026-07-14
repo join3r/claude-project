@@ -1,14 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  terminalStatusFromOutput,
-  PINNABLE_TAB_TYPES,
-  isPinnable
-} from '../src/renderer/components/terminalStatus'
-import type { Tab } from '../src/shared/types'
-
-function tab(type: Tab['type'], extra: Partial<Tab> = {}): Tab {
-  return { id: 't', type, title: 'x', ...extra }
-}
+import { terminalStatusFromOutput } from '../src/renderer/components/terminalStatus'
 
 describe('terminalStatusFromOutput', () => {
   it('returns attention on error keyword', () => {
@@ -35,21 +26,3 @@ describe('terminalStatusFromOutput', () => {
   })
 })
 
-describe('PINNABLE_TAB_TYPES / isPinnable', () => {
-  it('includes terminal and AI tab types', () => {
-    expect(PINNABLE_TAB_TYPES.has('terminal')).toBe(true)
-    expect(PINNABLE_TAB_TYPES.has('claude')).toBe(true)
-    expect(PINNABLE_TAB_TYPES.has('codex')).toBe(true)
-    expect(PINNABLE_TAB_TYPES.has('pi')).toBe(true)
-  })
-  it('excludes non-PTY tab types', () => {
-    expect(PINNABLE_TAB_TYPES.has('browser')).toBe(false)
-    expect(PINNABLE_TAB_TYPES.has('editor')).toBe(false)
-    expect(PINNABLE_TAB_TYPES.has('diff')).toBe(false)
-    expect(PINNABLE_TAB_TYPES.has('note')).toBe(false)
-  })
-  it('isPinnable reads from a Tab', () => {
-    expect(isPinnable(tab('terminal'))).toBe(true)
-    expect(isPinnable(tab('browser'))).toBe(false)
-  })
-})

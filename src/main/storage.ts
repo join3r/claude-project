@@ -207,11 +207,7 @@ export class Storage {
         taskStates,
         fileBrowserOpen: typeof value.fileBrowserOpen === 'boolean' ? value.fileBrowserOpen : false,
         fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,
-        fileBrowserActiveTab,
-        watchStripHidden: typeof value.watchStripHidden === 'boolean' ? value.watchStripHidden : false,
-        pinOrder: Array.isArray(value.pinOrder)
-          ? value.pinOrder.filter((k): k is string => typeof k === 'string')
-          : []
+        fileBrowserActiveTab
       },
       projects,
       tagIds

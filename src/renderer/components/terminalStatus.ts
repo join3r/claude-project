@@ -1,4 +1,3 @@
-import type { Tab, TabType } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 
 const ATTENTION_RE = /\b(error|failed|fail)\b/i
@@ -12,15 +11,4 @@ export function terminalStatusFromOutput(
   if (READY_RE.test(line)) return null
   if (prev === 'attention') return 'attention'
   return 'working'
-}
-
-export const PINNABLE_TAB_TYPES: ReadonlySet<TabType> = new Set<TabType>([
-  'terminal',
-  'claude',
-  'codex',
-  'pi'
-])
-
-export function isPinnable(tab: Tab): boolean {
-  return PINNABLE_TAB_TYPES.has(tab.type)
 }
