@@ -246,6 +246,18 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       cursorBlink: true,
     })
 
+    term.attachCustomKeyEventHandler((event) => {
+      // Shift+Enter inserts a newline (ESC+CR, same as Option+Enter) instead of submitting
+      if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const currentEntry = terminals.get(tabId)
+        if (!currentEntry || currentEntry.restoring) return false
+        markTaskInteracted(projectId, taskId)
+        window.api.ptyWrite(tabId, '\x1b\r')
+        return false
+      }
+      return true
+    })
+
     const fitAddon = new FitAddon()
     const serializeAddon = new SerializeAddon()
     const searchAddon = new SearchAddon()
