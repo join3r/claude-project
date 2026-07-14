@@ -77,7 +77,8 @@ describe('state hydration', () => {
     const loaded: ProjectsData = {
       projects: [{ id: 'existing', name: 'Existing', directory: '/tmp', tasks: [] }],
       tags: [],
-      projectOrder: ['existing']
+      projectOrder: ['existing'],
+      pinnedItems: []
     }
 
     const hydrated = applyQueuedStateUpdates(loaded, [
@@ -149,7 +150,8 @@ describe('state hydration', () => {
         }
       ],
       tags: [],
-      projectOrder: ['local-project']
+      projectOrder: ['local-project'],
+      pinnedItems: []
     }
 
     const next = persistSelectionState(
@@ -193,7 +195,8 @@ describe('state hydration', () => {
         }
       ],
       tags: [],
-      projectOrder: ['local-project']
+      projectOrder: ['local-project'],
+      pinnedItems: []
     }
 
     const next = persistSelectionState(

@@ -1,7 +1,20 @@
 // src/renderer/palette/sources/commands.ts
 import { commandRegistry } from '../CommandRegistry'
 import { paletteEvents } from '../paletteEvents'
-import { AI_TAB_TYPES, AI_TAB_META, isShellCommandProject, type AiTabType } from '../../../shared/types'
+import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
+
+function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
+  const { selectedProjectId, selectedTaskId, projects, pinnedItems } = actions
+  const keys = new Set(((pinnedItems ?? []) as PinnedItem[]).map(pinnedItemKey))
+  const isPinned = (item: PinnedItem) => keys.has(pinnedItemKey(item))
+  const project = projects.find((p: any) => p.id === selectedProjectId)
+  const projectTarget: PinnedItem | null = project ? { type: 'project', projectId: project.id } : null
+  const task = project?.tasks.find((t: any) => t.id === selectedTaskId)
+  const taskTarget: PinnedItem | null = task && !isHomeTask(task)
+    ? { type: 'task', projectId: project.id, taskId: task.id }
+    : null
+  return { project: projectTarget, task: taskTarget, isPinned }
+}
 
 const ENABLE_FLAG: Record<AiTabType, 'enableClaude' | 'enableCodex' | 'enablePi'> = {
   claude: 'enableClaude',
@@ -153,5 +166,61 @@ commandRegistry.register({
   title: 'Quit DevTool',
   aliases: ['quit', 'exit'],
   run: () => paletteEvents.emit('quit-app')
+})
+
+commandRegistry.register({
+  id: 'cmd.pinCurrentProject',
+  title: 'Pin Current Project',
+  aliases: ['pin project'],
+  when: ctx => {
+    const { project, isPinned } = currentPinTargets(ctx.actions)
+    return !!project && !isPinned(project)
+  },
+  run: ctx => {
+    const { project, isPinned } = currentPinTargets(ctx.actions)
+    if (project && !isPinned(project)) ctx.actions.togglePinnedItem(project)
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.unpinCurrentProject',
+  title: 'Unpin Current Project',
+  aliases: ['unpin project'],
+  when: ctx => {
+    const { project, isPinned } = currentPinTargets(ctx.actions)
+    return !!project && isPinned(project)
+  },
+  run: ctx => {
+    const { project, isPinned } = currentPinTargets(ctx.actions)
+    if (project && isPinned(project)) ctx.actions.togglePinnedItem(project)
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.pinCurrentTask',
+  title: 'Pin Current Task',
+  aliases: ['pin task'],
+  when: ctx => {
+    const { task, isPinned } = currentPinTargets(ctx.actions)
+    return !!task && !isPinned(task)
+  },
+  run: ctx => {
+    const { task, isPinned } = currentPinTargets(ctx.actions)
+    if (task && !isPinned(task)) ctx.actions.togglePinnedItem(task)
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.unpinCurrentTask',
+  title: 'Unpin Current Task',
+  aliases: ['unpin task'],
+  when: ctx => {
+    const { task, isPinned } = currentPinTargets(ctx.actions)
+    return !!task && isPinned(task)
+  },
+  run: ctx => {
+    const { task, isPinned } = currentPinTargets(ctx.actions)
+    if (task && isPinned(task)) ctx.actions.togglePinnedItem(task)
+  }
 })
 

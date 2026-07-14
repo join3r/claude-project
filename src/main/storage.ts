@@ -6,6 +6,7 @@ import {
   ProjectsData,
   createDefaultWindowSessionState,
   createDefaultWindowViewState,
+  normalizePinnedItems,
   pruneUnusedTags,
   reconcileWindowViewState,
   type PersistedWindowState,
@@ -60,7 +61,7 @@ export class Storage {
       const data = JSON.parse(raw)
       return Storage.normalizeProjectsData(data)
     } catch {
-      return { projects: [], tags: [], projectOrder: [] }
+      return { projects: [], tags: [], projectOrder: [], pinnedItems: [] }
     }
   }
 
@@ -107,7 +108,12 @@ export class Storage {
       }
     }
 
-    return pruneUnusedTags({ projects: normalizedProjects, tags, projectOrder })
+    return pruneUnusedTags({
+      projects: normalizedProjects,
+      tags,
+      projectOrder,
+      pinnedItems: normalizePinnedItems(data.pinnedItems, normalizedProjects)
+    })
   }
 
   saveProjects(data: ProjectsData): void {

@@ -228,7 +228,8 @@ describe('Storage', () => {
         }]
       }],
       tags: [{ id: 'tag-1', name: 'work' }],
-      projectOrder: ['project-1']
+      projectOrder: ['project-1'],
+      pinnedItems: []
     }
     const session = {
       windows: [{
@@ -285,7 +286,8 @@ describe('Storage', () => {
         }]
       }],
       tags: [{ id: 'tag-1', name: 'work' }],
-      projectOrder: ['project-1']
+      projectOrder: ['project-1'],
+      pinnedItems: []
     }
 
     fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({
@@ -396,7 +398,7 @@ describe('Storage', () => {
 
   it('returns empty window session when the file contains no saved windows', () => {
     fs.writeFileSync(path.join(testDir, 'window-session.json'), JSON.stringify({ windows: [] }))
-    const loaded = storage.loadWindowSession({ projects: [], tags: [], projectOrder: [] })
+    const loaded = storage.loadWindowSession({ projects: [], tags: [], projectOrder: [], pinnedItems: [] })
     expect(loaded.windows).toEqual([])
   })
 })

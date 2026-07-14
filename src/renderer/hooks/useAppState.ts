@@ -12,11 +12,13 @@ import {
   isHomeTab,
   isHomeTask,
   isRemoteProject,
+  pinnedItemKey,
   pruneUnusedTags,
   reconcileTaskViewState,
   reconcileWindowViewState
 } from '../../shared/types'
 import type {
+  PinnedItem,
   Project,
   ProjectNote,
   ProjectsData,
@@ -78,7 +80,7 @@ function cloneTaskState(state: TaskViewState): TaskViewState {
 }
 
 export function useAppState() {
-  const [projectsData, setProjectsData] = useState<ProjectsData>({ projects: [], tags: [], projectOrder: [] })
+  const [projectsData, setProjectsData] = useState<ProjectsData>({ projects: [], tags: [], projectOrder: [], pinnedItems: [] })
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [windowViewState, setWindowViewState] = useState<WindowViewState>(createDefaultWindowViewState())
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -1282,6 +1284,22 @@ export function useAppState() {
     updateWindowViewState(prev => writeSidebarToCurrentTask(prev, { fileBrowserOpen: !prev.fileBrowserOpen }))
   }, [updateWindowViewState, writeSidebarToCurrentTask])
 
+  const togglePinnedItem = useCallback((item: PinnedItem) => {
+    const key = pinnedItemKey(item)
+    persistProjects(prev => {
+      const existing = prev.pinnedItems ?? []
+      const without = existing.filter(candidate => pinnedItemKey(candidate) !== key)
+      return {
+        ...prev,
+        pinnedItems: without.length < existing.length ? without : [...existing, item]
+      }
+    })
+  }, [persistProjects])
+
+  const setPinnedOrder = useCallback((items: PinnedItem[]) => {
+    persistProjects(prev => ({ ...prev, pinnedItems: [...items] }))
+  }, [persistProjects])
+
   const setFileBrowserWidth = useCallback((width: number) => {
     updateWindowViewState(prev => ({ ...prev, fileBrowserWidth: Math.min(400, Math.max(150, width)) }))
   }, [updateWindowViewState])
@@ -1513,6 +1531,9 @@ export function useAppState() {
     projects,
     tags,
     projectOrder,
+    pinnedItems: projectsData.pinnedItems,
+    togglePinnedItem,
+    setPinnedOrder,
     config,
     selectedProject,
     selectedTask,

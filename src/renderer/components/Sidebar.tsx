@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
-import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, projectMatchesTagFilter } from '../../shared/types'
-import type { Task, Project } from '../../shared/types'
+import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import type { Task, Project, PinnedItem } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -125,6 +125,7 @@ function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
   const {
     projects, tags, projectOrder,
+    pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome,
     addProject, addRemoteProject, addShellCommandProject, addTag, removeProject, renameProject, updateProject,
@@ -196,6 +197,26 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     () => [...tags].sort((a, b) => a.name.localeCompare(b.name)),
     [tags]
   )
+  // Drop pins whose project/task no longer exists; storage prunes them on the next save.
+  const resolvedPins = React.useMemo(() => {
+    const resolved: { item: PinnedItem; key: string; project: Project; task?: Task }[] = []
+    for (const item of pinnedItems ?? []) {
+      const project = projectsById.get(item.projectId)
+      if (!project) continue
+      if (item.type === 'task') {
+        const task = project.tasks.find(t => t.id === item.taskId)
+        if (!task) continue
+        resolved.push({ item, key: pinnedItemKey(item), project, task })
+      } else {
+        resolved.push({ item, key: pinnedItemKey(item), project })
+      }
+    }
+    return resolved
+  }, [pinnedItems, projectsById])
+  const isPinned = useCallback((item: PinnedItem) => {
+    const key = pinnedItemKey(item)
+    return (pinnedItems ?? []).some(candidate => pinnedItemKey(candidate) === key)
+  }, [pinnedItems])
 
   useEffect(() => {
     if (switcherRequested) {
@@ -485,6 +506,66 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     document.addEventListener('mouseup', onMouseUp)
   }, [editingId, projectOrder, visibleProjectIds, reorderTasks, reorderProjects])
 
+  const [pinDragIndex, setPinDragIndex] = useState<number | null>(null)
+  const [pinDropIndex, setPinDropIndex] = useState<number | null>(null)
+  const pinDropIndexRef = useRef<number | null>(null)
+
+  const handlePinMouseDown = useCallback((e: React.MouseEvent, key: string, index: number) => {
+    if (e.button !== 0) return
+    const startY = e.clientY
+    const startX = e.clientX
+    let dragging = false
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientY - startY) + Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return
+        dragging = true
+        setPinDragIndex(index)
+      }
+      const list = document.querySelector('.sidebar-pinned-list')
+      if (!list) return
+      const items = list.querySelectorAll<HTMLElement>('[data-pin-key]')
+      const bestIndex = getTaskDropIndex(
+        Array.from(items).map((item) => {
+          const rect = item.getBoundingClientRect()
+          return {
+            id: item.dataset.pinKey ?? '',
+            index: Number(item.dataset.pinIndex ?? '-1'),
+            top: rect.top,
+            height: rect.height
+          }
+        }),
+        ev.clientY,
+        key
+      )
+      pinDropIndexRef.current = bestIndex
+      setPinDropIndex(bestIndex)
+    }
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      if (dragging) {
+        const dropIndex = pinDropIndexRef.current
+        if (dropIndex !== null) {
+          const toIndex = getReorderInsertIndex(index, dropIndex)
+          if (toIndex !== null) {
+            const next = resolvedPins.map(pin => pin.item)
+            const [moved] = next.splice(index, 1)
+            next.splice(toIndex, 0, moved)
+            setPinnedOrder(next)
+          }
+        }
+      }
+      pinDropIndexRef.current = null
+      setPinDragIndex(null)
+      setPinDropIndex(null)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [resolvedPins, setPinnedOrder])
+
   const renderProject = (project: Project) => {
     const isExpanded = expandedProjects.has(project.id)
     // Project home lives on the project row itself (it's filtered out of the
@@ -696,40 +777,110 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </div>
       </div>
 
-      <div className="px-3 pb-2 [-webkit-app-region:no-drag]">
+      {resolvedPins.length > 0 && (
+        <div className="pb-1 [-webkit-app-region:no-drag]">
+          <div className="px-3 pb-1 text-2xs font-bold uppercase tracking-[0.06em] text-text-muted">Pinned</div>
+          <div className="sidebar-pinned-list">
+            {resolvedPins.map((pin, index) => {
+              const isProjectPin = pin.item.type === 'project'
+              const isSelected = isProjectPin
+                ? selectedProjectId === pin.project.id
+                  && pin.project.tasks.some(t => t.id === selectedTaskId && isHomeTask(t))
+                : selectedTaskId === pin.task!.id
+              const isDraggingPin = pinDragIndex === index
+              return (
+                <React.Fragment key={pin.key}>
+                  {pinDropIndex === index && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
+                  <div
+                    className={[
+                      'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
+                      'transition-colors duration-(--motion-fast)',
+                      isSelected ? 'bg-sel' : 'hover:bg-surface-3',
+                      isDraggingPin ? 'opacity-40' : '',
+                    ].join(' ')}
+                    data-pin-key={pin.key}
+                    data-pin-index={index}
+                    onClick={() => {
+                      if (isProjectPin) selectProjectHome(pin.project.id)
+                      else handleSelectTask(pin.project.id, pin.task!)
+                    }}
+                    onMouseDown={(e) => handlePinMouseDown(e, pin.key, index)}
+                    onContextMenu={(e) => handleContextMenu(
+                      e,
+                      isProjectPin ? 'project' : 'task',
+                      pin.project.id,
+                      isProjectPin ? undefined : pin.task!.id
+                    )}
+                  >
+                    <ProjectIconSlot project={pin.project} theme={effectiveTheme} metadata={iconMetadata} />
+                    {isProjectPin ? (
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{pin.project.name}</span>
+                    ) : (
+                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                        <span className="text-text-muted">{pin.project.name}</span>
+                        <span className="text-text-subtle mx-1">›</span>
+                        {pin.task!.name}
+                      </span>
+                    )}
+                    {!isProjectPin && isWorkspaceTask(pin.task!) && (
+                      <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">ws</span>
+                    )}
+                    <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+                      {isProjectPin ? (() => {
+                        const projectStatus = getProjectStatus(pin.project.tasks.filter(t => !isHomeTask(t)), allStatuses)
+                        if (!projectStatus) return null
+                        const dotClass = projectStatus === 'working'
+                          ? 'bg-status-working animate-pulse'
+                          : projectStatus === 'attention'
+                          ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+                          : 'bg-status-exited'
+                        return <span className={`w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden ${dotClass}`} />
+                      })() : (
+                        <TaskStatusDot task={pin.task!} allStatuses={allStatuses} />
+                      )}
+                      <RowActions>
+                        <RowAction title="Unpin" onClick={() => togglePinnedItem(pin.item)}>
+                          <X size={13} />
+                        </RowAction>
+                      </RowActions>
+                    </span>
+                  </div>
+                </React.Fragment>
+              )
+            })}
+            {pinDropIndex === resolvedPins.length && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
+          </div>
+        </div>
+      )}
+
+      <div className="px-3 pb-2 flex flex-wrap items-center gap-1.5 [-webkit-app-region:no-drag]">
         <button
           type="button"
           onClick={() => setSwitcherActive(true)}
-          className="flex items-center gap-2 w-full h-(--ctl-h) px-2.5 rounded-md bg-field border border-border text-text-subtle text-xs hover:text-text-muted transition-colors duration-(--motion-fast)"
+          title="Quick switch (⌘P)"
+          className="px-1.5 py-1 rounded-full text-xs border cursor-pointer bg-field border-border text-text-muted hover:text-text hover:bg-surface-3 transition-colors duration-(--motion-fast) flex items-center"
         >
           <Search size={12} />
-          <span>Quick switch…</span>
-          <span className="ml-auto text-2xs opacity-70">⌘P</span>
         </button>
+        {sortedTags.map(tag => {
+          const isSelected = selectedTagIds.includes(tag.id)
+          return (
+            <button
+              key={tag.id}
+              type="button"
+              onClick={() => toggleTagFilter(tag.id)}
+              className={[
+                'px-2 py-0.5 rounded-full text-xs border cursor-pointer transition-colors duration-(--motion-fast)',
+                isSelected
+                  ? 'bg-sel border-transparent text-text'
+                  : 'bg-field border-border text-text-muted hover:text-text hover:bg-surface-3',
+              ].join(' ')}
+            >
+              {tag.name}
+            </button>
+          )
+        })}
       </div>
-
-      {sortedTags.length > 0 && (
-        <div className="px-3 pb-2 flex flex-wrap gap-1.5 [-webkit-app-region:no-drag]">
-          {sortedTags.map(tag => {
-            const isSelected = selectedTagIds.includes(tag.id)
-            return (
-              <button
-                key={tag.id}
-                type="button"
-                onClick={() => toggleTagFilter(tag.id)}
-                className={[
-                  'px-2 py-0.5 rounded-full text-xs border cursor-pointer transition-colors duration-(--motion-fast)',
-                  isSelected
-                    ? 'bg-sel border-transparent text-text'
-                    : 'bg-field border-border text-text-muted hover:text-text hover:bg-surface-3',
-                ].join(' ')}
-              >
-                {tag.name}
-              </button>
-            )
-          })}
-        </div>
-      )}
 
       <div className="sidebar-list flex-1 overflow-y-auto py-1">
         {visibleProjectIds.map((projectId, listIdx) => {
@@ -779,6 +930,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 setEditValue(item?.name ?? '')
                 setContextMenu(null)
               }}>Rename</button>
+              {(() => {
+                const item: PinnedItem = contextMenu.type === 'project'
+                  ? { type: 'project', projectId: contextMenu.projectId }
+                  : { type: 'task', projectId: contextMenu.projectId, taskId: contextMenu.taskId! }
+                const pinned = isPinned(item)
+                const noun = contextMenu.type === 'project' ? 'project' : 'task'
+                return (
+                  <button className={menuItemCls} onClick={() => {
+                    togglePinnedItem(item)
+                    setContextMenu(null)
+                  }}>{pinned ? `Unpin ${noun}` : `Pin ${noun}`}</button>
+                )
+              })()}
               {contextMenu.type === 'project' && (
                 <button className={menuItemCls} onClick={() => {
                   setDuplicateProjectId(contextMenu.projectId)

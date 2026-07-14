@@ -193,6 +193,44 @@ export interface ProjectsData {
   projects: Project[]
   tags: Tag[]
   projectOrder: string[]
+  pinnedItems: PinnedItem[]
+}
+
+export type PinnedItem =
+  | { type: 'project'; projectId: string }
+  | { type: 'task'; projectId: string; taskId: string }
+
+export function pinnedItemKey(item: PinnedItem): string {
+  return item.type === 'project' ? `project:${item.projectId}` : `task:${item.projectId}:${item.taskId}`
+}
+
+export function normalizePinnedItems(items: unknown, projects: readonly Project[]): PinnedItem[] {
+  if (!Array.isArray(items)) return []
+  const projectById = new Map(projects.map(p => [p.id, p]))
+  const seen = new Set<string>()
+  const result: PinnedItem[] = []
+  for (const raw of items) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const item = raw as Partial<PinnedItem> & { projectId?: unknown; taskId?: unknown }
+    if (typeof item.projectId !== 'string') continue
+    const project = projectById.get(item.projectId)
+    if (!project) continue
+    let normalized: PinnedItem
+    if (item.type === 'project') {
+      normalized = { type: 'project', projectId: item.projectId }
+    } else if (item.type === 'task' && typeof item.taskId === 'string') {
+      const tasks = Array.isArray(project.tasks) ? project.tasks : []
+      if (!tasks.some(t => t.id === item.taskId)) continue
+      normalized = { type: 'task', projectId: item.projectId, taskId: item.taskId }
+    } else {
+      continue
+    }
+    const key = pinnedItemKey(normalized)
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(normalized)
+  }
+  return result
 }
 
 /** OR filter: empty selection shows all; otherwise project must have at least one selected tag. */
