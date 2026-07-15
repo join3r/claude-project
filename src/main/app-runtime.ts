@@ -577,6 +577,40 @@ export class AppRuntime {
       }
     })
 
+    // Claude prunes old sessions (and never persists sessions that got no user
+    // message), so a stored sessionId can go stale; spawning `claude --resume`
+    // with it dies with "No conversation found". The renderer checks here first
+    // and starts fresh when the session file is gone.
+    ipcMain.handle('claude-session-exists', async (_event, cwd: string, sessionId: string, projectId?: string, sshConfig?: SshConfig) => {
+      if (!/^[0-9a-fA-F-]{8,64}$/.test(sessionId)) return false
+
+      if (!sshConfig || !projectId) {
+        const projectsDir = path.join(os.homedir(), '.claude', 'projects')
+        const fileName = `${sessionId}.jsonl`
+        // Claude derives the project dir name by replacing non-alphanumerics with '-'
+        const slug = cwd.replace(/[^a-zA-Z0-9]/g, '-')
+        if (fs.existsSync(path.join(projectsDir, slug, fileName))) return true
+        // Fallback sweep across all projects in case the slug derivation ever
+        // diverges from Claude's — a hit anywhere preserves the resume attempt.
+        try {
+          return fs.readdirSync(projectsDir).some(dir => fs.existsSync(path.join(projectsDir, dir, fileName)))
+        } catch {
+          return false
+        }
+      }
+
+      if (this.sshManager.getStatus(projectId) !== 'connected') {
+        throw new Error('SSH connection not established')
+      }
+      const sshArgs = [
+        '-S', this.sshManager.getSocketPath(projectId),
+        `${sshConfig.username}@${sshConfig.host}`,
+        `ls "$HOME"/.claude/projects/*/${sessionId}.jsonl >/dev/null 2>&1 && echo yes || echo no`
+      ]
+      const { stdout } = await execFileAsync('ssh', sshArgs, { timeout: 5000 })
+      return stdout.trim() === 'yes'
+    })
+
     ipcMain.handle(
       'pty-spawn',
       async (

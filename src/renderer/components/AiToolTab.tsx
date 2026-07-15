@@ -575,6 +575,26 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           const startSession = async (): Promise<void> => {
             let resumeSessionId = sessionId
 
+            // Claude prunes old sessions and never persists ones that got no user
+            // message, so `--resume` with a stale id dies with "No conversation
+            // found". Verify the session file still exists; start fresh if not.
+            if (isClaudeTab && resumeSessionId) {
+              try {
+                const exists = await window.api.claudeSessionExists(
+                  projectDir,
+                  resumeSessionId,
+                  sshConfig ? projectId : undefined,
+                  sshConfig
+                )
+                if (!exists) {
+                  resumeSessionId = undefined
+                  entry.term.write('\x1b[2mPrevious Claude session no longer exists — starting a new one.\x1b[0m\r\n')
+                }
+              } catch {
+                // Couldn't verify (e.g. SSH hiccup) — attempt the resume as before
+              }
+            }
+
             const command = AI_TAB_META[toolType].command
             const parsedExtra = parseExtraArgs(extraArgs)
             const args = buildAiToolArgs(toolType, parsedExtra, resumeSessionId)

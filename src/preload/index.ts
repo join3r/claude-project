@@ -115,6 +115,10 @@ const api = {
   codexReadSession: (cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig): Promise<{ sessionId: string | null }> =>
     ipcRenderer.invoke('codex-read-session', cwd, afterTs, projectId, sshConfig),
 
+  // Claude session existence check (before spawning with --resume)
+  claudeSessionExists: (cwd: string, sessionId: string, projectId?: string, sshConfig?: SshConfig): Promise<boolean> =>
+    ipcRenderer.invoke('claude-session-exists', cwd, sessionId, projectId, sshConfig),
+
   // Hook events from server
   onHookSessionStart: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
     ipcRenderer.on('hook-session-start', (_e, tabId, body) => callback(tabId, body))
