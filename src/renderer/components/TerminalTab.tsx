@@ -247,12 +247,17 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     })
 
     term.attachCustomKeyEventHandler((event) => {
-      // Shift+Enter inserts a newline (ESC+CR, same as Option+Enter) instead of submitting
-      if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        const currentEntry = terminals.get(tabId)
-        if (!currentEntry || currentEntry.restoring) return false
-        markTaskInteracted(projectId, taskId)
-        window.api.ptyWrite(tabId, '\x1b\r')
+      // Shift+Enter inserts a newline (ESC+CR, same as Option+Enter) instead of submitting.
+      // Must swallow ALL event types: Enter also fires a keypress, and letting xterm
+      // handle it would send a bare \r right after our \x1b\r — submitting anyway.
+      if (event.key === 'Enter' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (event.type === 'keydown') {
+          const currentEntry = terminals.get(tabId)
+          if (currentEntry && !currentEntry.restoring) {
+            markTaskInteracted(projectId, taskId)
+            window.api.ptyWrite(tabId, '\x1b\r')
+          }
+        }
         return false
       }
       return true
