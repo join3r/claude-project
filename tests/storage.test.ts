@@ -402,4 +402,31 @@ describe('Storage', () => {
     const loaded = storage.loadWindowSession({ projects: [], tags: [], projectOrder: [], pinnedItems: [] })
     expect(loaded.windows).toEqual([])
   })
+
+  it('backupProjectsOnStartup is a no-op when projects.json does not exist', () => {
+    storage.backupProjectsOnStartup()
+    expect(fs.existsSync(path.join(testDir, 'backups'))).toBe(false)
+  })
+
+  it('backupProjectsOnStartup snapshots projects.json into backups/', () => {
+    fs.writeFileSync(path.join(testDir, 'projects.json'), '{"projects":[]}')
+    storage.backupProjectsOnStartup()
+    const backups = fs.readdirSync(path.join(testDir, 'backups'))
+    expect(backups).toHaveLength(1)
+    expect(backups[0]).toMatch(/^projects-.*\.json$/)
+    expect(fs.readFileSync(path.join(testDir, 'backups', backups[0]), 'utf-8')).toBe('{"projects":[]}')
+  })
+
+  it('backupProjectsOnStartup prunes oldest snapshots beyond the keep limit', () => {
+    const backupsDir = path.join(testDir, 'backups')
+    fs.mkdirSync(backupsDir)
+    for (let i = 0; i < 12; i++) {
+      fs.writeFileSync(path.join(backupsDir, `projects-2026-01-${String(i + 1).padStart(2, '0')}.json`), '{}')
+    }
+    fs.writeFileSync(path.join(testDir, 'projects.json'), '{"projects":[]}')
+    storage.backupProjectsOnStartup(10)
+    const remaining = fs.readdirSync(backupsDir).sort()
+    expect(remaining).toHaveLength(10)
+    expect(remaining[0]).toBe('projects-2026-01-04.json')
+  })
 })

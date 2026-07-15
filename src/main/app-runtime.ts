@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { Storage } from './storage'
+import { CONFIG_DIR } from './config-dir'
 import { ScrollbackStorage } from './scrollback-storage'
 import { PtyManager } from './pty-manager'
 import { HookServer } from './hook-server'
@@ -54,7 +55,6 @@ import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
 
-const CONFIG_DIR = path.join(os.homedir(), '.devtool')
 const MAX_SCROLLBACK_CHARS = 2_000_000
 const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
 
@@ -162,6 +162,7 @@ export class AppRuntime {
   private startupWindowStates: PersistedWindowState[]
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
+    this.storage.backupProjectsOnStartup()
     this.projectsData = this.storage.loadProjects()
     this.config = this.storage.loadConfig()
     this.startupWindowStates = this.storage.loadWindowSession(this.projectsData).windows

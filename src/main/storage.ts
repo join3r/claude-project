@@ -40,6 +40,26 @@ export class Storage {
     this.windowSessionPath = path.join(dir, 'window-session.json')
   }
 
+  /** Rotating startup snapshot of projects.json — recovery net if another instance clobbers it. */
+  backupProjectsOnStartup(keep = 10): void {
+    try {
+      if (!fs.existsSync(this.projectsPath)) return
+      const backupsDir = path.join(path.dirname(this.projectsPath), 'backups')
+      fs.mkdirSync(backupsDir, { recursive: true })
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      fs.copyFileSync(this.projectsPath, path.join(backupsDir, `projects-${stamp}.json`))
+      const snapshots = fs
+        .readdirSync(backupsDir)
+        .filter(f => f.startsWith('projects-') && f.endsWith('.json'))
+        .sort()
+      for (const f of snapshots.slice(0, -keep)) {
+        fs.unlinkSync(path.join(backupsDir, f))
+      }
+    } catch {
+      // best-effort: never block startup on backup failure
+    }
+  }
+
   loadConfig(): AppConfig {
     try {
       const raw = fs.readFileSync(this.configPath, 'utf-8')

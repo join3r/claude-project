@@ -2,6 +2,7 @@
 // The primary IPC registration (including pty-spawn) lives in AppRuntime (app-runtime.ts).
 import { app, ipcMain, dialog, BrowserWindow, nativeTheme } from 'electron'
 import { Storage } from './storage'
+import { CONFIG_DIR } from './config-dir'
 import { ScrollbackStorage } from './scrollback-storage'
 import { PtyManager } from './pty-manager'
 import { HookServer } from './hook-server'
@@ -19,8 +20,6 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
-
-const CONFIG_DIR = path.join(os.homedir(), '.devtool')
 
 export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ cleanup: () => void }> {
   const storage = new Storage(CONFIG_DIR)
