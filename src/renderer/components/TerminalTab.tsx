@@ -365,9 +365,12 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     return () => disposable.dispose()
   }, [tabId, visible, config?.copyOnSelect])
 
-  // Use ResizeObserver to fit terminal when container dimensions change.
+  // ResizeObserver for fitting + spawning. Re-runs on visibility flips so that
+  // hide → show resets the observer; ResizeObserver fires an initial callback
+  // on observe(), which is what triggers re-attach (otherwise the freshly
+  // created xterm stays empty after switching back to the tab).
   useEffect(() => {
-    if (!containerRef.current || !config) return
+    if (!containerRef.current || !config || !visible) return
     const container = containerRef.current
     const ro = new ResizeObserver(() => {
       if (container.clientWidth === 0 || container.clientHeight === 0) return
@@ -417,7 +420,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, config, sshReady, sshConfig, shellCommand, projectId])
+  }, [tabId, config, sshReady, sshConfig, shellCommand, projectId, visible])
 
   // Focus terminal on visibility change
   useEffect(() => {
