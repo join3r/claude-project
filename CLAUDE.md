@@ -10,6 +10,8 @@ Persistent state lives in a config dir resolved in `src/main/config-dir.ts`: `~/
 
 Don't `chmod +s` `dist/chrome-sandbox` to chase sandbox errors — a setuid binary not owned by root makes Chromium reject it outright rather than fall back to the user-namespace sandbox.
 
+npm >=11.17 blocks dependency install scripts until they're approved, which would otherwise stop Electron from downloading at all. The `allowScripts` field in `package.json` covers `electron`, `esbuild` and `node-pty`; entries are pinned to exact versions, so bumping any of those needs a fresh `npm approve-scripts <pkg>`. `electron-winstaller` is deliberately left unapproved — it only matters for Windows packaging, which this project doesn't do, so `npm install` warns about it harmlessly.
+
 ## UI smoke testing with agent-browser
 
 DevTool exposes a Chrome DevTools Protocol port when launched with the `DEVTOOL_CDP_PORT` env var (wired in `src/main/index.ts`). Use this to drive the live UI from an AI session via `agent-browser`.
