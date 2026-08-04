@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
 import { isHomeTab, isRenamableTab, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
+import { useMenuPosition } from '../hooks/useMenuPosition'
 import { getTabDropIndex } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 
@@ -121,6 +122,7 @@ export default function TabBar({
   const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, renameTab } = useApp()
   const suppressClickRef = useRef(false)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
+  const tabMenuPos = useMenuPosition<HTMLDivElement>(tabMenu)
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement | null>(null)
@@ -348,7 +350,8 @@ export default function TabBar({
         <>
           <div className="fixed inset-0 z-(--z-menu)" onClick={close} onContextMenu={e => { e.preventDefault(); close() }} />
           <div
-            style={{ left: tabMenu.x, top: tabMenu.y }}
+            ref={tabMenuPos.ref}
+            style={tabMenuPos.style}
             className={`fixed z-(--z-menu) min-w-[180px] ${menuCls}`}
           >
             {isRenamableTab(tab) && (

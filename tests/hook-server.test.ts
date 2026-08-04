@@ -86,3 +86,39 @@ describe('HookServer', () => {
     expect(status).toBe(400)
   })
 })
+
+describe('HookServer logging', () => {
+  let logged: string[]
+  let server: HookServer
+
+  beforeEach(async () => {
+    logged = []
+    server = new HookServer((message) => logged.push(message))
+    await server.start()
+  })
+
+  afterEach(async () => {
+    await server.stop()
+  })
+
+  it('logs accepted hooks with endpoint, tab id and notification message', async () => {
+    await post(server.getPort(), '/hook/working', {}, { 'X-Tab-Id': 'tab-1' })
+    await post(server.getPort(), '/hook/notification', { message: 'needs your permission' }, { 'X-Tab-Id': 'tab-1' })
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(logged).toContain('hook endpoint=working tabId=tab-1')
+    expect(logged).toContain('hook endpoint=notification tabId=tab-1 message="needs your permission"')
+  })
+
+  it('logs a hook that arrived without a tab id', async () => {
+    await post(server.getPort(), '/hook/stopped', {})
+    await new Promise((r) => setTimeout(r, 10))
+    expect(logged).toContain('hook reject-no-tab-id endpoint=stopped')
+  })
+
+  it('logs an unknown endpoint', async () => {
+    await post(server.getPort(), '/hook/nope', {}, { 'X-Tab-Id': 'tab-1' })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(logged).toContain('hook reject-unknown url=/hook/nope')
+  })
+})

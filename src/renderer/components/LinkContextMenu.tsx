@@ -1,5 +1,6 @@
 import React from 'react'
 import { normalizeBrowserUrl } from '../browserUrl'
+import { useMenuPosition } from '../hooks/useMenuPosition'
 
 export interface LinkMenuState {
   url: string
@@ -14,6 +15,8 @@ interface Props {
 }
 
 export default function LinkContextMenu({ menu, onClose, onOpenInApp }: Props): React.ReactElement | null {
+  const menuPos = useMenuPosition<HTMLDivElement>(menu)
+
   if (!menu) return null
 
   const normalized = normalizeBrowserUrl(menu.url)
@@ -44,7 +47,8 @@ export default function LinkContextMenu({ menu, onClose, onOpenInApp }: Props): 
         }}
       />
       <div
-        style={{ left: menu.x, top: menu.y }}
+        ref={menuPos.ref}
+        style={menuPos.style}
         className="fixed z-(--z-menu) min-w-[180px] bg-surface border-[0.5px] border-border rounded-lg p-1 shadow-pop"
         onMouseDown={(e) => e.stopPropagation()}
       >

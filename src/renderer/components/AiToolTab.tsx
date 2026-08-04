@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -16,6 +16,8 @@ import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
 import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
+import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from './aiStatus'
+import { logStatusDetail } from '../statusDebug'
 import { normalizeBrowserUrl } from '../browserUrl'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 import { bindTerminalLinkContextMenu } from '../utils/bindTerminalLinkContextMenu'
@@ -26,6 +28,15 @@ import '@xterm/xterm/css/xterm.css'
 import { buildXtermTheme } from './terminalThemes'
 
 const ENABLE_XTERM_WEBGL = false
+
+/** How long after the last PTY chunk a tab counts as having settled down. */
+const QUIET_MS = 3000
+/**
+ * How long a hook tab may sit 'working' with no output before we stop believing it.
+ * Long enough to cover a silent tool call (web fetch, long build), short enough that
+ * a crashed / cleared / SSH-dropped session doesn't stay "working" until you notice.
+ */
+const STALE_WORKING_MS = 60_000
 
 interface Props {
   tabId: string
@@ -156,12 +167,13 @@ function ensureBeforeUnloadHandler(): void {
 export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta, markTaskInteracted } = useApp()
+  const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
   const focusClaimRef = useRef(false)
   const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suppressUntilRef = useRef(0)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
@@ -175,6 +187,32 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   // Tabs whose status is driven by hook-server events (Claude's shell hooks, pi's
   // status extension) rather than the terminal-bell / activity heuristic.
   const isHookTab = isClaudeTab || isPiTab
+
+  // Single funnel for every status write on this tab: aiStatus.ts owns the decision,
+  // this owns the context it needs. Returns the decision so callers can mirror it
+  // into the inbox without re-deriving it.
+  const applyStatus = useCallback((
+    event: AiStatusEvent,
+    notificationKind?: AiNotificationKind
+  ): AiStatusDecision => {
+    const current = statusStore.getStatus(tabId)
+    const decision = nextAiStatus(current, event, {
+      isHookTab,
+      visible: visibleRef.current,
+      windowFocused: document.hasFocus(),
+      notificationKind
+    })
+    if (decision !== 'keep') statusStore.setStatus(tabId, decision, event)
+    return decision
+  }, [statusStore, tabId, isHookTab])
+
+  // Restarted by anything that proves the agent is still alive (output, a hook).
+  const restartStaleTimer = useCallback(() => {
+    if (!isHookTab) return
+    if (staleTimerRef.current) clearTimeout(staleTimerRef.current)
+    staleTimerRef.current = setTimeout(() => applyStatus('stale-working'), STALE_WORKING_MS)
+  }, [isHookTab, applyStatus])
+
   const codexSpawnTsRef = useRef(0)
   const codexSessionPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const latestSessionIdRef = useRef<string | null>(sessionId ?? null)
@@ -298,7 +336,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       entry.term.write('\r\n\x1b[33mSSH reconnected — restarting session...\x1b[0m\r\n\r\n')
     }
     window.api.ptyKill(tabId)
-    statusStore.setStatus(tabId, null) // Clear exited status
+    statusStore.setStatus(tabId, null, 'ssh-respawn') // Clear exited status
     spawnedRef.current = false
     if (isCodexTab) {
       stopCodexSessionPolling()
@@ -428,22 +466,20 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       // stopped/session-start callbacks simply never fire for it.
       hookStatusCallbacks.set(tabId, {
         onWorking: () => {
-          const current = statusStore.getStatus(tabId)
-          if (current !== 'exited') {
-            statusStore.setStatus(tabId, 'working')
-          }
+          applyStatus('hook-working')
+          restartStaleTimer()
         },
         onStopped: () => {
-          const current = statusStore.getStatus(tabId)
-          if (current === 'working') {
-            statusStore.setStatus(tabId, null)
-          }
+          applyStatus('hook-stopped')
+          markTaskEvent(projectId, taskId)
         },
-        onNotification: () => {
-          const current = statusStore.getStatus(tabId)
-          if (current !== 'exited') {
-            statusStore.setStatus(tabId, 'attention')
-          }
+        onNotification: (body: Record<string, unknown>) => {
+          const kind = classifyNotification(body)
+          logStatusDetail(`notification tab=${tabId} kind=${kind} message=${JSON.stringify(body.message ?? null)}`)
+          const decision = applyStatus('hook-notification', kind)
+          // Only a real attention transition is inbox-worthy; a suppressed idle nudge
+          // must not wake a "snooze until it needs me" task.
+          if (decision === 'attention') markTaskEvent(projectId, taskId, 'attention')
         },
         onSessionStart: (body: Record<string, unknown>) => {
           const newSessionId = body.session_id as string | undefined
@@ -456,43 +492,43 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       ensureHookListeners()
     }
 
-    // PTY-based activity heuristic for all AI tabs. For Claude this is a fallback
-    // signal so the watch strip / sidebar still reflect activity when hooks
-    // haven't been configured or before they fire. For non-Claude tabs it's the
-    // primary signal. Hook-driven 'attention' is preserved (not overwritten).
+    // PTY-based activity heuristic for all AI tabs. For Claude/pi this only ever
+    // reports activity — never 'attention'; their hooks are the authority on whether
+    // the agent wants something. For non-hook tabs it's the primary signal.
     activityCallbacks.set(tabId, () => {
       if (Date.now() < suppressUntilRef.current) return
-      const current = statusStore.getStatus(tabId)
-      if (current === 'exited') return
-      if (current !== 'attention') {
-        statusStore.setStatus(tabId, 'working')
-      }
+      applyStatus('pty-data')
+      restartStaleTimer()
       if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
       activityTimerRef.current = setTimeout(() => {
-        const latest = statusStore.getStatus(tabId)
-        if (latest === 'working') {
-          statusStore.setStatus(tabId, visibleRef.current ? null : 'attention')
+        const decision = applyStatus('pty-quiet')
+        // For non-hook tools this settling-down is the only "the agent stopped"
+        // signal there is, so it's what the inbox has to key unread off.
+        if (!isHookTab && decision !== 'keep') {
+          markTaskEvent(projectId, taskId, decision === 'attention' ? 'attention' : 'event')
         }
-      }, 3000)
+      }, QUIET_MS)
     })
 
     if (!isHookTab) {
       term.onBell(() => {
-        statusStore.setStatus(tabId, 'attention')
+        if (applyStatus('bell') === 'attention') markTaskEvent(projectId, taskId, 'attention')
       })
     }
 
     // Exit callback (both Claude and non-Claude)
     exitCallbacks.set(tabId, () => {
       if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
-      statusStore.setStatus(tabId, 'exited')
+      if (staleTimerRef.current) clearTimeout(staleTimerRef.current)
+      applyStatus('exit')
+      markTaskEvent(projectId, taskId)
     })
 
     ensurePtyListener()
     ensurePtySizeListener()
     ensureExitListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, toolType, config, addTab, pane, projectId, taskId, visible, markTaskInteracted])
+  }, [tabId, toolType, config, addTab, pane, projectId, taskId, visible, markTaskInteracted, markTaskEvent, applyStatus, restartStaleTimer])
 
   // Show stored scrollback in the xterm before the user clicks Resume so they
   // can see what the session was about. Skipped if the tab will auto-spawn
@@ -678,15 +714,15 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
           window.api.ptyResize(tabId, entry.term.cols, entry.term.rows)
         }
         entry.term.focus()
-        const current = statusStore.getStatus(tabId)
-        if (current === 'attention') {
-          statusStore.setStatus(tabId, null)
-        }
       }
+      // Outside the `entry` guard on purpose: a tab can become visible before its
+      // xterm has been (re-)created — lazy activation, or the reattach after being
+      // hidden — and looking at it still counts as answering the call for attention.
+      applyStatus('visit')
     } else {
       focusClaimRef.current = false
     }
-  }, [visible, tabId])
+  }, [visible, tabId, isClaudeTab, applyStatus])
 
   // Update font when config or zoom changes
   useEffect(() => {
@@ -720,6 +756,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         exitCallbacks.delete(tabId)
         activityCallbacks.delete(tabId)
         hookStatusCallbacks.delete(tabId)
+        if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+        if (staleTimerRef.current) clearTimeout(staleTimerRef.current)
         statusStore.removeTab(tabId)
 
         // Cleanup hooks when Claude tab is removed (ref-counted)
@@ -735,6 +773,14 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     window.addEventListener('tab-removed', handler)
     return () => window.removeEventListener('tab-removed', handler)
   }, [tabId, isClaudeTab, projectDir, projectId, sshConfig])
+
+  // Drop pending status timers on unmount so they can't write to a gone tab
+  useEffect(() => {
+    return () => {
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current)
+      if (staleTimerRef.current) clearTimeout(staleTimerRef.current)
+    }
+  }, [])
 
   // Cmd+F to open search
   useEffect(() => {

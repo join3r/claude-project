@@ -9,6 +9,10 @@ export const AI_TAB_META: Record<AiTabType, { label: string; command: string }> 
   pi: { label: 'Pi', command: 'pi' }
 }
 
+/** What the New-task composer opens in a task it just created. */
+export const NEW_TASK_AUTO_OPEN = ['none', 'claude', 'codex', 'pi', 'browser', 'terminal'] as const
+export type NewTaskAutoOpen = typeof NEW_TASK_AUTO_OPEN[number]
+
 export interface Tab {
   id: string
   type: TabType
@@ -39,6 +43,26 @@ export interface TaskViewState {
   fileBrowserActiveTab?: FileBrowserTab
 }
 
+/**
+ * Inbox triage state for a task. Every field is optional, so tasks written by older
+ * builds need no migration — the whole object is simply absent.
+ */
+export interface TaskInboxState {
+  /** Stamped when the task is switched to. Drives unread. */
+  visitedAt?: number
+  /** Any meaningful event: hook notification/stop, terminal bell, PTY exit. */
+  eventAt?: number
+  /** Question / permission / bell specifically — a subset of eventAt. */
+  attentionAt?: number
+  settledAt?: number
+  snoozedAt?: number
+  /** Epoch ms wake time. Absent when snoozeUntilAttention is set. */
+  snoozedUntil?: number
+  snoozeUntilAttention?: boolean
+  /** Manual "mark unread"; cleared on the next visit. */
+  forcedUnread?: boolean
+}
+
 export interface Task {
   id: string
   name: string
@@ -54,6 +78,7 @@ export interface Task {
   splitRatio: number
   workspace?: WorkspaceConfig
   lastInteractedAt?: number
+  inbox?: TaskInboxState
   system?: 'home'
 }
 
@@ -286,6 +311,8 @@ export interface AppConfig {
   lazyLoadClaude: boolean
   lastProjectId: string | null
   lastTaskId: string | null
+  defaultSidebarTab: SidebarTab
+  newTaskAutoOpen: NewTaskAutoOpen
   taskRecencyHighlight: {
     enabled: boolean
     mode: 'rank' | 'time'
@@ -376,7 +403,11 @@ export interface WindowViewState {
   fileBrowserWidth: number
   fileBrowserActiveTab: FileBrowserTab
   sidebarWidth: number
+  sidebarProjectsCollapsed: boolean
+  sidebarTab: SidebarTab
 }
+
+export type SidebarTab = 'projects' | 'inbox'
 
 export interface WindowGeometry {
   x: number
@@ -418,6 +449,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   lazyLoadClaude: true,
   lastProjectId: null,
   lastTaskId: null,
+  defaultSidebarTab: 'inbox',
+  // Opt-in: creating a task keeps behaving exactly as before until you pick a tool.
+  newTaskAutoOpen: 'none',
   taskRecencyHighlight: {
     enabled: true,
     mode: 'rank',
@@ -461,7 +495,9 @@ export function createDefaultWindowViewState(): WindowViewState {
     fileBrowserOpen: false,
     fileBrowserWidth: 250,
     fileBrowserActiveTab: 'files',
-    sidebarWidth: 240
+    sidebarWidth: 240,
+    sidebarProjectsCollapsed: false,
+    sidebarTab: 'projects'
   }
 }
 
@@ -489,7 +525,9 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     fileBrowserOpen: state.fileBrowserOpen,
     fileBrowserWidth: state.fileBrowserWidth,
     fileBrowserActiveTab: state.fileBrowserActiveTab,
-    sidebarWidth: state.sidebarWidth
+    sidebarWidth: state.sidebarWidth,
+    sidebarProjectsCollapsed: state.sidebarProjectsCollapsed,
+    sidebarTab: state.sidebarTab
   }
 }
 
@@ -613,7 +651,10 @@ export function reconcileWindowViewState(
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
-    sidebarWidth: state.sidebarWidth ?? 240
+    sidebarWidth: state.sidebarWidth ?? 240,
+    sidebarProjectsCollapsed: state.sidebarProjectsCollapsed ?? false,
+    // only normalise unrecognised values — buildWindowViewState already applied the configured default
+    sidebarTab: state.sidebarTab === 'inbox' || state.sidebarTab === 'projects' ? state.sidebarTab : 'projects'
   }
 }
 
@@ -657,6 +698,8 @@ export function buildWindowViewState(
     fileBrowserOpen: seed?.fileBrowserOpen ?? false,
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
-    sidebarWidth: seed?.sidebarWidth ?? 240
+    sidebarWidth: seed?.sidebarWidth ?? 240,
+    sidebarProjectsCollapsed: seed?.sidebarProjectsCollapsed ?? false,
+    sidebarTab: seed?.sidebarTab ?? config.defaultSidebarTab
   }, projects, tagIds)
 }

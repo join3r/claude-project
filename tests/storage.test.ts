@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { Storage } from '../src/main/storage'
-import { DEFAULT_CONFIG, isRemoteProject, type ProjectsData } from '../src/shared/types'
+import {
+  DEFAULT_CONFIG,
+  createDefaultWindowViewState,
+  isRemoteProject,
+  type ProjectsData,
+  type WindowViewState
+} from '../src/shared/types'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -28,6 +34,22 @@ describe('Storage', () => {
     expect(config.theme).toBe('system')
     expect(config.editorWordWrap).toBe('off')
     expect(config.diffRenderSideBySide).toBe(true)
+    expect(config.defaultSidebarTab).toBe('inbox')
+    expect(config.newTaskAutoOpen).toBe('none')
+  })
+
+  it('fills in new config defaults for configs written before the key existed', () => {
+    fs.writeFileSync(path.join(testDir, 'config.json'), JSON.stringify({ fontSize: 16 }))
+    const config = storage.loadConfig()
+    expect(config.fontSize).toBe(16)
+    expect(config.defaultSidebarTab).toBe('inbox')
+    // Pre-existing configs must keep opening nothing until the user opts in.
+    expect(config.newTaskAutoOpen).toBe('none')
+  })
+
+  it('round-trips the new-task auto-open choice', () => {
+    storage.saveConfig({ ...DEFAULT_CONFIG, newTaskAutoOpen: 'claude' })
+    expect(storage.loadConfig().newTaskAutoOpen).toBe('claude')
   })
 
   it('saves and loads config', () => {
@@ -262,10 +284,34 @@ describe('Storage', () => {
           fileBrowserOpen: false,
           fileBrowserWidth: 250,
           fileBrowserActiveTab: 'files',
-          sidebarWidth: 240
+          sidebarWidth: 240,
+          sidebarProjectsCollapsed: false,
+          sidebarTab: 'projects'
         }
       }]
     })
+  })
+
+  it('restores the persisted sidebar tab, and only falls back to the configured default when absent', () => {
+    const projectsData: ProjectsData = { projects: [], tags: [], projectOrder: [], pinnedItems: [] }
+    const geometry = { x: 0, y: 0, width: 1200, height: 800, isMaximized: false }
+
+    storage.saveWindowSession({
+      windows: [{ geometry, viewState: { ...createDefaultWindowViewState(), sidebarTab: 'inbox' } }]
+    })
+    expect(storage.loadWindowSession(projectsData, 'projects').windows[0].viewState.sidebarTab).toBe('inbox')
+
+    storage.saveWindowSession({
+      windows: [{ geometry, viewState: { ...createDefaultWindowViewState(), sidebarTab: 'projects' } }]
+    })
+    expect(storage.loadWindowSession(projectsData, 'inbox').windows[0].viewState.sidebarTab).toBe('projects')
+
+    // legacy session written before the field existed
+    const { sidebarTab: _omitted, ...legacyViewState } = createDefaultWindowViewState()
+    storage.saveWindowSession({
+      windows: [{ geometry, viewState: legacyViewState as WindowViewState }]
+    })
+    expect(storage.loadWindowSession(projectsData, 'inbox').windows[0].viewState.sidebarTab).toBe('inbox')
   })
 
   it('normalizes persisted window sessions against current projects and tags', () => {

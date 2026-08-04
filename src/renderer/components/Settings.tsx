@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, TerminalColorScheme } from '../../shared/types'
+import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, NewTaskAutoOpen, TerminalColorScheme } from '../../shared/types'
 import { useApp } from '../context/AppContext'
+import { isAutoOpenAvailable } from './newTaskTabs'
 import { TERMINAL_SCHEME_OPTIONS } from './terminalThemes'
 import {
   EDITOR_FONT_SIZE_MAX,
@@ -33,6 +34,15 @@ const editorWhitespaceOptions: Array<{ value: EditorRenderWhitespace; label: str
   { value: 'trailing', label: 'Trailing' },
   { value: 'all', label: 'All' },
   { value: 'none', label: 'None' }
+]
+
+const newTaskAutoOpenOptions: Array<{ value: NewTaskAutoOpen; label: string }> = [
+  { value: 'none', label: 'Nothing' },
+  { value: 'claude', label: 'Claude Code' },
+  { value: 'codex', label: 'Codex' },
+  { value: 'pi', label: 'Pi' },
+  { value: 'terminal', label: 'Terminal' },
+  { value: 'browser', label: 'Browser' }
 ]
 
 const themeOptions = [
@@ -317,6 +327,20 @@ export default function Settings({ onClose }: Props): React.ReactElement {
         return (
           <>
             <GrpHead>Sidebar</GrpHead>
+            <FormGroup>
+              <SetBlock label="Sidebar opens on">
+                <SegCtl
+                  options={[
+                    { value: 'projects', label: 'Projects' },
+                    { value: 'inbox', label: 'Inbox' }
+                  ] as const}
+                  value={config.defaultSidebarTab}
+                  onChange={(defaultSidebarTab) => updateConfig({ defaultSidebarTab })}
+                />
+                <HelperText>Applies to new windows; each window remembers the tab you switch to.</HelperText>
+              </SetBlock>
+            </FormGroup>
+
             <Group>
               <GroupRow
                 label="Highlight recently focused tasks"
@@ -393,6 +417,30 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                   {config.taskRecencyHighlight.mode === 'rank'
                     ? 'The most recently focused tasks stay highlighted.'
                     : 'Highlights fade as tasks go untouched.'}
+                </HelperText>
+              </SetBlock>
+            </FormGroup>
+
+            <GrpHead>New task</GrpHead>
+            <FormGroup>
+              <SetBlock label="Open automatically">
+                <Select
+                  value={config.newTaskAutoOpen}
+                  onChange={(e) => updateConfig({ newTaskAutoOpen: e.target.value as NewTaskAutoOpen })}
+                >
+                  {newTaskAutoOpenOptions.map((option) => {
+                    const available = isAutoOpenAvailable(option.value, config)
+                    return (
+                      <option key={option.value} value={option.value} disabled={!available}>
+                        {available ? option.label : `${option.label} (turned off in AI Tools)`}
+                      </option>
+                    )
+                  })}
+                </Select>
+                <HelperText>
+                  {isAutoOpenAvailable(config.newTaskAutoOpen, config)
+                    ? 'Applies to the New task composer (⌘N, or the pencil in the inbox) — the + Task button in the project tree still makes an empty task.'
+                    : 'That tool is turned off under AI Tools, so new tasks open nothing. Turn it on there, or pick another option.'}
                 </HelperText>
               </SetBlock>
             </FormGroup>

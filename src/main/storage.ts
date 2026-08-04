@@ -11,6 +11,7 @@ import {
   reconcileWindowViewState,
   type PersistedWindowState,
   type Project,
+  type SidebarTab,
   type Tag,
   type TaskViewState,
   type WindowGeometry,
@@ -141,11 +142,15 @@ export class Storage {
     fs.writeFileSync(this.projectsPath, JSON.stringify(normalized, null, 2))
   }
 
-  loadWindowSession(projectsData: ProjectsData): WindowSessionState {
+  /**
+   * `defaultSidebarTab` only fills in windows persisted before the field existed —
+   * a window that recorded a tab keeps it, the way it kept its geometry.
+   */
+  loadWindowSession(projectsData: ProjectsData, defaultSidebarTab: SidebarTab = 'projects'): WindowSessionState {
     try {
       const raw = fs.readFileSync(this.windowSessionPath, 'utf-8')
       const data = JSON.parse(raw)
-      return Storage.normalizeWindowSessionData(data, projectsData)
+      return Storage.normalizeWindowSessionData(data, projectsData, defaultSidebarTab)
     } catch {
       return createDefaultWindowSessionState()
     }
@@ -155,14 +160,18 @@ export class Storage {
     fs.writeFileSync(this.windowSessionPath, JSON.stringify(data, null, 2))
   }
 
-  static normalizeWindowSessionData(data: unknown, projectsData: ProjectsData): WindowSessionState {
+  static normalizeWindowSessionData(
+    data: unknown,
+    projectsData: ProjectsData,
+    defaultSidebarTab: SidebarTab = 'projects'
+  ): WindowSessionState {
     if (!isRecord(data) || !Array.isArray(data.windows)) {
       return createDefaultWindowSessionState()
     }
 
     const tagIds = new Set(projectsData.tags.map(tag => tag.id))
     const windows = data.windows
-      .map((entry) => Storage.normalizePersistedWindowState(entry, projectsData.projects, tagIds))
+      .map((entry) => Storage.normalizePersistedWindowState(entry, projectsData.projects, tagIds, defaultSidebarTab))
       .filter((entry): entry is PersistedWindowState => entry !== null)
 
     return { windows }
@@ -171,14 +180,15 @@ export class Storage {
   private static normalizePersistedWindowState(
     value: unknown,
     projects: Project[],
-    tagIds: Set<string>
+    tagIds: Set<string>,
+    defaultSidebarTab: SidebarTab
   ): PersistedWindowState | null {
     if (!isRecord(value)) return null
 
     const geometry = Storage.normalizeWindowGeometry(value.geometry)
     if (!geometry) return null
 
-    const viewState = Storage.normalizeWindowViewState(value.viewState, projects, tagIds)
+    const viewState = Storage.normalizeWindowViewState(value.viewState, projects, tagIds, defaultSidebarTab)
     return { geometry, viewState }
   }
 
@@ -203,10 +213,11 @@ export class Storage {
   private static normalizeWindowViewState(
     value: unknown,
     projects: Project[],
-    tagIds: Set<string>
+    tagIds: Set<string>,
+    defaultSidebarTab: SidebarTab
   ): WindowViewState {
     if (!isRecord(value)) {
-      return createDefaultWindowViewState()
+      return { ...createDefaultWindowViewState(), sidebarTab: defaultSidebarTab }
     }
 
     const projectIds = new Set(projects.map(p => p.id))
@@ -234,7 +245,11 @@ export class Storage {
         fileBrowserOpen: typeof value.fileBrowserOpen === 'boolean' ? value.fileBrowserOpen : false,
         fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,
         fileBrowserActiveTab,
-        sidebarWidth: isFiniteNumber(value.sidebarWidth) ? value.sidebarWidth : 240
+        sidebarWidth: isFiniteNumber(value.sidebarWidth) ? value.sidebarWidth : 240,
+        sidebarProjectsCollapsed: typeof value.sidebarProjectsCollapsed === 'boolean' ? value.sidebarProjectsCollapsed : false,
+        sidebarTab: (value.sidebarTab === 'inbox' || value.sidebarTab === 'projects')
+          ? value.sidebarTab
+          : defaultSidebarTab
       },
       projects,
       tagIds

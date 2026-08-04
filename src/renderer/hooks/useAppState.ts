@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
 import {
-  AI_TAB_META,
-  AI_TAB_TYPES,
   buildWindowViewState,
   cloneWindowViewState,
   createDefaultWindowViewState,
@@ -32,6 +30,8 @@ import type {
   WorkspaceConfig,
   WindowViewState,
   TaskViewState,
+  TaskInboxState,
+  SidebarTab,
   FileBrowserTab
 } from '../../shared/types'
 import { applyQueuedStateUpdates, persistSelectionState, type StateUpdater } from './stateHydration'
@@ -43,14 +43,10 @@ import {
   type RecentlyClosedTab
 } from '../recentlyClosedTabs'
 import { createInteractionStampGate } from '../components/taskRecency'
+import { createTab, type CreateTabOptions } from '../components/newTaskTabs'
 
-export type ProjectUpdate = Partial<Pick<Project, 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
-type AddTabOptions = {
-  filePath?: string
-  url?: string
-  noteId?: string
-  noteName?: string
-}
+export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
+type AddTabOptions = CreateTabOptions
 
 export function buildWindowTitle(projectName: string | null, taskName: string | null, taskIsHome?: boolean): string {
   if (projectName && taskName && !taskIsHome) {
@@ -358,6 +354,118 @@ export function useAppState() {
     }))
   }, [persistProjects])
 
+  const updateTaskInbox = useCallback((
+    projectId: string,
+    taskId: string,
+    updater: (inbox: TaskInboxState) => TaskInboxState
+  ) => {
+    persistProjects(prev => ({
+      ...prev,
+      projects: prev.projects.map(project =>
+        project.id !== projectId ? project : {
+          ...project,
+          tasks: project.tasks.map(task =>
+            task.id === taskId ? { ...task, inbox: updater(task.inbox ?? {}) } : task
+          )
+        }
+      )
+    }))
+  }, [persistProjects])
+
+  /**
+   * Stamps a meaningful event on a task: a hook notification/stop, a terminal bell, a
+   * PTY exit. 'attention' additionally records the moment something started waiting on
+   * the user, which is what "snooze until it needs me" wakes on.
+   *
+   * Also resolves triage state that the event supersedes: a settle is undone (settle
+   * means "done for now", not "muted"), and an attention-snooze is woken.
+   */
+  const markTaskEvent = useCallback((
+    projectId: string,
+    taskId: string,
+    kind: 'event' | 'attention' = 'event'
+  ) => {
+    const now = Date.now()
+    // An event in the task you are currently looking at is read on arrival —
+    // otherwise the row you are staring at goes bold and stays that way.
+    const watching = windowViewStateRef.current.selectedTaskId === taskId
+    updateTaskInbox(projectId, taskId, inbox => {
+      const next: TaskInboxState = { ...inbox, eventAt: now }
+      if (kind === 'attention') next.attentionAt = now
+      if (watching) next.visitedAt = now
+      if (typeof next.settledAt === 'number') delete next.settledAt
+      if (kind === 'attention' && next.snoozeUntilAttention) {
+        delete next.snoozeUntilAttention
+        delete next.snoozedAt
+      }
+      return next
+    })
+  }, [updateTaskInbox])
+
+  const markTaskVisited = useCallback((projectId: string, taskId: string) => {
+    updateTaskInbox(projectId, taskId, inbox => {
+      const next: TaskInboxState = { ...inbox, visitedAt: Date.now() }
+      delete next.forcedUnread
+      return next
+    })
+  }, [updateTaskInbox])
+
+  const markTaskUnread = useCallback((projectId: string, taskId: string) => {
+    updateTaskInbox(projectId, taskId, inbox => ({ ...inbox, forcedUnread: true }))
+  }, [updateTaskInbox])
+
+  const settleTask = useCallback((projectId: string, taskId: string) => {
+    const now = Date.now()
+    updateTaskInbox(projectId, taskId, inbox => {
+      // Settling is also an acknowledgement, so it clears unread and any snooze.
+      const next: TaskInboxState = { ...inbox, settledAt: now, visitedAt: now }
+      delete next.forcedUnread
+      delete next.snoozedUntil
+      delete next.snoozeUntilAttention
+      delete next.snoozedAt
+      return next
+    })
+  }, [updateTaskInbox])
+
+  const unsettleTask = useCallback((projectId: string, taskId: string) => {
+    updateTaskInbox(projectId, taskId, inbox => {
+      const next = { ...inbox }
+      delete next.settledAt
+      return next
+    })
+  }, [updateTaskInbox])
+
+  const snoozeTask = useCallback((
+    projectId: string,
+    taskId: string,
+    options: { until?: number; untilAttention?: boolean }
+  ) => {
+    const now = Date.now()
+    updateTaskInbox(projectId, taskId, inbox => {
+      const next: TaskInboxState = { ...inbox, snoozedAt: now, visitedAt: now }
+      delete next.forcedUnread
+      delete next.settledAt
+      if (options.untilAttention) {
+        next.snoozeUntilAttention = true
+        delete next.snoozedUntil
+      } else {
+        next.snoozedUntil = options.until
+        delete next.snoozeUntilAttention
+      }
+      return next
+    })
+  }, [updateTaskInbox])
+
+  const unsnoozeTask = useCallback((projectId: string, taskId: string) => {
+    updateTaskInbox(projectId, taskId, inbox => {
+      const next = { ...inbox }
+      delete next.snoozedUntil
+      delete next.snoozeUntilAttention
+      delete next.snoozedAt
+      return next
+    })
+  }, [updateTaskInbox])
+
   const cleanupClosedTabHistory = useCallback((entries: RecentlyClosedTab[]) => {
     for (const entry of entries) {
       void window.api.scrollbackDelete(entry.tab.id)
@@ -464,6 +572,8 @@ export function useAppState() {
         : [...prev.expandedProjectIds, projectId]
     }))
 
+    markTaskVisited(projectId, taskId)
+
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     if (project && isRemoteProject(project) && project.ssh) {
       window.api.sshStatus(projectId).then(status => {
@@ -472,7 +582,7 @@ export function useAppState() {
         }
       })
     }
-  }, [updateWindowViewState])
+  }, [updateWindowViewState, markTaskVisited])
 
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
     persistProjects(prev => ({
@@ -676,14 +786,20 @@ export function useAppState() {
     })
   }, [persistProjects])
 
-  const addTask = useCallback((projectId: string, name: string) => {
+  // `initialTabs` exists so a task can be born with its tabs: calling `addTab` right
+  // after this would read a `projectsRef` that hasn't seen the task yet and clobber
+  // the view state written below.
+  const addTask = useCallback((projectId: string, name: string, initialTabs: Tab[] = []) => {
     const task: Task = {
       id: uuid(),
       name,
-      tabs: { left: [], right: [] },
-      activeTab: { left: null, right: null },
+      tabs: { left: initialTabs, right: [] },
+      activeTab: { left: initialTabs[initialTabs.length - 1]?.id ?? null, right: null },
       splitOpen: false,
-      splitRatio: 0.5
+      splitRatio: 0.5,
+      // Creating a task is an interaction: without the stamp a brand-new task has
+      // no activity at all and sinks to the bottom of the inbox's active group.
+      lastInteractedAt: Date.now()
     }
     persistProjects(prev => ({
       ...prev,
@@ -705,15 +821,21 @@ export function useAppState() {
     return task
   }, [persistProjects, updateWindowViewState])
 
-  const addWorkspaceTask = useCallback((projectId: string, name: string, workspace: WorkspaceConfig) => {
+  const addWorkspaceTask = useCallback((
+    projectId: string,
+    name: string,
+    workspace: WorkspaceConfig,
+    initialTabs: Tab[] = []
+  ) => {
     const task: Task = {
       id: uuid(),
       name,
       workspace,
-      tabs: { left: [], right: [] },
-      activeTab: { left: null, right: null },
+      tabs: { left: initialTabs, right: [] },
+      activeTab: { left: initialTabs[initialTabs.length - 1]?.id ?? null, right: null },
       splitOpen: false,
-      splitRatio: 0.5
+      splitRatio: 0.5,
+      lastInteractedAt: Date.now()
     }
     persistProjects(prev => ({
       ...prev,
@@ -834,28 +956,7 @@ export function useAppState() {
     arg?: string | AddTabOptions
   ) => {
     const options = typeof arg === 'string' ? { filePath: arg } : (arg ?? {})
-    const { filePath, url, noteId, noteName } = options
-    const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
-    let title: string
-    if (noteId) {
-      title = noteName ?? 'Note'
-    } else if (filePath) {
-      const fileName = filePath.split('/').pop() ?? filePath
-      title = type === 'diff' ? `${fileName} (diff)` : fileName
-    } else {
-      title = isAi ? AI_TAB_META[type as AiTabType].label : (type === 'terminal' ? 'Terminal' : 'Browser')
-    }
-    const tab: Tab = {
-      id: uuid(),
-      type,
-      title,
-      // pi resumes via `--session-id <uuid>`; pre-generate a stable id at creation so
-      // the same session is reloaded across app restarts (pi creates it if missing).
-      ...(type === 'pi' ? { sessionId: uuid() } : {}),
-      ...(filePath ? { filePath } : {}),
-      ...(url ? { url } : {}),
-      ...(noteId ? { noteId } : {})
-    }
+    const tab = createTab(type, options)
 
     persistProjects(prev => ({
       ...prev,
@@ -1308,6 +1409,14 @@ export function useAppState() {
     updateWindowViewState(prev => ({ ...prev, sidebarWidth: Math.min(420, Math.max(180, width)) }))
   }, [updateWindowViewState])
 
+  const toggleSidebarProjectsCollapsed = useCallback(() => {
+    updateWindowViewState(prev => ({ ...prev, sidebarProjectsCollapsed: !prev.sidebarProjectsCollapsed }))
+  }, [updateWindowViewState])
+
+  const setSidebarTab = useCallback((tab: SidebarTab) => {
+    updateWindowViewState(prev => ({ ...prev, sidebarTab: tab }))
+  }, [updateWindowViewState])
+
   const setFileBrowserOpen = useCallback((open: boolean) => {
     updateWindowViewState(prev => writeSidebarToCurrentTask(prev, { fileBrowserOpen: open }))
   }, [updateWindowViewState, writeSidebarToCurrentTask])
@@ -1552,6 +1661,13 @@ export function useAppState() {
     setSelectedTaskId: selectTask,
     switchToTask,
     markTaskInteracted,
+    markTaskEvent,
+    markTaskVisited,
+    markTaskUnread,
+    settleTask,
+    unsettleTask,
+    snoozeTask,
+    unsnoozeTask,
     addProject,
     addRemoteProject,
     addShellCommandProject,
@@ -1598,6 +1714,10 @@ export function useAppState() {
     setFileBrowserWidth,
     sidebarWidth: windowViewState.sidebarWidth,
     setSidebarWidth,
+    sidebarProjectsCollapsed: windowViewState.sidebarProjectsCollapsed,
+    toggleSidebarProjectsCollapsed,
+    sidebarTab: windowViewState.sidebarTab,
+    setSidebarTab,
     setFileBrowserActiveTab,
     openOrFocusDiffTab,
     openOrFocusEditorTab,

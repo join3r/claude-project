@@ -144,7 +144,7 @@ export class AppRuntime {
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
-  private readonly hookServer = new HookServer()
+  private readonly hookServer = new HookServer((message) => this.logDebug(message))
   private readonly codexSessionManager = new CodexSessionManager()
   private readonly workspaceManager = new WorkspaceManager()
   private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
@@ -165,7 +165,10 @@ export class AppRuntime {
     this.storage.backupProjectsOnStartup()
     this.projectsData = this.storage.loadProjects()
     this.config = this.storage.loadConfig()
-    this.startupWindowStates = this.storage.loadWindowSession(this.projectsData).windows
+    this.startupWindowStates = this.storage.loadWindowSession(
+      this.projectsData,
+      this.config.defaultSidebarTab
+    ).windows
   }
 
   async start(): Promise<void> {
@@ -1036,6 +1039,7 @@ export class AppRuntime {
         if (remotePort) {
           this.hookInjector.remoteInject(projectId, remoteCwd)
           hookInjectPrefix = this.hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
+          this.logDebug(`hookInjectRemote dir=${remoteCwd} port=${remotePort} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
         }
       } else if (isPiRemote) {
         // pi loads the status extension via `-e`; write it to the remote host and
@@ -1055,7 +1059,11 @@ export class AppRuntime {
       const isClaudeLocal = shell === 'claude' && extraEnv?.DEVTOOL_TAB_ID
       const isPiLocal = shell === AI_TAB_META.pi.command && extraEnv?.DEVTOOL_TAB_ID
       if (isClaudeLocal) {
+        // Hooks land in the dir Claude is actually started in (a workspace task's
+        // worktree, not the project root) — logged so a missing status is easy to
+        // trace back to the settings file it should have been written to.
         this.hookInjector.inject(cwd)
+        this.logDebug(`hookInject dir=${cwd} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
       }
       let localArgs = args
       let localEnv = extraEnv

@@ -180,6 +180,11 @@ const api = {
     ipcRenderer.on('menu-reload-tab', handler)
     return () => ipcRenderer.removeListener('menu-reload-tab', handler)
   },
+  onMenuNewTask: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-new-task', handler)
+    return () => ipcRenderer.removeListener('menu-new-task', handler)
+  },
   onMenuNewTerminal: (callback: () => void): (() => void) => {
     const handler = () => callback()
     ipcRenderer.on('menu-new-terminal', handler)

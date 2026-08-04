@@ -211,10 +211,29 @@ export class SshConnectionManager extends EventEmitter {
     const cmdSuffix = commandArgs?.length ? ' ' + commandArgs.map(a => shellQuote(a)).join(' ') : ''
     const prefix = commandPrefix || ''
     const cwd = cwdOverride || config.remoteDir
-    // Wrap in login shell so the user's profile is sourced (PATH, etc.)
+    // Wrap in an interactive login shell (-l -i). Login alone is not enough:
+    // non-interactive bash skips ~/.bashrc (and Ubuntu's ~/.bashrc early-returns
+    // for non-interactive shells), so PATH additions from nvm/cargo/local bin
+    // never apply and commands like `pi` come back "not found" even though they
+    // work in a normal terminal. We always allocate a tty (-t), so interactive
+    // matches what the user's own ssh session would get.
     const innerCmd = `${prefix}cd ${shellQuote(cwd)} && ${envPrefix}exec ${command}${cmdSuffix}`
-    args.push(`bash -l -c ${shellQuote(innerCmd)}`)
+    args.push(`bash -l -i -c ${shellQuote(innerCmd)}`)
     return args
+  }
+
+  /** Args for an end-to-end liveness probe through the master socket: runs
+   *  `true` on the remote host as a mux slave. Unlike `-O check` (which only
+   *  asks the local master process if it's alive), this exercises the actual
+   *  TCP connection to the server. */
+  buildProbeArgs(projectId: string, config: SshConfig): string[] {
+    return [
+      ...this.buildBaseArgs(projectId, config),
+      '-o', 'ControlMaster=no',
+      '-o', 'BatchMode=yes',
+      `${config.username}@${config.host}`,
+      'true'
+    ]
   }
 
   buildCheckArgs(projectId: string, config: SshConfig): string[] {
@@ -541,19 +560,40 @@ export class SshConnectionManager extends EventEmitter {
 
   private healthCheckTimers = new Map<string, ReturnType<typeof setInterval>>()
 
-  /** Short-circuit the 10s health check poll when we have direct evidence the
-   *  tunnel is dead (e.g., a slave PTY printed "Shared connection to ... closed").
-   *  `ssh -O check` can falsely report the master as alive when the master
-   *  process survives but its TCP connection to the server has died, so we
-   *  don't rely on it here — we just tear everything down and let Layer 2
-   *  auto-reconnect take over immediately. */
+  private reconnectProbes = new Set<string>()
+
+  /** Short-circuit the 10s health check poll when a slave PTY printed
+   *  "Shared connection to ... closed". That message is NOT proof the tunnel
+   *  died — ssh prints it on every mux-slave exit, including a remote command
+   *  simply finishing or failing (e.g. "exec: pi: not found"). Tearing down
+   *  unconditionally turns any fast-exiting remote command into an infinite
+   *  gray-out/reconnect/respawn loop. So first verify with an end-to-end probe
+   *  through the control socket (a real `true` over the master's TCP — `-O
+   *  check` isn't enough because the master process can outlive its dead TCP
+   *  connection). Only if the probe fails do we tear down and let Layer 2
+   *  auto-reconnect take over. */
   triggerReconnect(projectId: string, config: SshConfig): void {
     if (this.getStatus(projectId) !== 'connected') return
-    this.stopHealthCheck(projectId)
-    this.clearTunnelRuntime(projectId)
-    this.setStatus(projectId, 'disconnected')
-    if (this.autoReconnectEnabled.has(projectId)) {
-      this.scheduleAutoReconnect(projectId, config)
+    if (this.reconnectProbes.has(projectId)) return
+    this.reconnectProbes.add(projectId)
+    void this.probeThenReconnect(projectId, config)
+  }
+
+  private async probeThenReconnect(projectId: string, config: SshConfig): Promise<void> {
+    try {
+      await this.execFileAsync('ssh', this.buildProbeArgs(projectId, config), { timeout: 5000 })
+      // Master answered end-to-end — the "connection closed" was a normal
+      // slave exit, not a dead tunnel. Leave the connection alone.
+    } catch {
+      if (this.getStatus(projectId) !== 'connected') return
+      this.stopHealthCheck(projectId)
+      this.clearTunnelRuntime(projectId)
+      this.setStatus(projectId, 'disconnected')
+      if (this.autoReconnectEnabled.has(projectId)) {
+        this.scheduleAutoReconnect(projectId, config)
+      }
+    } finally {
+      this.reconnectProbes.delete(projectId)
     }
   }
 

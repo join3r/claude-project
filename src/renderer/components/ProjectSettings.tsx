@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { AI_TAB_TYPES, AI_TAB_META } from '../../shared/types'
+import { AI_TAB_TYPES, AI_TAB_META, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import type { Project, AiTabType } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import TagPicker from './TagPicker'
@@ -18,6 +18,7 @@ interface Props {
     emoji?: string
     icon?: string
     tagIds?: string[]
+    directory?: string
   }) => void
   onClose: () => void
 }
@@ -34,7 +35,9 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   const [iconError, setIconError] = useState<string | null>(null)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [tagIds, setTagIds] = useState<string[]>(project.tagIds ?? [])
+  const [directory, setDirectory] = useState(project.directory)
   const suggestionsRef = useRef<HTMLDivElement>(null)
+  const canEditDirectory = !isRemoteProject(project) && !isShellCommandProject(project)
 
   useEffect(() => {
     let cancelled = false
@@ -55,18 +58,28 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   )
 
   const handleSave = () => {
+    const cleanedDirectory = directory.trim()
+    if (canEditDirectory && !cleanedDirectory) return
+
     const cleaned: Partial<Record<AiTabType, string>> = {}
     for (const tool of AI_TAB_TYPES) {
       const val = args[tool]?.trim()
       if (val) cleaned[tool] = val
     }
-    onSave({
+    const updates: Parameters<Props['onSave']>[0] = {
       aiToolArgs: cleaned,
       emoji: emoji.trim() || undefined,
       icon: icon.trim() || undefined,
       tagIds,
-    })
+    }
+    if (canEditDirectory) updates.directory = cleanedDirectory
+    onSave(updates)
     onClose()
+  }
+
+  const handlePickDirectory = async () => {
+    const picked = await window.api.pickDirectory().catch(() => null)
+    if (picked) setDirectory(picked)
   }
 
   const pickSuggestion = (slug: string) => {
@@ -79,8 +92,30 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
     <Modal
       title="Project Settings"
       onClose={onClose}
-      footer={<PrimaryButton onClick={handleSave}>Save</PrimaryButton>}
+      footer={<PrimaryButton onClick={handleSave} disabled={canEditDirectory && !directory.trim()}>Save</PrimaryButton>}
     >
+      {canEditDirectory && (
+        <SetBlock label="Directory">
+          <div className="flex gap-2">
+            <Field
+              className="flex-1"
+              value={directory}
+              onChange={(e) => setDirectory(e.target.value)}
+              placeholder="/path/to/project"
+            />
+            <button
+              type="button"
+              className="h-(--ctl-h) px-2.5 rounded-md bg-field text-text-muted hover:text-text border border-border cursor-pointer text-base"
+              onClick={handlePickDirectory}
+              title="Browse"
+            >
+              …
+            </button>
+          </div>
+          <HelperText>Update this when the project folder is moved.</HelperText>
+        </SetBlock>
+      )}
+
       <SetBlock label="Dashboard icon">
         <div className="flex items-center gap-2.5 relative">
           <div className="size-(--ctl-h-lg) rounded-md border border-border bg-field flex items-center justify-center shrink-0 overflow-hidden">

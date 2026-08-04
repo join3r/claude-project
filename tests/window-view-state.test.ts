@@ -178,4 +178,17 @@ describe('window view state', () => {
 
     expect(reconciled.expandedProjectIds).toEqual(['project-1'])
   })
+
+  it('opens new windows on the configured default sidebar tab', () => {
+    expect(buildWindowViewState(projects, DEFAULT_CONFIG).sidebarTab).toBe('inbox')
+    expect(
+      buildWindowViewState(projects, { ...DEFAULT_CONFIG, defaultSidebarTab: 'projects' }).sidebarTab
+    ).toBe('projects')
+  })
+
+  it('keeps a seeded sidebar tab over the configured default', () => {
+    const state = buildWindowViewState(projects, DEFAULT_CONFIG, { sidebarTab: 'projects' })
+
+    expect(state.sidebarTab).toBe('projects')
+  })
 })

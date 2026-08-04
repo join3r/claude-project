@@ -1,21 +1,27 @@
 import React, { createContext, useContext, useRef, useSyncExternalStore } from 'react'
+import { logStatusTransition } from '../statusDebug'
 
 export type TabStatusValue = 'working' | 'attention' | 'exited' | null
 
 export interface TabStatusStore {
   getStatus(tabId: string): TabStatusValue
-  setStatus(tabId: string, status: TabStatusValue): void
+  /** `reason` is trace-only (see statusDebug) — every writer should pass one. */
+  setStatus(tabId: string, status: TabStatusValue, reason?: string): void
   removeTab(tabId: string): void
   subscribe(callback: () => void): () => void
   getSnapshot(): Record<string, TabStatusValue>
+  /** When each tab's current status began — drives the inbox's "waiting 4m". */
+  getSinceSnapshot(): Record<string, number>
 }
 
 function createTabStatusStore(): TabStatusStore {
   let statuses: Record<string, TabStatusValue> = {}
+  let since: Record<string, number> = {}
   const listeners = new Set<() => void>()
 
   function notify() {
     statuses = { ...statuses }
+    since = { ...since }
     listeners.forEach((l) => l())
   }
 
@@ -23,14 +29,17 @@ function createTabStatusStore(): TabStatusStore {
     getStatus(tabId: string) {
       return statuses[tabId] ?? null
     },
-    setStatus(tabId: string, status: TabStatusValue) {
+    setStatus(tabId: string, status: TabStatusValue, reason?: string) {
       if (statuses[tabId] === status) return
+      logStatusTransition(tabId, statuses[tabId] ?? null, status, reason)
       statuses[tabId] = status
+      since[tabId] = Date.now()
       notify()
     },
     removeTab(tabId: string) {
       if (!(tabId in statuses)) return
       delete statuses[tabId]
+      delete since[tabId]
       notify()
     },
     subscribe(callback: () => void) {
@@ -39,6 +48,9 @@ function createTabStatusStore(): TabStatusStore {
     },
     getSnapshot() {
       return statuses
+    },
+    getSinceSnapshot() {
+      return since
     }
   }
 }
@@ -70,5 +82,13 @@ export function useAllTabStatuses(): Record<string, TabStatusValue> {
   return useSyncExternalStore(
     store.subscribe,
     () => store.getSnapshot()
+  )
+}
+
+export function useAllTabStatusSince(): Record<string, number> {
+  const store = useTabStatusStore()
+  return useSyncExternalStore(
+    store.subscribe,
+    () => store.getSinceSnapshot()
   )
 }

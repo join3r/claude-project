@@ -22,7 +22,7 @@ import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import { buildXtermTheme } from './terminalThemes'
 import { useTabStatusStore } from '../context/TabStatusContext'
-import { terminalStatusFromOutput } from './terminalStatus'
+import { hasBell, terminalStatusFromOutput } from './terminalStatus'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -52,7 +52,7 @@ interface TerminalEntry {
 
 const terminals = new Map<string, TerminalEntry>()
 const statusDetectors = new Map<string, (chunk: string) => void>()
-const exitListeners = new Map<string, () => void>()
+const exitListeners = new Map<string, (exitCode: number) => void>()
 
 let ptyListenerRegistered = false
 let ptyExitListenerRegistered = false
@@ -86,8 +86,8 @@ function ensurePtyListener(): void {
 function ensurePtyExitListener(): void {
   if (ptyExitListenerRegistered) return
   ptyExitListenerRegistered = true
-  window.api.onPtyExit((id: string) => {
-    exitListeners.get(id)?.()
+  window.api.onPtyExit((id: string, exitCode: number) => {
+    exitListeners.get(id)?.(exitCode)
   })
 }
 
@@ -136,7 +136,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
 export default function TerminalTab({ tabId, visible, projectId, taskId, pane, projectDir, sshConfig, shellCommand }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const { addTab, config, effectiveTerminalTheme, terminalZoomDelta, markTaskInteracted } = useApp()
+  const { addTab, config, effectiveTerminalTheme, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
   const focusClaimRef = useRef(false)
@@ -153,23 +153,25 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
 
   const handleOutputForStatus = useCallback((chunk: string) => {
     const now = Date.now()
-    if (now - lastStatusWriteRef.current < 200) return // throttle ~5/sec
+    // Bells skip the throttle — dropping one loses the tab's only attention signal.
+    if (!hasBell(chunk) && now - lastStatusWriteRef.current < 200) return // throttle ~5/sec
     lastStatusWriteRef.current = now
 
-    const lines = chunk.split(/\r?\n/).filter(l => l.trim().length > 0)
-    const lastLine = lines[lines.length - 1]
-    if (!lastLine) return
-
     const prev = statusStore.getStatus(tabId)
-    const next = terminalStatusFromOutput(lastLine, prev)
-    if (next !== prev) statusStore.setStatus(tabId, next)
+    const next = terminalStatusFromOutput(chunk, prev)
+    if (next !== prev) {
+      statusStore.setStatus(tabId, next, 'terminal-output')
+      // Only the transition into attention is inbox-worthy; ordinary output would
+      // otherwise keep every task with a dev server permanently unread.
+      if (next === 'attention') markTaskEvent(projectId, taskId, 'attention')
+    }
 
     if (decayTimerRef.current) window.clearTimeout(decayTimerRef.current)
     decayTimerRef.current = window.setTimeout(() => {
       const current = statusStore.getStatus(tabId)
-      if (current === 'working') statusStore.setStatus(tabId, null)
+      if (current === 'working') statusStore.setStatus(tabId, null, 'terminal-quiet')
     }, 30_000)
-  }, [statusStore, tabId])
+  }, [statusStore, tabId, projectId, taskId, markTaskEvent])
 
   // Release the renderer-side xterm instance while hidden. The PTY keeps
   // running in main and will be reattached from runtime scrollback on show.
@@ -489,14 +491,21 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   // so activity keeps updating while the tab is hidden (entry is disposed).
   useEffect(() => {
     statusDetectors.set(tabId, handleOutputForStatus)
-    exitListeners.set(tabId, () => statusStore.setStatus(tabId, 'exited'))
+    exitListeners.set(tabId, (exitCode: number) => {
+      statusStore.setStatus(tabId, 'exited', 'terminal-exit')
+      // A non-zero exit is a real "that didn't go well" — worth waking a task that
+      // was snoozed until something needed you. It stays 'exited' rather than
+      // 'attention' though: the tier is for agents blocked on you, and a dead shell
+      // isn't blocked, it's over.
+      markTaskEvent(projectId, taskId, exitCode !== 0 ? 'attention' : 'event')
+    })
     ensurePtyListener()
     ensurePtyExitListener()
     return () => {
       statusDetectors.delete(tabId)
       exitListeners.delete(tabId)
     }
-  }, [tabId, handleOutputForStatus, statusStore])
+  }, [tabId, handleOutputForStatus, statusStore, projectId, taskId, markTaskEvent])
 
   // Cleanup decay timer on unmount
   useEffect(() => {

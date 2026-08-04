@@ -52,6 +52,11 @@ function buildAppMenu(): void {
           click: () => sendToRenderer('menu-new-window')
         },
         {
+          label: 'New Task',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => sendToRenderer('menu-new-task')
+        },
+        {
           label: 'New Terminal Tab',
           accelerator: 'CmdOrCtrl+T',
           click: () => sendToRenderer('menu-new-terminal')
@@ -195,7 +200,8 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
       } else if (input.alt) {
         if (key === 'i') { mainWindow.webContents.toggleDevTools(); event.preventDefault() }
       } else {
-        if (key === 't') send('menu-new-terminal')
+        if (key === 'n') send('menu-new-task')
+        else if (key === 't') send('menu-new-terminal')
         else if (key === 'w') send('menu-close-tab')
         else if (key === 'p') send('menu-project-switcher')
         else if (key === 'b') send('menu-toggle-sidebar')

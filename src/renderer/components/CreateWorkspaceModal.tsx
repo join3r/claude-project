@@ -98,7 +98,7 @@ export default function CreateWorkspaceModal({ projectDir, projectId, sshConfig,
           {filteredBranches.map(branch => (
             <button
               key={branch}
-              className={`block w-full rounded-md px-2 py-1 text-left text-base text-text bg-transparent border-0 cursor-pointer ${branch === selectedBranch ? 'bg-sel' : 'hover:bg-surface-3'}`}
+              className={`block w-full rounded-md px-2 py-1 text-left text-base text-text border-0 cursor-pointer ${branch === selectedBranch ? 'bg-sel' : 'bg-transparent hover:bg-surface-3'}`}
               onClick={() => setSelectedBranch(branch)}
             >
               {branch}
