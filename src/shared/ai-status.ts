@@ -1,10 +1,14 @@
-import type { TabStatusValue } from '../context/TabStatusContext'
+import type { TabStatusValue } from './types'
 
 /**
  * The status dot for an AI tab is written from four independent sources (Claude/pi
  * hooks, raw PTY activity, the terminal bell, PTY exit). This module is the single
  * place that decides what wins, so the rules are testable instead of buried in
  * AiToolTab's effects.
+ *
+ * It is shared rather than renderer-local because main runs the same state machine
+ * over the hook events it forwards (`src/main/tab-activity-registry.ts`); idle
+ * cleanup would otherwise be deciding "is this agent busy?" by its own rules.
  */
 
 export type AiStatusEvent =

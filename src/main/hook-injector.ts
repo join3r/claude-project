@@ -11,7 +11,17 @@ interface HookEntry {
 
 export class HookInjector {
   private port: number
-  private refCounts = new Map<string, number>()
+  /**
+   * Tab ids that currently hold an injection, keyed by project dir.
+   *
+   * Tracking owners rather than a plain count keeps inject/cleanup balanced no
+   * matter how they interleave: a cleanup for a tab that never spawned (hidden
+   * lazy tabs request cleanup on removal regardless) can't consume a sibling's
+   * reference, and a tab that respawns its PTY re-adds an id it already owns
+   * instead of double-counting. Hooks come off disk exactly when a dir's owner
+   * set empties.
+   */
+  private localOwners = new Map<string, Set<string>>()
 
   constructor(port: number) {
     this.port = port
@@ -42,12 +52,15 @@ export class HookInjector {
     }
   }
 
-  inject(projectDir: string): void {
-    const count = this.refCounts.get(projectDir) ?? 0
-    this.refCounts.set(projectDir, count + 1)
-
-    // Only write hooks on first inject for this dir
-    if (count > 0) return
+  inject(projectDir: string, tabId: string): void {
+    const owners = this.localOwners.get(projectDir)
+    if (owners) {
+      // Hooks are already on disk for this dir — record the extra owner (or
+      // ignore a respawn of one we already track) and leave the file alone.
+      owners.add(tabId)
+      return
+    }
+    this.localOwners.set(projectDir, new Set([tabId]))
 
     const claudeDir = path.join(projectDir, '.claude')
     const settingsPath = path.join(claudeDir, 'settings.local.json')
@@ -80,18 +93,18 @@ export class HookInjector {
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
   }
 
-  cleanup(projectDir: string): void {
-    const count = this.refCounts.get(projectDir) ?? 0
-    if (count <= 0) return
+  /** Release `tabId`'s injection. A tab that never injected is a no-op. */
+  cleanup(projectDir: string, tabId: string): void {
+    const owners = this.localOwners.get(projectDir)
+    if (!owners || !owners.delete(tabId)) return
+    if (owners.size > 0) return
 
-    if (count > 1) {
-      this.refCounts.set(projectDir, count - 1)
-      return
-    }
+    // Last owner gone — remove hooks from file
+    this.localOwners.delete(projectDir)
+    this.removeHooksFromDisk(projectDir)
+  }
 
-    // Last reference — remove hooks from file
-    this.refCounts.delete(projectDir)
-
+  private removeHooksFromDisk(projectDir: string): void {
     const settingsPath = path.join(projectDir, '.claude', 'settings.local.json')
     try {
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
@@ -118,20 +131,21 @@ export class HookInjector {
   }
 
   cleanupAll(): void {
-    for (const dir of [...this.refCounts.keys()]) {
-      // Force cleanup regardless of refcount
-      this.refCounts.set(dir, 1)
-      this.cleanup(dir)
+    for (const dir of [...this.localOwners.keys()]) {
+      // Shutdown — drop hooks regardless of who still owns them
+      this.localOwners.delete(dir)
+      this.removeHooksFromDisk(dir)
     }
   }
 
   getInjectedDirs(): string[] {
-    return [...this.refCounts.keys()]
+    return [...this.localOwners.keys()]
   }
 
   // --- Remote hook injection ---
 
-  private remoteRefCounts = new Map<string, number>()
+  /** Owner tab ids keyed by `projectId:remoteDir` — same accounting as {@link localOwners}. */
+  private remoteOwners = new Map<string, Set<string>>()
 
   private remoteKey(projectId: string, remoteDir: string): string {
     return `${projectId}:${remoteDir}`
@@ -142,24 +156,33 @@ export class HookInjector {
     return "'" + s.replace(/'/g, "'\\''") + "'"
   }
 
-  /** Track remote inject ref-count keyed by projectId + remoteDir. Returns true on first inject. */
-  remoteInject(projectId: string, remoteDir: string): boolean {
+  /**
+   * Record `tabId` as an owner of the remote injection for projectId + remoteDir.
+   * Returns true when it is the first owner (hooks were not installed there yet).
+   */
+  remoteInject(projectId: string, remoteDir: string, tabId: string): boolean {
     const key = this.remoteKey(projectId, remoteDir)
-    const count = this.remoteRefCounts.get(key) ?? 0
-    this.remoteRefCounts.set(key, count + 1)
-    return count === 0
+    const owners = this.remoteOwners.get(key)
+    if (owners) {
+      owners.add(tabId)
+      return false
+    }
+    this.remoteOwners.set(key, new Set([tabId]))
+    return true
   }
 
-  /** Track remote cleanup ref-count. Returns true when last ref removed. */
-  remoteCleanup(projectId: string, remoteDir: string): boolean {
+  /**
+   * Release `tabId`'s remote injection. Returns true when the last owner is gone
+   * and the caller should run the remote cleanup script; a tab that never
+   * injected releases nothing and returns false.
+   */
+  remoteCleanup(projectId: string, remoteDir: string, tabId: string): boolean {
     const key = this.remoteKey(projectId, remoteDir)
-    const count = this.remoteRefCounts.get(key) ?? 0
-    if (count <= 1) {
-      this.remoteRefCounts.delete(key)
-      return true
-    }
-    this.remoteRefCounts.set(key, count - 1)
-    return false
+    const owners = this.remoteOwners.get(key)
+    if (!owners || !owners.delete(tabId)) return false
+    if (owners.size > 0) return false
+    this.remoteOwners.delete(key)
+    return true
   }
 
   /**

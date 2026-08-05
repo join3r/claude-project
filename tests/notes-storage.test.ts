@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { NotesStorage } from '../src/main/notes-storage'
+import { RevisionStore } from '../src/main/revision-store'
+import type { NotesEnvelope, NotesRecord } from '../src/shared/types'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -51,5 +53,44 @@ describe('NotesStorage', () => {
     const filePath = path.join(testDir, 'notes.json')
     fs.writeFileSync(filePath, 'not valid json')
     expect(storage.load()).toEqual({})
+  })
+
+  describe('behind a RevisionStore', () => {
+    const note = (id: string, content: string) =>
+      ({ id, name: id, content, createdAt: 1, updatedAt: 1 })
+
+    function buildStore(): { store: RevisionStore<NotesRecord>; broadcasts: NotesEnvelope[] } {
+      storage.save({ p1: [note('n-a', 'a0'), note('n-b', 'b0')] })
+      const broadcasts: NotesEnvelope[] = []
+      const store = new RevisionStore<NotesRecord>({
+        initial: storage.load(),
+        persist: (data) => storage.save(data),
+        broadcast: (envelope) => broadcasts.push(envelope)
+      })
+      return { store, broadcasts }
+    }
+
+    it('writes nothing to disk for a save that quotes a stale revision', () => {
+      const { store } = buildStore()
+      const stale = store.get()
+
+      store.save(stale.revision, { p1: [note('n-a', 'a1'), note('n-b', 'b0')] })
+      const refused = store.save(stale.revision, { p1: [note('n-a', 'a0'), note('n-b', 'b1')] })
+
+      expect(refused.ok).toBe(false)
+      // The whole-record write from the stale window never reached the file, so the
+      // accepted edit is still there.
+      expect(storage.load().p1.find(n => n.id === 'n-a')?.content).toBe('a1')
+    })
+
+    it('broadcasts every accepted note save so other windows learn about it', () => {
+      const { store, broadcasts } = buildStore()
+
+      store.save(store.getRevision(), { p1: [note('n-a', 'a1'), note('n-b', 'b0')] })
+
+      expect(broadcasts).toHaveLength(1)
+      expect(broadcasts[0].revision).toBe(1)
+      expect(broadcasts[0].data.p1.find(n => n.id === 'n-a')?.content).toBe('a1')
+    })
   })
 })

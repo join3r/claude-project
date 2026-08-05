@@ -600,6 +600,148 @@ describe('SshConnectionManager triggerReconnect', () => {
   })
 })
 
+describe('SshConnectionManager auto-reconnect restores the configured tunnel', () => {
+  let manager: SshConnectionManager
+  let socketDir: string
+  const config = { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/app' }
+  const tunnel = { host: 'localhost', sourcePort: 3000, destinationPort: 3000 }
+
+  /** Drive the mocked ssh binary from its argv: `handler` returns an Error to
+   *  fail the call, or a stdout string to succeed it. */
+  const respondByArgs = (handler: (args: string[]) => Error | string): void => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        const result = handler(args)
+        if (result instanceof Error) (cb as (err: Error) => void)(result)
+        else (cb as (err: null, stdout: string, stderr: string) => void)(null, result, '')
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+  }
+
+  const isTunnelForward = (args: string[]): boolean =>
+    args.includes('-L') && args.includes('forward')
+  const isMaster = (args: string[]): boolean => args.includes('-M')
+  const isRemoteForward = (args: string[]): boolean => args.includes('-R')
+  const isCheck = (args: string[]): boolean => args.includes('check')
+
+  beforeEach(() => {
+    socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-test-'))
+    manager = new SshConnectionManager(socketDir, 9999)
+    mockExecFile.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    manager.clearProject('proj-1')
+    manager.stopHealthChecks()
+    vi.useRealTimers()
+    fs.rmSync(socketDir, { recursive: true })
+  })
+
+  it('recreates the tunnel on auto-reconnect and only then reports connected', async () => {
+    const events: string[] = []
+    manager.on('status-changed', (_id: string, status: string) => events.push(`ssh:${status}`))
+    manager.on('tunnel-status-changed', (_id: string, status: string) => events.push(`tunnel:${status}`))
+
+    respondByArgs(args => (isRemoteForward(args) ? 'Allocated port 45678' : ''))
+
+    await manager.connect('proj-1', config, { tunnel })
+    expect(manager.getStatus('proj-1')).toBe('connected')
+    expect(manager.getTunnelState('proj-1')).toEqual({ status: 'active' })
+
+    // Health check fails -> teardown -> auto-reconnect (first backoff is 1s).
+    const checkSpy = vi.spyOn(manager, 'checkConnection').mockResolvedValue(false)
+    manager.startHealthChecks('proj-1', config, 10000)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(manager.getStatus('proj-1')).toBe('disconnected')
+
+    checkSpy.mockRestore()
+    mockExecFile.mockClear()
+    respondByArgs(args => (isRemoteForward(args) ? 'Allocated port 45678' : ''))
+
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(manager.getStatus('proj-1')).toBe('connected')
+    expect(manager.getTunnel('proj-1')).toEqual(tunnel)
+    expect(manager.getTunnelState('proj-1')).toEqual({ status: 'active' })
+
+    // The reconnect re-issued the same forward the user configured.
+    const forwardCalls = mockExecFile.mock.calls.filter(call => isTunnelForward(call[1] as string[]))
+    expect(forwardCalls).toHaveLength(1)
+    expect(forwardCalls[0][1]).toContain('3000:localhost:3000')
+
+    // 'connected' is never announced while the tunnel is down: every ssh:connected
+    // is immediately preceded by the tunnel going active.
+    for (const [i, event] of events.entries()) {
+      if (event === 'ssh:connected') expect(events[i - 1]).toBe('tunnel:active')
+    }
+    expect(events.filter(e => e === 'ssh:connected')).toHaveLength(2)
+  })
+
+  it('reports a degraded state, not connected, when the tunnel fails after reconnect', async () => {
+    respondByArgs(args => (isRemoteForward(args) ? 'Allocated port 45678' : ''))
+    await manager.connect('proj-1', config, { tunnel })
+
+    const checkSpy = vi.spyOn(manager, 'checkConnection').mockResolvedValue(false)
+    manager.startHealthChecks('proj-1', config, 10000)
+    await vi.advanceTimersByTimeAsync(10000)
+    checkSpy.mockRestore()
+
+    // Master comes back, but the local port is taken and the forward fails.
+    respondByArgs(args => {
+      if (isTunnelForward(args)) return new Error('bind: Address already in use')
+      if (isRemoteForward(args)) return 'Allocated port 45678'
+      return ''
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(manager.getStatus('proj-1')).not.toBe('connected')
+    expect(manager.getStatus('proj-1')).toBe('connecting')
+    expect(manager.getTunnelState('proj-1')).toEqual({
+      status: 'error',
+      error: expect.stringContaining('Address already in use')
+    })
+    expect(manager.getTunnel('proj-1')).toBeUndefined()
+
+    // Retries on the same backoff cadence and reports connected once it recovers.
+    respondByArgs(args => {
+      if (isCheck(args)) return ''
+      if (isRemoteForward(args)) return 'Allocated port 45678'
+      return ''
+    })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(manager.getStatus('proj-1')).toBe('connected')
+    expect(manager.getTunnelState('proj-1')).toEqual({ status: 'active' })
+    expect(manager.getTunnel('proj-1')).toEqual(tunnel)
+  })
+
+  it('reconnects a project without a tunnel exactly as before', async () => {
+    respondByArgs(args => (isRemoteForward(args) ? 'Allocated port 45678' : ''))
+
+    await manager.connect('proj-1', config)
+    expect(manager.getStatus('proj-1')).toBe('connected')
+
+    const checkSpy = vi.spyOn(manager, 'checkConnection').mockResolvedValue(false)
+    manager.startHealthChecks('proj-1', config, 10000)
+    await vi.advanceTimersByTimeAsync(10000)
+    checkSpy.mockRestore()
+
+    mockExecFile.mockClear()
+    respondByArgs(args => (isRemoteForward(args) ? 'Allocated port 45678' : ''))
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(manager.getStatus('proj-1')).toBe('connected')
+    expect(manager.getTunnel('proj-1')).toBeUndefined()
+    expect(manager.getTunnelState('proj-1')).toEqual({ status: 'inactive' })
+    expect(mockExecFile.mock.calls.filter(call => isTunnelForward(call[1] as string[]))).toHaveLength(0)
+    // Only the master and the remote hook forward, no spurious extra ssh calls.
+    expect(mockExecFile.mock.calls.filter(call => isMaster(call[1] as string[]))).toHaveLength(1)
+    expect(mockExecFile.mock.calls.filter(call => isRemoteForward(call[1] as string[]))).toHaveLength(1)
+  })
+})
+
 describe('SshConnectionManager SOCKS proxy', () => {
   let manager: SshConnectionManager
   let socketDir: string

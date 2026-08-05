@@ -47,6 +47,11 @@ export class SshConnectionManager extends EventEmitter {
   private remotePorts = new Map<string, number>()
   private configs = new Map<string, SshConfig>()
   private tunnels = new Map<string, TunnelConfig>()
+  /** The tunnel the project is *configured* to have, as opposed to the one that
+   *  is currently up (`tunnels`). Survives connection loss so that reconnects —
+   *  including automatic ones, which have no renderer in the loop — can restore
+   *  the connection to its full configured state. */
+  private desiredTunnels = new Map<string, TunnelConfig>()
   private tunnelStates = new Map<string, TunnelState>()
   private socksProxies = new Map<string, { port: number; process: ChildProcess }>()
   private socksStartPromises = new Map<string, Promise<number>>()
@@ -54,6 +59,8 @@ export class SshConnectionManager extends EventEmitter {
   private autoReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private autoReconnectAttempts = new Map<string, number>()
   private autoReconnectEnabled = new Set<string>()
+  private tunnelRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private tunnelRetryAttempts = new Map<string, number>()
 
   /** Promisified execFile that always returns { stdout, stderr } */
   private execFileAsync(cmd: string, args: string[], opts: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
@@ -106,7 +113,10 @@ export class SshConnectionManager extends EventEmitter {
     this.emit('tunnel-status-changed', projectId, status, error)
   }
 
+  /** Drop the *live* tunnel state. Deliberately keeps `desiredTunnels`: the
+   *  configuration is still what the user asked for, it just isn't up right now. */
   private clearTunnelRuntime(projectId: string): void {
+    this.cancelTunnelRetry(projectId)
     this.tunnels.delete(projectId)
     this.tunnelStates.delete(projectId)
     this.emit('tunnel-status-changed', projectId, 'inactive', undefined)
@@ -114,10 +124,12 @@ export class SshConnectionManager extends EventEmitter {
 
   clearProject(projectId: string): void {
     this.cancelAutoReconnect(projectId)
+    this.cancelTunnelRetry(projectId)
     this.statuses.delete(projectId)
     this.remotePorts.delete(projectId)
     this.configs.delete(projectId)
     this.tunnels.delete(projectId)
+    this.desiredTunnels.delete(projectId)
     this.tunnelStates.delete(projectId)
     this.socksStartPromises.delete(projectId)
     const socksEntry = this.socksProxies.get(projectId)
@@ -404,7 +416,17 @@ export class SshConnectionManager extends EventEmitter {
     return connected
   }
 
-  async connect(projectId: string, config: SshConfig): Promise<void> {
+  /** Connect (or reconnect) a project and bring it back to its full configured
+   *  state. Pass `options.tunnel` to record the project's configured local
+   *  forward (null clears it); omit `options` to reuse whatever was recorded
+   *  last — which is what the internal auto-reconnect path does, so it restores
+   *  the same tunnel the renderer-triggered connect established. */
+  async connect(projectId: string, config: SshConfig, options?: { tunnel?: TunnelConfig | null }): Promise<void> {
+    if (options && 'tunnel' in options) {
+      if (options.tunnel) this.desiredTunnels.set(projectId, options.tunnel)
+      else this.desiredTunnels.delete(projectId)
+    }
+
     // Serialize per-project: if a connect is already in progress, wait for it
     // then check status — avoids a second call's cleanup killing the master
     // that the first call just established (race on app startup with multiple
@@ -438,6 +460,7 @@ export class SshConnectionManager extends EventEmitter {
     // socket file actually exists.
     this.stopHealthCheck(projectId)
     this.cancelPendingAutoReconnect(projectId)
+    this.cancelTunnelRetry(projectId)
     const socketPath = this.getSocketPath(projectId)
     if (fs.existsSync(socketPath)) {
       try {
@@ -469,9 +492,30 @@ export class SshConnectionManager extends EventEmitter {
         throw new Error('SSH master connected but remote port forwarding was not allocated — stdout: ' + stdout.slice(0, 200))
       }
       this.setRemotePort(projectId, parseInt(portMatch[1], 10))
-      this.setStatus(projectId, 'connected')
       this.autoReconnectEnabled.add(projectId)
       this.autoReconnectAttempts.delete(projectId)
+
+      // Step 3: restore the configured local forward *before* announcing
+      // 'connected'. Anyone who sees 'connected' must be able to rely on the
+      // tunnel actually being up — otherwise an automatic recovery silently
+      // leaves the user with a dead forward they believe is working.
+      const tunnel = this.desiredTunnels.get(projectId)
+      if (tunnel) {
+        try {
+          await this.applyTunnel(projectId, config, tunnel)
+        } catch (tunnelErr) {
+          // The master is alive but the connection is not in its configured
+          // state, so we stay 'connecting' and keep retrying the forward on the
+          // same backoff cadence auto-reconnect uses. The reason is surfaced
+          // through the tunnel state.
+          const message = tunnelErr instanceof Error ? tunnelErr.message : String(tunnelErr)
+          this.tunnels.delete(projectId)
+          this.setTunnelState(projectId, 'error', message)
+          this.scheduleTunnelRetry(projectId, config)
+          return
+        }
+      }
+      this.setStatus(projectId, 'connected')
     } catch (err) {
       this.setStatus(projectId, 'disconnected')
       this.configs.delete(projectId)
@@ -499,11 +543,21 @@ export class SshConnectionManager extends EventEmitter {
     this.clearProject(projectId)
   }
 
+  /** Bring up a local forward through the existing master socket. Shared by the
+   *  renderer-driven `setTunnel` and by the connect/reconnect path, so both
+   *  establish the tunnel exactly the same way. */
+  private async applyTunnel(projectId: string, config: SshConfig, tunnel: TunnelConfig): Promise<void> {
+    await this.execFileAsync('ssh', this.buildTunnelForwardArgs(projectId, config, tunnel), { timeout: 10000 })
+    this.tunnels.set(projectId, tunnel)
+    this.setTunnelState(projectId, 'active')
+  }
+
   async setTunnel(projectId: string, config: SshConfig, tunnel: TunnelConfig | null): Promise<void> {
     if (this.getStatus(projectId) !== 'connected') {
       throw new Error('SSH connection not established')
     }
 
+    this.cancelTunnelRetry(projectId)
     const previousTunnel = this.tunnels.get(projectId)
     if (previousTunnel) {
       try {
@@ -515,14 +569,14 @@ export class SshConnectionManager extends EventEmitter {
     }
 
     if (!tunnel) {
+      this.desiredTunnels.delete(projectId)
       this.clearTunnelRuntime(projectId)
       return
     }
 
+    this.desiredTunnels.set(projectId, tunnel)
     try {
-      await this.execFileAsync('ssh', this.buildTunnelForwardArgs(projectId, config, tunnel), { timeout: 10000 })
-      this.tunnels.set(projectId, tunnel)
-      this.setTunnelState(projectId, 'active')
+      await this.applyTunnel(projectId, config, tunnel)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.setTunnelState(projectId, 'error', message)
@@ -633,6 +687,10 @@ export class SshConnectionManager extends EventEmitter {
         if (this.getStatus(projectId) === 'connected') {
           this.autoReconnectAttempts.delete(projectId)
           this.startHealthChecks(projectId, config)
+        } else if (this.tunnelRetryTimers.has(projectId)) {
+          // Master is back but the configured forward isn't up yet — the tunnel
+          // retry owns recovery from here (and hands back if the master dies).
+          this.autoReconnectAttempts.delete(projectId)
         } else if (this.autoReconnectEnabled.has(projectId)) {
           this.scheduleAutoReconnect(projectId, config)
         }
@@ -643,6 +701,58 @@ export class SshConnectionManager extends EventEmitter {
       }
     }, delay)
     this.autoReconnectTimers.set(projectId, timer)
+  }
+
+  /** Retry a configured local forward that failed to come up after the master
+   *  connected, on the same exponential backoff as auto-reconnect. The project
+   *  stays 'connecting' until the forward is live: the master is usable, but the
+   *  connection is not in the state the user configured, so callers must not
+   *  treat it as fully connected. */
+  private scheduleTunnelRetry(projectId: string, config: SshConfig): void {
+    if (this.tunnelRetryTimers.has(projectId)) return
+    const attempts = this.tunnelRetryAttempts.get(projectId) ?? 0
+    const delay = Math.min(1000 * Math.pow(2, attempts), 30000)
+    const timer = setTimeout(async () => {
+      this.tunnelRetryTimers.delete(projectId)
+      const tunnel = this.desiredTunnels.get(projectId)
+      if (!tunnel || !this.autoReconnectEnabled.has(projectId)) return
+      if (this.getStatus(projectId) === 'connected') return
+      this.tunnelRetryAttempts.set(projectId, attempts + 1)
+
+      // The master can die while we retry the forward — hand back to the full
+      // reconnect path when it does, instead of retrying a forward forever
+      // against a dead socket.
+      const masterAlive = await this.checkConnection(projectId, config)
+      if (!masterAlive) {
+        this.cancelTunnelRetry(projectId)
+        this.setStatus(projectId, 'disconnected')
+        if (this.autoReconnectEnabled.has(projectId)) {
+          this.scheduleAutoReconnect(projectId, config)
+        }
+        return
+      }
+
+      try {
+        await this.applyTunnel(projectId, config, tunnel)
+        this.tunnelRetryAttempts.delete(projectId)
+        this.setStatus(projectId, 'connected')
+        this.startHealthChecks(projectId, config)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        this.setTunnelState(projectId, 'error', message)
+        this.scheduleTunnelRetry(projectId, config)
+      }
+    }, delay)
+    this.tunnelRetryTimers.set(projectId, timer)
+  }
+
+  private cancelTunnelRetry(projectId: string): void {
+    const timer = this.tunnelRetryTimers.get(projectId)
+    if (timer) {
+      clearTimeout(timer)
+      this.tunnelRetryTimers.delete(projectId)
+    }
+    this.tunnelRetryAttempts.delete(projectId)
   }
 
   /** Cancel a pending auto-reconnect timer but keep the intent to auto-reconnect.

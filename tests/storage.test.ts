@@ -412,7 +412,56 @@ describe('Storage', () => {
     const tasks = normalized.projects[0].tasks
     expect(tasks[0].lastInteractedAt).toBe(12345)
     expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
-    expect(tasks[1].lastInteractedAt).toBeUndefined()
+    // t2 has no stamp of any kind — it gets one now rather than reading as infinitely idle.
+    expect(tasks[1].lastInteractedAt).toBeGreaterThan(12345)
+  })
+
+  it('starts the clock now for a task with no activity stamp at all', () => {
+    const before = Date.now()
+    const data = {
+      projects: [{
+        id: 'p1',
+        name: 'P1',
+        dir: '/tmp/p1',
+        tasks: [{
+          id: 't1',
+          name: 'T1',
+          tabs: { left: [], right: [] },
+          activeTab: { left: null, right: null },
+          splitOpen: false,
+          splitRatio: 0.5
+        }]
+      }],
+      projectOrder: ['p1']
+    }
+
+    const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
+    const stamp = normalized.projects[0].tasks[0].lastInteractedAt
+    expect(stamp).toBeGreaterThanOrEqual(before)
+    expect(stamp).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('leaves a task with only an inbox event stamp alone', () => {
+    const data = {
+      projects: [{
+        id: 'p1',
+        name: 'P1',
+        dir: '/tmp/p1',
+        tasks: [{
+          id: 't1',
+          name: 'T1',
+          tabs: { left: [], right: [] },
+          activeTab: { left: null, right: null },
+          splitOpen: false,
+          splitRatio: 0.5,
+          inbox: { eventAt: 4242 }
+        }]
+      }],
+      projectOrder: ['p1']
+    }
+
+    const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
+    expect(normalized.projects[0].tasks[0].lastInteractedAt).toBeUndefined()
   })
 
   it('does not overwrite existing lastInteractedAt', () => {
@@ -450,13 +499,24 @@ describe('Storage', () => {
   })
 
   it('backupProjectsOnStartup is a no-op when projects.json does not exist', () => {
-    storage.backupProjectsOnStartup()
+    // Nothing on disk is nothing to lose, so this still counts as a snapshot for
+    // the callers that refuse to delete without one.
+    expect(storage.backupProjectsOnStartup()).toBe(true)
     expect(fs.existsSync(path.join(testDir, 'backups'))).toBe(false)
+  })
+
+  it('backupProjectsOnStartup reports failure instead of swallowing it', () => {
+    fs.writeFileSync(path.join(testDir, 'projects.json'), '{"projects":[]}')
+    // A file where backups/ has to go: the copy cannot happen, and idle cleanup
+    // must be able to see that (finding #9).
+    fs.writeFileSync(path.join(testDir, 'backups'), 'not a directory')
+
+    expect(storage.backupProjectsOnStartup()).toBe(false)
   })
 
   it('backupProjectsOnStartup snapshots projects.json into backups/', () => {
     fs.writeFileSync(path.join(testDir, 'projects.json'), '{"projects":[]}')
-    storage.backupProjectsOnStartup()
+    expect(storage.backupProjectsOnStartup()).toBe(true)
     const backups = fs.readdirSync(path.join(testDir, 'backups'))
     expect(backups).toHaveLength(1)
     expect(backups[0]).toMatch(/^projects-.*\.json$/)

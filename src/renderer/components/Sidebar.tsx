@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore, type TabStatusValue } from '../context/TabStatusContext'
 import { AI_TAB_TYPES, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
-import type { Task, Project, PinnedItem } from '../../shared/types'
+import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -438,8 +438,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
     if (task?.workspace && project) {
       let keepBranch = false
+      let result: WorkspaceDeleteResult
       try {
-        const result = await window.api.workspaceDelete(
+        result = await window.api.workspaceDelete(
           {
             projectDir: getProjectDir(project),
             projectId: isRemoteProject(project) ? project.id : undefined,
@@ -449,18 +450,27 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             baseBranch: task.workspace.baseBranch
           }
         )
-        if (result.status === 'uncommitted') {
-          if (!window.confirm('This workspace has uncommitted changes that will be lost. Delete anyway?')) return
-        } else if (result.status === 'unmerged') {
-          if (!window.confirm(`Branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete workspace?`)) return
-          keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
-        } else if (result.status === 'uncommitted-and-unmerged') {
-          if (!window.confirm(`This workspace has uncommitted changes and branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete anyway?`)) return
-          keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
-        }
-      } catch {
-        // Pre-flight failed, proceed with deletion
+      } catch (err) {
+        // A pre-flight that never ran is not permission to delete: ask, like 'check-failed'.
+        result = { status: 'check-failed', reason: err instanceof Error ? err.message : String(err) }
       }
+
+      if (result.status === 'uncommitted') {
+        if (!window.confirm('This workspace has uncommitted changes that will be lost. Delete anyway?')) return
+      } else if (result.status === 'unmerged') {
+        if (!window.confirm(`Branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete workspace?`)) return
+        keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
+      } else if (result.status === 'uncommitted-and-unmerged') {
+        if (!window.confirm(`This workspace has uncommitted changes and branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete anyway?`)) return
+        keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
+      } else if (result.status === 'check-failed') {
+        const reason = result.reason || 'The safety checks did not complete.'
+        if (!window.confirm(`DevTool could not verify that workspace "${task.workspace.branchName}" is safe to delete.\n\n${reason}\n\nDelete anyway? Uncommitted or unmerged work may be lost.`)) return
+        // Merge state unknown, so keep the branch unless the user explicitly asks otherwise.
+        keepBranch = !window.confirm(`Also delete the branch "${task.workspace.branchName}"? Its merge state could not be verified.`)
+      }
+      // 'invalid-worktree' is reported after step 2 instead: killing the tabs below can free
+      // the worktree, and the forced pass is the one that decides whether anything is left.
 
       // Step 1: Kill all tabs/PTYs first so no process holds the worktree cwd
       for (const tab of [...task.tabs.left, ...task.tabs.right]) {
@@ -470,7 +480,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       // Step 2: Now safe to remove worktree and branch
       try {
-        await window.api.workspaceDelete(
+        const forced = await window.api.workspaceDelete(
           {
             projectDir: getProjectDir(project),
             projectId: isRemoteProject(project) ? project.id : undefined,
@@ -482,6 +492,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             keepBranch
           }
         )
+        if (forced.status !== 'ok') {
+          window.alert(forced.reason || `The workspace directory "${task.workspace.worktreePath}" could not be removed and was left on disk.`)
+        }
       } catch {
         // Worktree may already be cleaned up
       }

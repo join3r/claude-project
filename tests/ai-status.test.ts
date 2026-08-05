@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyNotification, nextAiStatus, type AiStatusCtx } from '../src/renderer/components/aiStatus'
+import { classifyNotification, nextAiStatus, type AiStatusCtx } from '../src/shared/ai-status'
 
 const hookTab = (over: Partial<AiStatusCtx> = {}): AiStatusCtx => ({
   isHookTab: true,

@@ -13,6 +13,13 @@ export const AI_TAB_META: Record<AiTabType, { label: string; command: string }> 
 export const NEW_TASK_AUTO_OPEN = ['none', 'claude', 'codex', 'pi', 'browser', 'terminal'] as const
 export type NewTaskAutoOpen = typeof NEW_TASK_AUTO_OPEN[number]
 
+/**
+ * The live state of one tab's process. Lives in shared rather than in the
+ * renderer's TabStatusContext because main keeps the authoritative copy too
+ * (see `src/main/tab-activity-registry.ts`) and idle cleanup reads both.
+ */
+export type TabStatusValue = 'working' | 'attention' | 'exited' | null
+
 export interface Tab {
   id: string
   type: TabType
@@ -108,6 +115,28 @@ export interface WorkspaceDeleteRequest extends WorkspaceTarget {
   baseBranch: string
   force?: boolean
   keepBranch?: boolean
+}
+
+/**
+ * Outcome of a workspace deletion attempt. The safety checks fail *closed*:
+ * - `check-failed`  a safety check could not be completed (missing base branch, git error,
+ *                   timeout, unreachable host). Nothing was deleted; `force` can override.
+ * - `invalid-worktree`  the recorded path is not a registered worktree of the repository, so
+ *                   the recursive-delete fallback was refused. `force` does *not* override this.
+ */
+export type WorkspaceDeleteStatus =
+  | 'ok'
+  | 'uncommitted'
+  | 'unmerged'
+  | 'uncommitted-and-unmerged'
+  | 'check-failed'
+  | 'invalid-worktree'
+
+export interface WorkspaceDeleteResult {
+  status: WorkspaceDeleteStatus
+  baseBranch?: string
+  /** Human-readable explanation for `check-failed` / `invalid-worktree`. */
+  reason?: string
 }
 
 export function isWorkspaceTask(task: Task): boolean {
@@ -221,6 +250,28 @@ export interface ProjectsData {
   pinnedItems: PinnedItem[]
 }
 
+/**
+ * Every window holds a full snapshot of the shared state, so a plain "here is my
+ * copy" save lets whichever IPC lands last erase the other window's change. The
+ * canonical copy in main therefore carries a revision, and a save has to name the
+ * revision it was derived from — a compare-and-swap. A save whose base is stale is
+ * refused and handed the canonical state back so the renderer can rebase onto it.
+ */
+export interface RevisionEnvelope<T> {
+  revision: number
+  data: T
+}
+
+export type RevisionSaveResult<T> =
+  | { ok: true; revision: number }
+  | { ok: false; revision: number; data: T }
+
+export type NotesRecord = Record<string, ProjectNote[]>
+export type ProjectsEnvelope = RevisionEnvelope<ProjectsData>
+export type ProjectsSaveResult = RevisionSaveResult<ProjectsData>
+export type NotesEnvelope = RevisionEnvelope<NotesRecord>
+export type NotesSaveResult = RevisionSaveResult<NotesRecord>
+
 export type PinnedItem =
   | { type: 'project'; projectId: string }
   | { type: 'task'; projectId: string; taskId: string }
@@ -323,6 +374,44 @@ export interface AppConfig {
     enabled: boolean
     heightPx: number
   }
+  idleTaskCleanup: IdleTaskCleanupConfig
+}
+
+/**
+ * Auto-deletion of tasks that have gone quiet. Ships off: the sweep deletes silently, so
+ * nothing happens until it is deliberately enabled.
+ */
+/**
+ * Everything idle cleanup exempts a task for, as main sees it across every window:
+ * what is selected somewhere, what the hooks have reported, what still has a live
+ * process, and what holds an unsaved buffer.
+ */
+export interface CleanupActivity {
+  openTaskIds: string[]
+  statuses: Record<string, TabStatusValue>
+  liveTabIds: string[]
+  dirtyTabIds: string[]
+}
+
+/** A task main deleted on its own (idle cleanup), and the tabs that went with it. */
+export interface TaskRemoval {
+  projectId: string
+  taskId: string
+  tabIds: string[]
+}
+
+export interface IdleTaskCleanupConfig {
+  enabled: boolean
+  /** Idle longer than `days`. */
+  byAge: { enabled: boolean; days: number }
+  /** More than `maxTasks` tasks in the project. */
+  byCount: { enabled: boolean; maxTasks: number }
+  /** How the two rules compose. Irrelevant unless both are enabled. */
+  combine: 'and' | 'or'
+  /** Only touch tasks explicitly settled in the inbox. */
+  settledOnly: boolean
+  /** Also delete workspace tasks whose worktree is clean and branch already merged. */
+  includeCleanWorkspaces: boolean
 }
 
 export type TerminalColorScheme =
@@ -353,6 +442,17 @@ export type GitFileStatus = 'A' | 'M' | 'D' | 'R' | 'U' | '?'
 export interface GitStatusEntry {
   relativePath: string
   status: GitFileStatus
+  /** For rename/copy entries: the path the file came from. */
+  origPath?: string
+}
+
+/**
+ * Every path a git operation must touch for a status entry. Rename/copy
+ * entries need the original path too — unstaging only the new path would leave
+ * the old one deleted in the index.
+ */
+export function gitEntryPaths(entry: GitStatusEntry): string[] {
+  return entry.origPath ? [entry.relativePath, entry.origPath] : [entry.relativePath]
 }
 
 export interface GitDiffSummary {
@@ -461,6 +561,15 @@ export const DEFAULT_CONFIG: AppConfig = {
   activityPanel: {
     enabled: true,
     heightPx: 160
+  },
+  // Opt-in: the sweep deletes without asking, so it stays dormant until you turn it on.
+  idleTaskCleanup: {
+    enabled: false,
+    byAge: { enabled: true, days: 14 },
+    byCount: { enabled: true, maxTasks: 20 },
+    combine: 'and',
+    settledOnly: true,
+    includeCleanWorkspaces: false
   }
 }
 

@@ -41,23 +41,37 @@ export class Storage {
     this.windowSessionPath = path.join(dir, 'window-session.json')
   }
 
-  /** Rotating startup snapshot of projects.json — recovery net if another instance clobbers it. */
-  backupProjectsOnStartup(keep = 10): void {
+  /**
+   * Rotating snapshot of projects.json — recovery net if another instance clobbers it,
+   * and the only thing standing behind a silent idle-cleanup deletion.
+   *
+   * Returns whether a snapshot now exists on disk. Callers that merely want a safety
+   * net (startup) ignore it; a caller that is about to delete the user's tasks must
+   * not proceed on a `false` (finding #9). "Nothing to copy yet" counts as success:
+   * there is no state to lose.
+   */
+  backupProjectsOnStartup(keep = 10): boolean {
     try {
-      if (!fs.existsSync(this.projectsPath)) return
+      if (!fs.existsSync(this.projectsPath)) return true
       const backupsDir = path.join(path.dirname(this.projectsPath), 'backups')
       fs.mkdirSync(backupsDir, { recursive: true })
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-      fs.copyFileSync(this.projectsPath, path.join(backupsDir, `projects-${stamp}.json`))
-      const snapshots = fs
-        .readdirSync(backupsDir)
-        .filter(f => f.startsWith('projects-') && f.endsWith('.json'))
-        .sort()
-      for (const f of snapshots.slice(0, -keep)) {
-        fs.unlinkSync(path.join(backupsDir, f))
+      const snapshotPath = path.join(backupsDir, `projects-${stamp}.json`)
+      fs.copyFileSync(this.projectsPath, snapshotPath)
+      try {
+        const snapshots = fs
+          .readdirSync(backupsDir)
+          .filter(f => f.startsWith('projects-') && f.endsWith('.json'))
+          .sort()
+        for (const f of snapshots.slice(0, -keep)) {
+          fs.unlinkSync(path.join(backupsDir, f))
+        }
+      } catch {
+        // The snapshot is written; failing to prune old ones does not invalidate it.
       }
+      return fs.existsSync(snapshotPath)
     } catch {
-      // best-effort: never block startup on backup failure
+      return false
     }
   }
 
@@ -118,6 +132,7 @@ export class Storage {
       tagIds: (project.tagIds ?? []).filter(id => tagIds.has(id))
     }))
 
+    const now = Date.now()
     for (const project of normalizedProjects) {
       if (!Array.isArray(project.tasks)) continue
       for (const task of project.tasks) {
@@ -126,6 +141,12 @@ export class Storage {
           task.lastInteractedAt = legacy
         }
         delete (task as { lastFocusedAt?: unknown }).lastFocusedAt
+        // A task with no activity stamp at all reads as infinitely idle, which would make it
+        // the first thing idle-cleanup deletes. Start its clock now instead: nothing should
+        // be deleted on the basis of data we never recorded.
+        if (task.lastInteractedAt === undefined && task.inbox?.eventAt === undefined) {
+          task.lastInteractedAt = now
+        }
       }
     }
 

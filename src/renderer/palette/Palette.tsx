@@ -160,8 +160,11 @@ export function Palette(): React.ReactElement | null {
       actions.setActiveTab(projectId, taskId, pane as 'left' | 'right', tabId)
     } else if (e.kind === 'note') {
       const [, projectId, noteId] = id.split(':')
-      const taskId = actions.selectedTaskId
-      if (taskId) actions.openOrFocusNoteTab(projectId, taskId, 'left', noteId)
+      // The selected task only means something inside the selected project;
+      // for a note from another project let the app resolve that project's
+      // own landing task.
+      const taskId = projectId === actions.selectedProjectId ? actions.selectedTaskId : null
+      actions.openOrFocusNoteTab(projectId, taskId, 'left', noteId)
     }
     setOpen(false)
   }, [results, actions])

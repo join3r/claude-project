@@ -16,7 +16,7 @@ import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
 import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
-import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from './aiStatus'
+import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../shared/ai-status'
 import { logStatusDetail } from '../statusDebug'
 import { normalizeBrowserUrl } from '../browserUrl'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
@@ -760,12 +760,13 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         if (staleTimerRef.current) clearTimeout(staleTimerRef.current)
         statusStore.removeTab(tabId)
 
-        // Cleanup hooks when Claude tab is removed (ref-counted)
+        // Release this tab's hook injection. Main tracks owners per directory, so
+        // this is a no-op for a lazy tab that never spawned and never injected.
         if (isClaudeTab) {
           if (sshConfig) {
-            window.api.hooksCleanupRemote(projectId, sshConfig, projectDir)
+            window.api.hooksCleanupRemote(projectId, sshConfig, projectDir, tabId)
           } else {
-            window.api.hooksCleanup(projectDir)
+            window.api.hooksCleanup(projectDir, tabId)
           }
         }
       }

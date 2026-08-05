@@ -44,8 +44,13 @@ export default function NewTaskModal({
   // Keyboard cursor in the project list, independent of what's actually selected.
   const [projectIndex, setProjectIndex] = useState(0)
   const [creating, setCreating] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
   const [error, setError] = useState('')
   const projectListRef = useRef<HTMLDivElement>(null)
+  // git has no abort once it starts cutting a worktree, so "cancel" means: ignore
+  // whatever comes back, and undo it. Checked after every await, not just the first.
+  const cancelledRef = useRef(false)
+  const mountedRef = useRef(true)
 
   const project = useMemo(() => projects.find(p => p.id === projectId) ?? null, [projects, projectId])
   const filteredProjects = useMemo(() => matchProjects(projects, projectFilter), [projects, projectFilter])
@@ -72,13 +77,37 @@ export default function NewTaskModal({
     row?.scrollIntoView({ block: 'nearest' })
   }, [projectIndex])
 
+  // However the dialog goes away — Escape, backdrop, or the parent dropping it —
+  // it takes any request it started with it.
+  useEffect(() => {
+    cancelledRef.current = false
+    mountedRef.current = true
+    return () => {
+      cancelledRef.current = true
+      mountedRef.current = false
+    }
+  }, [])
+
+  /** Give up on the dialog, and on anything it has in flight. */
+  const requestClose = (): void => {
+    // First press while git is working stays up to say so; a second one bails out
+    // and lets the unwind finish on its own.
+    if (creating && !cancelling) {
+      cancelledRef.current = true
+      setCancelling(true)
+      setError('')
+      return
+    }
+    onClose()
+  }
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') requestClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [onClose, creating, cancelling])
 
   // Branches are only fetched once you actually ask for a workspace — the common
   // case is a plain task, and a git call per project switch would be wasted work.
@@ -115,6 +144,14 @@ export default function NewTaskModal({
 
   const valid = isNewTaskDraftValid({ projectId, name, workspace: workspaceOn, branch, baseBranch })
 
+  /** The unwind is done — drop the dialog, unless the user already walked away. */
+  const finishCancel = (): void => {
+    if (!mountedRef.current) return
+    setCreating(false)
+    setCancelling(false)
+    onClose()
+  }
+
   const handleCreate = async (): Promise<void> => {
     if (!valid || creating || !project) return
     const taskName = name.trim()
@@ -124,26 +161,65 @@ export default function NewTaskModal({
       return
     }
 
+    cancelledRef.current = false
     setCreating(true)
+    setCancelling(false)
     setError('')
+
+    let result: Awaited<ReturnType<typeof window.api.workspaceCreate>>
     try {
-      const result = await window.api.workspaceCreate({
+      result = await window.api.workspaceCreate({
         projectDir: getProjectDir(project),
         projectId: project.ssh ? project.id : undefined,
         sshConfig: project.ssh,
         name: branch.trim(),
         baseBranch
       })
+    } catch (err) {
+      // A cancelled failure has nothing to unwind — git got no further than we did.
+      if (cancelledRef.current) {
+        finishCancel()
+        return
+      }
+      if (!mountedRef.current) return
+      setError(err instanceof Error ? err.message : 'Failed to create workspace')
+      setCreating(false)
+      return
+    }
+
+    if (!cancelledRef.current) {
       onCreateWorkspace(project.id, taskName, {
         worktreePath: result.worktreePath,
         branchName: result.branchName,
         baseBranch,
         relativeProjectPath: result.relativeProjectPath
       })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create workspace')
-      setCreating(false)
+      return
     }
+
+    // Cancelled while git was working: the worktree is on disk with nothing
+    // pointing at it. Force is safe here — the branch is seconds old and sits on
+    // its base, so there is no uncommitted or unmerged work to protect.
+    try {
+      await window.api.workspaceDelete({
+        projectDir: getProjectDir(project),
+        projectId: project.ssh ? project.id : undefined,
+        sshConfig: project.ssh,
+        worktreePath: result.worktreePath,
+        branchName: result.branchName,
+        baseBranch,
+        force: true
+      })
+    } catch (err) {
+      // Never drop an orphan quietly: if we can't undo it, name it so the user can.
+      if (!mountedRef.current) return
+      const why = err instanceof Error ? err.message : 'unknown error'
+      setError(`Cancelled, but the workspace at ${result.worktreePath} could not be removed (${why}). Delete it by hand.`)
+      setCreating(false)
+      setCancelling(false)
+      return
+    }
+    finishCancel()
   }
 
   const submitOnEnter = (e: React.KeyboardEvent): void => {
@@ -175,12 +251,12 @@ export default function NewTaskModal({
   return (
     <Modal
       title="New task"
-      onClose={onClose}
+      onClose={requestClose}
       footer={
         <>
-          <LinkBtn onClick={onClose}>Cancel</LinkBtn>
+          <LinkBtn onClick={requestClose}>{cancelling ? 'Close anyway' : 'Cancel'}</LinkBtn>
           <PrimaryButton onClick={() => void handleCreate()} disabled={!valid || creating}>
-            {creating ? 'Creating…' : 'Create'}
+            {cancelling ? 'Cancelling…' : creating ? 'Creating…' : 'Create'}
           </PrimaryButton>
         </>
       }
@@ -283,6 +359,9 @@ export default function NewTaskModal({
             )}
           </SetBlock>
 
+          {cancelling && (
+            <HelperText>Cancelling — removing the workspace git already started.</HelperText>
+          )}
           {error && <HelperText><span className="text-danger">{error}</span></HelperText>}
         </>
       )}

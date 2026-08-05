@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { ChevronRight } from 'lucide-react'
 import type { GitStatusResult, GitStatusEntry } from '../../shared/types'
+import { gitEntryPaths } from '../../shared/types'
 import { LinkBtn } from './ui'
 
 interface Props {
@@ -107,8 +108,8 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
   const handleStageAll = useCallback(() => {
     if (!gitStatus) return
     const files = [
-      ...gitStatus.unstaged.map(e => e.relativePath),
-      ...gitStatus.untracked.map(e => e.relativePath),
+      ...gitStatus.unstaged.flatMap(gitEntryPaths),
+      ...gitStatus.untracked.flatMap(gitEntryPaths),
     ]
     handleStage(files)
   }, [gitStatus, handleStage])
@@ -170,7 +171,7 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
 
   const handleSectionAction = useCallback((key: SectionKey) => {
     if (!gitStatus) return
-    const files = gitStatus[key].map(e => e.relativePath)
+    const files = gitStatus[key].flatMap(gitEntryPaths)
     if (key === 'staged') {
       handleUnstage(files)
     } else {
@@ -178,11 +179,12 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     }
   }, [gitStatus, handleStage, handleUnstage])
 
-  const handleFileAction = useCallback((key: SectionKey, filePath: string) => {
+  const handleFileAction = useCallback((key: SectionKey, entry: GitStatusEntry) => {
+    const files = gitEntryPaths(entry)
     if (key === 'staged') {
-      handleUnstage([filePath])
+      handleUnstage(files)
     } else {
-      handleStage([filePath])
+      handleStage(files)
     }
   }, [handleStage, handleUnstage])
 
@@ -273,7 +275,7 @@ interface FileRowProps {
   sectionKey: SectionKey
   busy: boolean
   onFileClick: (filePath: string) => void
-  onAction: (sectionKey: SectionKey, filePath: string) => void
+  onAction: (sectionKey: SectionKey, entry: GitStatusEntry) => void
   onDiscard?: (files: string[]) => void
 }
 
@@ -298,9 +300,9 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: 
     } else {
       setConfirmDiscard(false)
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
-      onDiscard([entry.relativePath])
+      onDiscard(gitEntryPaths(entry))
     }
-  }, [onDiscard, confirmDiscard, entry.relativePath])
+  }, [onDiscard, confirmDiscard, entry])
 
   return (
     <div
@@ -312,7 +314,10 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: 
       >
         {entry.status}
       </span>
-      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{entry.relativePath}</span>
+      <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={entry.origPath ? `${entry.origPath} → ${entry.relativePath}` : entry.relativePath}>
+        {entry.relativePath}
+        {entry.origPath && <span className="text-text-muted"> ← {entry.origPath}</span>}
+      </span>
       {onDiscard && (
         <button
           className={`bg-transparent border-0 rounded-md text-text-muted cursor-pointer text-xs leading-none size-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast) hover:enabled:bg-danger/15 hover:enabled:text-danger disabled:opacity-0 disabled:cursor-default${confirmDiscard ? ' !opacity-100 bg-danger/15 text-danger font-bold' : ''}`}
@@ -327,7 +332,7 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard }: 
         className="ml-auto bg-transparent border-0 rounded-md text-text-muted cursor-pointer text-base font-semibold leading-none size-5 inline-flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast) hover:enabled:bg-sel hover:enabled:text-text disabled:opacity-0 disabled:cursor-default"
         title={sectionKey === 'staged' ? 'Unstage' : 'Stage'}
         disabled={busy}
-        onClick={(e) => { e.stopPropagation(); onAction(sectionKey, entry.relativePath) }}
+        onClick={(e) => { e.stopPropagation(); onAction(sectionKey, entry) }}
       >
         {sectionKey === 'staged' ? '−' : '+'}
       </button>

@@ -202,15 +202,15 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
   })
 
   // Hook injection
-  ipcMain.handle('hooks-inject', (_e, projectDir: string) => {
-    hookInjector.inject(projectDir)
+  ipcMain.handle('hooks-inject', (_e, projectDir: string, tabId: string) => {
+    hookInjector.inject(projectDir, tabId)
   })
-  ipcMain.handle('hooks-cleanup', (_e, projectDir: string) => {
-    hookInjector.cleanup(projectDir)
+  ipcMain.handle('hooks-cleanup', (_e, projectDir: string, tabId: string) => {
+    hookInjector.cleanup(projectDir, tabId)
   })
-  ipcMain.handle('hooks-cleanup-remote', async (_e, projectId: string, sshConfig: SshConfig, remoteDir?: string) => {
+  ipcMain.handle('hooks-cleanup-remote', async (_e, projectId: string, sshConfig: SshConfig, remoteDir: string | undefined, tabId: string) => {
     const effectiveRemoteDir = remoteDir || sshConfig.remoteDir
-    const isLast = hookInjector.remoteCleanup(projectId, effectiveRemoteDir)
+    const isLast = hookInjector.remoteCleanup(projectId, effectiveRemoteDir, tabId)
     if (!isLast) return
 
     if (sshManager.getStatus(projectId) !== 'connected') return
@@ -274,7 +274,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow): Promise<{ 
       if (isClaudeRemote) {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {
-          hookInjector.remoteInject(projectId, remoteCwd)
+          hookInjector.remoteInject(projectId, remoteCwd, extraEnv.DEVTOOL_TAB_ID)
           hookInjectPrefix = hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
         }
       } else if (isPiRemote) {

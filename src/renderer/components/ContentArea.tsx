@@ -7,6 +7,8 @@ import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import Pane from './Pane'
 import TunnelPopup from './TunnelPopup'
+import UnsavedChangesModal from './UnsavedChangesModal'
+import StateSyncErrorModal from './StateSyncErrorModal'
 import { getPaneFromValue, resolvePaneForMenuAction, type PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
@@ -233,7 +235,8 @@ export default function ContentArea(): React.ReactElement {
     const cleanupClose = window.api.onMenuCloseTab(() => {
       const info = getActiveTabInfo()
       if (selectedProjectId && selectedTaskId && info?.activeTabId && info.activeTab?.type !== 'home') {
-        removeTab(selectedProjectId, selectedTaskId, info.pane, info.activeTabId)
+        // May park on the unsaved-changes dialog before anything is removed.
+        void removeTab(selectedProjectId, selectedTaskId, info.pane, info.activeTabId)
       }
     })
 
@@ -562,6 +565,10 @@ export default function ContentArea(): React.ReactElement {
           onClose={() => setTunnelPopupOpen(false)}
         />
       )}
+      {/* App-wide, but hosted here for the same reason TunnelPopup is: this is
+          the surface the tabs it protects live on. */}
+      <UnsavedChangesModal />
+      <StateSyncErrorModal />
     </div>
   )
 }

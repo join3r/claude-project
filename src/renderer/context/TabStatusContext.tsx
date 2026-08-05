@@ -1,7 +1,10 @@
 import React, { createContext, useContext, useRef, useSyncExternalStore } from 'react'
 import { logStatusTransition } from '../statusDebug'
+import type { TabStatusValue } from '../../shared/types'
 
-export type TabStatusValue = 'working' | 'attention' | 'exited' | null
+// Re-exported so the many `from '../context/TabStatusContext'` importers keep
+// working now that main needs the same type (see shared/types.ts).
+export type { TabStatusValue }
 
 export interface TabStatusStore {
   getStatus(tabId: string): TabStatusValue

@@ -304,7 +304,7 @@ export default function TabBar({
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation()
-                    removeTab(projectId, taskId, pane, tab.id)
+                    void removeTab(projectId, taskId, pane, tab.id)
                   }}
                   title="Close tab (⌘W)"
                 >
@@ -370,7 +370,7 @@ export default function TabBar({
               <button
                 type="button"
                 className={menuItemCls}
-                onClick={() => { removeTab(projectId, taskId, pane, tab.id); close() }}
+                onClick={() => { void removeTab(projectId, taskId, pane, tab.id); close() }}
               >
                 Close tab
               </button>

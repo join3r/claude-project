@@ -13,8 +13,13 @@ import { CodexSessionManager } from './codex-session-manager'
 import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
 import { NotesStorage } from './notes-storage'
+import { RevisionStore } from './revision-store'
+import { TabActivityRegistry } from './tab-activity-registry'
+import { runIdleCleanupSweep, type IdleCleanupEnvironment } from './idle-cleanup-sweep'
+import { tearDownTaskTabs } from './task-teardown'
 import { PaletteFrecencyStorage, type FrecencyFile } from './palette-frecency-storage'
 import { parseNumstat } from './git-diff-summary'
+import { GIT_STATUS_ARGS, parseGitStatusZ } from './git-status-parse'
 import { AI_TAB_META } from '../shared/types'
 import {
   piExtensionLocalPath,
@@ -29,19 +34,21 @@ import type {
   GitPostureLastCommit,
   GitPostureResult,
   GitStatusResult,
-  GitStatusEntry,
-  GitFileStatus,
   GitOperationResult,
   PersistedWindowState,
+  Project,
   ProjectsData,
   SshConfig,
+  TabStatusValue,
+  Task,
   TunnelConfig,
   WorkspaceCreateRequest,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteResult,
   WorkspaceListBranchesRequest,
   WindowGeometry,
   WindowViewState,
-  ProjectNote
+  NotesRecord
 } from '../shared/types'
 import {
   buildWindowViewState,
@@ -56,6 +63,13 @@ import { promisify } from 'util'
 const execFileAsync = promisify(execFile)
 
 const MAX_SCROLLBACK_CHARS = 2_000_000
+/**
+ * Let the windows come up before the first sweep: what is on screen, which
+ * buffers are unsaved and which PTYs are alive are all safeguards main only
+ * learns once the renderers have reported in.
+ */
+const IDLE_CLEANUP_STARTUP_DELAY_MS = 15_000
+const IDLE_CLEANUP_INTERVAL_MS = 60 * 60_000
 const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
 
 interface PtyRuntime {
@@ -151,24 +165,58 @@ export class AppRuntime {
   private readonly windows = new Map<number, BrowserWindow>()
   private readonly windowStates = new Map<number, PersistedWindowState>()
   private readonly ptyRuntimes = new Map<string, PtyRuntime>()
+  /** Main's authoritative view of what every tab's agent is doing. */
+  private readonly activityRegistry = new TabActivityRegistry()
+  /** Tabs with an unsaved editor buffer, per window — a task holding one is not swept. */
+  private readonly dirtyTabsByWindow = new Map<number, Set<string>>()
   private hookInjector!: HookInjector
   private sshManager!: SshConnectionManager
   private started = false
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
   private socksProxyStarting = new Map<string, Promise<number>>()
-  private projectsData: ProjectsData
+  private readonly projectsStore: RevisionStore<ProjectsData>
+  private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private startupWindowStates: PersistedWindowState[]
+  private idleCleanupTimer: NodeJS.Timeout | null = null
+  private idleCleanupScheduled = false
+  private idleCleanupRunning = false
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
     this.storage.backupProjectsOnStartup()
-    this.projectsData = this.storage.loadProjects()
+    this.projectsStore = new RevisionStore<ProjectsData>({
+      initial: this.storage.loadProjects(),
+      normalize: (data) => Storage.normalizeProjectsData(data as unknown as Record<string, unknown>),
+      persist: (data) => this.storage.saveProjects(data),
+      broadcast: (envelope) => this.broadcastToAllWindows('projects-updated', envelope)
+    })
+    // Notes only gained a canonical copy in main when they gained a revision: before
+    // that `notes-save` proxied straight to disk, which is why note changes never
+    // reached the other windows at all.
+    this.notesStore = new RevisionStore<NotesRecord>({
+      initial: this.notesStorage.load(),
+      persist: (data) => this.notesStorage.save(data),
+      broadcast: (envelope) => this.broadcastToAllWindows('notes-updated', envelope)
+    })
     this.config = this.storage.loadConfig()
     this.startupWindowStates = this.storage.loadWindowSession(
-      this.projectsData,
+      this.projectsStore.peek(),
       this.config.defaultSidebarTab
     ).windows
+  }
+
+  /**
+   * The one write path for canonical projects state from inside main (idle cleanup
+   * and anything after it). Going through here is what bumps the revision and tells
+   * the windows, so a main-side deletion cannot be resurrected by a stale renderer.
+   */
+  commitProjects(next: ProjectsData): ProjectsData {
+    return this.projectsStore.commit(next).data
+  }
+
+  getProjectsData(): ProjectsData {
+    return this.projectsStore.peek()
   }
 
   async start(): Promise<void> {
@@ -189,9 +237,10 @@ export class AppRuntime {
       geometry: getWindowGeometry(window),
       viewState: initialViewState
         ? cloneWindowViewState(initialViewState)
-        : buildWindowViewState(this.projectsData.projects, this.config)
+        : buildWindowViewState(this.projectsStore.peek().projects, this.config)
     })
     this.logDebug(`registerWindow windowId=${window.id}`)
+    this.scheduleIdleCleanup()
     const syncGeometry = () => {
       this.updateWindowGeometry(window.id)
     }
@@ -202,6 +251,9 @@ export class AppRuntime {
     window.on('closed', () => {
       this.logDebug(`windowClosed windowId=${window.id}`)
       this.windows.delete(window.id)
+      // A closed window's unsaved buffers went with it; leaving them behind would
+      // protect their tasks from cleanup forever.
+      this.dirtyTabsByWindow.delete(window.id)
       if (!this.quitting) {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
@@ -225,7 +277,173 @@ export class AppRuntime {
     this.quitting = true
   }
 
+  /**
+   * Idle-task cleanup runs here, not in a renderer. A window's picture of what is
+   * running is per-window by construction, so the window that happened to be asked
+   * could not see an agent working in another one and deleted it anyway (finding
+   * #7). Main receives every hook event, owns every PTY and knows every window's
+   * selection, so it is the only process that can answer "is this safe to delete?".
+   */
+  private scheduleIdleCleanup(): void {
+    if (this.idleCleanupScheduled) return
+    this.idleCleanupScheduled = true
+    setTimeout(() => void this.runIdleCleanup(), IDLE_CLEANUP_STARTUP_DELAY_MS)
+    this.idleCleanupTimer = setInterval(() => void this.runIdleCleanup(), IDLE_CLEANUP_INTERVAL_MS)
+  }
+
+  /** One sweep at a time: the hourly tick must not overlap a sweep still awaiting git. */
+  private async runIdleCleanup(): Promise<void> {
+    if (this.idleCleanupRunning) return
+    this.idleCleanupRunning = true
+    try {
+      await runIdleCleanupSweep(this.idleCleanupEnvironment())
+    } catch (err) {
+      this.logDebug(`idleCleanupFailed error=${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      this.idleCleanupRunning = false
+    }
+  }
+
+  private idleCleanupEnvironment(): IdleCleanupEnvironment {
+    return {
+      readProjects: () => {
+        const data = this.projectsStore.peek()
+        return { projects: data.projects, pinnedItems: data.pinnedItems ?? [] }
+      },
+      readConfig: () => this.config.idleTaskCleanup,
+      readActivity: () => ({
+        openTaskIds: this.getOpenTaskIds(),
+        statuses: this.activityRegistry.getSnapshot(),
+        liveTabIds: this.getLiveTabIds(),
+        dirtyTabIds: this.getDirtyTabIds()
+      }),
+      now: () => Date.now(),
+      backupProjects: () => this.storage.backupProjectsOnStartup(),
+      deleteWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
+      removeTask: (project, task) => this.removeTaskFromMain(project, task),
+      forgetWorkspace: (project, task) => this.forgetTaskWorkspace(project, task),
+      log: (message) => this.logDebug(message)
+    }
+  }
+
+  /** Tasks selected in any window — only this process sees all of them. */
+  private getOpenTaskIds(): string[] {
+    const ids = new Set<string>()
+    for (const state of this.windowStates.values()) {
+      if (state.viewState.selectedTaskId) ids.add(state.viewState.selectedTaskId)
+    }
+    return [...ids]
+  }
+
+  /** Tabs whose process is still running, including ones no window currently shows. */
+  private getLiveTabIds(): string[] {
+    const ids: string[] = []
+    for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
+      if (runtime.exitCode === null) ids.push(tabId)
+    }
+    return ids
+  }
+
+  private getDirtyTabIds(): string[] {
+    const ids = new Set<string>()
+    for (const tabIds of this.dirtyTabsByWindow.values()) {
+      for (const tabId of tabIds) ids.add(tabId)
+    }
+    return [...ids]
+  }
+
+  private async deleteTaskWorkspace(project: Project, task: Task) {
+    if (!task.workspace) return { status: 'ok' as const }
+    // No `force`: this both checks that the worktree is clean and the branch merged
+    // *and* performs the deletion when it is. Anything else leaves it untouched.
+    return this.deleteWorkspace({
+      projectDir: project.ssh ? project.ssh.remoteDir : project.directory,
+      projectId: project.ssh ? project.id : undefined,
+      sshConfig: project.ssh,
+      worktreePath: task.workspace.worktreePath,
+      branchName: task.workspace.branchName,
+      baseBranch: task.workspace.baseBranch
+    })
+  }
+
+  /** The worktree is gone but the task stayed: leave no record pointing at nothing. */
+  private forgetTaskWorkspace(project: Project, task: Task): void {
+    this.logDebug(`idleCleanupWorkspaceOrphaned project=${project.id} task=${task.id}`)
+    const data = this.projectsStore.peek()
+    this.commitProjects({
+      ...data,
+      projects: data.projects.map(candidate => candidate.id !== project.id ? candidate : {
+        ...candidate,
+        tasks: candidate.tasks.map(existing => {
+          if (existing.id !== task.id) return existing
+          const { workspace: _gone, ...rest } = existing
+          return rest
+        })
+      })
+    })
+  }
+
+  /**
+   * Delete a task on main's own behalf, doing here every piece of teardown
+   * `useAppState.removeTask` does in a window — the PTYs (which outlive a hidden
+   * tab), the scrollback files, the hook injections and the activity entries.
+   * A renderer only tears down tabs it has mounted, so nothing here may be left
+   * to the broadcast; the broadcast covers only what is renderer-local (xterm
+   * instances, per-window status entries, view state).
+   */
+  private async removeTaskFromMain(project: Project, task: Task): Promise<void> {
+    const tabIds = await tearDownTaskTabs(project, task, {
+      killPty: (tabId) => {
+        this.ptyManager.kill(tabId)
+        this.ptyRuntimes.delete(tabId)
+      },
+      deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
+      forgetActivity: (tabId) => this.activityRegistry.remove(tabId),
+      releaseHooks: (owner, dir, tabId) => owner.ssh
+        ? this.cleanupRemoteHooks(owner.id, owner.ssh, dir, tabId)
+        : this.hookInjector.cleanup(dir, tabId)
+    })
+
+    // Sent before the state commit, and on the same ordered channel: a window that
+    // learns the task is gone first unmounts its tabs, and the components that own
+    // the xterm instances and status entries would no longer be listening.
+    this.broadcastToAllWindows('tasks-removed', { projectId: project.id, taskId: task.id, tabIds })
+
+    const data = this.projectsStore.peek()
+    this.commitProjects({
+      ...data,
+      projects: data.projects.map(candidate =>
+        candidate.id === project.id
+          ? { ...candidate, tasks: candidate.tasks.filter(existing => existing.id !== task.id) }
+          : candidate
+      )
+    })
+
+    // Main's own copy of each window's selection is what gets persisted on quit,
+    // so it has to forget the task too.
+    for (const [windowId, state] of this.windowStates.entries()) {
+      const taskStates = { ...state.viewState.taskStates }
+      const hadTaskState = task.id in taskStates
+      const wasSelected = state.viewState.selectedTaskId === task.id
+      if (!hadTaskState && !wasSelected) continue
+      delete taskStates[task.id]
+      this.windowStates.set(windowId, {
+        geometry: cloneWindowGeometry(state.geometry),
+        viewState: {
+          ...cloneWindowViewState(state.viewState),
+          selectedTaskId: wasSelected ? null : state.viewState.selectedTaskId,
+          taskStates
+        }
+      })
+    }
+    this.persistWindowSession()
+  }
+
   async shutdown(): Promise<void> {
+    if (this.idleCleanupTimer) {
+      clearInterval(this.idleCleanupTimer)
+      this.idleCleanupTimer = null
+    }
     this.persistWindowSession()
     for (const [tabId, runtime] of this.ptyRuntimes.entries()) {
       this.scrollbackStorage.save(tabId, runtime.scrollback)
@@ -237,19 +455,26 @@ export class AppRuntime {
   }
 
   private registerEventForwarders(): void {
+    // Each hook event now has two consumers: the windows, which draw the status dot
+    // for the tabs they have mounted, and the activity registry, which is what idle
+    // cleanup asks. The forwarding is unchanged — the registry is an addition.
     this.hookServer.on('session-start', (tabId: string, body: Record<string, unknown>) => {
+      this.activityRegistry.touch(tabId)
       this.broadcastToAttachedWindows(tabId, 'hook-session-start', tabId, body)
     })
 
     this.hookServer.on('working', (tabId: string) => {
+      this.activityRegistry.working(tabId)
       this.broadcastToAttachedWindows(tabId, 'hook-working', tabId)
     })
 
     this.hookServer.on('stopped', (tabId: string) => {
+      this.activityRegistry.stopped(tabId)
       this.broadcastToAttachedWindows(tabId, 'hook-stopped', tabId)
     })
 
     this.hookServer.on('notification', (tabId: string, body: Record<string, unknown>) => {
+      this.activityRegistry.notification(tabId, body)
       this.broadcastToAttachedWindows(tabId, 'hook-notification', tabId, body)
     })
 
@@ -262,6 +487,10 @@ export class AppRuntime {
         await ses.setProxy({ proxyRules: 'direct://' }).catch(() => {})
         await ses.closeAllConnections().catch(() => {})
         this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+      }
+
+      if (status === 'connected') {
+        await this.restoreSocksProxy(projectId)
       }
     })
 
@@ -301,18 +530,58 @@ export class AppRuntime {
 
   private async ensureSshConnected(projectId: string, sshConfig: SshConfig): Promise<void> {
     if (this.sshManager.getStatus(projectId) === 'connected') return
-    await this.sshManager.connect(projectId, sshConfig)
+    await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
     this.sshManager.startHealthChecks(projectId, sshConfig)
   }
 
+  /** Restore the SOCKS proxy the user enabled for a project. Runs on every
+   *  transition into 'connected' — manual connect and auto-reconnect alike — so
+   *  a recovered connection isn't left without the proxy that was configured. */
+  private async restoreSocksProxy(projectId: string): Promise<void> {
+    if (!this.socksProxyEnabled.get(projectId)) return
+    if (this.sshManager.getSocksProxy(projectId)) return
+    const sshConfig = this.sshManager.getConfig(projectId)
+    if (!sshConfig) return
+    try {
+      const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
+      const ses = session.fromPartition(`persist:browser-${projectId}`)
+      await ses.setProxy({
+        proxyRules: `socks5://127.0.0.1:${port}`,
+        proxyBypassRules: '<-loopback>'
+      })
+      await ses.closeAllConnections()
+      this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
+    } catch {
+      // Keep SSH connected even when restoring the SOCKS proxy fails.
+    }
+  }
+
   private registerIpcHandlers(): void {
-    ipcMain.handle('load-projects', () => clone(this.projectsData))
-    ipcMain.handle('save-projects', (event, data: ProjectsData) => {
-      this.projectsData = Storage.normalizeProjectsData(data as unknown as Record<string, unknown>)
-      this.storage.saveProjects(this.projectsData)
-      this.broadcastToAllWindows('projects-updated', clone(this.projectsData))
+    ipcMain.handle('load-projects', () => this.projectsStore.get())
+    ipcMain.handle('save-projects', (_event, payload: { baseRevision: number; data: ProjectsData }) =>
+      this.projectsStore.save(payload.baseRevision, payload.data))
+
+    // Everything the sweep exempts a task for, as the settings preview needs to show
+    // it: what is on screen in any window, what main has heard from the hooks, what
+    // still has a process, and what has an unsaved buffer open.
+    ipcMain.handle('get-cleanup-activity', () => ({
+      openTaskIds: this.getOpenTaskIds(),
+      statuses: this.activityRegistry.getSnapshot(),
+      liveTabIds: this.getLiveTabIds(),
+      dirtyTabIds: this.getDirtyTabIds()
+    }))
+
+    // Windows publish their unsaved editors: a background sweep has nobody to show a
+    // Save/Discard dialog to, so a dirty buffer keeps its task out of the sweep.
+    ipcMain.handle('report-dirty-tabs', (event, tabIds: string[]) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      if (!window) return undefined
+      if (tabIds.length === 0) this.dirtyTabsByWindow.delete(window.id)
+      else this.dirtyTabsByWindow.set(window.id, new Set(tabIds))
       return undefined
     })
+
+    ipcMain.handle('backup-projects-now', () => this.storage.backupProjectsOnStartup())
 
     ipcMain.handle('load-config', () => clone(this.config))
     ipcMain.handle('save-config', (_event, config: AppConfig) => {
@@ -327,7 +596,7 @@ export class AppRuntime {
       const state = window ? this.windowStates.get(window.id) ?? null : null
       return state
         ? cloneWindowViewState(state.viewState)
-        : buildWindowViewState(this.projectsData.projects, this.config)
+        : buildWindowViewState(this.projectsStore.peek().projects, this.config)
     })
 
     ipcMain.handle('save-window-state', (event, viewState: WindowViewState) => {
@@ -410,37 +679,19 @@ export class AppRuntime {
       event.returnValue = true
     })
 
-    ipcMain.handle('notes-load', () => this.notesStorage.load())
-    ipcMain.handle('notes-save', (_event, data: Record<string, ProjectNote[]>) => this.notesStorage.save(data))
+    ipcMain.handle('notes-load', () => this.notesStore.get())
+    ipcMain.handle('notes-save', (_event, payload: { baseRevision: number; data: NotesRecord }) =>
+      this.notesStore.save(payload.baseRevision, payload.data))
 
     ipcMain.handle('palette-frecency:load', () => this.paletteFrecencyStorage.load())
     ipcMain.handle('palette-frecency:save', (_event, file: FrecencyFile) => this.paletteFrecencyStorage.save(file))
 
     ipcMain.handle('ssh-connect', async (_event, projectId: string, sshConfig: SshConfig) => {
-      await this.sshManager.connect(projectId, sshConfig)
+      // The tunnel and the SOCKS proxy are restored by the manager's connect
+      // path and the 'connected' status handler respectively, so that automatic
+      // reconnects go through exactly the same restoration as this one.
+      await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
       this.sshManager.startHealthChecks(projectId, sshConfig)
-      const tunnel = this.getProjectTunnel(projectId)
-      if (tunnel) {
-        try {
-          await this.sshManager.setTunnel(projectId, sshConfig, tunnel)
-        } catch {
-          // Keep SSH connected even when restoring the tunnel fails.
-        }
-      }
-      if (this.socksProxyEnabled.get(projectId)) {
-        try {
-          const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
-          const ses = session.fromPartition(`persist:browser-${projectId}`)
-          await ses.setProxy({
-            proxyRules: `socks5://127.0.0.1:${port}`,
-            proxyBypassRules: '<-loopback>'
-          })
-          await ses.closeAllConnections()
-          this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
-        } catch {
-          // Keep SSH connected even when restoring SOCKS proxy fails.
-        }
-      }
     })
 
     ipcMain.handle('ssh-disconnect', async (_event, projectId: string, sshConfig: SshConfig) => {
@@ -527,32 +778,14 @@ export class AppRuntime {
       return { enabled, port: proxy?.port }
     })
 
-    ipcMain.handle('hooks-inject', (_event, projectDir: string) => {
-      this.hookInjector.inject(projectDir)
+    ipcMain.handle('hooks-inject', (_event, projectDir: string, tabId: string) => {
+      this.hookInjector.inject(projectDir, tabId)
     })
-    ipcMain.handle('hooks-cleanup', (_event, projectDir: string) => {
-      this.hookInjector.cleanup(projectDir)
+    ipcMain.handle('hooks-cleanup', (_event, projectDir: string, tabId: string) => {
+      this.hookInjector.cleanup(projectDir, tabId)
     })
-    ipcMain.handle('hooks-cleanup-remote', async (_event, projectId: string, sshConfig: SshConfig, remoteDir?: string) => {
-      const effectiveRemoteDir = remoteDir || sshConfig.remoteDir
-      const isLast = this.hookInjector.remoteCleanup(projectId, effectiveRemoteDir)
-      if (!isLast) return
-
-      if (this.sshManager.getStatus(projectId) !== 'connected') return
-      const cleanupScript = this.hookInjector.buildRemoteCleanupScript(effectiveRemoteDir)
-      const cleanupArgs = [
-        '-S', this.sshManager.getSocketPath(projectId),
-        `${sshConfig.username}@${sshConfig.host}`,
-        cleanupScript
-      ]
-      try {
-        const { execFile } = await import('child_process')
-        const { promisify } = await import('util')
-        await promisify(execFile)('ssh', cleanupArgs, { timeout: 5000 })
-      } catch {
-        // Best-effort cleanup
-      }
-    })
+    ipcMain.handle('hooks-cleanup-remote', (_event, projectId: string, sshConfig: SshConfig, remoteDir: string | undefined, tabId: string) =>
+      this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId))
 
     ipcMain.handle('codex-read-session', async (_event, cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig) => {
       if (!sshConfig || !projectId) {
@@ -693,17 +926,7 @@ export class AppRuntime {
 
     ipcMain.handle(
       'workspace-delete',
-      async (_event, request: WorkspaceDeleteRequest) => {
-        if (request.sshConfig && request.projectId) {
-          await this.ensureSshConnected(request.projectId, request.sshConfig)
-          return this.remoteWorkspaceManager.delete(this.sshManager.getSocketPath(request.projectId), {
-            ...request,
-            projectId: request.projectId,
-            sshConfig: request.sshConfig
-          })
-        }
-        return this.workspaceManager.delete(request)
-      }
+      (_event, request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> => this.deleteWorkspace(request)
     )
 
     // File browser
@@ -804,30 +1027,10 @@ export class AppRuntime {
       const resolvedCwd = path.resolve(projectCwd)
       try {
         const [{ stdout }, summary] = await Promise.all([
-          execFileAsync('git', ['status', '--porcelain'], { cwd: resolvedCwd }),
+          execFileAsync('git', GIT_STATUS_ARGS, { cwd: resolvedCwd }),
           readGitDiffSummary(resolvedCwd)
         ])
-        const staged: GitStatusEntry[] = []
-        const unstaged: GitStatusEntry[] = []
-        const untracked: GitStatusEntry[] = []
-
-        for (const line of stdout.split('\n')) {
-          if (!line) continue
-          const indexStatus = line[0]
-          const workTreeStatus = line[1]
-          const filePath = line.slice(3).trim()
-
-          if (indexStatus === '?' && workTreeStatus === '?') {
-            untracked.push({ relativePath: filePath, status: '?' })
-          } else {
-            if (indexStatus && indexStatus !== ' ' && indexStatus !== '?') {
-              staged.push({ relativePath: filePath, status: indexStatus as GitFileStatus })
-            }
-            if (workTreeStatus && workTreeStatus !== ' ' && workTreeStatus !== '?') {
-              unstaged.push({ relativePath: filePath, status: workTreeStatus as GitFileStatus })
-            }
-          }
-        }
+        const { staged, unstaged, untracked } = parseGitStatusZ(stdout)
 
         return { staged, unstaged, untracked, summary }
       } catch {
@@ -843,7 +1046,9 @@ export class AppRuntime {
     ipcMain.handle('fb-git-diff', async (_event, projectCwd: string, relativeFilePath: string): Promise<string> => {
       const resolvedCwd = path.resolve(projectCwd)
       try {
-        const { stdout } = await execFileAsync('git', ['show', `HEAD:${relativeFilePath}`], { cwd: resolvedCwd })
+        // The trailing `--` keeps a path that starts with `-` from being read
+        // as an option; the raw path is passed through untouched.
+        const { stdout } = await execFileAsync('git', ['show', `HEAD:${relativeFilePath}`, '--'], { cwd: resolvedCwd })
         return stdout
       } catch {
         return ''
@@ -926,6 +1131,44 @@ export class AppRuntime {
     })
   }
 
+  /** Shared by the `workspace-delete` IPC and the idle sweep, which runs it with no `force`. */
+  private async deleteWorkspace(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> {
+    if (request.sshConfig && request.projectId) {
+      await this.ensureSshConnected(request.projectId, request.sshConfig)
+      return this.remoteWorkspaceManager.delete(this.sshManager.getSocketPath(request.projectId), {
+        ...request,
+        projectId: request.projectId,
+        sshConfig: request.sshConfig
+      })
+    }
+    return this.workspaceManager.delete(request)
+  }
+
+  /** Release a tab's remote hook injection, running the remote script for the last owner. */
+  private async cleanupRemoteHooks(
+    projectId: string,
+    sshConfig: SshConfig,
+    remoteDir: string | undefined,
+    tabId: string
+  ): Promise<void> {
+    const effectiveRemoteDir = remoteDir || sshConfig.remoteDir
+    const isLast = this.hookInjector.remoteCleanup(projectId, effectiveRemoteDir, tabId)
+    if (!isLast) return
+
+    if (this.sshManager.getStatus(projectId) !== 'connected') return
+    const cleanupScript = this.hookInjector.buildRemoteCleanupScript(effectiveRemoteDir)
+    const cleanupArgs = [
+      '-S', this.sshManager.getSocketPath(projectId),
+      `${sshConfig.username}@${sshConfig.host}`,
+      cleanupScript
+    ]
+    try {
+      await execFileAsync('ssh', cleanupArgs, { timeout: 5000 })
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
   private async attachOrCreatePty(
     windowId: number,
     id: string,
@@ -991,6 +1234,9 @@ export class AppRuntime {
     sshConfig?: SshConfig
   ): void {
     this.logDebug(`ptySpawn start id=${id} shell=${shell} cwd=${cwd}`)
+    // A fresh process for this tab: whatever the old one was doing (including
+    // 'exited') describes a process that no longer exists.
+    this.activityRegistry.reset(id)
 
     // Capture the current runtime so callbacks can verify they belong to the
     // right generation.  After a kill+respawn cycle the same `id` maps to a
@@ -1018,6 +1264,7 @@ export class AppRuntime {
         const runtime = this.ptyRuntimes.get(id)
         if (!runtime || runtime !== expectedRuntime) return
         runtime.exitCode = exitCode
+        this.activityRegistry.exited(id)
         this.logDebug(`ptyExit id=${id} exitCode=${exitCode}`)
         this.broadcastToAttachedWindows(id, 'pty-exit', id, exitCode)
       }
@@ -1037,7 +1284,7 @@ export class AppRuntime {
       if (isClaudeRemote) {
         const remotePort = this.sshManager.getRemotePort(projectId)
         if (remotePort) {
-          this.hookInjector.remoteInject(projectId, remoteCwd)
+          this.hookInjector.remoteInject(projectId, remoteCwd, extraEnv.DEVTOOL_TAB_ID)
           hookInjectPrefix = this.hookInjector.buildRemoteInjectScript(remoteCwd, remotePort) + ' && '
           this.logDebug(`hookInjectRemote dir=${remoteCwd} port=${remotePort} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
         }
@@ -1062,7 +1309,7 @@ export class AppRuntime {
         // Hooks land in the dir Claude is actually started in (a workspace task's
         // worktree, not the project root) — logged so a missing status is easy to
         // trace back to the settings file it should have been written to.
-        this.hookInjector.inject(cwd)
+        this.hookInjector.inject(cwd, extraEnv.DEVTOOL_TAB_ID)
         this.logDebug(`hookInject dir=${cwd} tabId=${extraEnv?.DEVTOOL_TAB_ID}`)
       }
       let localArgs = args
@@ -1083,6 +1330,9 @@ export class AppRuntime {
     }
     this.ptyManager.kill(id)
     this.ptyRuntimes.delete(id)
+    // No process, no activity: a status left at 'working' here would protect the
+    // task from cleanup for the rest of the session.
+    this.activityRegistry.remove(id)
   }
 
   private claimPtyControl(tabId: string, windowId: number): void {
@@ -1131,7 +1381,7 @@ export class AppRuntime {
   }
 
   private getProjectTunnel(projectId: string): TunnelConfig | undefined {
-    return this.projectsData.projects.find((project) => project.id === projectId)?.tunnel
+    return this.projectsStore.peek().projects.find((project) => project.id === projectId)?.tunnel
   }
 
   private broadcastToAttachedWindows(tabId: string, channel: string, ...args: unknown[]): void {

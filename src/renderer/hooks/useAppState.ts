@@ -16,6 +16,7 @@ import {
   reconcileWindowViewState
 } from '../../shared/types'
 import type {
+  NotesRecord,
   PinnedItem,
   Project,
   ProjectNote,
@@ -28,6 +29,7 @@ import type {
   AiTabType,
   SshConfig,
   WorkspaceConfig,
+  WorkspaceDeleteResult,
   WindowViewState,
   TaskViewState,
   TaskInboxState,
@@ -35,6 +37,8 @@ import type {
   FileBrowserTab
 } from '../../shared/types'
 import { applyQueuedStateUpdates, persistSelectionState, type StateUpdater } from './stateHydration'
+import { RevisionSyncClient } from './revisionSync'
+import { resolveLandingTaskId } from './taskNavigation'
 import { backfillLifetimeStats, incrementLifetimeStat } from './lifetimeStats'
 import { moveTaskTab } from '../tabMove'
 import {
@@ -44,6 +48,7 @@ import {
 } from '../recentlyClosedTabs'
 import { createInteractionStampGate } from '../components/taskRecency'
 import { createTab, type CreateTabOptions } from '../components/newTaskTabs'
+import { useDirtyBufferStore, type DirtyBuffer } from '../context/DirtyBufferContext'
 
 export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'tunnel' | 'emoji' | 'icon' | 'tagIds'>>
 type AddTabOptions = CreateTabOptions
@@ -56,6 +61,38 @@ export function buildWindowTitle(projectName: string | null, taskName: string | 
     return projectName
   }
   return 'DevTool'
+}
+
+/**
+ * These deletions are fire-and-forget and nobody is standing in front of a dialog for them,
+ * but a refusal still must not vanish: 'invalid-worktree' means main deliberately left a
+ * directory on disk rather than recursively deleting something it could not identify.
+ */
+function reportRefusedWorkspaceDelete(result: WorkspaceDeleteResult): void {
+  if (result.status === 'ok') return
+  console.warn(`Workspace not removed (${result.status}): ${result.reason ?? 'no reason given'}`)
+}
+
+/** What the unsaved-changes dialog is currently asking about. */
+export interface DirtyClosePrompt {
+  /** Every unsaved file the pending removal would take, by path. */
+  files: string[]
+  /** A Save is in flight; the buttons are held until it lands or fails. */
+  saving: boolean
+  /** Why the last Save did not land. The removal stays un-done while this is set. */
+  error: string | null
+}
+
+export type DirtyCloseChoice = 'save' | 'discard' | 'cancel'
+
+/** Nothing was dirty, so the removal goes ahead without a dialog ever existing. */
+const PROCEED: Promise<'proceed'> = Promise.resolve('proceed')
+
+/** How long typing has to pause before a note's content is written. */
+const NOTE_CONTENT_SAVE_DEBOUNCE_MS = 500
+
+function tabIdsOfTask(task: Task): string[] {
+  return [...task.tabs.left, ...task.tabs.right].map(tab => tab.id)
 }
 
 function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
@@ -105,10 +142,94 @@ export function useAppState() {
   const lastSavedWindowStateJsonRef = useRef<string | null>(null)
   const interactionGateRef = useRef(createInteractionStampGate())
   const recentlyClosedTabsRef = useRef<RecentlyClosedTab[]>([])
-  const [notes, setNotes] = useState<Record<string, ProjectNote[]>>({})
-  const notesRef = useRef<Record<string, ProjectNote[]>>({})
-  notesRef.current = notes
+  const [notes, setNotes] = useState<NotesRecord>({})
+  // Unlike the other refs here this one is *written ahead* of the state it mirrors:
+  // note mutations compute their next value from it so that several edits in one
+  // turn compose, and so the value handed to the save is never a render behind.
+  const notesRef = useRef<NotesRecord>({})
   const noteContentSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /**
+   * Set when this window has permanently failed to persist something. It means the
+   * state on screen is main's, not the user's — so it has to be visible, not logged.
+   */
+  const [stateSyncError, setStateSyncError] = useState<string | null>(null)
+  const dismissStateSyncError = useCallback(() => setStateSyncError(null), [])
+
+  const projectsSyncRef = useRef<RevisionSyncClient<ProjectsData> | null>(null)
+  if (!projectsSyncRef.current) {
+    projectsSyncRef.current = new RevisionSyncClient<ProjectsData>({
+      save: (payload) => window.api.saveProjects(payload),
+      onRebase: (data) => {
+        // The client is already re-sending this exact payload, so mark it saved to
+        // keep the save effect below from queueing a redundant trailing write.
+        lastSavedProjectsJsonRef.current = JSON.stringify(data)
+        projectsDataRef.current = data
+        setProjectsData(data)
+      },
+      onError: setStateSyncError
+    })
+  }
+  const projectsSync = projectsSyncRef.current
+
+  const notesSyncRef = useRef<RevisionSyncClient<NotesRecord> | null>(null)
+  if (!notesSyncRef.current) {
+    notesSyncRef.current = new RevisionSyncClient<NotesRecord>({
+      save: (payload) => window.api.notesSave(payload),
+      onRebase: (data) => {
+        notesRef.current = data
+        setNotes(data)
+      },
+      onError: setStateSyncError
+    })
+  }
+  const notesSync = notesSyncRef.current
+
+  /**
+   * The single write path for projects/tasks/tabs state. Every mutation is recorded
+   * as an updater before it is applied, which is what lets a save rejected by main's
+   * compare-and-swap be replayed onto the canonical state instead of lost. A mutation
+   * that skips this wrapper and calls `setProjectsData` directly reinstates the
+   * lost-update bug for that one action, silently and untestably.
+   */
+  const mutateProjects = useCallback((updater: (prev: ProjectsData) => ProjectsData) => {
+    const wrapped = (prev: ProjectsData) => pruneUnusedTags(updater(prev))
+    if (!projectsLoadedRef.current) {
+      // No revision to quote yet; these are rebased onto the loaded snapshot instead.
+      pendingProjectUpdatersRef.current.push(wrapped)
+    } else {
+      projectsSync.enqueue(wrapped)
+    }
+    setProjectsData(prev => wrapped(prev))
+  }, [projectsSync])
+
+  /**
+   * The same wrapper for notes. `defer` is the debounced content edit: the mutation is
+   * queued for replay immediately — a broadcast landing mid-keystroke must not wipe
+   * what is being typed — while the write itself waits for the typing to stop.
+   */
+  const mutateNotes = useCallback((
+    updater: (prev: NotesRecord) => NotesRecord,
+    options?: { key?: string; defer?: boolean }
+  ) => {
+    notesSync.enqueue(updater, options?.key)
+    const next = updater(notesRef.current)
+    notesRef.current = next
+    setNotes(next)
+
+    if (noteContentSaveTimerRef.current !== null) {
+      clearTimeout(noteContentSaveTimerRef.current)
+      noteContentSaveTimerRef.current = null
+    }
+    if (options?.defer) {
+      noteContentSaveTimerRef.current = setTimeout(() => {
+        noteContentSaveTimerRef.current = null
+        notesSync.requestSave(notesRef.current)
+      }, NOTE_CONTENT_SAVE_DEBOUNCE_MS)
+      return
+    }
+    notesSync.requestSave(next)
+  }, [notesSync])
 
   const updateWindowViewState = useCallback((updater: (prev: WindowViewState) => WindowViewState) => {
     setWindowViewState(prev => {
@@ -121,6 +242,70 @@ export function useAppState() {
     return reconcileTaskViewState(task, windowViewStateRef.current.taskStates[task.id])
   }, [])
 
+  const dirtyBuffers = useDirtyBufferStore()
+  const [dirtyPrompt, setDirtyPrompt] = useState<DirtyClosePrompt | null>(null)
+  // The buffers themselves never enter state: they carry live closures over the
+  // editors, and the dialog only ever needs their paths to render.
+  const dirtyPromptBuffersRef = useRef<DirtyBuffer[]>([])
+  const dirtyPromptResolveRef = useRef<((outcome: 'proceed' | 'cancel') => void) | null>(null)
+
+  /**
+   * The one gate every removal path goes through. Clean tabs never see a dialog
+   * — the promise is already resolved — so ⌘W on a terminal costs nothing.
+   */
+  const confirmDiscardDirty = useCallback((tabIds: string[]): Promise<'proceed' | 'cancel'> => {
+    const dirty = dirtyBuffers.getDirtyTabs(tabIds)
+    if (dirty.length === 0) return PROCEED
+    // A second removal while the dialog is up would strand the first caller's
+    // promise; the modal blocks the UI, so this only guards the odd programmatic
+    // caller (idle cleanup) racing the user.
+    if (dirtyPromptResolveRef.current) return Promise.resolve('cancel')
+
+    return new Promise<'proceed' | 'cancel'>(resolve => {
+      dirtyPromptResolveRef.current = resolve
+      dirtyPromptBuffersRef.current = dirty
+      setDirtyPrompt({ files: dirty.map(buffer => buffer.filePath), saving: false, error: null })
+    })
+  }, [dirtyBuffers])
+
+  const settleDirtyPrompt = useCallback((outcome: 'proceed' | 'cancel') => {
+    const resolve = dirtyPromptResolveRef.current
+    dirtyPromptResolveRef.current = null
+    dirtyPromptBuffersRef.current = []
+    setDirtyPrompt(null)
+    resolve?.(outcome)
+  }, [])
+
+  const resolveDirtyPrompt = useCallback(async (choice: DirtyCloseChoice): Promise<void> => {
+    if (!dirtyPromptResolveRef.current) return
+    if (choice === 'cancel') {
+      settleDirtyPrompt('cancel')
+      return
+    }
+    if (choice === 'discard') {
+      settleDirtyPrompt('proceed')
+      return
+    }
+
+    setDirtyPrompt(prev => (prev ? { ...prev, saving: true, error: null } : prev))
+    for (const buffer of dirtyPromptBuffersRef.current) {
+      try {
+        await buffer.save()
+      } catch (err) {
+        // Nothing is removed on the strength of a write that did not land. The
+        // dialog stays up with the reason so the user can retry, discard, or
+        // back out — and the rejection dies here rather than reaching the
+        // unhandled-rejection crash screen in src/renderer/main.tsx.
+        const message = err instanceof Error ? err.message : String(err)
+        setDirtyPrompt(prev => (prev
+          ? { ...prev, saving: false, error: message ? `Save failed: ${message}` : 'Save failed.' }
+          : prev))
+        return
+      }
+    }
+    settleDirtyPrompt('proceed')
+  }, [settleDirtyPrompt])
+
   useEffect(() => {
     let cancelled = false
 
@@ -129,10 +314,14 @@ export function useAppState() {
       window.api.loadConfig(),
       window.api.loadWindowState(),
       window.api.notesLoad()
-    ]).then(([loadedProjectsData, loadedConfig, loadedWindowViewState, loadedNotes]) => {
+    ]).then(([loadedProjects, loadedConfig, loadedWindowViewState, loadedNotesEnvelope]) => {
       if (cancelled) return
 
-      const hydratedProjectsData = applyQueuedStateUpdates(loadedProjectsData, pendingProjectUpdatersRef.current)
+      projectsSync.hydrate(loadedProjects.revision)
+      notesSync.hydrate(loadedNotesEnvelope.revision)
+      const loadedNotes = notesSync.replay(loadedNotesEnvelope.data)
+
+      const hydratedProjectsData = applyQueuedStateUpdates(loadedProjects.data, pendingProjectUpdatersRef.current)
       const hydratedConfig = applyQueuedStateUpdates(loadedConfig, pendingConfigUpdatersRef.current)
 
       const projectsWithLifetime = hydratedProjectsData.projects.map(p =>
@@ -157,25 +346,53 @@ export function useAppState() {
       configLoadedRef.current = true
       windowStateLoadedRef.current = true
 
+      projectsDataRef.current = finalProjectsData
+      notesRef.current = loadedNotes
       setProjectsData(finalProjectsData)
       setConfig(hydratedConfig)
       setWindowViewState(hydratedWindowViewState)
       setNotes(loadedNotes)
+      // Note mutations made before the load returned were replayed onto the loaded
+      // record above but have never been persisted.
+      if (notesSync.hasPending()) notesSync.requestSave(loadedNotes)
     })
 
     void window.api.getNativeTheme().then(setTheme)
     window.api.onThemeChanged(setTheme)
 
-    const cleanupProjects = window.api.onProjectsUpdated((updatedProjectsData) => {
+    // Canonical state, not a mutation: it is adopted rather than pushed through
+    // `mutateProjects`. Anything of ours that main has not acknowledged yet is
+    // replayed on top so another window's save cannot swallow it.
+    const cleanupProjects = window.api.onProjectsUpdated((envelope) => {
       if (cancelled) return
-      const projectsWithLifetime = updatedProjectsData.projects.map(p =>
+      const projectsWithLifetime = envelope.data.projects.map(p =>
         backfillLifetimeStats(p, notesRef.current)
       )
-      const final = { ...updatedProjectsData, projects: projectsWithLifetime }
-      const serialized = JSON.stringify(final)
-      if (serialized === lastSavedProjectsJsonRef.current) return
-      lastSavedProjectsJsonRef.current = serialized
-      setProjectsData(final)
+      const canonical = { ...envelope.data, projects: projectsWithLifetime }
+      // Compare the inner data: the revision alone would make every broadcast — our
+      // own save echoing back included — look like news.
+      if (JSON.stringify(canonical) === lastSavedProjectsJsonRef.current) {
+        // Mid-save the acknowledgement carries the authoritative revision; adopting
+        // one from an echo would let a stale base slip past the compare-and-swap.
+        if (!projectsSync.isSaving()) projectsSync.hydrate(envelope.revision)
+        return
+      }
+      const next = projectsSync.applyBroadcast(envelope.revision, canonical)
+      if (next === null) return
+      // Marking it saved keeps the save effect from re-sending state we were just
+      // handed — so anything replayed on top has to be sent explicitly here.
+      lastSavedProjectsJsonRef.current = JSON.stringify(next)
+      projectsDataRef.current = next
+      setProjectsData(next)
+      if (projectsSync.hasPending()) projectsSync.requestSave(next)
+    })
+
+    const cleanupNotes = window.api.onNotesUpdated((envelope) => {
+      if (cancelled) return
+      const next = notesSync.applyBroadcast(envelope.revision, envelope.data)
+      if (next === null) return
+      notesRef.current = next
+      setNotes(next)
     })
 
     const cleanupConfig = window.api.onConfigUpdated((updatedConfig) => {
@@ -189,9 +406,57 @@ export function useAppState() {
     return () => {
       cancelled = true
       cleanupProjects()
+      cleanupNotes()
       cleanupConfig()
     }
   }, [])
+
+  /**
+   * Publish this window's unsaved editors to main. Idle cleanup runs there with
+   * nobody in front of a Save/Discard dialog, so a dirty buffer has to be a
+   * safeguard rather than a prompt — and main cannot see one on its own.
+   */
+  useEffect(() => {
+    let lastReported = ''
+    const report = () => {
+      const tabIds = dirtyBuffers.getDirtyTabs().map(buffer => buffer.tabId).sort()
+      const serialized = JSON.stringify(tabIds)
+      if (serialized === lastReported) return
+      lastReported = serialized
+      void window.api.reportDirtyTabs(tabIds).catch(() => {})
+    }
+    report()
+    return dirtyBuffers.subscribe(report)
+  }, [dirtyBuffers])
+
+  /**
+   * Main deleted a task by itself (idle cleanup). The state change arrives as a
+   * normal projects broadcast; this is the part of `removeTask` that is local to
+   * a window — the xterm instances and per-tab status entries hanging off the
+   * tabs, and this window's own view state.
+   */
+  useEffect(() => {
+    return window.api.onTasksRemoved(({ taskId, tabIds }) => {
+      for (const tabId of tabIds) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+      }
+      // Disposing a live xterm writes its buffer back synchronously, which would
+      // put back the scrollback file main just deleted.
+      for (const tabId of tabIds) {
+        void window.api.scrollbackDelete(tabId)
+      }
+      updateWindowViewState(prev => {
+        if (!(taskId in prev.taskStates) && prev.selectedTaskId !== taskId) return prev
+        const taskStates = { ...prev.taskStates }
+        delete taskStates[taskId]
+        return {
+          ...prev,
+          selectedTaskId: prev.selectedTaskId === taskId ? null : prev.selectedTaskId,
+          taskStates
+        }
+      })
+    })
+  }, [updateWindowViewState])
 
   useEffect(() => {
     const handleFocus = () => setWindowFocused(true)
@@ -211,8 +476,8 @@ export function useAppState() {
     if (serialized === lastSavedProjectsJsonRef.current) return
 
     lastSavedProjectsJsonRef.current = serialized
-    void window.api.saveProjects(projectsData)
-  }, [projectsData])
+    projectsSync.requestSave(projectsData)
+  }, [projectsData, projectsSync])
 
   useEffect(() => {
     if (!configLoadedRef.current || !config) return
@@ -251,15 +516,15 @@ export function useAppState() {
     if (!projectsLoadedRef.current || !configLoadedRef.current || !config) return
     if (!windowFocused) return
 
-    const selection = persistSelectionState(
-      projectsData,
-      config,
-      windowViewState.selectedProjectId,
-      windowViewState.selectedTaskId
-    )
+    const selectedProjectId = windowViewState.selectedProjectId
+    const selectedTaskId = windowViewState.selectedTaskId
+    const selection = persistSelectionState(projectsData, config, selectedProjectId, selectedTaskId)
 
+    // Stamping the project's `lastTaskId` is a real mutation of shared state, so it
+    // goes through the wrapper like any other — recomputed against `prev` so that a
+    // conflict replay stamps the right project rather than a stale snapshot of it.
     if (selection.projectsData !== projectsData) {
-      setProjectsData(selection.projectsData)
+      mutateProjects(prev => persistSelectionState(prev, config, selectedProjectId, selectedTaskId).projectsData)
     }
 
     if (selection.config !== config) {
@@ -267,6 +532,7 @@ export function useAppState() {
     }
   }, [
     config,
+    mutateProjects,
     projectsData,
     windowFocused,
     windowViewState.selectedProjectId,
@@ -320,14 +586,6 @@ export function useAppState() {
     }))
   }, [projects, windowViewState.selectedTaskId, windowViewState.taskStates, windowViewState.fileBrowserOpen, windowViewState.fileBrowserActiveTab, updateWindowViewState])
 
-  const persistProjects = useCallback((updater: (prev: ProjectsData) => ProjectsData) => {
-    const wrapped = (prev: ProjectsData) => pruneUnusedTags(updater(prev))
-    if (!projectsLoadedRef.current) {
-      pendingProjectUpdatersRef.current.push(wrapped)
-    }
-    setProjectsData(prev => wrapped(prev))
-  }, [])
-
   const includePendingTags = useCallback((data: ProjectsData, tagIds?: readonly string[]): ProjectsData => {
     if (!tagIds?.length) return data
     const existingTagIds = new Set(data.tags.map(tag => tag.id))
@@ -341,7 +599,7 @@ export function useAppState() {
   const markTaskInteracted = useCallback((projectId: string, taskId: string) => {
     const now = Date.now()
     if (!interactionGateRef.current(taskId, now)) return
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id !== projectId ? project : {
@@ -352,14 +610,14 @@ export function useAppState() {
         }
       )
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const updateTaskInbox = useCallback((
     projectId: string,
     taskId: string,
     updater: (inbox: TaskInboxState) => TaskInboxState
   ) => {
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id !== projectId ? project : {
@@ -370,7 +628,7 @@ export function useAppState() {
         }
       )
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   /**
    * Stamps a meaningful event on a task: a hook notification/stop, a terminal bell, a
@@ -585,7 +843,7 @@ export function useAppState() {
   }, [updateWindowViewState, markTaskVisited])
 
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map((project) => {
         if (project.id !== projectId) return project
@@ -595,7 +853,7 @@ export function useAppState() {
         return { ...project, tasks }
       })
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const addProject = useCallback((name: string, directory: string, tagIds?: string[]) => {
     const id = uuid()
@@ -607,7 +865,7 @@ export function useAppState() {
       tasks: [homeTask],
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
-    persistProjects(prev => {
+    mutateProjects(prev => {
       const data = includePendingTags(prev, tagIds)
       return {
         ...data,
@@ -617,7 +875,7 @@ export function useAppState() {
     })
     selectProject(project.id)
     return project
-  }, [includePendingTags, persistProjects, selectProject])
+  }, [includePendingTags, mutateProjects, selectProject])
 
   const addRemoteProject = useCallback((
     name: string,
@@ -636,7 +894,7 @@ export function useAppState() {
       ...(aiToolArgs ? { aiToolArgs } : {}),
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
-    persistProjects(prev => {
+    mutateProjects(prev => {
       const data = includePendingTags(prev, tagIds)
       return {
         ...data,
@@ -647,7 +905,7 @@ export function useAppState() {
     selectProject(project.id)
     window.api.sshConnect(project.id, sshConfig).catch(() => {})
     return project
-  }, [includePendingTags, persistProjects, selectProject])
+  }, [includePendingTags, mutateProjects, selectProject])
 
   const addShellCommandProject = useCallback((name: string, command: string, tagIds?: string[]) => {
     const id = uuid()
@@ -660,7 +918,7 @@ export function useAppState() {
       tasks: [homeTask],
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
-    persistProjects(prev => {
+    mutateProjects(prev => {
       const data = includePendingTags(prev, tagIds)
       return {
         ...data,
@@ -670,13 +928,20 @@ export function useAppState() {
     })
     selectProject(project.id)
     return project
-  }, [includePendingTags, persistProjects, selectProject])
+  }, [includePendingTags, mutateProjects, selectProject])
 
   const getProjectDir = useCallback((project: Project): string => {
     return project.ssh ? project.ssh.remoteDir : project.directory
   }, [])
 
   const removeProject = useCallback(async (id: string) => {
+    const doomed = projectsRef.current.find(p => p.id === id)
+    // One dialog for the whole project, asked before anything is torn down.
+    if (doomed) {
+      const tabIds = doomed.tasks.flatMap(tabIdsOfTask)
+      if (await confirmDiscardDirty(tabIds) === 'cancel') return
+    }
+
     const project = projectsRef.current.find(p => p.id === id)
     if (project) {
       for (const task of project.tasks) {
@@ -695,7 +960,7 @@ export function useAppState() {
               baseBranch: task.workspace.baseBranch,
               force: true
             }
-          ).catch(() => {})
+          ).then(reportRefusedWorkspaceDelete).catch(() => {})
         }
       }
       if (project.ssh) {
@@ -703,7 +968,7 @@ export function useAppState() {
       }
     }
 
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.filter(project => project.id !== id),
       projectOrder: prev.projectOrder.filter(rootId => rootId !== id)
@@ -715,24 +980,24 @@ export function useAppState() {
       selectedTaskId: prev.selectedProjectId === id ? null : prev.selectedTaskId,
       expandedProjectIds: prev.expandedProjectIds.filter(pid => pid !== id)
     }))
-  }, [getProjectDir, persistProjects, updateWindowViewState])
+  }, [confirmDiscardDirty, getProjectDir, mutateProjects, updateWindowViewState])
 
   const renameProject = useCallback((id: string, name: string) => {
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project => (project.id === id ? { ...project, name } : project))
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const updateProject = useCallback((id: string, updates: ProjectUpdate) => {
-    persistProjects(prev => {
+    mutateProjects(prev => {
       const data = includePendingTags(prev, updates.tagIds)
       return {
         ...data,
         projects: data.projects.map(project => (project.id === id ? { ...project, ...updates } : project))
       }
     })
-  }, [includePendingTags, persistProjects])
+  }, [includePendingTags, mutateProjects])
 
   const findOrCreateTagId = useCallback((data: ProjectsData, name: string): { data: ProjectsData; tagId: string } => {
     const trimmed = name.trim()
@@ -759,14 +1024,14 @@ export function useAppState() {
   const renameTag = useCallback((tagId: string, name: string) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       tags: prev.tags.map(tag => (tag.id === tagId ? { ...tag, name: trimmed } : tag))
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const setProjectTags = useCallback((projectId: string, tagIds: string[]) => {
-    persistProjects(prev => {
+    mutateProjects(prev => {
       const data = includePendingTags(prev, tagIds)
       return {
         ...data,
@@ -775,16 +1040,16 @@ export function useAppState() {
         )
       }
     })
-  }, [includePendingTags, persistProjects])
+  }, [includePendingTags, mutateProjects])
 
   const reorderProjects = useCallback((fromIndex: number, toIndex: number) => {
-    persistProjects(prev => {
+    mutateProjects(prev => {
       const newOrder = [...prev.projectOrder]
       const [moved] = newOrder.splice(fromIndex, 1)
       newOrder.splice(toIndex, 0, moved)
       return { ...prev, projectOrder: newOrder }
     })
-  }, [persistProjects])
+  }, [mutateProjects])
 
   // `initialTabs` exists so a task can be born with its tabs: calling `addTab` right
   // after this would read a `projectsRef` that hasn't seen the task yet and clobber
@@ -801,7 +1066,7 @@ export function useAppState() {
       // no activity at all and sinks to the bottom of the inbox's active group.
       lastInteractedAt: Date.now()
     }
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -819,7 +1084,7 @@ export function useAppState() {
       }
     }))
     return task
-  }, [persistProjects, updateWindowViewState])
+  }, [mutateProjects, updateWindowViewState])
 
   const addWorkspaceTask = useCallback((
     projectId: string,
@@ -837,7 +1102,7 @@ export function useAppState() {
       splitRatio: 0.5,
       lastInteractedAt: Date.now()
     }
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -855,9 +1120,16 @@ export function useAppState() {
       }
     }))
     return task
-  }, [persistProjects, updateWindowViewState])
+  }, [mutateProjects, updateWindowViewState])
 
-  const removeTask = useCallback((projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => {
+  const removeTask = useCallback(async (projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => {
+    const doomed = projectsRef.current
+      .find(candidate => candidate.id === projectId)?.tasks
+      .find(candidate => candidate.id === taskId)
+    if (doomed && isHomeTask(doomed)) return
+    // One dialog for every unsaved editor under the task, not one per tab.
+    if (doomed && await confirmDiscardDirty(tabIdsOfTask(doomed)) === 'cancel') return
+
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = project?.tasks.find(candidate => candidate.id === taskId)
     if (task && isHomeTask(task)) return
@@ -877,11 +1149,11 @@ export function useAppState() {
             baseBranch: task.workspace.baseBranch,
             force: true
           }
-        ).catch(() => {})
+        ).then(reportRefusedWorkspaceDelete).catch(() => {})
       }
     }
 
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -899,10 +1171,10 @@ export function useAppState() {
         taskStates
       }
     })
-  }, [persistProjects, updateWindowViewState])
+  }, [confirmDiscardDirty, mutateProjects, updateWindowViewState])
 
   const renameTask = useCallback((projectId: string, taskId: string, name: string) => {
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -910,7 +1182,7 @@ export function useAppState() {
           : project
       )
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const renameTab = useCallback((
     projectId: string,
@@ -921,7 +1193,7 @@ export function useAppState() {
   ) => {
     const trimmed = title.trim()
     if (!trimmed) return
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -946,7 +1218,7 @@ export function useAppState() {
           : project
       )
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const addTab = useCallback((
     projectId: string,
@@ -958,7 +1230,7 @@ export function useAppState() {
     const options = typeof arg === 'string' ? { filePath: arg } : (arg ?? {})
     const tab = createTab(type, options)
 
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -1004,9 +1276,11 @@ export function useAppState() {
     })
 
     return tab
-  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask])
+  }, [mutateProjects, updateWindowViewState, getTaskViewStateForTask])
 
-  const removeTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
+  const removeTab = useCallback(async (projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
+    if (await confirmDiscardDirty([tabId]) === 'cancel') return
+
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = project?.tasks.find(candidate => candidate.id === taskId)
     const tabIndex = task?.tabs[pane].findIndex(tab => tab.id === tabId) ?? -1
@@ -1045,7 +1319,7 @@ export function useAppState() {
       }
     })
 
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -1067,7 +1341,7 @@ export function useAppState() {
     }))
 
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask, rememberClosedTab])
+  }, [confirmDiscardDirty, mutateProjects, updateWindowViewState, getTaskViewStateForTask, rememberClosedTab])
 
   const reopenClosedTab = useCallback((): 'left' | 'right' | null => {
     const next = shiftRestorableClosedTab(recentlyClosedTabsRef.current, projectsRef.current)
@@ -1084,7 +1358,7 @@ export function useAppState() {
       return null
     }
 
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -1138,10 +1412,10 @@ export function useAppState() {
     }
 
     return pane
-  }, [cleanupClosedTabHistory, persistProjects, updateWindowViewState, getTaskViewStateForTask])
+  }, [cleanupClosedTabHistory, mutateProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const updateTabUrl = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, url: string) => {
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -1162,10 +1436,10 @@ export function useAppState() {
           : project
       )
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const updateTabSessionId = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string, sessionId: string) => {
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -1186,7 +1460,7 @@ export function useAppState() {
           : project
       )
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const setActiveTab = useCallback((projectId: string, taskId: string, pane: 'left' | 'right', tabId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
@@ -1236,7 +1510,7 @@ export function useAppState() {
       }
     }))
 
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId
@@ -1254,7 +1528,7 @@ export function useAppState() {
           : project
       )
     }))
-  }, [persistProjects, updateWindowViewState, getTaskViewStateForTask])
+  }, [mutateProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const toggleSplit = useCallback((projectId: string, taskId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
@@ -1387,7 +1661,7 @@ export function useAppState() {
 
   const togglePinnedItem = useCallback((item: PinnedItem) => {
     const key = pinnedItemKey(item)
-    persistProjects(prev => {
+    mutateProjects(prev => {
       const existing = prev.pinnedItems ?? []
       const without = existing.filter(candidate => pinnedItemKey(candidate) !== key)
       return {
@@ -1395,11 +1669,11 @@ export function useAppState() {
         pinnedItems: without.length < existing.length ? without : [...existing, item]
       }
     })
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const setPinnedOrder = useCallback((items: PinnedItem[]) => {
-    persistProjects(prev => ({ ...prev, pinnedItems: [...items] }))
-  }, [persistProjects])
+    mutateProjects(prev => ({ ...prev, pinnedItems: [...items] }))
+  }, [mutateProjects])
 
   const setFileBrowserWidth = useCallback((width: number) => {
     updateWindowViewState(prev => ({ ...prev, fileBrowserWidth: Math.min(400, Math.max(150, width)) }))
@@ -1467,32 +1741,33 @@ export function useAppState() {
       createdAt: Date.now(),
       updatedAt: Date.now()
     }
-    setNotes(prev => {
-      const updated = { ...prev, [projectId]: [...(prev[projectId] ?? []), note] }
-      void window.api.notesSave(updated)
-      return updated
+    mutateNotes(prev => {
+      const existing = prev[projectId] ?? []
+      // A replay of this create must not add the note a second time.
+      if (existing.some(n => n.id === note.id)) return prev
+      return { ...prev, [projectId]: [...existing, note] }
     })
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id === projectId ? incrementLifetimeStat(project, 'notesCreated') : project
       )
     }))
     return note
-  }, [persistProjects])
+  }, [mutateNotes, mutateProjects])
 
   const renameNote = useCallback((projectId: string, noteId: string, name: string) => {
-    setNotes(prev => {
-      const updated = {
+    const renamedAt = Date.now()
+    mutateNotes(prev => {
+      const existing = prev[projectId]
+      // Renaming a note another window deleted is dropped, not a resurrection.
+      if (!existing?.some(n => n.id === noteId)) return prev
+      return {
         ...prev,
-        [projectId]: (prev[projectId] ?? []).map(n =>
-          n.id === noteId ? { ...n, name, updatedAt: Date.now() } : n
-        )
+        [projectId]: existing.map(n => (n.id === noteId ? { ...n, name, updatedAt: renamedAt } : n))
       }
-      void window.api.notesSave(updated)
-      return updated
     })
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(project =>
         project.id !== projectId ? project : {
@@ -1511,16 +1786,13 @@ export function useAppState() {
         }
       )
     }))
-  }, [persistProjects])
+  }, [mutateProjects])
 
   const deleteNote = useCallback((projectId: string, noteId: string) => {
-    setNotes(prev => {
-      const updated = {
-        ...prev,
-        [projectId]: (prev[projectId] ?? []).filter(n => n.id !== noteId)
-      }
-      void window.api.notesSave(updated)
-      return updated
+    mutateNotes(prev => {
+      const existing = prev[projectId]
+      if (!existing?.some(n => n.id === noteId)) return prev
+      return { ...prev, [projectId]: existing.filter(n => n.id !== noteId) }
     })
 
     const project = projectsRef.current.find(p => p.id === projectId)
@@ -1564,7 +1836,7 @@ export function useAppState() {
       return { ...prev, taskStates: nextTaskStates }
     })
 
-    persistProjects(prev => ({
+    mutateProjects(prev => ({
       ...prev,
       projects: prev.projects.map(p =>
         p.id !== projectId ? p : {
@@ -1583,46 +1855,62 @@ export function useAppState() {
     for (const tabId of removedTabIds) {
       window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
     }
-  }, [persistProjects, updateWindowViewState])
+  }, [mutateNotes, mutateProjects, updateWindowViewState])
 
   const updateNoteContent = useCallback((projectId: string, noteId: string, content: string) => {
     const now = Date.now()
-    setNotes(prev => ({
-      ...prev,
-      [projectId]: (prev[projectId] ?? []).map(n =>
-        n.id === noteId ? { ...n, content, updatedAt: now } : n
-      )
-    }))
-    if (noteContentSaveTimerRef.current !== null) clearTimeout(noteContentSaveTimerRef.current)
-    noteContentSaveTimerRef.current = setTimeout(() => {
-      noteContentSaveTimerRef.current = null
-      void window.api.notesSave(notesRef.current)
-    }, 500)
-  }, [])
+    mutateNotes(
+      prev => {
+        const existing = prev[projectId]
+        // The documented policy for a replay onto state where another window deleted
+        // this note: the deletion wins and the edit is dropped. Resurrecting the note
+        // would undo a deliberate delete with a keystroke nobody aimed at it.
+        if (!existing?.some(n => n.id === noteId)) return prev
+        return {
+          ...prev,
+          [projectId]: existing.map(n => (n.id === noteId ? { ...n, content, updatedAt: now } : n))
+        }
+      },
+      // One coalesced entry per note: every keystroke replaces the last, so a replay
+      // writes the newest text once instead of every intermediate value in order.
+      { key: `note-content:${projectId}:${noteId}`, defer: true }
+    )
+  }, [mutateNotes])
 
   const openOrFocusNoteTab = useCallback((
     projectId: string,
-    taskId: string,
+    taskId: string | null,
     pane: 'left' | 'right',
     noteId: string
   ) => {
     const project = projectsRef.current.find(p => p.id === projectId)
-    const task = project?.tasks.find(t => t.id === taskId)
-    if (!task) return
+    if (!project) return
+
+    // `taskId` may be missing, stale, or belong to a different project (the
+    // palette can surface notes from any project). Fall back to the project's
+    // own landing task instead of silently doing nothing.
+    const targetTaskId = resolveLandingTaskId(project, taskId)
+    const task = targetTaskId ? project.tasks.find(t => t.id === targetTaskId) : null
+    if (!task || !targetTaskId) return
+
+    const view = windowViewStateRef.current
+    if (view.selectedProjectId !== projectId || view.selectedTaskId !== targetTaskId) {
+      switchToTask(projectId, targetTaskId)
+    }
 
     const allTabs = [...task.tabs.left, ...task.tabs.right]
     const existingTab = allTabs.find(t => t.type === 'note' && t.noteId === noteId)
     if (existingTab) {
       const existingPane = task.tabs.left.includes(existingTab) ? 'left' : 'right'
-      setActiveTab(projectId, taskId, existingPane, existingTab.id)
+      setActiveTab(projectId, targetTaskId, existingPane, existingTab.id)
       return
     }
 
     const note = notesRef.current[projectId]?.find(n => n.id === noteId)
     if (!note) return
 
-    addTab(projectId, taskId, pane, 'note', { noteId, noteName: note.name })
-  }, [addTab, setActiveTab])
+    addTab(projectId, targetTaskId, pane, 'note', { noteId, noteName: note.name })
+  }, [addTab, setActiveTab, switchToTask])
 
   const selectedProjectId = windowViewState.selectedProjectId
   const selectedTaskId = windowViewState.selectedTaskId
@@ -1690,6 +1978,11 @@ export function useAppState() {
     addTab,
     removeTab,
     renameTab,
+    dirtyPrompt,
+    resolveDirtyPrompt,
+    confirmDiscardDirty,
+    stateSyncError,
+    dismissStateSyncError,
     reopenClosedTab,
     updateTabUrl,
     updateTabSessionId,

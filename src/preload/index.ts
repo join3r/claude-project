@@ -1,31 +1,53 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppConfig,
+  CleanupActivity,
   CommitHistoryResult,
   DirectoryEntry,
   GitOperationResult,
   GitPostureResult,
   GitStatusResult,
-  ProjectNote,
+  NotesEnvelope,
+  NotesRecord,
+  NotesSaveResult,
   ProjectsData,
+  ProjectsEnvelope,
+  ProjectsSaveResult,
   SshConfig,
+  TaskRemoval,
   TunnelConfig,
   TunnelState,
   WorkspaceCreateRequest,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteResult,
   WorkspaceListBranchesRequest,
   WindowViewState
 } from '../shared/types'
 
 const api = {
   // Projects
-  loadProjects: (): Promise<ProjectsData> => ipcRenderer.invoke('load-projects'),
-  saveProjects: (data: ProjectsData): Promise<void> => ipcRenderer.invoke('save-projects', data),
-  onProjectsUpdated: (callback: (data: ProjectsData) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: ProjectsData) => callback(data)
+  // Projects and notes are revision-guarded: a save quotes the revision it was
+  // derived from and main refuses it if another window got there first.
+  loadProjects: (): Promise<ProjectsEnvelope> => ipcRenderer.invoke('load-projects'),
+  saveProjects: (payload: { baseRevision: number; data: ProjectsData }): Promise<ProjectsSaveResult> =>
+    ipcRenderer.invoke('save-projects', payload),
+  onProjectsUpdated: (callback: (envelope: ProjectsEnvelope) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, envelope: ProjectsEnvelope) => callback(envelope)
     ipcRenderer.on('projects-updated', handler)
     return () => ipcRenderer.removeListener('projects-updated', handler)
   },
+
+  // Idle task cleanup runs entirely in main — a window only reports what main
+  // cannot see (its unsaved buffers) and reacts to what main removed.
+  reportDirtyTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('report-dirty-tabs', tabIds),
+  getCleanupActivity: (): Promise<CleanupActivity> => ipcRenderer.invoke('get-cleanup-activity'),
+  onTasksRemoved: (callback: (removal: TaskRemoval) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, removal: TaskRemoval) => callback(removal)
+    ipcRenderer.on('tasks-removed', handler)
+    return () => ipcRenderer.removeListener('tasks-removed', handler)
+  },
+  /** Resolves false when no snapshot was written — nothing destructive may follow. */
+  backupProjectsNow: (): Promise<boolean> => ipcRenderer.invoke('backup-projects-now'),
 
   // Config
   loadConfig: (): Promise<AppConfig> => ipcRenderer.invoke('load-config'),
@@ -37,8 +59,14 @@ const api = {
   },
 
   // Notes
-  notesLoad: (): Promise<Record<string, ProjectNote[]>> => ipcRenderer.invoke('notes-load'),
-  notesSave: (data: Record<string, ProjectNote[]>): Promise<void> => ipcRenderer.invoke('notes-save', data),
+  notesLoad: (): Promise<NotesEnvelope> => ipcRenderer.invoke('notes-load'),
+  notesSave: (payload: { baseRevision: number; data: NotesRecord }): Promise<NotesSaveResult> =>
+    ipcRenderer.invoke('notes-save', payload),
+  onNotesUpdated: (callback: (envelope: NotesEnvelope) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, envelope: NotesEnvelope) => callback(envelope)
+    ipcRenderer.on('notes-updated', handler)
+    return () => ipcRenderer.removeListener('notes-updated', handler)
+  },
 
   // Palette frecency
   paletteFrecencyLoad: (): Promise<{ version: 1; entries: Record<string, { lastUsedAt: number; useCount: number }> }> =>
@@ -106,10 +134,12 @@ const api = {
   scrollbackDelete: (tabId: string): Promise<void> => ipcRenderer.invoke('scrollback-delete', tabId),
 
   // Hook injection
-  hooksInject: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-inject', projectDir),
-  hooksCleanup: (projectDir: string): Promise<void> => ipcRenderer.invoke('hooks-cleanup', projectDir),
-  hooksCleanupRemote: (projectId: string, sshConfig: SshConfig, remoteDir?: string): Promise<void> =>
-    ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig, remoteDir),
+  // tabId identifies which tab owns the injection — hooks are shared per directory
+  // and only come off disk once every owning tab has released them.
+  hooksInject: (projectDir: string, tabId: string): Promise<void> => ipcRenderer.invoke('hooks-inject', projectDir, tabId),
+  hooksCleanup: (projectDir: string, tabId: string): Promise<void> => ipcRenderer.invoke('hooks-cleanup', projectDir, tabId),
+  hooksCleanupRemote: (projectId: string, sshConfig: SshConfig, remoteDir: string | undefined, tabId: string): Promise<void> =>
+    ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig, remoteDir, tabId),
 
   // Codex session reading
   codexReadSession: (cwd: string, afterTs?: number, projectId?: string, sshConfig?: SshConfig): Promise<{ sessionId: string | null }> =>
@@ -265,9 +295,7 @@ const api = {
     baseBranch: string
     relativeProjectPath: string
   }> => ipcRenderer.invoke('workspace-create', request),
-  workspaceDelete: (
-    request: WorkspaceDeleteRequest
-  ): Promise<{ status: 'ok' | 'uncommitted' | 'unmerged' | 'uncommitted-and-unmerged'; baseBranch?: string }> =>
+  workspaceDelete: (request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> =>
     ipcRenderer.invoke('workspace-delete', request)
 }
 

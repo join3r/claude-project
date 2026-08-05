@@ -1,5 +1,5 @@
 import { execFile } from 'child_process'
-import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceListBranchesRequest } from '../shared/types'
+import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceListBranchesRequest } from '../shared/types'
 
 type RemoteWorkspaceResponse<T> =
   | { ok: true; data: T }
@@ -173,7 +173,7 @@ except Exception as err:
   async delete(
     socketPath: string,
     request: WorkspaceDeleteRequest & { projectId: string; sshConfig: SshConfig }
-  ): Promise<{ status: 'ok' | 'uncommitted' | 'unmerged' | 'uncommitted-and-unmerged'; baseBranch?: string }> {
+  ): Promise<WorkspaceDeleteResult> {
     return this.runRemote(
       socketPath,
       request.projectId,
@@ -189,6 +189,22 @@ except Exception as err:
       `
 import os, shutil, subprocess
 
+def error_text(err):
+    stderr = getattr(err, 'stderr', None)
+    if stderr and stderr.strip():
+        return stderr.strip()
+    return str(err)
+
+def emit(data):
+    print(json.dumps({'ok': True, 'data': data}))
+    raise SystemExit(0)
+
+def real_path(target):
+    try:
+        return os.path.realpath(target)
+    except Exception:
+        return os.path.abspath(target)
+
 try:
     repo_root = subprocess.run(
         ['git', 'rev-parse', '--show-toplevel'],
@@ -200,18 +216,24 @@ try:
     ).stdout.strip()
 
     if not payload.get('force'):
+        # A safety check that cannot be completed is not proof that there is nothing to lose,
+        # so every failure below blocks the deletion instead of allowing it.
         has_uncommitted = False
-        try:
-            status_stdout = subprocess.run(
-                ['git', '-C', payload['worktreePath'], 'status', '--porcelain'],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=True
-            ).stdout.strip()
-            has_uncommitted = len(status_stdout) > 0
-        except Exception:
-            has_uncommitted = False
+        if os.path.exists(payload['worktreePath']):
+            try:
+                status_stdout = subprocess.run(
+                    ['git', '-C', payload['worktreePath'], 'status', '--porcelain'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=True
+                ).stdout.strip()
+                has_uncommitted = len(status_stdout) > 0
+            except Exception as err:
+                emit({
+                    'status': 'check-failed',
+                    'reason': 'Could not check "%s" for uncommitted changes: %s' % (payload['worktreePath'], error_text(err))
+                })
 
         is_unmerged = False
         try:
@@ -224,18 +246,21 @@ try:
             ).stdout
             merged_branches = [line.strip().lstrip('*+ ').strip() for line in merged_stdout.splitlines()]
             is_unmerged = payload['branchName'] not in merged_branches
-        except Exception:
-            is_unmerged = False
+        except Exception as err:
+            emit({
+                'status': 'check-failed',
+                'baseBranch': payload['baseBranch'],
+                'reason': 'Could not check whether "%s" is merged into "%s": %s' % (
+                    payload['branchName'], payload['baseBranch'], error_text(err)
+                )
+            })
 
         if has_uncommitted and is_unmerged:
-            print(json.dumps({'ok': True, 'data': {'status': 'uncommitted-and-unmerged', 'baseBranch': payload['baseBranch']}}))
-            raise SystemExit(0)
+            emit({'status': 'uncommitted-and-unmerged', 'baseBranch': payload['baseBranch']})
         if has_uncommitted:
-            print(json.dumps({'ok': True, 'data': {'status': 'uncommitted'}}))
-            raise SystemExit(0)
+            emit({'status': 'uncommitted'})
         if is_unmerged:
-            print(json.dumps({'ok': True, 'data': {'status': 'unmerged', 'baseBranch': payload['baseBranch']}}))
-            raise SystemExit(0)
+            emit({'status': 'unmerged', 'baseBranch': payload['baseBranch']})
 
     try:
         subprocess.run(
@@ -246,8 +271,43 @@ try:
             check=True
         )
     except Exception:
-        if os.path.exists(payload['worktreePath']):
-            shutil.rmtree(payload['worktreePath'], ignore_errors=True)
+        # git refused to remove it. Before recursively deleting anything, prove the path is
+        # really a worktree of this repo — a stale record can point at a reused directory.
+        try:
+            listing = subprocess.run(
+                ['git', '-C', repo_root, 'worktree', 'list', '--porcelain'],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True
+            ).stdout
+        except Exception as err:
+            emit({
+                'status': 'check-failed',
+                'reason': 'Could not list the worktrees of %s, so "%s" was left untouched: %s' % (
+                    repo_root, payload['worktreePath'], error_text(err)
+                )
+            })
+
+        registered = [
+            line[len('worktree '):].strip()
+            for line in listing.splitlines()
+            if line.startswith('worktree ')
+        ]
+        target = real_path(payload['worktreePath'])
+        is_registered = any(real_path(entry) == target for entry in registered if entry)
+
+        if is_registered:
+            if os.path.exists(payload['worktreePath']):
+                shutil.rmtree(payload['worktreePath'], ignore_errors=True)
+        elif os.path.exists(payload['worktreePath']):
+            emit({
+                'status': 'invalid-worktree',
+                'reason': '"%s" is not a registered worktree of %s, so it was not deleted. Remove it by hand if it is no longer needed.' % (
+                    payload['worktreePath'], repo_root
+                )
+            })
+
         subprocess.run(
             ['git', '-C', repo_root, 'worktree', 'prune'],
             capture_output=True,
