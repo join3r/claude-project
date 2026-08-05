@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "npx @electron/rebuild -m . && node scripts/patch-dev-electron-plist.mjs"
+    "postinstall": "node scripts/ensure-electron.mjs && npx @electron/rebuild -m . && node scripts/patch-dev-electron-plist.mjs"
   },
   "build": {
     "appId": "com.devtool.app",
@@ -92,5 +92,11 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "uuid": "^13.0.0"
+  },
+  "allowScripts": {
+    "electron@35.7.5": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.3": true,
+    "node-pty@1.1.0": true
   }
 }
