@@ -39,7 +39,6 @@ import type {
   Project,
   ProjectsData,
   SshConfig,
-  TabStatusValue,
   Task,
   TunnelConfig,
   WorkspaceCreateRequest,
@@ -617,19 +616,25 @@ export class AppRuntime {
     })
 
     ipcMain.handle('pick-directory', async (event) => {
-      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined
-      const result = await dialog.showOpenDialog(owner, {
-        properties: ['openDirectory']
-      })
+      // `showOpenDialog` is overloaded on arity, not on an optional owner, so the
+      // ownerless case has to be a separate call rather than passing undefined.
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
+      const result = owner
+        ? await dialog.showOpenDialog(owner, options)
+        : await dialog.showOpenDialog(options)
       return result.canceled ? null : result.filePaths[0]
     })
 
     ipcMain.handle('pick-file', async (event, title?: string) => {
-      const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined
-      const result = await dialog.showOpenDialog(owner, {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const options: Electron.OpenDialogOptions = {
         title: title || 'Select file',
         properties: ['openFile', 'showHiddenFiles']
-      })
+      }
+      const result = owner
+        ? await dialog.showOpenDialog(owner, options)
+        : await dialog.showOpenDialog(options)
       return result.canceled ? null : result.filePaths[0]
     })
 

@@ -83,7 +83,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     }
     applyZoom()
     webview.addEventListener('dom-ready', applyZoom)
-    return () => webview.removeEventListener('dom-ready', applyZoom)
+    return () => { webview.removeEventListener('dom-ready', applyZoom) }
   }, [browserZoomFactor])
 
   // Initialize SOCKS proxy for remote projects

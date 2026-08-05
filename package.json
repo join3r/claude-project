@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "build:mac": "electron-vite build && electron-builder --mac --dir",
     "build:linux": "electron-vite build && electron-builder --linux --dir",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "npx @electron/rebuild -m . && node scripts/patch-dev-electron-plist.mjs"

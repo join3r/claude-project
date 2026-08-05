@@ -29,7 +29,7 @@ export class HookInjector {
 
   /** Identify devtool hooks by marker OR by URL pattern (marker may be stripped by Claude) */
   private isDevtoolHook(h: HookEntry): boolean {
-    if ((h as Record<string, unknown>)[DEVTOOL_HOOK_MARKER]) return true
+    if ((h as unknown as Record<string, unknown>)[DEVTOOL_HOOK_MARKER]) return true
     return h.hooks.some((hook) => /localhost:\d+\/hook\//.test(hook.command))
   }
 

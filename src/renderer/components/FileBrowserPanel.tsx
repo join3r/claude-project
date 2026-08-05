@@ -26,7 +26,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     ? [selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath].filter(Boolean).join('/')
     : selectedProject?.directory ?? ''
 
-  const isLocalProject = selectedProject
+  const isLocalProject = !!selectedProject
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
     && !!selectedProject.directory

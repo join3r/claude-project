@@ -1,0 +1,12 @@
+{
+  // The only config that actually typechecks this project: `npm run typecheck`.
+  // The build does not — electron-vite strips types with esbuild — and the two
+  // environment configs are split by target, so neither covers src/shared on its
+  // own. This one spans all three source roots in a single program.
+  "extends": "./tsconfig.web.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}

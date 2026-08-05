@@ -356,15 +356,17 @@ export class SshConnectionManager extends EventEmitter {
 
     // Catch spawn errors (e.g. ENOENT if ssh binary not found) to prevent
     // unhandled error events from crashing the Electron main process.
-    let spawnError: Error | null = null
-    child.on('error', (err: Error) => { spawnError = err })
+    // Held in an object: assigning from the callback leaves control-flow analysis
+    // convinced a plain `let` is still null, which narrows it to `never` below.
+    const spawnFailure = { error: null as Error | null }
+    child.on('error', (err: Error) => { spawnFailure.error = err })
 
     try {
       await this.waitForPort(port)
     } catch {
       child.kill()
-      if (spawnError) {
-        throw new Error(`Failed to spawn ssh: ${spawnError.message}`)
+      if (spawnFailure.error) {
+        throw new Error(`Failed to spawn ssh: ${spawnFailure.error.message}`)
       }
       if (attempt < 1 && !stderr.includes('Permission denied') && !stderr.includes('Connection refused')) {
         return this.doStartSocksProxy(projectId, config, attempt + 1)
