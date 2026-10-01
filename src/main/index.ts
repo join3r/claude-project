@@ -15,14 +15,6 @@ import { isMenuZoomInKey } from '../shared/shortcut-label'
 // (do not rethrow — that aborts instead of the recoverable dialog).
 installBrokenPipeUncaughtHandler()
 
-// Name the app DevTool, not the package's lowercase `devtool` (menu bar, About,
-// notifications). Renaming also moves Electron's default userData, which would
-// put dev runs (`<appData>/devtool`) on the packaged app's `<appData>/DevTool` —
-// the same folder on case-insensitive macOS/Windows disks. Pin the old path so
-// dev and prod Chromium storage stay apart, like the config dirs do.
-const userDataPath = app.getPath('userData')
-app.setName('DevTool')
-app.setPath('userData', userDataPath)
 if (process.platform === 'win32') {
   // Matches build.appId, which NSIS stamps on the Start Menu shortcut, so the
   // taskbar groups installed windows under that shortcut. Dev runs get their own id.
@@ -402,6 +394,14 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
 }
 
 app.whenReady().then(async () => {
+  // DevTool, not the package's lowercase `devtool`, in About and the app menu.
+  // Only once ready: Electron names the safeStorage key (the macOS Keychain's
+  // `<name> Safe Storage`, the Linux keyring entry) after the name it has during
+  // startup, and existing installs keep theirs under `devtool`. Renaming earlier
+  // orphans that key: the mobile identity no longer decrypts (paired phones must
+  // pair again) and Chromium's encrypted cookies (browser-tab logins) are lost.
+  // userData is resolved by now too, so it stays `<appData>/devtool`.
+  app.setName('DevTool')
   // Before anything reads or writes the config dir: a second instance on the same
   // dir would clobber the first one's saves.
   const lock = await acquireInstanceLock(CONFIG_DIR, () => {
