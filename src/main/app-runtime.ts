@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, powerSaveBlocker, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, safeStorage, shell } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -590,6 +590,13 @@ export class AppRuntime {
       }
     })
 
+    // A master that slept through its connection's death still answers the
+    // health check's `-O check`; probe end to end so it is replaced right away.
+    powerMonitor.on('resume', () => {
+      this.logDebug('powerResume verifying ssh connections')
+      this.sshManager.verifyAll()
+    })
+
     this.sshManager.on('tunnel-status-changed', (projectId: string, status: string, error?: string) => {
       this.logDebug(`tunnelStatus projectId=${projectId} status=${status}${error ? ` error=${error}` : ''}`)
       this.broadcastToAllWindows('ssh-tunnel-status-changed', projectId, status, error)
@@ -663,7 +670,9 @@ export class AppRuntime {
       sendToWindow: (windowId, channel, ...args) => this.sendToWindow(windowId, channel, ...args),
       resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
       localEnv: () => getShellEnv(),
-      ensureSsh: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
+      // A chat spawns a fresh remote process per session, so check the master
+      // actually reaches the host first: a stale one fails the spawn with 255.
+      ensureSsh: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig, { verify: true }),
       remoteCommand: (projectId, sshConfig, cwd, claudeArgs, env) => ({
         file: this.sshManager.getSshCommand(),
         args: this.sshManager.buildStdioSpawnArgs(projectId, sshConfig, 'claude', claudeArgs, env, cwd)
@@ -707,8 +716,10 @@ export class AppRuntime {
     })
   }
 
-  private async ensureSshConnected(projectId: string, sshConfig: SshConfig): Promise<void> {
-    if (this.sshManager.getStatus(projectId) === 'connected') return
+  private async ensureSshConnected(projectId: string, sshConfig: SshConfig, options?: { verify?: boolean }): Promise<void> {
+    if (this.sshManager.getStatus(projectId) === 'connected') {
+      if (!options?.verify || await this.sshManager.verifyConnection(projectId, sshConfig)) return
+    }
     await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
     this.sshManager.startHealthChecks(projectId, sshConfig)
   }

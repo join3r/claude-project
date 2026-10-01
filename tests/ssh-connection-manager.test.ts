@@ -717,6 +717,115 @@ describe('SshConnectionManager triggerReconnect', () => {
   })
 })
 
+describe('SshConnectionManager verifyConnection', () => {
+  let manager: SshConnectionManager
+  let socketDir: string
+  const config = { host: 'h', port: 22, username: 'u', remoteDir: '/d' }
+
+  const respond = (err: Error | null): void => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: unknown, _opts: unknown, cb: unknown) => {
+        if (err) (cb as (e: Error) => void)(err)
+        else (cb as (e: null, stdout: string, stderr: string) => void)(null, '', '')
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+  }
+
+  beforeEach(() => {
+    socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-test-'))
+    manager = new SshConnectionManager(socketDir, 9999)
+    mockExecFile.mockReset()
+  })
+
+  afterEach(() => {
+    manager.clearProject('proj-1')
+    fs.rmSync(socketDir, { recursive: true })
+  })
+
+  it('resolves true and stays connected when the probe reaches the host', async () => {
+    manager.setStatus('proj-1', 'connected')
+    respond(null)
+
+    await expect(manager.verifyConnection('proj-1', config)).resolves.toBe(true)
+    expect(manager.getStatus('proj-1')).toBe('connected')
+    const args = mockExecFile.mock.calls[0][1] as string[]
+    expect(args).toContain('true')
+    expect(args).not.toContain('check')
+  })
+
+  it('resolves false and marks disconnected when a stale master fails the probe', async () => {
+    manager.setStatus('proj-1', 'connected')
+    respond(new Error('mux_client_request_session: read from master failed'))
+
+    await expect(manager.verifyConnection('proj-1', config)).resolves.toBe(false)
+    expect(manager.getStatus('proj-1')).toBe('disconnected')
+  })
+
+  it('shares one probe between concurrent callers', async () => {
+    manager.setStatus('proj-1', 'connected')
+    respond(null)
+
+    const [a, b] = await Promise.all([
+      manager.verifyConnection('proj-1', config),
+      manager.verifyConnection('proj-1', config)
+    ])
+    expect(a && b).toBe(true)
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves false without probing when not connected', async () => {
+    await expect(manager.verifyConnection('proj-1', config)).resolves.toBe(false)
+    expect(mockExecFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('SshConnectionManager auto-reconnect backoff', () => {
+  let manager: SshConnectionManager
+  let socketDir: string
+  const config = { host: 'h', port: 22, username: 'u', remoteDir: '/d' }
+
+  beforeEach(() => {
+    socketDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-ssh-test-'))
+    manager = new SshConnectionManager(socketDir, 9999)
+    mockExecFile.mockReset()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    manager.clearProject('proj-1')
+    manager.stopHealthChecks()
+    vi.useRealTimers()
+    fs.rmSync(socketDir, { recursive: true })
+  })
+
+  it('doubles the delay between failed attempts instead of retrying every second', async () => {
+    let up = true
+    const masterAttempts: number[] = []
+    mockExecFile.mockImplementation(
+      (_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
+        if (args.includes('-M')) masterAttempts.push(Date.now())
+        if (args.includes('-M') && !up) (cb as (e: Error) => void)(new Error('Could not resolve hostname h'))
+        else if (args.includes('-R')) (cb as (e: null, o: string, r: string) => void)(null, 'Allocated port 40000\n', '')
+        else if (args.includes('check') && !up) (cb as (e: Error) => void)(new Error('no master'))
+        else (cb as (e: null, o: string, r: string) => void)(null, '', '')
+        return {} as ReturnType<typeof execFile>
+      }
+    )
+
+    await manager.connect('proj-1', config)
+    manager.startHealthChecks('proj-1', config, 10000)
+    up = false
+    await vi.advanceTimersByTimeAsync(10000) // health check fails → first retry in 1s
+    masterAttempts.length = 0
+    await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000 + 8000)
+
+    const gaps = masterAttempts.slice(1).map((t, i) => t - masterAttempts[i])
+    expect(masterAttempts).toHaveLength(4)
+    expect(gaps).toEqual([2000, 4000, 8000])
+  })
+})
+
 describe('SshConnectionManager auto-reconnect restores the configured tunnel', () => {
   let manager: SshConnectionManager
   let socketDir: string

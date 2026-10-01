@@ -591,6 +591,17 @@ export class SshConnectionManager extends EventEmitter {
    *  last — which is what the internal auto-reconnect path does, so it restores
    *  the same tunnel the renderer-triggered connect established. */
   async connect(projectId: string, config: SshConfig, options?: { tunnel?: TunnelConfig | null }): Promise<void> {
+    return this.connectWith(projectId, config, options, false)
+  }
+
+  /** `auto` marks an auto-reconnect attempt, which must keep the backoff count
+   *  a manual connect resets — otherwise every retry runs at the 1s floor. */
+  private async connectWith(
+    projectId: string,
+    config: SshConfig,
+    options: { tunnel?: TunnelConfig | null } | undefined,
+    auto: boolean
+  ): Promise<void> {
     if (options && 'tunnel' in options) {
       if (options.tunnel) this.desiredTunnels.set(projectId, options.tunnel)
       else this.desiredTunnels.delete(projectId)
@@ -606,7 +617,7 @@ export class SshConnectionManager extends EventEmitter {
       if (this.getStatus(projectId) === 'connected') return
     }
 
-    const promise = this.doConnect(projectId, config)
+    const promise = this.doConnect(projectId, config, auto)
     this.connectLocks.set(projectId, promise)
     try {
       await promise
@@ -617,7 +628,7 @@ export class SshConnectionManager extends EventEmitter {
     }
   }
 
-  private async doConnect(projectId: string, config: SshConfig): Promise<void> {
+  private async doConnect(projectId: string, config: SshConfig, auto: boolean): Promise<void> {
     ensureSshDir(this.socketDir)
 
     // Clean up stale ControlMaster socket from a previous (dead) connection.
@@ -626,7 +637,7 @@ export class SshConnectionManager extends EventEmitter {
     // operates through the control socket, so only attempt it when the
     // socket file actually exists.
     this.stopHealthCheck(projectId)
-    this.cancelPendingAutoReconnect(projectId)
+    if (!auto) this.cancelPendingAutoReconnect(projectId)
     this.cancelTunnelRetry(projectId)
     const socketPath = this.getSocketPath(projectId)
     if (fs.existsSync(socketPath)) {
@@ -846,40 +857,59 @@ export class SshConnectionManager extends EventEmitter {
 
   private healthCheckTimers = new Map<string, ReturnType<typeof setInterval>>()
 
-  private reconnectProbes = new Set<string>()
+  private connectionProbes = new Map<string, Promise<boolean>>()
 
   /** Short-circuit the 10s health check poll when a slave PTY printed
    *  "Shared connection to ... closed". That message is NOT proof the tunnel
    *  died — ssh prints it on every mux-slave exit, including a remote command
    *  simply finishing or failing (e.g. "exec: pi: not found"). Tearing down
    *  unconditionally turns any fast-exiting remote command into an infinite
-   *  gray-out/reconnect/respawn loop. So first verify with an end-to-end probe
-   *  through the control socket (a real `true` over the master's TCP — `-O
-   *  check` isn't enough because the master process can outlive its dead TCP
-   *  connection). Only if the probe fails do we tear down and let Layer 2
-   *  auto-reconnect take over. */
+   *  gray-out/reconnect/respawn loop. So first verify end to end (see
+   *  `verifyConnection`), and only tear down if that fails. */
   triggerReconnect(projectId: string, config: SshConfig): void {
-    if (this.getStatus(projectId) !== 'connected') return
-    if (this.reconnectProbes.has(projectId)) return
-    this.reconnectProbes.add(projectId)
-    void this.probeThenReconnect(projectId, config)
+    void this.verifyConnection(projectId, config)
   }
 
-  private async probeThenReconnect(projectId: string, config: SshConfig): Promise<void> {
+  /** Probe a project we believe is connected with a real `true` through the
+   *  control socket. `-O check` isn't enough: it only asks the local master
+   *  process, and that process outlives its TCP connection — after the machine
+   *  wakes from sleep it keeps answering `-O check` while every new session
+   *  through it fails with exit 255. On failure the connection is torn down and
+   *  Layer 2 auto-reconnect takes over; a caller that connects right away
+   *  supersedes the pending retry. Concurrent calls share one probe. Resolves
+   *  false when the project isn't (or is no longer) connected. */
+  verifyConnection(projectId: string, config: SshConfig): Promise<boolean> {
+    if (this.getStatus(projectId) !== 'connected') return Promise.resolve(false)
+    const pending = this.connectionProbes.get(projectId)
+    if (pending) return pending
+    const probe = this.probeConnection(projectId, config).finally(() => {
+      this.connectionProbes.delete(projectId)
+    })
+    this.connectionProbes.set(projectId, probe)
+    return probe
+  }
+
+  /** `verifyConnection` for every connected project — run when the machine wakes. */
+  verifyAll(): void {
+    for (const [projectId, config] of this.getConnectedProjects()) {
+      void this.verifyConnection(projectId, config)
+    }
+  }
+
+  private async probeConnection(projectId: string, config: SshConfig): Promise<boolean> {
     try {
       await this.execFileAsync('ssh', this.buildProbeArgs(projectId, config), { timeout: 5000 })
-      // Master answered end-to-end — the "connection closed" was a normal
-      // slave exit, not a dead tunnel. Leave the connection alone.
+      // Master answered end-to-end — the connection is fine.
+      return true
     } catch {
-      if (this.getStatus(projectId) !== 'connected') return
+      if (this.getStatus(projectId) !== 'connected') return false
       this.stopHealthCheck(projectId)
       this.clearTunnelRuntime(projectId)
       this.setStatus(projectId, 'disconnected')
       if (this.autoReconnectEnabled.has(projectId)) {
         this.scheduleAutoReconnect(projectId, config)
       }
-    } finally {
-      this.reconnectProbes.delete(projectId)
+      return false
     }
   }
 
@@ -915,7 +945,7 @@ export class SshConnectionManager extends EventEmitter {
       if (!this.autoReconnectEnabled.has(projectId)) return
       this.autoReconnectAttempts.set(projectId, attempts + 1)
       try {
-        await this.connect(projectId, config)
+        await this.connectWith(projectId, config, undefined, true)
         if (this.getStatus(projectId) === 'connected') {
           this.autoReconnectAttempts.delete(projectId)
           this.startHealthChecks(projectId, config)
