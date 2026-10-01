@@ -63,6 +63,7 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   piCommand: str,
   lazyLoadClaude: bool,
   keepAwakeWhileWorking: bool,
+  autoCheckUpdates: bool,
   claudeDefaultView: v.literal('terminal', 'chat'),
   lastProjectId: nullableStr,
   lastTaskId: nullableStr,

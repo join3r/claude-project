@@ -55,5 +55,11 @@ export default tseslint.config(
       // Test doubles cast freely (window.api mocks, partial fixtures).
       '@typescript-eslint/no-explicit-any': 'off'
     }
+  },
+  {
+    // CommonJS hooks electron-builder loads with require() (scripts/sign-win.cjs).
+    files: ['**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' }
   }
 )

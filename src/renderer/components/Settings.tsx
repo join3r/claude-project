@@ -14,6 +14,7 @@ import {
 import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, Disclosure, LinkBtn } from './ui'
 import ExternalIdesSettings from './ExternalIdesSettings'
 import MobileSettings from './settings/MobileSettings'
+import UpdatesSettings from './settings/UpdatesSettings'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
@@ -84,7 +85,7 @@ function parseNumberInput(value: string, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, parsed))
 }
 
-type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'tasks' | 'mobile'
+type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'tasks' | 'mobile' | 'updates'
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'appearance', label: 'Appearance' },
@@ -93,7 +94,8 @@ const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'ai', label: 'AI Tools' },
   { id: 'sidebar', label: 'Sidebar' },
   { id: 'tasks', label: 'Tasks' },
-  { id: 'mobile', label: 'Mobile' }
+  { id: 'mobile', label: 'Mobile' },
+  { id: 'updates', label: 'Updates' }
 ]
 
 export default function Settings({ onClose }: Props): React.ReactElement {
@@ -549,6 +551,9 @@ export default function Settings({ onClose }: Props): React.ReactElement {
 
       case 'mobile':
         return <MobileSettings />
+
+      case 'updates':
+        return <UpdatesSettings />
 
       case 'sidebar':
         return (

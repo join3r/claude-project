@@ -319,8 +319,10 @@ describe('EditorTab', () => {
     })
 
     async function press(keybinding: number): Promise<void> {
+      // The editor registers its commands on mount, which can land after the
+      // file content shows up on a loaded runner (flaked on ubuntu CI).
+      await waitFor(() => expect(mocks.commands.get(keybinding)).toBeTypeOf('function'))
       const run = mocks.commands.get(keybinding)
-      expect(run).toBeTypeOf('function')
       await act(async () => {
         run!()
         await new Promise(resolve => setTimeout(resolve, 0))

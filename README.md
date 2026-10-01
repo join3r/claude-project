@@ -4,7 +4,7 @@ A desktop application for managing development workspaces. Organize projects, ta
 
 Built with Electron, React, and TypeScript.
 
-Windows support (Git Bash terminals, portable Node, `.cmd` agent shims) was contributed from the [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool) fork. Their Windows/Pi direction is in [ROADMAP.md](./ROADMAP.md); a company-deploy security snapshot is in [SECURITY.md](./SECURITY.md).
+Windows support (Git Bash terminals, portable Node, `.cmd` agent shims) was contributed from the [join3r/claude-project](https://github.com/join3r/claude-project) fork. Their Windows/Pi direction is in [ROADMAP.md](./ROADMAP.md); a company-deploy security snapshot is in [SECURITY.md](./SECURITY.md).
 
 ## Features
 
@@ -110,7 +110,23 @@ Limits of this path:
 
 - It is **run-only**. You cannot `npm run dev` or change the Electron native addon without a VS build machine.
 - Architecture must match (x64 build for x64 Windows).
-- This is a folder, not a Setup.exe. `electron-winstaller` stays unapproved until an installer is actually required. The portable `DevTool.exe` is unsigned (`signAndEditExecutable` is off so the build does not need Windows code-sign tools).
+- The portable `DevTool.exe` is unsigned. The build still stamps DevTool's icon and version resources onto it (an `afterPack` hook, `scripts/win-rcedit.cjs`, runs the `rcedit` npm package; no certificate), so Task Manager and file properties say DevTool, not Electron.
+
+#### Windows installer (per-user Setup.exe)
+
+```bash
+npm run build:win:setup
+```
+
+That writes `dist/DevTool-Setup-<version>.exe` (per-user NSIS installer: no admin, installs under `%LOCALAPPDATA%\Programs\DevTool`, adds a Start Menu shortcut) and `dist/DevTool-<version>-win.zip` (the portable folder, zipped). The portable folder from `npm run build:win` stays the no-admin escape hatch. Uninstalling never touches `~/.devtool`. It is electron-builder NSIS, so `electron-winstaller` stays unapproved.
+
+Both are **unsigned** until a code-signing certificate exists. SmartScreen will warn: **More info → Run anyway**.
+
+Releases are cut by hand on the Windows build machine: `npm run release:win` builds both and uploads them as a **draft** GitHub Release (needs `gh` logged in); publish the draft on GitHub. With a certificate, `npm run release:win -- --signed` (see `scripts/sign-win.cjs` for `DEVTOOL_SIGN_CMD` / `DEVTOOL_PUBLISHER_NAME`) also uploads `latest.yml`, which lets signed installs update themselves.
+
+#### Updates
+
+Packaged builds check `github.com/join3r/claude-project/releases` at launch and every few hours (Settings → Updates, or the menu's **Check for Updates…**; the automatic check can be turned off). Unsigned builds — the portable folder, an unsigned Setup.exe, macOS/Linux dirs — never replace themselves: they say a new version exists and open its release page. Only a signed Setup.exe install downloads and installs updates on its own.
 
 ### Development
 
@@ -125,6 +141,7 @@ Starts the app in development mode with hot reload. On Windows this still needs 
 ```bash
 npm run build          # Typecheck, then production JS/CSS bundle
 npm run build:win      # Portable Windows folder (dist/win-unpacked)
+npm run build:win:setup # Per-user Setup.exe + portable zip (dist/)
 npm run build:mac      # Package macOS app
 npm run build:linux    # Package Linux app
 ```

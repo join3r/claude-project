@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, powerSaveBlocker, safeStorage } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, powerSaveBlocker, safeStorage, shell } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -51,6 +51,10 @@ import { NotebookKernelManager } from './notebook-kernel'
 import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
 import { registerMobileHandlers } from './ipc/mobile'
+import { registerUpdateHandlers } from './ipc/updates'
+import { createUpdates, type Updates } from './updates'
+import { probeRedirect } from './release-redirect'
+import { decideUpdateMode } from '../shared/updates'
 import { MobileService } from './mobile/mobile-service'
 import { PairingsStore } from './mobile/pairings-store'
 import { IdentityStore } from './mobile/identity'
@@ -141,6 +145,7 @@ export class AppRuntime {
   private chatManager!: ClaudeChatManager
   /** Phones: relay connection, pairing and the inbox they see. Dormant while Mobile is off. */
   private mobileService!: MobileService
+  private updates!: Updates
   private started = false
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
@@ -225,9 +230,48 @@ export class AppRuntime {
     })
     this.chatManager = this.createChatManager()
     this.mobileService = this.createMobileService()
+    this.updates = this.createUpdates()
     this.registerEventForwarders()
     this.registerIpcHandlers()
     this.mobileService.start()
+    this.updates.start()
+  }
+
+  /** The updater, for the app menu's "Check for Updates…". */
+  getUpdates(): Updates {
+    return this.updates
+  }
+
+  private createUpdates(): Updates {
+    let signed = false
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')) as { devtoolSigned?: unknown }
+      signed = pkg.devtoolSigned === true
+    } catch {
+      // Unreadable package.json: treat as unsigned.
+    }
+    const mode = decideUpdateMode({
+      isPackaged: app.isPackaged,
+      platform: process.platform,
+      hasUpdateConfig: app.isPackaged && fs.existsSync(path.join(process.resourcesPath, 'app-update.yml')),
+      signed
+    })
+    return createUpdates({
+      mode,
+      appVersion: app.getVersion(),
+      autoCheck: () => this.config.autoCheckUpdates !== false,
+      broadcast: (status) => this.broadcastToAllWindows('updates-status', status),
+      openExternal: (url) => { void shell.openExternal(url).catch(() => {}) },
+      probeRedirect: (url) => probeRedirect(url),
+      now: () => Date.now(),
+      log: (message) => this.logDebug(message),
+      loadAutoUpdater: async () => {
+        const mod = await import('electron-updater')
+        // `autoUpdater` is a lazy getter on a CJS module, which import() only
+        // exposes on `default` (the named binding comes back undefined).
+        return mod.autoUpdater ?? (mod as unknown as { default: typeof mod }).default.autoUpdater
+      }
+    })
   }
 
   private createMobileService(): MobileService {
@@ -516,6 +560,7 @@ export class AppRuntime {
     }
     this.persistWindowSession()
     this.mobileService?.stop()
+    this.updates?.close()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
@@ -791,6 +836,7 @@ export class AppRuntime {
       listCondaEnvs: () => listCondaEnvs({}, { force: true })
     })
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
+    registerUpdateHandlers(ipc, { updates: () => this.updates })
   }
 
   /**

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, dialog, Menu, shell, systemPreferences } from 'electron'
 import { join } from 'path'
 import { installBrokenPipeUncaughtHandler } from './broken-pipe'
 import { pathToFileURL } from 'url'
@@ -14,6 +14,22 @@ import { isMenuZoomInKey } from '../shared/shortcut-label'
 // "Uncaught Exception" modal. Other errors still go to Electron's handler
 // (do not rethrow — that aborts instead of the recoverable dialog).
 installBrokenPipeUncaughtHandler()
+
+// Name the app DevTool, not the package's lowercase `devtool` (menu bar, About,
+// notifications). Renaming also moves Electron's default userData, which would
+// put dev runs (`<appData>/devtool`) on the packaged app's `<appData>/DevTool` —
+// the same folder on case-insensitive macOS/Windows disks. Pin the old path so
+// dev and prod Chromium storage stay apart, like the config dirs do.
+const userDataPath = app.getPath('userData')
+app.setName('DevTool')
+app.setPath('userData', userDataPath)
+if (process.platform === 'win32') {
+  // Matches build.appId, which NSIS stamps on the Start Menu shortcut, so the
+  // taskbar groups installed windows under that shortcut. Dev runs get their own id.
+  app.setAppUserModelId(app.isPackaged ? 'com.devtool.app' : 'com.devtool.app.dev')
+}
+/** Packaged via build.files; the project root in dev. */
+const APP_ICON_PATH = join(app.getAppPath(), 'build', 'icon.png')
 
 if (process.env.DEVTOOL_CDP_PORT) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env.DEVTOOL_CDP_PORT)
@@ -105,6 +121,45 @@ function focusExistingWindow(): void {
   if (process.platform === 'darwin') app.focus({ steal: true })
 }
 
+/** App menu → Check for Updates…: check now, answer in a dialog. */
+async function checkForUpdatesFromMenu(): Promise<void> {
+  const updates = appRuntime?.getUpdates()
+  if (!updates) return
+  const owner = BrowserWindow.getFocusedWindow()
+  const show = (options: Electron.MessageBoxOptions) =>
+    owner ? dialog.showMessageBox(owner, options) : dialog.showMessageBox(options)
+  if (updates.status().mode === 'none') {
+    await show({ type: 'info', message: 'Updates are off in development runs', detail: `DevTool ${app.getVersion()}` })
+    return
+  }
+  const status = await updates.check()
+  if (status.state === 'error') {
+    await show({ type: 'warning', message: 'Could not check for updates', detail: status.error ?? '' })
+    return
+  }
+  if (!status.available) {
+    await show({ type: 'info', message: 'DevTool is up to date', detail: `Version ${status.appVersion}` })
+    return
+  }
+  if (status.mode === 'auto') {
+    await show({
+      type: 'info',
+      message: `DevTool ${status.available} is downloading`,
+      detail: 'It installs when you quit DevTool, or restart from Settings → Updates once it is ready.'
+    })
+    return
+  }
+  const { response } = await show({
+    type: 'info',
+    message: `DevTool ${status.available} is available`,
+    detail: `You have ${status.appVersion}. Download it from the release page.`,
+    buttons: ['Open Release Page', 'Later'],
+    defaultId: 0,
+    cancelId: 1
+  })
+  if (response === 0) await updates.install()
+}
+
 function buildAppMenu(): void {
   const isMac = process.platform === 'darwin'
 
@@ -120,6 +175,7 @@ function buildAppMenu(): void {
             label: app.name,
             submenu: [
               { role: 'about' as const },
+              { label: 'Check for Updates…', click: () => void checkForUpdatesFromMenu() },
               { type: 'separator' as const },
               {
                 label: 'Settings...',
@@ -245,7 +301,13 @@ function buildAppMenu(): void {
         { role: 'zoom' },
         ...(isMac ? [{ type: 'separator' as const }, { role: 'front' as const }] : [])
       ]
-    }
+    },
+    ...(isMac
+      ? []
+      : [{
+          label: 'Help',
+          submenu: [{ label: 'Check for Updates…', click: () => void checkForUpdatesFromMenu() }]
+        }])
   ]
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
@@ -261,6 +323,8 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 12, y: 12 },
+    // macOS takes the bundle icon; Windows/Linux need it per window in dev (and Linux always).
+    ...(process.platform === 'darwin' ? {} : { icon: APP_ICON_PATH }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -352,6 +416,10 @@ app.whenReady().then(async () => {
     return
   }
   releaseInstanceLock = lock.release
+  if (process.platform === 'darwin' && !app.isPackaged) {
+    // Dev runs Electron.app, whose bundle icon is Electron's.
+    app.dock?.setIcon(APP_ICON_PATH)
+  }
   await resolveShellEnv()
   // Warm the conda env list so the first local PTY can resolve a saved name without waiting.
   void listCondaEnvs().catch(() => {})

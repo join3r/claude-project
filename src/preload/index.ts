@@ -28,6 +28,7 @@ import type { CondaListResult } from '../shared/conda'
 import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
+import type { UpdateStatus } from '../shared/updates'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
@@ -423,6 +424,15 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, state: MobileState) => callback(state)
     ipcRenderer.on('mobile-state-changed', handler)
     return () => ipcRenderer.removeListener('mobile-state-changed', handler)
+  },
+  // Updates (Settings → Updates). Main owns the state; every change is also broadcast.
+  updatesGetStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-get-status'),
+  updatesCheck: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-check'),
+  updatesInstall: (): Promise<void> => ipcRenderer.invoke('updates-install'),
+  onUpdatesStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => callback(status)
+    ipcRenderer.on('updates-status', handler)
+    return () => ipcRenderer.removeListener('updates-status', handler)
   }
 }
 

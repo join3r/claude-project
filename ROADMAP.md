@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
-`package.json` is **0.5.1** (Phase 4.5 agent context links, a patch on Phase 4's `0.5.0`, like 1.3 / 1.4). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
+`package.json` is **0.6.0** (Phase 5 packaging + app identity). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -46,7 +46,7 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 3 done | `0.4.0` |
 | Phase 4 done | `0.5.0` (native `.ipynb` tabs) |
 | Phase 4.5 (agent context links) | `0.5.1` (tagged; not a numbered bump) |
-| Phase 5 (packaging + app identity) | `0.6.0`+ (icon / name / NSIS / signing / updater as you tag them) |
+| Phase 5 done (packaging + app identity) | `0.6.0` (signing dormant until a certificate; a signed build is a `0.6.x` patch) |
 | Phase 6 (Pi chat tab) | `0.7.0` |
 
 LSP is parked (see Ideas); it does not get a numbered phase or a minor. Phase 6 is the Pi chat tab; there is no Phase 7 until something else earns one. Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
@@ -66,7 +66,7 @@ Already useful, keep it:
 
 Known gaps this fork must treat as work, not surprises:
 
-- Windows packaging is a portable folder (`npm run build:win` → `dist/win-unpacked`), not a Setup.exe. That folder stays the no-admin escape hatch. An installer is **Phase 5** (electron-builder NSIS, not `electron-winstaller`). From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
+- Windows packaging: the portable folder (`npm run build:win` → `dist/win-unpacked`) stays the no-admin escape hatch; Phase 5 added a per-user NSIS Setup.exe (`npm run build:win:setup`). Both are unsigned until a certificate exists. From-source `npm install` on Windows still needs admin + VS Build Tools + Spectre libs (see README).
 - Local Windows terminals are Git Bash (`Git\bin\bash.exe --login -i`, auto-detect; Settings can set a `bash.exe` path). PowerShell and Command Prompt are not product surfaces. Login-shell env **is** captured in `shell-env.ts`; do not copy that Unix PATH onto `process.env.PATH` (ConPTY `cmd.exe` lookup breaks — see AGENTS.md).
 - POSIX assumptions: worktree paths, hook inject (`curl` + `python3`). Remote Pi extension lives under `$HOME/.devtool-remote/` (Phase 2 moved it off `/tmp`).
 
@@ -342,7 +342,7 @@ Tried and dropped during testing: a bare `path (lines …)` without `@` (Claude 
 
 ---
 
-## Phase 5 — Packaging, distribution, app identity
+## Phase 5 — Packaging, distribution, app identity — done (`0.6.0`)
 
 Was going to sit behind language servers as a later phase. LSP is parked, so packaging is the next numbered phase after native notebooks (and the 4.5 context-links patch). **Packaging and making the app look like DevTool, not Electron.**
 
@@ -361,11 +361,21 @@ Items 2–3 are small and independent of the certificate; they can tag as `0.5.x
 
 Software Center / MSI may be a **separate IT artifact**, not this phase’s default output.
 
+**Status (landed in `0.6.0`):**
+
+- **2. Icon** — landed. `build/icon.png` is generated from join3r's iOS app icon (`npm run make-icon` → `scripts/make-icon.mjs`: macOS grid, rounded corners, transparent padding); electron-builder derives `.ico` / `.icns`. Window icon on Windows/Linux, Dock icon in macOS dev runs.
+- **3. Name** — landed. `app.setName('DevTool')` with userData pinned to its old path (dev stays on `<appData>/devtool`, not merged into the packaged `DevTool` profile). Dev `Electron.app` plist gets `CFBundleName` / `CFBundleDisplayName` (postinstall + `predev`). Windows: an `afterPack` hook (`scripts/win-rcedit.cjs`, `rcedit` npm package) stamps icon + version resources with no certificate (exe stays unsigned), and `setAppUserModelId('com.devtool.app')` (`.dev` for dev runs). `signAndEditExecutable` stays `false`: on Windows, electron-builder's own rcedit step unpacks `winCodeSign`, and 7-Zip fails on its macOS symlinks without Developer Mode / admin (seen on the build machine). electron-builder then only signs the NSIS installer/uninstaller, so the `afterPack` hook calls `scripts/sign-win.cjs` on `DevTool.exe` itself (no-op without `DEVTOOL_SIGN_CMD`).
+- **4. NSIS** — landed. `npm run build:win:setup` → per-user `DevTool-Setup-<v>.exe` (no admin, Start Menu shortcut, never touches `~/.devtool`) + portable zip. `npm run release:win` uploads a draft GitHub Release from the Windows box.
+- **5. Signing** — wired, dormant. No certificate. `scripts/sign-win.cjs` runs `DEVTOOL_SIGN_CMD` when set (token/cloud-HSM certs sign through a command, not a `.pfx`). Options to look at when it matters: Certum Open Source Code Signing, SignPath Foundation (needs CI builds), Azure Artifact Signing (check eligibility). Stem (`join3r/stem`) does not sign on Windows either.
+- **6. Updates** — landed, stem's model. Every packaged build checks GitHub Releases (Settings → Updates, Check for Updates…, opt-out toggle). Unsigned builds only announce a new version and open its page; only a `--signed` Setup.exe install self-updates via electron-updater. Unsigned releases carry no `latest.yml`.
+
 Stay out of: language servers, conda GUI, a second Windows shell, reviving JupyterLab-in-browser.
 
-**Verify:** on Windows — exe icon, taskbar, Task Manager name, Start Menu shortcut, installer per-user without admin, portable folder still runs. On macOS — `npm run dev` menu bar and Dock say DevTool with the DevTool icon; packaged `build:mac` the same.
+**Verify:** unit tests for version compare, release-redirect parsing, update-mode decision (signed NSIS vs portable vs dev), manual-check states, the config toggle and the sign hook. **Windows (Windows 11, 2026-10-01) — done:** `build:win` exe carries DevTool icon + version resources (unsigned), taskbar / title bar / Task Manager say DevTool, Git Bash + Pi tabs start; `build:win:setup` installs per-user without UAC under `%LOCALAPPDATA%\Programs\DevTool`, Start Menu shortcut, pinning groups on one button, `app-update.yml` names the fork; Settings → Updates and Help → Check for Updates… report up to date (no releases yet); uninstall keeps `~/.devtool`; dev runs group separately and update checks are off. **macOS — done:** dev and packaged `build:mac` say DevTool with the icon; dev userData stays `devtool`; packaged update check is `manual`. Not run: offline check (unit-tested).
 
-**Effort:** icon + name are an evening; installer is days to a couple of weeks; signing + updater depend on the certificate. Ships as **`0.6.0`+** (tag slices as you actually copy them).
+**Closeout:** done. `package.json` is **0.6.0**. Authenticode + self-update are wired but dormant until a certificate (then `release:win --signed`, a `0.6.x` patch). Next is Phase 6 (Pi chat tab).
+
+**Effort:** icon + name an evening; installer + updater a few evenings; signing waits on a certificate. Shipped as **`0.6.0`**.
 
 ---
 
@@ -410,7 +420,7 @@ Parking lot. Do not start these instead of the numbered phases. Several items al
 | Language servers (Python, Markdown) | Parked. Monaco covers edit/view; analysis belongs in Pi. Optional sugar only if Monaco-without-Pi is painful. No minor reserved. |
 | Native notebook cells + kernel | Phase 4 (`0.5.0`) |
 | Agent context links from editor/notebook (Ctrl+L / Ctrl+Shift+L) | Phase 4.5 (`0.5.1`) |
-| Windows installer + Authenticode + auto-update + app icon + app name (not "Electron") | Phase 5 |
+| Windows installer + Authenticode + auto-update + app icon + app name (not "Electron") | Phase 5 (`0.6.0`; signing dormant until a certificate) |
 | Open workspace in VS Code / Cursor | Phase 1.2 |
 | Spyder as an external IDE | after Phase 3 |
 | Config-dir `0700`, scrollback id, IPC cwd allow-list | Parking lot (deferred; not packaging) |
@@ -455,7 +465,7 @@ Keep upstream `master` as a remote (`upstream`) and rebase or merge periodically
 9. Conda env picker on spawn (Phase 3). **Done** in `0.4.0`.
 10. Native in-app `.ipynb` notebooks (Phase 4). **Done** in `0.5.0`. Not a JupyterLab browser launcher.
 11. Agent context links from editor/notebook (Phase 4.5): Ctrl+L (selection, or current line / cell) and Ctrl+Shift+L (whole file) insert a compact `@path:lines` / cell / file link into the agent terminal or Claude chat. Tags `0.5.1`.
-12. Packaging + app identity (Phase 5): keep portable `dist/win-unpacked`, app icon, app name (not "Electron" in the macOS menu bar / Windows Task Manager), then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update. Ships as `0.6.0`+. Do not insert LSP between 11 and 12. Do not revive browser JupyterLab.
+12. Packaging + app identity (Phase 5): keep portable `dist/win-unpacked`, app icon, app name (not "Electron" in the macOS menu bar / Windows Task Manager), then per-user NSIS Setup.exe + Start Menu, then Authenticode, then auto-update. **Done** in `0.6.0` (signing/self-update dormant until a certificate). Do not revive browser JupyterLab.
 13. Pi chat tab (Phase 6): `pi --mode rpc` in main, agent-neutral chat model shared with Claude chat, extension dialogs as cards. Ships as `0.7.0`.
 
 Skip a step only if the previous phase already includes it by accident (e.g. PATH work that makes conda trivial).
@@ -498,7 +508,7 @@ Work machine constraints to re-test every phase: Git Bash, portable Node zip, Pi
 | 3 | `0.4.0` (shipped) | Conda picker on spawn | 1–2 weeks |
 | 4 | `0.5.0` (shipped) | Native `.ipynb` tabs (Monaco cells + conda kernel) | a focused pass |
 | 4.5 | `0.5.1` (shipped) | Ctrl+L selection (or line / cell) and Ctrl+Shift+L whole file → compact link in agent terminal / Claude chat | a short pass |
-| 5 | `0.6.0`+ | Portable folder kept; app icon + DevTool name; per-user NSIS Setup.exe; then Authenticode; then auto-update | icon/name an evening; installer days–weeks; signing/updater depend on the cert |
+| 5 | `0.6.0` (shipped) | Portable folder kept; app icon + DevTool name; per-user NSIS Setup.exe; update checks; Authenticode + self-update wired, dormant until a cert | a few evenings |
 | 6 | `0.7.0` | Pi chat tab over `pi --mode rpc` (timeline, composer, extension dialogs, resume) | 2–3 weeks of evenings |
 
 Language servers stay in the parking lot. They are not a numbered phase. There is no Phase 7 until something else earns one.

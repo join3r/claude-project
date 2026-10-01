@@ -2,7 +2,7 @@
 
 Snapshot of what this fork actually is, from a security point of view, before putting it on company machines. Dated against **`0.5.0`** (Phase 4 native notebooks). Not a pentest. Not a promise that later phases stay clean.
 
-This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). Work stays on [TeleporterGuy/DevTool](https://github.com/TeleporterGuy/DevTool). Product direction is in [ROADMAP.md](./ROADMAP.md).
+This repository is a fork of [join3r/claude-project](https://github.com/join3r/claude-project). Work stays on [join3r/claude-project](https://github.com/join3r/claude-project). Product direction is in [ROADMAP.md](./ROADMAP.md).
 
 ---
 
@@ -22,7 +22,7 @@ It will:
 It will **not**:
 
 - Sandbox Pi (or Claude/Codex). Models, API keys, and base URL stay in Pi’s own config (Phase 0.5).
-- Add SSO, audit logs, DLP, or an update channel.
+- Add SSO, audit logs, or DLP. The update check (below) talks to public GitHub Releases, not a managed company channel.
 - Replace company SSH/PKI policy. Host-key checking is TOFU (`accept-new`).
 
 If “an AI CLI with the developer’s credentials, on company source” is already a no, this app does not make that safer. If that is already accepted for a normal Git Bash window, the rest of this file is the *extra* surface DevTool adds.
@@ -70,7 +70,9 @@ Severity is “what a company security review usually does with it,” not CVSS.
 
 ### Blocker
 
-**Unsigned Windows portable folder.** `package.json` sets `signAndEditExecutable: false`. `npm run build:win` yields `dist/win-unpacked` with no Authenticode publisher. SmartScreen, AppLocker, WDAC, and “who shipped this?” all fire. There is no installer, no auto-update, no Electron fuses (`onlyLoadAppFromAsar`, `embeddedAsarIntegrityValidation`, `runAsNode`, cookie encryption). Anyone who can write into that folder can replace binaries.
+**Unsigned Windows builds.** No certificate is configured: `npm run build:win` (`dist/win-unpacked`) and `npm run build:win:setup` (per-user NSIS Setup.exe) carry DevTool's icon and version resources but no Authenticode publisher. SmartScreen, AppLocker, WDAC, and “who shipped this?” all fire. No Electron fuses (`onlyLoadAppFromAsar`, `embeddedAsarIntegrityValidation`, `runAsNode`, cookie encryption). Anyone who can write into the install folder (per-user: `%LOCALAPPDATA%\Programs\DevTool`) can replace binaries.
+
+**Update check.** Packaged builds request `https://github.com/join3r/claude-project/releases/latest` at launch and every 6 h (Settings → Updates turns it off). Unsigned builds only report a newer version and open its page; they never download or replace themselves. Only a build signed through `scripts/sign-win.cjs` and installed with Setup.exe self-updates via electron-updater, which checks the downloaded installer's publisher. Unsigned releases ship without `latest.yml`, so no install self-updates to one.
 
 ### High
 

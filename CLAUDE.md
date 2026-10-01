@@ -20,6 +20,8 @@ npm >=11.17 blocks dependency install scripts until they're approved, which woul
 
 `postinstall` runs `@electron/rebuild` so `node-pty` matches Electron, not the host Node. `package.json` overrides `node-abi` so rebuild knows this Electron major. On Windows that compile needs **admin rights** to install or modify Visual Studio 2022 Build Tools, plus the **MSVC v143 Spectre-mitigated libs** component (`MSB8040` if it is missing). Do not strip `SpectreMitigation` from `binding.gyp`. Git Bash/MinGW is not a substitute. Details: [README.md](./README.md) (Install → Windows).
 
+Agent shells on Windows (Claude Code) may set `NoDefaultCurrentDirectoryInExePath=1`, which makes node-pty's gyp step fail with `'GetCommitHash.bat' is not recognized`. Unset it for `npm ci` / `npm run build:win*`.
+
 Machines without admin do not `npm install` from git. Produce a portable folder on a VS machine with `npm run build:win` and copy `dist/win-unpacked`. That path is run-only (`DevTool.exe`); it does not unlock `npm run dev`.
 
 ## Windows spawn PATH
