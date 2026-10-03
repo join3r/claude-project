@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { isEphemeralProject, isHomeTask } from '../../../shared/types'
-import type { Tab, Task, WorkspaceConfig } from '../../../shared/types'
+import type { Tab, Task, WorkspaceConfig, WorkspaceDraft } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
 import {
   addTaskInDirectoryData,
@@ -20,7 +20,13 @@ import { reportRefusedWorkspaceDelete } from './useProjects'
 export interface TasksActions {
   addTask: (projectId: string, name: string, initialTabs?: Tab[]) => Task
   addWorkspaceTask: (projectId: string, name: string, workspace: WorkspaceConfig, initialTabs?: Tab[]) => Task
-  addTaskInDirectory: (directory: string, name: string, initialTabs?: Tab[], workspace?: WorkspaceConfig) => Task
+  addTaskInDirectory: (directory: string, name: string, initialTabs?: Tab[], workspace?: WorkspaceConfig, workspaceDraft?: WorkspaceDraft) => Task
+  /** An empty task that becomes a workspace once its first tab opens (see `Task.workspaceDraft`). */
+  addPendingWorkspaceTask: (projectId: string, name: string, draft?: WorkspaceDraft) => Task
+  /** Change a pending workspace task's draft; null turns it into a plain task. */
+  setWorkspaceDraft: (projectId: string, taskId: string, draft: WorkspaceDraft | null) => void
+  /** Point a task at the worktree just created for it, ending its draft. */
+  attachWorkspace: (projectId: string, taskId: string, workspace: WorkspaceConfig) => void
   removeTask: (projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => Promise<void>
   renameTask: (projectId: string, taskId: string, name: string) => void
   reorderTasks: (projectId: string, fromIndex: number, toIndex: number) => void
@@ -66,9 +72,10 @@ export function useTasks(
     directory: string,
     name: string,
     initialTabs: Tab[] = [],
-    workspace?: WorkspaceConfig
+    workspace?: WorkspaceConfig,
+    workspaceDraft?: WorkspaceDraft
   ) => {
-    const task = makeTask(name, initialTabs, workspace)
+    const task: Task = { ...makeTask(name, initialTabs, workspace), ...(workspaceDraft ? { workspaceDraft } : {}) }
     // Resolved before the mutation, not inside it: the updater is replayed against
     // the synced snapshot as well as local state, so it has to be idempotent.
     const existing = projectsRef.current.find(p => isEphemeralProject(p) && p.directory === directory)
@@ -119,6 +126,23 @@ export function useTasks(
     updateWindowViewState(prev => removeTaskView(prev, projectId, taskId, ownerRetired))
   }, [confirmDiscardDirty, mutateProjects, updateWindowViewState])
 
+  const addPendingWorkspaceTask = useCallback((projectId: string, name: string, draft: WorkspaceDraft = {}) => {
+    const task: Task = { ...makeTask(name, []), workspaceDraft: draft }
+    mutateProjects(prev => appendTaskToProject(prev, projectId, task))
+    updateWindowViewState(prev => selectNewTaskView(prev, projectId, task))
+    return task
+  }, [mutateProjects, updateWindowViewState])
+
+  const setWorkspaceDraft = useCallback((projectId: string, taskId: string, draft: WorkspaceDraft | null) => {
+    mutateProjects(prev => mapTask(prev, projectId, taskId, ({ workspaceDraft: _old, ...task }) => (
+      draft ? { ...task, workspaceDraft: draft } : task
+    )))
+  }, [mutateProjects])
+
+  const attachWorkspace = useCallback((projectId: string, taskId: string, workspace: WorkspaceConfig) => {
+    mutateProjects(prev => mapTask(prev, projectId, taskId, ({ workspaceDraft: _draft, ...task }) => ({ ...task, workspace })))
+  }, [mutateProjects])
+
   const renameTask = useCallback((projectId: string, taskId: string, name: string) => {
     mutateProjects(prev => mapTask(prev, projectId, taskId, task => ({ ...task, name })))
   }, [mutateProjects])
@@ -130,5 +154,5 @@ export function useTasks(
     })))
   }, [mutateProjects])
 
-  return { addTask, addWorkspaceTask, addTaskInDirectory, removeTask, renameTask, reorderTasks }
+  return { addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, setWorkspaceDraft, attachWorkspace, removeTask, renameTask, reorderTasks }
 }

@@ -105,9 +105,20 @@ export interface Task {
   splitOpen: boolean
   splitRatio: number
   workspace?: WorkspaceConfig
+  /**
+   * A workspace task whose worktree doesn't exist yet: + Workspace opens it on the
+   * prompt box, and the worktree is created (branch named after the first prompt)
+   * when the first tab opens. Cleared once `workspace` is set.
+   */
+  workspaceDraft?: WorkspaceDraft
   lastInteractedAt?: number
   inbox?: TaskInboxState
   system?: 'home'
+}
+
+export interface WorkspaceDraft {
+  /** The branch the worktree will fork from; unset means main, then master, then the first branch. */
+  baseBranch?: string
 }
 
 export interface WorkspaceConfig {

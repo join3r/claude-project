@@ -555,7 +555,7 @@ export default function ContentArea(): React.ReactElement {
                   sshConfig={project.ssh}
                   shellCommand={project.shellCommand}
                   aiToolArgs={project.aiToolArgs}
-                  promptBox={task.tabs.left.length === 0 && task.tabs.right.length === 0 ? { project, taskName: task.name } : undefined}
+                  promptBox={task.tabs.left.length === 0 && task.tabs.right.length === 0 ? { project, taskName: task.name, workspaceDraft: task.workspaceDraft } : undefined}
                   style={isSplitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                   onPaneFocus={rememberFocusedPane}
                   tabDragState={tabDragState}

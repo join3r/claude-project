@@ -13,7 +13,7 @@ import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
-import type { Tab, AiTabType, Project, SshConfig, ShellCommandConfig } from '../../shared/types'
+import type { Tab, AiTabType, Project, SshConfig, ShellCommandConfig, WorkspaceDraft } from '../../shared/types'
 import type { PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 
@@ -31,7 +31,7 @@ interface Props {
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
   /** Set on the left pane of a task with no tabs at all: it shows the first-prompt box. */
-  promptBox?: { project: Project; taskName: string }
+  promptBox?: { project: Project; taskName: string; workspaceDraft?: WorkspaceDraft }
   style?: React.CSSProperties
   onPaneFocus?: (pane: PaneSide) => void
   tabDragState: TabDragState | null
@@ -92,6 +92,7 @@ export default function Pane({
             project={promptBox.project}
             taskId={taskId}
             taskName={promptBox.taskName}
+            workspaceDraft={promptBox.workspaceDraft}
             projectDir={projectDir}
             visible={taskVisible}
           />

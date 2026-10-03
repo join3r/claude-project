@@ -4,7 +4,7 @@ import { NEW_TASK_NAME, isShellCommandProject } from '../../shared/types'
 import { dirBasename } from '../../shared/paths'
 import { Modal, SetBlock, Field, LinkBtn, PrimaryButton, HelperText, Switch, menuCls, menuItemCls } from './ui'
 import AddLocalProject from './AddLocalProject'
-import { branchSlug, defaultBaseBranch, isNewTaskDraftValid, matchProjects } from './newTask'
+import { branchSlug, defaultBaseBranch, isNewTaskDraftValid, isPendingWorkspaceDraft, matchProjects } from './newTask'
 import type { NewTaskTarget } from './newTask'
 import { Plus } from 'lucide-react'
 
@@ -18,6 +18,8 @@ interface Props {
   onAddProject: (name: string, directory: string, tagIds?: string[]) => Project
   onCreate: (target: NewTaskTarget, name: string) => void
   onCreateWorkspace: (target: NewTaskTarget, name: string, workspace: WorkspaceConfig) => void
+  /** A workspace with no name or branch yet: the worktree is made when the first prompt names it. */
+  onCreatePendingWorkspace: (target: NewTaskTarget, baseBranch: string) => void
   onClose: () => void
 }
 
@@ -58,6 +60,7 @@ export default function NewTaskModal({
   onAddProject,
   onCreate,
   onCreateWorkspace,
+  onCreatePendingWorkspace,
   onClose
 }: Props): React.ReactElement {
   const [target, setTarget] = useState<NewTaskTarget | null>(() => {
@@ -258,6 +261,11 @@ export default function NewTaskModal({
 
     if (!workspaceOn) {
       onCreate(target, taskName)
+      return
+    }
+
+    if (isPendingWorkspaceDraft({ target, name, workspace: workspaceOn, branch, baseBranch })) {
+      onCreatePendingWorkspace(target, baseBranch)
       return
     }
 
@@ -499,6 +507,9 @@ export default function NewTaskModal({
                   placeholder="feature-name"
                   onKeyDown={submitOnEnter}
                 />
+                {!name.trim() && !branch.trim() && (
+                  <HelperText>Left empty, the branch is named after the task's first prompt.</HelperText>
+                )}
               </SetBlock>
 
               <SetBlock label={<span className="text-sm text-text-muted">Base branch</span>}>

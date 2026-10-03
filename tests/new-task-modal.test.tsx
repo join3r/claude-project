@@ -26,6 +26,7 @@ const inDir = (directory: string): NewTaskTarget => ({ kind: 'dir', directory })
 
 let onCreate: Mock<(target: NewTaskTarget, name: string) => void>
 let onCreateWorkspace: Mock<(target: NewTaskTarget, name: string, workspace: WorkspaceConfig) => void>
+let onCreatePendingWorkspace: Mock<(target: NewTaskTarget, baseBranch: string) => void>
 let onAddProject: Mock<(name: string, directory: string, tagIds?: string[]) => Project>
 let onClose: Mock<() => void>
 
@@ -58,6 +59,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   onCreate = vi.fn()
   onCreateWorkspace = vi.fn()
+  onCreatePendingWorkspace = vi.fn()
   onAddProject = vi.fn((name: string, directory: string) => project('p9', name, { directory }))
   onClose = vi.fn()
   ;(window as unknown as { api: unknown }).api = {
@@ -87,6 +89,7 @@ function renderModal(defaultProjectId: string | null = 'p1', projects: Project[]
       onAddProject={onAddProject}
       onCreate={onCreate}
       onCreateWorkspace={onCreateWorkspace}
+      onCreatePendingWorkspace={onCreatePendingWorkspace}
       onClose={onClose}
     />
   )
@@ -181,6 +184,19 @@ describe('NewTaskModal', () => {
       relativeProjectPath: ''
     })
     expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it('leaves an unnamed workspace pending instead of cutting a worktree now', async () => {
+    renderModal()
+    await act(async () => { fireEvent.click(screen.getByRole('switch')) })
+    await waitFor(() => expect(api().workspaceListBranches).toHaveBeenCalled())
+    await waitFor(() => expect((screen.getByText('Create') as HTMLButtonElement).disabled).toBe(false))
+
+    await act(async () => { fireEvent.click(screen.getByText('Create')) })
+
+    expect(api().workspaceCreate).not.toHaveBeenCalled()
+    expect(onCreatePendingWorkspace).toHaveBeenCalledWith(inProject('p1'), 'master')
+    expect(onCreateWorkspace).not.toHaveBeenCalled()
   })
 
   it('keeps a hand-edited branch name instead of re-deriving it', async () => {
@@ -365,6 +381,7 @@ describe('NewTaskModal', () => {
             onAddProject={onAddProject}
             onCreate={onCreate}
             onCreateWorkspace={onCreateWorkspace}
+            onCreatePendingWorkspace={onCreatePendingWorkspace}
             onClose={onClose}
           />
         )

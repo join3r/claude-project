@@ -55,13 +55,23 @@ export interface NewTaskDraft {
 /**
  * A draft is submittable once it has somewhere to go. The name is optional: an
  * unnamed task opens on its prompt box and the first prompt names it. A workspace
- * task also needs a branch to create and a branch to create it from.
+ * task also needs a branch to create it from, and a branch to create unless it is
+ * left pending (no name, no branch).
  */
 export function isNewTaskDraftValid(draft: NewTaskDraft): boolean {
   if (!draft.target) return false
   if (draft.target.kind === 'project' ? !draft.target.projectId : !draft.target.directory) return false
   if (!draft.workspace) return true
-  return draft.branch.trim().length > 0 && draft.baseBranch.length > 0
+  if (!draft.baseBranch) return false
+  return draft.branch.trim().length > 0 || isPendingWorkspaceDraft(draft)
+}
+
+/**
+ * A workspace asked for with neither a task name nor a branch: the task opens on
+ * its prompt box and the worktree is created once the first prompt names it.
+ */
+export function isPendingWorkspaceDraft(draft: NewTaskDraft): boolean {
+  return draft.workspace && !draft.name.trim() && !draft.branch.trim()
 }
 
 /**

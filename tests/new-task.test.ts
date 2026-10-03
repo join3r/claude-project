@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { branchSlug, defaultBaseBranch, isNewTaskDraftValid, matchProjects } from '../src/renderer/components/newTask'
+import { branchSlug, defaultBaseBranch, isNewTaskDraftValid, isPendingWorkspaceDraft, matchProjects } from '../src/renderer/components/newTask'
 
 describe('branchSlug', () => {
   it('turns a prose task name into a git-safe branch', () => {
@@ -65,6 +65,15 @@ describe('isNewTaskDraftValid', () => {
     expect(isNewTaskDraftValid({ ...ws, branch: 'do-the-thing' })).toBe(false)
     expect(isNewTaskDraftValid({ ...ws, branch: 'do-the-thing', baseBranch: 'main' })).toBe(true)
     expect(isNewTaskDraftValid({ ...ws, branch: '  ', baseBranch: 'main' })).toBe(false)
+  })
+
+  it('leaves an unnamed workspace with no branch pending until its first prompt', () => {
+    const pending = { ...base, name: '', workspace: true, branch: '', baseBranch: 'main' }
+    expect(isNewTaskDraftValid(pending)).toBe(true)
+    expect(isPendingWorkspaceDraft(pending)).toBe(true)
+    expect(isNewTaskDraftValid({ ...pending, baseBranch: '' })).toBe(false)
+    expect(isPendingWorkspaceDraft({ ...pending, branch: 'mine' })).toBe(false)
+    expect(isPendingWorkspaceDraft({ ...pending, workspace: false })).toBe(false)
   })
 })
 

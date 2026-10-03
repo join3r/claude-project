@@ -4,7 +4,6 @@ import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../c
 import { NEW_TASK_NAME, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
 import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
-import CreateWorkspaceModal from './CreateWorkspaceModal'
 import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
 import ProjectSettings from './ProjectSettings'
@@ -42,7 +41,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome,
     addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
-    addTask, addWorkspaceTask, addTaskInDirectory, removeTask, renameTask,
+    addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, removeTask, renameTask,
     reorderProjects, reorderTasks, getProjectDir,
     config, updateConfig,
     toggleTagFilter, clearTagFilters,
@@ -123,7 +122,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
-  const [workspaceModalProjectId, setWorkspaceModalProjectId] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
@@ -293,8 +291,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     else settleTask(projectId, taskId)
   }, [findTask, settleTask, unsettleTask])
 
+  // Like + Task, it opens on the prompt box; the worktree is made when the first
+  // prompt is sent, with the branch named after it.
   const handleAddWorkspace = (projectId: string) => {
-    setWorkspaceModalProjectId(projectId)
+    addPendingWorkspaceTask(projectId, NEW_TASK_NAME)
   }
 
   const handleDeleteTask = async (projectId: string, taskId: string) => {
@@ -1022,6 +1022,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             }
             setNewTaskOpen(false)
           }}
+          onCreatePendingWorkspace={(target, baseBranch) => {
+            if (target.kind === 'dir') {
+              addTaskInDirectory(target.directory, NEW_TASK_NAME, [], undefined, { baseBranch })
+            } else {
+              addPendingWorkspaceTask(target.projectId, NEW_TASK_NAME, { baseBranch })
+              setProjectExpanded(target.projectId, true)
+            }
+            setNewTaskOpen(false)
+          }}
           onCreateWorkspace={(target, name, workspace) => {
             if (target.kind === 'dir') {
               addTaskInDirectory(target.directory, name, [], workspace)
@@ -1034,23 +1043,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onClose={() => setNewTaskOpen(false)}
         />
       )}
-
-      {workspaceModalProjectId && (() => {
-        const project = projects.find(p => p.id === workspaceModalProjectId)
-        if (!project) return null
-        return (
-          <CreateWorkspaceModal
-            projectDir={getProjectDir(project)}
-            projectId={isRemoteProject(project) ? project.id : undefined}
-            sshConfig={project.ssh}
-            onAdd={(name, workspace) => {
-              addWorkspaceTask(workspaceModalProjectId, name, workspace)
-              setWorkspaceModalProjectId(null)
-            }}
-            onCancel={() => setWorkspaceModalProjectId(null)}
-          />
-        )
-      })()}
 
       <div
         className="absolute right-0 top-0 bottom-0 w-[3px] cursor-col-resize hover:bg-accent active:bg-accent transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
