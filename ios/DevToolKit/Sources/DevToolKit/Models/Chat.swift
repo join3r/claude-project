@@ -237,15 +237,94 @@ public struct ChatStatus: Sendable, Equatable {
     public var processError: String?
     public var permissionMode: String?
     public var model: String?
+    /// The model and effort pickers; nil from a desktop that doesn't send them.
+    public var settings: ChatSettings?
+    /// The context, cost and plan-limit meter; nil until the desktop has read any of it.
+    public var usage: ChatUsage?
 
     public init(busy: Bool = false, turnStartedAt: Int64? = nil, process: ChatProcessState = .idle,
-                processError: String? = nil, permissionMode: String? = nil, model: String? = nil) {
+                processError: String? = nil, permissionMode: String? = nil, model: String? = nil,
+                settings: ChatSettings? = nil, usage: ChatUsage? = nil) {
         self.busy = busy
         self.turnStartedAt = turnStartedAt
         self.process = process
         self.processError = processError
         self.permissionMode = permissionMode
         self.model = model
+        self.settings = settings
+        self.usage = usage
+    }
+}
+
+/// One row of the model picker.
+public struct ChatModelOption: Sendable, Equatable, Hashable {
+    public var value: String
+    public var label: String
+    public var description: String?
+
+    public init(value: String, label: String, description: String? = nil) {
+        self.value = value
+        self.label = label
+        self.description = description
+    }
+}
+
+/// The composer's model and effort pickers (§6.2), labelled by the desktop.
+public struct ChatSettings: Sendable, Equatable {
+    /// The picked `models` value; nil = Claude's settings default.
+    public var model: String?
+    /// What the session runs, by name ("Opus 5.5"), once known.
+    public var modelName: String?
+    /// Pickable models, without a "Default" row: the phone adds that.
+    public var models: [ChatModelOption]
+    /// The picked effort; nil = the default.
+    public var effort: String?
+    /// What the default effort resolves to, once known.
+    public var defaultEffort: String?
+    /// The effort levels the current model takes.
+    public var efforts: [String]
+
+    public init(model: String? = nil, modelName: String? = nil, models: [ChatModelOption] = [],
+                effort: String? = nil, defaultEffort: String? = nil, efforts: [String] = []) {
+        self.model = model
+        self.modelName = modelName
+        self.models = models
+        self.effort = effort
+        self.defaultEffort = defaultEffort
+        self.efforts = efforts
+    }
+}
+
+/// One plan rate-limit window.
+public struct ChatLimitWindow: Sendable, Equatable {
+    /// Percent used, 0–100.
+    public var used: Int
+    /// Unix ms.
+    public var resetsAt: Int64?
+
+    public init(used: Int, resetsAt: Int64? = nil) {
+        self.used = used
+        self.resetsAt = resetsAt
+    }
+}
+
+/// The composer's meter (§6.2). Each part is there once the desktop has read it.
+public struct ChatUsage: Sendable, Equatable {
+    public var contextTokens: Int64?
+    public var contextMax: Int64?
+    /// Session cost at API list prices, in US cents.
+    public var costCents: Int64?
+    /// claude.ai plan windows; nil for API-key sessions.
+    public var fiveHour: ChatLimitWindow?
+    public var sevenDay: ChatLimitWindow?
+
+    public init(contextTokens: Int64? = nil, contextMax: Int64? = nil, costCents: Int64? = nil,
+                fiveHour: ChatLimitWindow? = nil, sevenDay: ChatLimitWindow? = nil) {
+        self.contextTokens = contextTokens
+        self.contextMax = contextMax
+        self.costCents = costCents
+        self.fiveHour = fiveHour
+        self.sevenDay = sevenDay
     }
 }
 
@@ -363,6 +442,23 @@ public struct TaskNewResult: Sendable, Equatable {
     }
 }
 
+/// `chat.settings` (§8.5) params. Nil fields stay as they are; an empty
+/// `model` or `effort` goes back to Claude's settings default.
+public struct ChatSettingsParams: Sendable, Equatable {
+    public var tabId: String
+    /// One of `TaskOp.modes`.
+    public var mode: String?
+    public var model: String?
+    public var effort: String?
+
+    public init(tabId: String, mode: String? = nil, model: String? = nil, effort: String? = nil) {
+        self.tabId = tabId
+        self.mode = mode
+        self.model = model
+        self.effort = effort
+    }
+}
+
 /// `task.new` (§8.4). It names a project, not a tab, so it isn't one of `ChatParams.ops`.
 public enum TaskOp {
     public static let new = "task.new"
@@ -407,6 +503,8 @@ public enum ChatOp {
     public static let detail = "chat.detail"
     /// `chat.new` (§8.2) names a task, not a tab, so it isn't one of `ChatParams.ops`.
     public static let new = "chat.new"
+    /// `chat.settings` (§8.5); parsed by `ChatSettingsParams`, not `ChatParams`.
+    public static let settings = "chat.settings"
 
     /// §6.3 limits.
     public static let maxSendLength = 32_000
@@ -443,7 +541,9 @@ extension ChatStatus {
             process: ChatProcessState(rawValue: try f.str("process")),
             processError: try f.optStr("processError"),
             permissionMode: try f.optStr("permissionMode"),
-            model: try f.optStr("model")
+            model: try f.optStr("model"),
+            settings: f.isUnset("settings") ? nil : try ChatSettings.parse(f["settings"]),
+            usage: f.isUnset("usage") ? nil : try ChatUsage.parse(f["usage"])
         )
     }
 
@@ -454,6 +554,79 @@ extension ChatStatus {
         if let processError { o["processError"] = .string(processError) }
         if let permissionMode { o["permissionMode"] = .string(permissionMode) }
         if let model { o["model"] = .string(model) }
+        if let settings { o["settings"] = settings.json }
+        if let usage { o["usage"] = usage.json }
+    }
+}
+
+extension ChatSettings {
+    static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatSettings {
+        let f = try Fields(value, "settings")
+        return ChatSettings(
+            model: try f.optStr("model"),
+            modelName: try f.optStr("modelName"),
+            models: try f.array("models").map { (v) throws(ProtocolError) -> ChatModelOption in
+                let m = try Fields(v, "model")
+                return ChatModelOption(value: try m.str("value"), label: try m.str("label"), description: try m.optStr("description"))
+            },
+            effort: try f.optStr("effort"),
+            defaultEffort: try f.optStr("defaultEffort"),
+            efforts: try f.array("efforts").map { (v) throws(ProtocolError) -> String in
+                guard let s = v.stringValue else { throw ProtocolError("efforts must hold strings") }
+                return s
+            }
+        )
+    }
+
+    var json: JSONValue {
+        var o: JSONObject = [:]
+        if let model { o["model"] = .string(model) }
+        if let modelName { o["modelName"] = .string(modelName) }
+        o["models"] = .array(models.map { m in
+            var row: JSONObject = ["value": .string(m.value), "label": .string(m.label)]
+            if let description = m.description { row["description"] = .string(description) }
+            return .object(row)
+        })
+        if let effort { o["effort"] = .string(effort) }
+        if let defaultEffort { o["defaultEffort"] = .string(defaultEffort) }
+        o["efforts"] = .array(efforts.map { .string($0) })
+        return .object(o)
+    }
+}
+
+extension ChatLimitWindow {
+    static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatLimitWindow {
+        let f = try Fields(value, "limit")
+        return ChatLimitWindow(used: Int(try f.int("used")), resetsAt: try f.optInt("resetsAt"))
+    }
+
+    var json: JSONValue {
+        var o: JSONObject = ["used": .int(Int64(used))]
+        if let resetsAt { o["resetsAt"] = .int(resetsAt) }
+        return .object(o)
+    }
+}
+
+extension ChatUsage {
+    static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatUsage {
+        let f = try Fields(value, "usage")
+        return ChatUsage(
+            contextTokens: try f.optInt("contextTokens"),
+            contextMax: try f.optInt("contextMax"),
+            costCents: try f.optInt("costCents"),
+            fiveHour: f.isUnset("fiveHour") ? nil : try ChatLimitWindow.parse(f["fiveHour"]),
+            sevenDay: f.isUnset("sevenDay") ? nil : try ChatLimitWindow.parse(f["sevenDay"])
+        )
+    }
+
+    var json: JSONValue {
+        var o: JSONObject = [:]
+        if let contextTokens { o["contextTokens"] = .int(contextTokens) }
+        if let contextMax { o["contextMax"] = .int(contextMax) }
+        if let costCents { o["costCents"] = .int(costCents) }
+        if let fiveHour { o["fiveHour"] = fiveHour.json }
+        if let sevenDay { o["sevenDay"] = sevenDay.json }
+        return .object(o)
     }
 }
 
@@ -701,6 +874,27 @@ extension TaskNewParams {
     public var json: JSONValue {
         var fields: JSONObject = ["projectId": .string(projectId), "prompt": .string(prompt)]
         if let mode { fields["mode"] = .string(mode) }
+        return .object(fields)
+    }
+}
+
+extension ChatSettingsParams {
+    /// The desktop's side: a missing `tabId`, nothing to change, or an unknown
+    /// `mode` throws (`bad-request`).
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatSettingsParams {
+        let o = try Fields(value, "params")
+        let params = ChatSettingsParams(tabId: try o.str("tabId"), mode: try o.optStr("mode"),
+                                        model: try o.optStr("model"), effort: try o.optStr("effort"))
+        if let mode = params.mode, !TaskOp.modes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
+        if params.mode == nil && params.model == nil && params.effort == nil { throw ProtocolError("nothing to change") }
+        return params
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["tabId": .string(tabId)]
+        if let mode { fields["mode"] = .string(mode) }
+        if let model { fields["model"] = .string(model) }
+        if let effort { fields["effort"] = .string(effort) }
         return .object(fields)
     }
 }

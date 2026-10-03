@@ -7,6 +7,41 @@
   "$defs": {
     "ms": { "type": "integer", "minimum": 0 },
     "process": { "enum": ["idle", "starting", "running", "exited"] },
+    "settings": {
+      "description": "The composer's model and effort pickers. Absent model/effort = Claude's settings default.",
+      "type": "object",
+      "required": ["models", "efforts"],
+      "properties": {
+        "model": { "type": "string", "description": "The picked models[].value" },
+        "modelName": { "type": "string" },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["value", "label"],
+            "properties": { "value": { "type": "string" }, "label": { "type": "string" }, "description": { "type": "string" } }
+          }
+        },
+        "effort": { "type": "string" },
+        "defaultEffort": { "type": "string" },
+        "efforts": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "limit": {
+      "type": "object",
+      "required": ["used"],
+      "properties": { "used": { "type": "integer", "minimum": 0, "description": "Percent used, 0–100" }, "resetsAt": { "$ref": "#/$defs/ms" } }
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "contextTokens": { "type": "integer", "minimum": 0 },
+        "contextMax": { "type": "integer", "minimum": 0 },
+        "costCents": { "type": "integer", "minimum": 0 },
+        "fiveHour": { "$ref": "#/$defs/limit" },
+        "sevenDay": { "$ref": "#/$defs/limit" }
+      }
+    },
     "view": {
       "type": "object",
       "required": ["tabId", "title", "busy", "process", "items", "hasEarlier", "prompts"],
@@ -19,6 +54,8 @@
         "processError": { "type": "string" },
         "permissionMode": { "type": "string" },
         "model": { "type": "string" },
+        "settings": { "$ref": "#/$defs/settings" },
+        "usage": { "$ref": "#/$defs/usage" },
         "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
         "hasEarlier": { "type": "boolean" },
         "prompts": { "type": "array", "items": { "$ref": "#/$defs/prompt" } }
@@ -139,7 +176,9 @@
         "process": { "$ref": "#/$defs/process" },
         "processError": { "type": "string" },
         "permissionMode": { "type": "string" },
-        "model": { "type": "string" }
+        "model": { "type": "string" },
+        "settings": { "$ref": "#/$defs/settings" },
+        "usage": { "$ref": "#/$defs/usage" }
       }
     }
   }

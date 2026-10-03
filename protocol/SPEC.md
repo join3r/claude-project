@@ -208,9 +208,25 @@ ChatView = {
   busy: boolean, turnStartedAt?: number,
   process: 'idle' | 'starting' | 'running' | 'exited', processError?: string,
   permissionMode?: string, model?: string,
+  settings?: ChatViewSettings,         // the composer's pickers (desktops that list chat.settings, §8.5)
+  usage?: ChatViewUsage,               // the composer's meter
   items: ChatViewItem[],               // oldest → newest, WINDOWED (see 6.4)
   hasEarlier: boolean,                 // more items exist before items[0]
   prompts: ChatViewPrompt[]            // open prompts, oldest first
+}
+ChatViewSettings = {
+  model?: string,                      // the picked models[].value; absent = Claude's settings default
+  modelName?: string,                  // what the session runs, by name ("Opus 4.5"), once known
+  models: [{ value, label, description? }],   // pickable models; no "Default" row (the phone adds it)
+  effort?: string,                     // the picked effort; absent = the default
+  defaultEffort?: string,              // what the default effort resolves to, once known
+  efforts: string[]                    // the levels the current model takes
+}
+ChatViewUsage = {                      // each part once the desktop has read it
+  contextTokens?: number, contextMax?: number,
+  costCents?: number,                  // session cost at API list prices, US cents
+  fiveHour?: { used: number, resetsAt?: number },   // claude.ai plan windows: integer percent used, unix ms
+  sevenDay?: { used: number, resetsAt?: number }    // absent for API-key sessions
 }
 ChatViewItem =
   | { kind: 'user', id, text, images?: number, queued?: true, failed?: true }
@@ -230,6 +246,7 @@ ChatViewPrompt =
 - `tool.summary` is the same one-line label the desktop shows (`summarizeTool` / the item's `label`). `hasDetail` is true when `chat.detail` has something to show (the tool has input or a result).
 - Flags (`queued`, `failed`, `streaming`, `agent`) are either `true` or absent. `images` is only sent when it is at least 1; image bytes are never sent in M2.
 - Item IDs are unique within a chat and stable across events. A tool item's ID is its `tool_use` ID; a user item's is its message UUID.
+- `settings` and `usage` are labelled and rounded the way the desktop composer shows them, so the phone does no model matching of its own. Like the other status fields they are sent whole in every `evt chat` (§6.4), and a change to either flushes at once.
 - Forward compatibility, extending §4.4: an item or prompt with an unknown `kind` keeps its place and renders as "Needs a newer app" (`protocol/ts` parses it to `{ kind: 'unknown', id, unknownKind }`). An unknown tool `status` reads as `pending`, an unknown notice `tone` as `muted`, and an unknown `process` as `idle`. A known kind missing a required field makes the whole message malformed.
 
 ### 6.3 Ops (phone → desktop `req`)
@@ -351,7 +368,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, and one that also implements §8.4 adds `"task.new"`. A phone shows "New chat" only for a desktop that lists `chat.new`, and "New task" only for one that lists `task.new`; an older desktop answers either op `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. A phone shows "New chat" only for a desktop that lists `chat.new`, and "New task" only for one that lists `task.new`; an older desktop answers either op `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (phone → desktop `req`)
 
@@ -380,3 +397,14 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - The desktop adds a task at the end of the project, named after the prompt's first non-empty line (whitespace collapsed, at most 50 characters with a trailing `…`), with one `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) in its left pane. It saves this as a main-side projects commit, like §8.2. It doesn't select the task or switch any window's visible tab.
 - The desktop then attaches the chat's runtime (which starts the process), applies `mode`, and sends `prompt` as a `chat.send` from this phone would, so a `done` push (§7.6) follows the turn. It answers once the prompt is sent. The phone opens the chat with `chat.open`, and the task appears in the next `inbox` event.
 - Errors: unknown `projectId` or a project hidden from mobile (§4.4) → `not-found`. A shell-command project or Claude turned off in the desktop's settings → `unsupported`. Missing or malformed params → `bad-request`.
+
+### 8.5 `chat.settings` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `chat.settings` | `{ tabId, mode?, model?, effort? }` | `{}` |
+
+- Changes the chat's permission mode, model or effort, as the desktop composer's pickers do. An absent field stays as it is; at least one must be present. `mode` is one of the §8.4 modes. `model` is a `settings.models[].value` and `effort` one of `settings.efforts`; `""` for either goes back to Claude's settings default.
+- The desktop applies them in that order (mode, model, effort), so an effort is checked against the model just picked. It answers `{}` once they are applied; the new values arrive in the next `evt chat`. The chat need not be open on this phone. A chat without a live process keeps the values for its next start, as the desktop does.
+- A desktop that implements this op lists `"chat.settings"` in its features (§8.1) and sends `settings` and `usage` in the chat view (§6.2). The phone shows the pickers read-only for a desktop that sends `settings` without listing the feature.
+- Errors: unknown tab, as §6.3 → `not-found`. No field, an unknown `mode`, `model` or `effort` → `bad-request`.

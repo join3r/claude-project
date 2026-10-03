@@ -27,11 +27,6 @@ struct NewTaskSheet: View {
     @State private var error: String?
     @FocusState private var focused: Bool
 
-    /// The desktop's labels for `TaskOp.modes`.
-    private static let modeLabels: [String: String] = [
-        "default": "Ask", "acceptEdits": "Accept edits", "plan": "Plan", "auto": "Auto", "bypassPermissions": "Bypass",
-    ]
-
     var body: some View {
         NavigationStack {
             Form {
@@ -49,7 +44,7 @@ struct NewTaskSheet: View {
                     Picker("Mode", selection: $mode) {
                         Text("Default").tag("")
                         ForEach(TaskOp.modes, id: \.self) { value in
-                            Text(Self.modeLabels[value] ?? value).tag(value)
+                            Text(PermissionModes.labels[value] ?? value).tag(value)
                         }
                     }
                     .disabled(sending)

@@ -55,6 +55,19 @@ export class FakeChats implements ChatBridgeChats {
 
   async setPermissionMode(tabId: string, mode: string): Promise<void> {
     this.modes.push({ tabId, mode })
+    this.update(tabId, (s) => ({ ...s, info: { ...s.info, permissionMode: mode } }))
+  }
+
+  readonly settings: { tabId: string; model?: string; effort?: string }[] = []
+
+  async setModel(tabId: string, model: string | undefined): Promise<void> {
+    this.settings.push({ tabId, model })
+    this.update(tabId, (s) => ({ ...s, info: { ...s.info, model, modelPicked: model !== undefined } }))
+  }
+
+  async setEffort(tabId: string, effort: string | undefined): Promise<void> {
+    this.settings.push({ tabId, effort })
+    this.update(tabId, (s) => ({ ...s, info: { ...s.info, effort } }))
   }
 
   async interrupt(tabId: string): Promise<void> {

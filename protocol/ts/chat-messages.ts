@@ -45,6 +45,17 @@ export type TaskNewMode = (typeof TASK_NEW_MODES)[number]
 export interface TaskNewParams { projectId: string; prompt: string; mode?: TaskNewMode }
 export interface TaskNewResult { taskId: string; tabId: string }
 
+/**
+ * `chat.settings` (SPEC.md §8.5): change an open chat's permission mode, model or
+ * effort, as the desktop composer's pickers do. An absent field stays as it is; an
+ * empty `model` or `effort` goes back to Claude's settings default.
+ */
+export const CHAT_SETTINGS_OP = 'chat.settings'
+/** The handshake feature (§8.1) a desktop lists when it answers `chat.settings`. */
+export const CHAT_SETTINGS_FEATURE = 'chat.settings'
+
+export interface ChatSettingsParams { tabId: string; mode?: TaskNewMode; model?: string; effort?: string }
+
 /** Caps from §6.2–§6.4. */
 export const ChatLimits = {
   /** `text.markdown` / `user.text` in the view; longer ones end in "…" and come through `chat.detail`. */
@@ -113,6 +124,44 @@ export interface ChatViewUnknownPrompt { kind: 'unknown'; id: string; unknownKin
 
 export type ChatViewPrompt = ChatViewPermissionPrompt | ChatViewQuestionPrompt | ChatViewPlanPrompt | ChatViewUnknownPrompt
 
+/** One row of the model picker. */
+export interface ChatViewModelOption { value: string; label: string; description?: string }
+
+/** The composer's model and effort pickers (§6.2). */
+export interface ChatViewSettings {
+  /** The model picked in this chat (a `models` value); absent = Claude's settings default. */
+  model?: string
+  /** What the session runs, by name ("Opus 5.5"), once known. */
+  modelName?: string
+  /** Pickable models, without a "Default" row: the phone adds that. */
+  models: ChatViewModelOption[]
+  /** The effort picked in this chat; absent = the default. */
+  effort?: string
+  /** The effort the default resolves to, once known. */
+  defaultEffort?: string
+  /** The effort levels the current model takes. */
+  efforts: string[]
+}
+
+/** One plan rate-limit window. */
+export interface ChatViewLimitWindow {
+  /** Percent used, 0–100. */
+  used: number
+  /** Unix ms. */
+  resetsAt?: number
+}
+
+/** The composer's meter (§6.2); each part appears once the desktop has read it. */
+export interface ChatViewUsage {
+  contextTokens?: number
+  contextMax?: number
+  /** Session cost at API list prices, in US cents. */
+  costCents?: number
+  /** claude.ai plan windows; absent for API-key sessions. */
+  fiveHour?: ChatViewLimitWindow
+  sevenDay?: ChatViewLimitWindow
+}
+
 /** The session-level fields `ChatView` and `evt chat` share. */
 export interface ChatViewStatus {
   busy: boolean
@@ -121,6 +170,8 @@ export interface ChatViewStatus {
   processError?: string
   permissionMode?: string
   model?: string
+  settings?: ChatViewSettings
+  usage?: ChatViewUsage
 }
 
 export interface ChatView extends ChatViewStatus {
@@ -159,7 +210,7 @@ export type ChatAnswer =
 
 export interface ChatAnswerParams { tabId: string; promptId: string; answer: ChatAnswer }
 
-export type ChatParams = ChatTabParams | ChatEarlierParams | ChatSendParams | ChatDetailParams | ChatAnswerParams
+export type ChatParams = ChatTabParams | ChatEarlierParams | ChatSendParams | ChatDetailParams | ChatAnswerParams | ChatSettingsParams
 
 export interface ChatOpenResult { seq: number; view: ChatView }
 export interface ChatEarlierResult { items: ChatViewItem[]; hasEarlier: boolean }
@@ -331,6 +382,54 @@ export function parseChatViewPrompt(value: unknown): ChatViewPrompt {
   }
 }
 
+function strings(o: Obj, key: string): string[] {
+  return arr(o, key).map((value) => {
+    if (typeof value !== 'string') fail(`${key} must hold strings`)
+    return value
+  })
+}
+
+/** Keys in a fixed order, as {@link withStatus} does. */
+function parseSettings(value: unknown): ChatViewSettings {
+  const o = obj(value, 'settings')
+  const model = optStr(o, 'model')
+  const modelName = optStr(o, 'modelName')
+  const effort = optStr(o, 'effort')
+  const defaultEffort = optStr(o, 'defaultEffort')
+  return {
+    ...(model !== undefined ? { model } : {}),
+    ...(modelName !== undefined ? { modelName } : {}),
+    models: arr(o, 'models').map((raw) => {
+      const m = obj(raw, 'model')
+      const description = optStr(m, 'description')
+      return { value: str(m, 'value'), label: str(m, 'label'), ...(description !== undefined ? { description } : {}) }
+    }),
+    ...(effort !== undefined ? { effort } : {}),
+    ...(defaultEffort !== undefined ? { defaultEffort } : {}),
+    efforts: strings(o, 'efforts')
+  }
+}
+
+function parseLimitWindow(value: unknown): ChatViewLimitWindow {
+  const o = obj(value, 'limit')
+  const window: ChatViewLimitWindow = { used: int(o, 'used') }
+  const resetsAt = optInt(o, 'resetsAt')
+  if (resetsAt !== undefined) window.resetsAt = resetsAt
+  return window
+}
+
+function parseUsage(value: unknown): ChatViewUsage {
+  const o = obj(value, 'usage')
+  const usage: ChatViewUsage = {}
+  for (const key of ['contextTokens', 'contextMax', 'costCents'] as const) {
+    const v = optInt(o, key)
+    if (v !== undefined) usage[key] = v
+  }
+  if (!absent(o, 'fiveHour')) usage.fiveHour = parseLimitWindow(o.fiveHour)
+  if (!absent(o, 'sevenDay')) usage.sevenDay = parseLimitWindow(o.sevenDay)
+  return usage
+}
+
 function parseStatus(o: Obj): ChatViewStatus {
   const status: ChatViewStatus = { busy: bool(o, 'busy'), process: soft<ChatViewProcess>(o, 'process', PROCESSES, 'idle') }
   const turnStartedAt = optInt(o, 'turnStartedAt')
@@ -341,6 +440,8 @@ function parseStatus(o: Obj): ChatViewStatus {
   if (permissionMode !== undefined) status.permissionMode = permissionMode
   const model = optStr(o, 'model')
   if (model !== undefined) status.model = model
+  if (!absent(o, 'settings')) status.settings = parseSettings(o.settings)
+  if (!absent(o, 'usage')) status.usage = parseUsage(o.usage)
   return status
 }
 
@@ -353,7 +454,9 @@ function withStatus<T extends object>(head: T, status: ChatViewStatus): T & Chat
     process: status.process,
     ...(status.processError !== undefined ? { processError: status.processError } : {}),
     ...(status.permissionMode !== undefined ? { permissionMode: status.permissionMode } : {}),
-    ...(status.model !== undefined ? { model: status.model } : {})
+    ...(status.model !== undefined ? { model: status.model } : {}),
+    ...(status.settings !== undefined ? { settings: status.settings } : {}),
+    ...(status.usage !== undefined ? { usage: status.usage } : {})
   }
 }
 
@@ -464,6 +567,26 @@ export function parseTaskNewParams(params: unknown): TaskNewParams {
   if (mode === undefined) return { projectId, prompt }
   if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
   return { projectId, prompt, mode: mode as TaskNewMode }
+}
+
+/**
+ * `chat.settings` params (the desktop's side). Throws ProtocolError — `bad-request` —
+ * on a missing `tabId`, no field to change, or a `mode` outside {@link TASK_NEW_MODES}.
+ */
+export function parseChatSettingsParams(params: unknown): ChatSettingsParams {
+  const o = obj(params, 'params')
+  const out: ChatSettingsParams = { tabId: str(o, 'tabId') }
+  const mode = optStr(o, 'mode')
+  if (mode !== undefined) {
+    if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
+    out.mode = mode as TaskNewMode
+  }
+  const model = optStr(o, 'model')
+  if (model !== undefined) out.model = model
+  const effort = optStr(o, 'effort')
+  if (effort !== undefined) out.effort = effort
+  if (out.mode === undefined && out.model === undefined && out.effort === undefined) fail('nothing to change')
+  return out
 }
 
 /** `task.new` result (the phone's side). */

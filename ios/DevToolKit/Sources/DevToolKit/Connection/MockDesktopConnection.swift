@@ -187,6 +187,30 @@ public actor MockDesktopConnection: DesktopConnection {
             let result = try addTask(projectId: parsed.projectId, prompt: parsed.prompt)
             startReply(tabId: result.tabId, text: parsed.prompt)
             return result.json
+        case ChatOp.settings:
+            let parsed: ChatSettingsParams
+            do {
+                parsed = try ChatSettingsParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard chats[parsed.tabId] != nil else { throw notFound() }
+            change(parsed.tabId, upserts: []) { chat in
+                if let mode = parsed.mode { chat.status.permissionMode = mode }
+                var settings = chat.status.settings ?? MockChatTranscript.settings(model: chat.status.model, now: Date().unixMilliseconds).0
+                if let model = parsed.model {
+                    settings.model = model.isEmpty ? nil : model
+                    let picked = settings.models.first { $0.value == model }
+                    settings.modelName = picked?.label ?? "Opus 4.5"
+                    chat.status.model = "claude-\(picked?.value ?? "opus")-4-5"
+                }
+                if let effort = parsed.effort {
+                    settings.effort = effort.isEmpty ? nil : effort
+                    settings.defaultEffort = effort.isEmpty ? "medium" : nil
+                }
+                chat.status.settings = settings
+            }
+            return .object([:])
         case ChatOp.interrupt:
             let tabId = try string("tabId")
             guard chats[tabId] != nil else { throw notFound() }
@@ -218,7 +242,7 @@ public actor MockDesktopConnection: DesktopConnection {
             let now = Date().unixMilliseconds
             inbox.projects[p].tasks[t].tabs.append(InboxTab(id: tabId, type: .claudeChat, title: "Claude", status: .idle, since: now))
             inbox.generatedAt = now
-            chats[tabId] = MockChatTranscript(title: "Claude", status: ChatStatus(), items: [], prompts: [], details: [:])
+            chats[tabId] = MockChatTranscript(title: "Claude", status: MockChatTranscript.freshStatus(), items: [], prompts: [], details: [:])
             continuation.yield(.inbox(inbox))
             return tabId
         }
@@ -239,7 +263,7 @@ public actor MockDesktopConnection: DesktopConnection {
         let tab = InboxTab(id: tabId, type: .claudeChat, title: "Claude", status: .idle, since: now)
         inbox.projects[p].tasks.append(InboxTask(id: taskId, name: name, lastInteractedAt: now, tabs: [tab]))
         inbox.generatedAt = now
-        chats[tabId] = MockChatTranscript(title: "Claude", status: ChatStatus(), items: [], prompts: [], details: [:])
+        chats[tabId] = MockChatTranscript(title: "Claude", status: MockChatTranscript.freshStatus(), items: [], prompts: [], details: [:])
         continuation.yield(.inbox(inbox))
         return TaskNewResult(taskId: taskId, tabId: tabId)
     }
@@ -409,7 +433,7 @@ public actor MockDesktopConnection: DesktopConnection {
             guard (try? await Task.sleep(for: .milliseconds(200))) != nil else { return }
         }
 
-        continuation.yield(.features([DesktopFeature.chatNew, DesktopFeature.taskNew]))
+        continuation.yield(.features([DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
         inbox.generatedAt = Date().unixMilliseconds

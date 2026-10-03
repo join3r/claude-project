@@ -15,6 +15,7 @@ import {
   diffItems,
   earlierItems,
   emptySent,
+  viewSettings,
   headKey,
   mapPrompt,
   recordSent,
@@ -22,7 +23,7 @@ import {
   viewStatus,
   type SentItems
 } from './chat-view'
-import { AppErrorCode, ChatLimits, ChatOp } from '../../../protocol/ts/index.ts'
+import { AppErrorCode, CHAT_SETTINGS_OP, ChatLimits, ChatOp } from '../../../protocol/ts/index.ts'
 import type {
   AppMessage,
   ChatAnswer,
@@ -30,7 +31,8 @@ import type {
   ChatDetailParams,
   ChatEarlierParams,
   ChatParams,
-  ChatSendParams
+  ChatSendParams,
+  ChatSettingsParams
 } from '../../../protocol/ts/index.ts'
 
 /**
@@ -53,6 +55,9 @@ export interface ChatBridgeChats {
   send(tabId: string, text: string): Promise<void>
   /** Optional so a bridge without it still serves every `chat.*` op; `task.new` uses it for `mode`. */
   setPermissionMode?(tabId: string, mode: string): Promise<void>
+  /** `chat.settings`; undefined goes back to Claude's settings default. */
+  setModel?(tabId: string, model: string | undefined): Promise<void>
+  setEffort?(tabId: string, effort: string | undefined): Promise<void>
   interrupt(tabId: string): Promise<void>
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean
 }
@@ -236,9 +241,34 @@ export class ChatBridge {
         if (!detail) throw new OpError(AppErrorCode.NotFound, 'No such item')
         return detail
       }
+      case CHAT_SETTINGS_OP:
+        return this.applySettings(resolved, params as ChatSettingsParams)
       default:
         throw new OpError(AppErrorCode.Unsupported, `Unknown op ${op}`)
     }
+  }
+
+  /** `chat.settings` (SPEC.md §8.5): what the composer's pickers do, in their order. */
+  private async applySettings(resolved: ResolvedTab, { tabId, mode, model, effort }: ChatSettingsParams): Promise<unknown> {
+    const { chats } = this.deps
+    if (!chats.setPermissionMode || !chats.setModel || !chats.setEffort) {
+      throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot change chat settings')
+    }
+    const chat = await this.ensureRuntime(resolved)
+    // Only what the phone was offered; "" is the Default row.
+    const offered = viewSettings(chat.info, chat.models)
+    if (model && offered.models.length > 0 && !offered.models.some((m) => m.value === model)) {
+      throw new OpError(AppErrorCode.BadRequest, `Unknown model ${model}`)
+    }
+    if (mode !== undefined) await chats.setPermissionMode(tabId, mode)
+    if (model !== undefined) await chats.setModel(tabId, model || undefined)
+    if (effort !== undefined) {
+      // Checked against the model now running, after a model change above.
+      const efforts = viewSettings(chats.snapshot(tabId)?.state.info ?? chat.info, chat.models).efforts
+      if (effort && !efforts.includes(effort)) throw new OpError(AppErrorCode.BadRequest, `Unknown effort ${effort}`)
+      await chats.setEffort(tabId, effort || undefined)
+    }
+    return {}
   }
 
   private async open(state: PhoneState, resolved: ResolvedTab): Promise<unknown> {

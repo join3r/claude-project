@@ -309,6 +309,52 @@ describe('ChatBridge', () => {
     await expect(bridge.startTask('phone-1', 'nope', 'x')).rejects.toMatchObject({ code: 'not-found' })
   })
 
+  it('sends the pickers and meter the composer shows, labelled the same way', async () => {
+    const models = [
+      { value: 'default', displayName: 'Default (recommended)' },
+      { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus 5.5', description: 'Most capable', supportedEffortLevels: ['low', 'high'] },
+      { value: 'haiku', resolvedModel: 'claude-haiku-4-5', displayName: 'Haiku 4.5' }
+    ]
+    chats.update('tab-chat', (s) => ({
+      ...s,
+      models,
+      info: { model: 'claude-opus-5-5', applied: { model: 'claude-opus-5-5', effort: 'high' } },
+      usage: { contextTokens: 48_123.4, contextMax: 200_000, costUsd: 1.374, fiveHour: { utilization: 41.6, resetsAt: '2026-10-03T14:30:00Z' }, sevenDay: { utilization: 7 } }
+    }))
+    const res = await req('chat.open', { tabId: 'tab-chat' })
+    const view = (res as { result: { view: Record<string, unknown> } }).result.view
+    expect(view.settings).toEqual({
+      modelName: 'Opus 5.5',
+      models: [{ value: 'opus', label: 'Opus 5.5', description: 'Most capable' }, { value: 'haiku', label: 'Haiku 4.5' }],
+      defaultEffort: 'high',
+      efforts: ['low', 'high']
+    })
+    expect(view.usage).toEqual({
+      contextTokens: 48_123, contextMax: 200_000, costCents: 137,
+      fiveHour: { used: 42, resetsAt: Date.parse('2026-10-03T14:30:00Z') }, sevenDay: { used: 7 }
+    })
+
+    // A picked model reports its wire id once the session starts; the phone gets the row's value.
+    chats.update('tab-chat', (s) => ({ ...s, info: { model: 'claude-haiku-4-5-20251001', modelPicked: true, effort: 'low', applied: { model: 'claude-haiku-4-5-20251001', effort: 'low' } } }))
+    expect(events().at(-1)?.settings).toEqual(expect.objectContaining({ model: 'haiku', modelName: 'Haiku 4.5', effort: 'low', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] }))
+    expect(events().at(-1)?.settings).not.toHaveProperty('defaultEffort')
+  })
+
+  it('chat.settings applies mode, model and effort in the composer order; "" is the default', async () => {
+    chats.update('tab-chat', (s) => ({ ...s, models: [{ value: 'opus', displayName: 'Opus', supportedEffortLevels: ['low', 'high'] }, { value: 'haiku', displayName: 'Haiku' }] }))
+    expect(await req('chat.settings', { tabId: 'tab-chat', mode: 'plan', model: 'opus', effort: 'high' })).toMatchObject({ ok: true, result: {} })
+    expect(chats.modes).toEqual([{ tabId: 'tab-chat', mode: 'plan' }])
+    expect(chats.settings).toEqual([{ tabId: 'tab-chat', model: 'opus' }, { tabId: 'tab-chat', effort: 'high' }])
+
+    expect(await req('chat.settings', { tabId: 'tab-chat', model: '', effort: '' })).toMatchObject({ ok: true })
+    expect(chats.settings.slice(2)).toEqual([{ tabId: 'tab-chat', model: undefined }, { tabId: 'tab-chat', effort: undefined }])
+
+    expect(await req('chat.settings', { tabId: 'tab-chat', model: 'gpt' })).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    // Haiku lists no levels, so the fallback list applies; Opus takes only low and high.
+    expect(await req('chat.settings', { tabId: 'tab-chat', model: 'opus', effort: 'max' })).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(await req('chat.settings', { tabId: 'nope', mode: 'plan' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+  })
+
   it('reports a failing manager call as internal', async () => {
     chats.send = async () => { throw new Error('boom') }
     expect(await req('chat.send', { tabId: 'tab-chat', text: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'boom' } })

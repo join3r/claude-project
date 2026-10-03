@@ -65,7 +65,7 @@ import { ChatBridge } from './mobile/chat-bridge'
 import { PushEmitter } from './mobile/push-emitter'
 import { addChatTab } from './mobile/new-chat'
 import { addTaskWithChat } from './mobile/new-task'
-import { AppErrorCode, CHAT_NEW_FEATURE, TASK_NEW_FEATURE } from '../../protocol/ts/index.ts'
+import { AppErrorCode, CHAT_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_NEW_FEATURE } from '../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
@@ -332,7 +332,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE],
+        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),

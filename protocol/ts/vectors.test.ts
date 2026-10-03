@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -163,5 +163,7 @@ describe('M2 vectors', () => {
     for (const s of file.taskNew.results) expect(parseTaskNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.taskNew.invalid.params) expect(() => parseTaskNewParams(JSON.parse(s)), s).toThrow()
     for (const s of file.taskNew.invalid.results) expect(() => parseTaskNewResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.settings.params) expect(parseChatSettingsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.settings.invalid.params) expect(() => parseChatSettingsParams(JSON.parse(s)), s).toThrow()
   })
 })

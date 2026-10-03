@@ -92,7 +92,9 @@ struct ChatScreen: View {
     private var subtitle: String? {
         var parts: [String] = []
         if let task = found?.task.name { parts.append(task) }
-        if let mode = model.view?.status.permissionMode, let label = Self.permissionModeLabel(mode) { parts.append(label) }
+        // The controls bar shows the mode when the desktop sends the pickers.
+        if let status = model.view?.status, status.settings == nil, let mode = status.permissionMode,
+           let label = Self.permissionModeLabel(mode) { parts.append(label) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
@@ -101,6 +103,7 @@ struct ChatScreen: View {
         case "default": nil
         case "plan": "Plan mode"
         case "acceptEdits": "Accept edits"
+        case "auto": "Auto mode"
         case "bypassPermissions": "Bypass permissions"
         default: mode
         }
@@ -229,6 +232,10 @@ struct ChatScreen: View {
             }
             if model.showingCache {
                 cachedNote
+            } else if let status = model.view?.status, status.settings != nil || status.usage != nil {
+                ChatControlsBar(status: status, editable: canChangeSettings) { mode, model, effort in
+                    Task { await self.model.updateSettings(mode: mode, model: model, effort: effort) }
+                }
             }
             composer
         }
@@ -280,6 +287,11 @@ struct ChatScreen: View {
     private var lastSeen: Date? {
         if case .offline(let seen?) = app.state(of: route.desktopId) { return seen }
         return app.desktop(route.desktopId)?.lastSeen
+    }
+
+    /// The desktop answers `chat.settings` and is reachable.
+    private var canChangeSettings: Bool {
+        !readOnly && app.supports(DesktopFeature.chatSettings, on: route.desktopId)
     }
 
     private var canSend: Bool {

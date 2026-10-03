@@ -23,6 +23,7 @@ import {
   parseTaskNewParams,
   type TaskNewParams,
   parseChatParams,
+  parseChatSettingsParams,
   parsePushParams,
   PushOp,
   ProtocolError
@@ -788,7 +789,9 @@ export class MobileService {
     if (this.deps.chat) {
       let chatParams: ReturnType<typeof parseChatParams>
       try {
-        chatParams = parseChatParams(message.op, message.params)
+        chatParams = message.op === AppOp.ChatSettings
+          ? parseChatSettingsParams(message.params)
+          : parseChatParams(message.op, message.params)
       } catch (err) {
         if (!(err instanceof ProtocolError)) throw err
         session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })

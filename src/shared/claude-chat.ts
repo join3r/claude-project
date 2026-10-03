@@ -1152,6 +1152,9 @@ export function promptKindFor(toolName: string): ChatPromptKind {
   return 'permission'
 }
 
+/** The composer's effort levels when the model doesn't list its own. */
+export const CHAT_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+
 export const CHAT_PERMISSION_MODES = [
   { value: 'default', label: 'Ask' },
   { value: 'acceptEdits', label: 'Accept edits' },

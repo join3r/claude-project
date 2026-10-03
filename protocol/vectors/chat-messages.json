@@ -204,7 +204,7 @@
   "results": [
     {
       "op": "chat.open",
-      "json": "{\"seq\":11,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"items\":[{\"kind\":\"user\",\"id\":\"u1\",\"text\":\"Run the tests, please.\"},{\"kind\":\"user\",\"id\":\"u2\",\"text\":\"And a screenshot\",\"images\":1,\"queued\":true},{\"kind\":\"user\",\"id\":\"u3\",\"text\":\"lost\",\"failed\":true},{\"kind\":\"thinking\",\"id\":\"i3-0\",\"preview\":\"Let me look at the test runner first…\"},{\"kind\":\"text\",\"id\":\"i4-0\",\"markdown\":\"Running **the tests** now.\"},{\"kind\":\"tool\",\"id\":\"toolu_01\",\"name\":\"Bash\",\"summary\":\"Bash · npm test\",\"status\":\"done\",\"hasDetail\":true},{\"kind\":\"tool\",\"id\":\"toolu_02\",\"name\":\"Agent\",\"summary\":\"Explore · find auth code\",\"status\":\"running\",\"hasDetail\":true,\"childCount\":3,\"lastChild\":\"Grep · verifyToken\"},{\"kind\":\"notice\",\"id\":\"n9-0\",\"text\":\"Interrupted\",\"tone\":\"muted\"},{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass\",\"streaming\":true}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true},{\"kind\":\"question\",\"id\":\"req-2\",\"questions\":[{\"question\":\"Which database should we use?\",\"header\":\"Database\",\"multiSelect\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Relational\"},{\"label\":\"SQLite\"}]},{\"question\":\"Which extras?\",\"multiSelect\":true,\"options\":[{\"label\":\"Auth\"},{\"label\":\"Admin\"}]}]},{\"kind\":\"plan\",\"id\":\"req-3\",\"markdown\":\"## Plan\\n\\n1. Add the column\\n2. Backfill\"},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":true}]}}",
+      "json": "{\"seq\":11,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"settings\":{\"modelName\":\"Opus 4.5\",\"models\":[{\"value\":\"opus\",\"label\":\"Opus 4.5\",\"description\":\"Most capable\"},{\"value\":\"haiku\",\"label\":\"Haiku 4.5\"}],\"defaultEffort\":\"medium\",\"efforts\":[\"low\",\"medium\",\"high\"]},\"usage\":{\"contextTokens\":48000,\"contextMax\":200000,\"costCents\":137,\"fiveHour\":{\"used\":42,\"resetsAt\":1790003600000},\"sevenDay\":{\"used\":7}},\"items\":[{\"kind\":\"user\",\"id\":\"u1\",\"text\":\"Run the tests, please.\"},{\"kind\":\"user\",\"id\":\"u2\",\"text\":\"And a screenshot\",\"images\":1,\"queued\":true},{\"kind\":\"user\",\"id\":\"u3\",\"text\":\"lost\",\"failed\":true},{\"kind\":\"thinking\",\"id\":\"i3-0\",\"preview\":\"Let me look at the test runner first…\"},{\"kind\":\"text\",\"id\":\"i4-0\",\"markdown\":\"Running **the tests** now.\"},{\"kind\":\"tool\",\"id\":\"toolu_01\",\"name\":\"Bash\",\"summary\":\"Bash · npm test\",\"status\":\"done\",\"hasDetail\":true},{\"kind\":\"tool\",\"id\":\"toolu_02\",\"name\":\"Agent\",\"summary\":\"Explore · find auth code\",\"status\":\"running\",\"hasDetail\":true,\"childCount\":3,\"lastChild\":\"Grep · verifyToken\"},{\"kind\":\"notice\",\"id\":\"n9-0\",\"text\":\"Interrupted\",\"tone\":\"muted\"},{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass\",\"streaming\":true}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true},{\"kind\":\"question\",\"id\":\"req-2\",\"questions\":[{\"question\":\"Which database should we use?\",\"header\":\"Database\",\"multiSelect\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Relational\"},{\"label\":\"SQLite\"}]},{\"question\":\"Which extras?\",\"multiSelect\":true,\"options\":[{\"label\":\"Auth\"},{\"label\":\"Admin\"}]}]},{\"kind\":\"plan\",\"id\":\"req-3\",\"markdown\":\"## Plan\\n\\n1. Add the column\\n2. Backfill\"},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":true}]}}",
       "expected": {
         "seq": 11,
         "view": {
@@ -215,6 +215,38 @@
           "process": "running",
           "permissionMode": "default",
           "model": "claude-opus-4-5",
+          "settings": {
+            "modelName": "Opus 4.5",
+            "models": [
+              {
+                "value": "opus",
+                "label": "Opus 4.5",
+                "description": "Most capable"
+              },
+              {
+                "value": "haiku",
+                "label": "Haiku 4.5"
+              }
+            ],
+            "defaultEffort": "medium",
+            "efforts": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "usage": {
+            "contextTokens": 48000,
+            "contextMax": 200000,
+            "costCents": 137,
+            "fiveHour": {
+              "used": 42,
+              "resetsAt": 1790003600000
+            },
+            "sevenDay": {
+              "used": 7
+            }
+          },
           "items": [
             {
               "kind": "user",
@@ -338,7 +370,7 @@
     },
     {
       "op": "chat.open",
-      "json": "{\"seq\":3,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":false,\"turnStartedAt\":null,\"process\":\"hibernating\",\"permissionMode\":\"default\",\"model\":null,\"items\":[{\"kind\":\"user\",\"id\":\"u1\",\"text\":\"Run the tests, please.\",\"images\":0,\"queued\":false,\"reactions\":[\"👍\"]},{\"kind\":\"diagram\",\"id\":\"d1\",\"svg\":\"<svg/>\"},{\"kind\":\"tool\",\"id\":\"toolu_01\",\"name\":\"Bash\",\"summary\":\"Bash · npm test\",\"status\":\"paused\",\"hasDetail\":true,\"childCount\":null,\"colour\":\"red\"},{\"kind\":\"notice\",\"id\":\"n1\",\"text\":\"Heads up\",\"tone\":\"loud\"}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"survey\",\"id\":\"req-9\",\"stars\":5},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":false,\"risk\":\"high\"}],\"layout\":\"bubbles\"}}",
+      "json": "{\"seq\":3,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":false,\"turnStartedAt\":null,\"process\":\"hibernating\",\"permissionMode\":\"default\",\"model\":null,\"settings\":{\"model\":\"haiku\",\"modelName\":\"Haiku 4.5\",\"models\":[{\"value\":\"haiku\",\"label\":\"Haiku 4.5\",\"description\":null,\"tier\":2}],\"effort\":\"low\",\"defaultEffort\":null,\"efforts\":[],\"speed\":\"fast\"},\"usage\":{\"contextTokens\":null,\"costCents\":0,\"fiveHour\":{\"used\":100,\"resetsAt\":null,\"scope\":\"org\"},\"sevenDay\":null,\"opus\":{\"used\":3}},\"items\":[{\"kind\":\"user\",\"id\":\"u1\",\"text\":\"Run the tests, please.\",\"images\":0,\"queued\":false,\"reactions\":[\"👍\"]},{\"kind\":\"diagram\",\"id\":\"d1\",\"svg\":\"<svg/>\"},{\"kind\":\"tool\",\"id\":\"toolu_01\",\"name\":\"Bash\",\"summary\":\"Bash · npm test\",\"status\":\"paused\",\"hasDetail\":true,\"childCount\":null,\"colour\":\"red\"},{\"kind\":\"notice\",\"id\":\"n1\",\"text\":\"Heads up\",\"tone\":\"loud\"}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"survey\",\"id\":\"req-9\",\"stars\":5},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":false,\"risk\":\"high\"}],\"layout\":\"bubbles\"}}",
       "expected": {
         "seq": 3,
         "view": {
@@ -347,6 +379,24 @@
           "busy": false,
           "process": "idle",
           "permissionMode": "default",
+          "settings": {
+            "model": "haiku",
+            "modelName": "Haiku 4.5",
+            "models": [
+              {
+                "value": "haiku",
+                "label": "Haiku 4.5"
+              }
+            ],
+            "effort": "low",
+            "efforts": []
+          },
+          "usage": {
+            "costCents": 0,
+            "fiveHour": {
+              "used": 100
+            }
+          },
           "items": [
             {
               "kind": "user",
@@ -525,6 +575,65 @@
       }
     },
     {
+      "json": "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":15,\"upserts\":[],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"usage\":{\"contextTokens\":48000,\"contextMax\":200000,\"costCents\":137,\"fiveHour\":{\"used\":43,\"resetsAt\":1790003600000},\"sevenDay\":{\"used\":7}},\"settings\":{\"modelName\":\"Opus 4.5\",\"models\":[{\"value\":\"opus\",\"label\":\"Opus 4.5\",\"description\":\"Most capable\"},{\"value\":\"haiku\",\"label\":\"Haiku 4.5\"}],\"efforts\":[\"low\",\"medium\",\"high\"],\"effort\":\"high\"}}",
+      "expected": {
+        "t": "evt",
+        "e": "chat",
+        "tabId": "tab-chat",
+        "seq": 15,
+        "busy": true,
+        "turnStartedAt": 1790000000000,
+        "process": "running",
+        "permissionMode": "default",
+        "model": "claude-opus-4-5",
+        "settings": {
+          "modelName": "Opus 4.5",
+          "models": [
+            {
+              "value": "opus",
+              "label": "Opus 4.5",
+              "description": "Most capable"
+            },
+            {
+              "value": "haiku",
+              "label": "Haiku 4.5"
+            }
+          ],
+          "effort": "high",
+          "efforts": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "usage": {
+          "contextTokens": 48000,
+          "contextMax": 200000,
+          "costCents": 137,
+          "fiveHour": {
+            "used": 43,
+            "resetsAt": 1790003600000
+          },
+          "sevenDay": {
+            "used": 7
+          }
+        },
+        "upserts": [],
+        "removes": [],
+        "prompts": [
+          {
+            "kind": "permission",
+            "id": "req-1",
+            "toolName": "Bash",
+            "title": "Claude wants to run a command",
+            "summary": "Bash · rm -rf dist",
+            "canAlwaysAllow": true,
+            "detail": "rm -rf dist\n\nClean the build output"
+          }
+        ]
+      }
+    },
+    {
       "json": "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":14,\"upserts\":[{\"kind\":\"poll\",\"id\":\"x1\",\"options\":[]},{\"kind\":\"thinking\",\"id\":\"i3-0\",\"preview\":\"more…\",\"streaming\":true}],\"removes\":[],\"prompts\":[{\"kind\":\"survey\",\"id\":\"req-9\",\"stars\":5},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":false,\"risk\":\"high\"}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"napping\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"cursor\":5}",
       "expected": {
         "t": "evt",
@@ -626,11 +735,11 @@
       },
       {
         "op": "chat.open",
-        "json": "{\"seq\":1,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"items\":[{\"kind\":\"text\",\"id\":\"x\"}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true},{\"kind\":\"question\",\"id\":\"req-2\",\"questions\":[{\"question\":\"Which database should we use?\",\"header\":\"Database\",\"multiSelect\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Relational\"},{\"label\":\"SQLite\"}]},{\"question\":\"Which extras?\",\"multiSelect\":true,\"options\":[{\"label\":\"Auth\"},{\"label\":\"Admin\"}]}]},{\"kind\":\"plan\",\"id\":\"req-3\",\"markdown\":\"## Plan\\n\\n1. Add the column\\n2. Backfill\"},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":true}]}}"
+        "json": "{\"seq\":1,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"settings\":{\"modelName\":\"Opus 4.5\",\"models\":[{\"value\":\"opus\",\"label\":\"Opus 4.5\",\"description\":\"Most capable\"},{\"value\":\"haiku\",\"label\":\"Haiku 4.5\"}],\"defaultEffort\":\"medium\",\"efforts\":[\"low\",\"medium\",\"high\"]},\"usage\":{\"contextTokens\":48000,\"contextMax\":200000,\"costCents\":137,\"fiveHour\":{\"used\":42,\"resetsAt\":1790003600000},\"sevenDay\":{\"used\":7}},\"items\":[{\"kind\":\"text\",\"id\":\"x\"}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true},{\"kind\":\"question\",\"id\":\"req-2\",\"questions\":[{\"question\":\"Which database should we use?\",\"header\":\"Database\",\"multiSelect\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Relational\"},{\"label\":\"SQLite\"}]},{\"question\":\"Which extras?\",\"multiSelect\":true,\"options\":[{\"label\":\"Auth\"},{\"label\":\"Admin\"}]}]},{\"kind\":\"plan\",\"id\":\"req-3\",\"markdown\":\"## Plan\\n\\n1. Add the column\\n2. Backfill\"},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":true}]}}"
       },
       {
         "op": "chat.open",
-        "json": "{\"seq\":1,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":\"yes\",\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"items\":[{\"kind\":\"user\",\"id\":\"u1\",\"text\":\"Run the tests, please.\"},{\"kind\":\"user\",\"id\":\"u2\",\"text\":\"And a screenshot\",\"images\":1,\"queued\":true},{\"kind\":\"user\",\"id\":\"u3\",\"text\":\"lost\",\"failed\":true},{\"kind\":\"thinking\",\"id\":\"i3-0\",\"preview\":\"Let me look at the test runner first…\"},{\"kind\":\"text\",\"id\":\"i4-0\",\"markdown\":\"Running **the tests** now.\"},{\"kind\":\"tool\",\"id\":\"toolu_01\",\"name\":\"Bash\",\"summary\":\"Bash · npm test\",\"status\":\"done\",\"hasDetail\":true},{\"kind\":\"tool\",\"id\":\"toolu_02\",\"name\":\"Agent\",\"summary\":\"Explore · find auth code\",\"status\":\"running\",\"hasDetail\":true,\"childCount\":3,\"lastChild\":\"Grep · verifyToken\"},{\"kind\":\"notice\",\"id\":\"n9-0\",\"text\":\"Interrupted\",\"tone\":\"muted\"},{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass\",\"streaming\":true}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true},{\"kind\":\"question\",\"id\":\"req-2\",\"questions\":[{\"question\":\"Which database should we use?\",\"header\":\"Database\",\"multiSelect\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Relational\"},{\"label\":\"SQLite\"}]},{\"question\":\"Which extras?\",\"multiSelect\":true,\"options\":[{\"label\":\"Auth\"},{\"label\":\"Admin\"}]}]},{\"kind\":\"plan\",\"id\":\"req-3\",\"markdown\":\"## Plan\\n\\n1. Add the column\\n2. Backfill\"},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":true}]}}"
+        "json": "{\"seq\":1,\"view\":{\"tabId\":\"tab-chat\",\"title\":\"Claude\",\"busy\":\"yes\",\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"settings\":{\"modelName\":\"Opus 4.5\",\"models\":[{\"value\":\"opus\",\"label\":\"Opus 4.5\",\"description\":\"Most capable\"},{\"value\":\"haiku\",\"label\":\"Haiku 4.5\"}],\"defaultEffort\":\"medium\",\"efforts\":[\"low\",\"medium\",\"high\"]},\"usage\":{\"contextTokens\":48000,\"contextMax\":200000,\"costCents\":137,\"fiveHour\":{\"used\":42,\"resetsAt\":1790003600000},\"sevenDay\":{\"used\":7}},\"items\":[{\"kind\":\"user\",\"id\":\"u1\",\"text\":\"Run the tests, please.\"},{\"kind\":\"user\",\"id\":\"u2\",\"text\":\"And a screenshot\",\"images\":1,\"queued\":true},{\"kind\":\"user\",\"id\":\"u3\",\"text\":\"lost\",\"failed\":true},{\"kind\":\"thinking\",\"id\":\"i3-0\",\"preview\":\"Let me look at the test runner first…\"},{\"kind\":\"text\",\"id\":\"i4-0\",\"markdown\":\"Running **the tests** now.\"},{\"kind\":\"tool\",\"id\":\"toolu_01\",\"name\":\"Bash\",\"summary\":\"Bash · npm test\",\"status\":\"done\",\"hasDetail\":true},{\"kind\":\"tool\",\"id\":\"toolu_02\",\"name\":\"Agent\",\"summary\":\"Explore · find auth code\",\"status\":\"running\",\"hasDetail\":true,\"childCount\":3,\"lastChild\":\"Grep · verifyToken\"},{\"kind\":\"notice\",\"id\":\"n9-0\",\"text\":\"Interrupted\",\"tone\":\"muted\"},{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass\",\"streaming\":true}],\"hasEarlier\":true,\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true},{\"kind\":\"question\",\"id\":\"req-2\",\"questions\":[{\"question\":\"Which database should we use?\",\"header\":\"Database\",\"multiSelect\":false,\"options\":[{\"label\":\"Postgres\",\"description\":\"Relational\"},{\"label\":\"SQLite\"}]},{\"question\":\"Which extras?\",\"multiSelect\":true,\"options\":[{\"label\":\"Auth\"},{\"label\":\"Admin\"}]}]},{\"kind\":\"plan\",\"id\":\"req-3\",\"markdown\":\"## Plan\\n\\n1. Add the column\\n2. Backfill\"},{\"kind\":\"permission\",\"id\":\"req-4\",\"toolName\":\"Write\",\"title\":\"Write src/a.ts\",\"summary\":\"Write · src/a.ts\",\"canAlwaysAllow\":false,\"agent\":true}]}}"
       },
       {
         "op": "chat.earlier",
@@ -650,7 +759,11 @@
       "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass.\"},{\"kind\":\"tool\",\"id\":\"toolu_03\",\"name\":\"Read\",\"summary\":\"Read · package.json\",\"status\":\"pending\",\"hasDetail\":true}],\"removes\":[1],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}",
       "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"tool\",\"id\":\"x\",\"name\":\"Bash\",\"summary\":\"s\",\"status\":\"done\"}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}",
       "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass.\"},{\"kind\":\"tool\",\"id\":\"toolu_03\",\"name\":\"Read\",\"summary\":\"Read · package.json\",\"status\":\"pending\",\"hasDetail\":true}],\"removes\":[],\"prompts\":[{\"kind\":\"plan\",\"id\":\"p\"}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}",
-      "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"markdown\":\"no id\"}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}"
+      "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"markdown\":\"no id\"}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}",
+      "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass.\"},{\"kind\":\"tool\",\"id\":\"toolu_03\",\"name\":\"Read\",\"summary\":\"Read · package.json\",\"status\":\"pending\",\"hasDetail\":true}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"settings\":{\"models\":[]}}",
+      "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass.\"},{\"kind\":\"tool\",\"id\":\"toolu_03\",\"name\":\"Read\",\"summary\":\"Read · package.json\",\"status\":\"pending\",\"hasDetail\":true}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"settings\":{\"modelName\":\"Opus 4.5\",\"models\":[{\"value\":\"opus\"}],\"defaultEffort\":\"medium\",\"efforts\":[\"low\",\"medium\",\"high\"]}}",
+      "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass.\"},{\"kind\":\"tool\",\"id\":\"toolu_03\",\"name\":\"Read\",\"summary\":\"Read · package.json\",\"status\":\"pending\",\"hasDetail\":true}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"usage\":{\"fiveHour\":{\"used\":12.5}}}",
+      "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"text\",\"id\":\"i10-0\",\"markdown\":\"All 42 tests pass.\"},{\"kind\":\"tool\",\"id\":\"toolu_03\",\"name\":\"Read\",\"summary\":\"Read · package.json\",\"status\":\"pending\",\"hasDetail\":true}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\",\"usage\":{\"costCents\":-1}}"
     ]
   },
   "new": {
@@ -749,6 +862,49 @@
         "{\"tabId\":\"tab-new\"}",
         "{\"taskId\":\"task-new\"}",
         "[]"
+      ]
+    }
+  },
+  "settings": {
+    "params": [
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"mode\":\"plan\"}",
+        "expected": {
+          "tabId": "tab-chat",
+          "mode": "plan"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"model\":\"haiku\",\"effort\":\"low\"}",
+        "expected": {
+          "tabId": "tab-chat",
+          "model": "haiku",
+          "effort": "low"
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"model\":\"\",\"effort\":\"\"}",
+        "expected": {
+          "tabId": "tab-chat",
+          "model": "",
+          "effort": ""
+        }
+      },
+      {
+        "json": "{\"tabId\":\"tab-chat\",\"mode\":null,\"effort\":\"max\",\"extra\":true}",
+        "expected": {
+          "tabId": "tab-chat",
+          "effort": "max"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"mode\":\"plan\"}",
+        "{\"tabId\":\"tab-chat\"}",
+        "{\"tabId\":\"tab-chat\",\"mode\":\"yolo\"}",
+        "{\"tabId\":\"tab-chat\",\"model\":4}",
+        "null"
       ]
     }
   }

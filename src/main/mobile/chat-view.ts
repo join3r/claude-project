@@ -1,7 +1,8 @@
 import { firstLine, summarizeTool } from '../../shared/agent-activity'
 import { editPairs, diffLines } from '../../shared/chat-diff'
 import { canAlwaysAllow, planText, promptQuestions } from '../../shared/chat-prompts'
-import type { ChatItem, ChatPrompt, ChatState } from '../../shared/claude-chat'
+import { CHAT_EFFORT_LEVELS, findModelOption } from '../../shared/claude-chat'
+import type { ChatItem, ChatLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
 import { ChatLimits, capText } from '../../../protocol/ts/index.ts'
 import type {
   ChatDetailResult,
@@ -9,8 +10,11 @@ import type {
   ChatView,
   ChatViewItem,
   ChatViewPrompt,
+  ChatViewLimitWindow,
   ChatViewQuestion,
-  ChatViewStatus
+  ChatViewSettings,
+  ChatViewStatus,
+  ChatViewUsage
 } from '../../../protocol/ts/index.ts'
 
 /**
@@ -138,7 +142,60 @@ export function viewStatus(state: ChatState): ChatViewStatus {
   if (state.processError !== undefined) status.processError = state.processError
   if (state.info.permissionMode !== undefined) status.permissionMode = state.info.permissionMode
   if (state.info.model !== undefined) status.model = state.info.model
+  status.settings = viewSettings(state.info, state.models)
+  const usage = viewUsage(state.usage)
+  if (usage) status.usage = usage
   return status
+}
+
+/** The composer's model and effort pickers, labelled as the desktop's are (Composer.tsx). */
+export function viewSettings(info: ChatSessionInfo, models: ChatModelOption[]): ChatViewSettings {
+  // The CLI's own "Default" row resolves to a real model; the phone adds a Default row naming it.
+  const pickable = models.filter((m) => m.value !== 'default')
+  const running = info.modelPicked ? info.model : info.applied?.model ?? info.model
+  const current = findModelOption(pickable, info.applied?.model ?? info.model)
+  // `info.model` turns into the wire id once the session reports it: send the row's value.
+  const model = info.modelPicked && info.model ? findModelOption(pickable, info.model)?.value ?? info.model : undefined
+  const modelName = running ? findModelOption(pickable, running)?.displayName ?? running.replace(/^claude-/, '') : undefined
+  // `applied.effort` is null when no effort is sent (a model without effort levels).
+  const defaultEffort = info.effort ? undefined : info.applied?.effort ?? undefined
+  // Keys in the order the protocol's parser gives them.
+  return {
+    ...(model !== undefined ? { model } : {}),
+    ...(modelName !== undefined ? { modelName } : {}),
+    models: pickable.map((m) => ({ value: m.value, label: m.displayName, ...(m.description ? { description: m.description } : {}) })),
+    ...(info.effort ? { effort: info.effort } : {}),
+    ...(defaultEffort ? { defaultEffort } : {}),
+    efforts: current?.supportedEffortLevels?.length ? current.supportedEffortLevels : CHAT_EFFORT_LEVELS
+  }
+}
+
+function limitWindow(window: ChatLimitWindow | undefined): ChatViewLimitWindow | undefined {
+  if (!window || !Number.isFinite(window.utilization)) return undefined
+  const out: ChatViewLimitWindow = { used: Math.round(Math.min(100, Math.max(0, window.utilization))) }
+  const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : NaN
+  if (Number.isFinite(resetsAt) && resetsAt >= 0) out.resetsAt = resetsAt
+  return out
+}
+
+function count(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined
+}
+
+/** The composer's meter; undefined until any part of it is known. */
+export function viewUsage(usage: ChatUsage): ChatViewUsage | undefined {
+  const out: ChatViewUsage = {}
+  const contextTokens = count(usage.contextTokens)
+  if (contextTokens !== undefined) out.contextTokens = contextTokens
+  const contextMax = count(usage.contextMax)
+  if (contextMax !== undefined) out.contextMax = contextMax
+  const costCents = count(usage.costUsd !== undefined ? usage.costUsd * 100 : undefined)
+  if (costCents !== undefined) out.costCents = costCents
+  const fiveHour = limitWindow(usage.fiveHour)
+  if (fiveHour) out.fiveHour = fiveHour
+  const sevenDay = limitWindow(usage.sevenDay)
+  if (sevenDay) out.sevenDay = sevenDay
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 /** The whole view, windowed to the last `window` items (§6.4). */

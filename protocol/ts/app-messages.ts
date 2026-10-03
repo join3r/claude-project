@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { CHAT_NEW_OP, ChatOp, TASK_NEW_OP, parseChatViewEvent } from './chat-messages.ts'
+import { CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, TASK_NEW_OP, parseChatViewEvent } from './chat-messages.ts'
 import type { ChatViewEvent } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -133,6 +133,7 @@ export const AppOp = {
   ChatDetail: ChatOp.Detail,
   ChatNew: CHAT_NEW_OP,
   TaskNew: TASK_NEW_OP,
+  ChatSettings: CHAT_SETTINGS_OP,
   PushRegister: PushOp.Register,
   PushUnregister: PushOp.Unregister
 } as const

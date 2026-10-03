@@ -140,7 +140,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -189,7 +189,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
     log: () => {},
     timers,
     newChat: options.newChat,
-    newTask: options.newTask
+    newTask: options.newTask,
+    chat: options.chat
   }
   const service = new MobileService(deps)
   const transport = () => transports[transports.length - 1]
@@ -207,7 +208,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   }
 }
 
-function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask'] } = {}) {
+function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -533,6 +534,20 @@ describe('MobileService app messages', () => {
     const count = env.channel.sent.length
     env.channel.hooks.onAppMessage({ t: 'evt', e: 'pairing', status: 'accepted' }) // not a request
     expect(env.channel.sent.length).toBe(count)
+  })
+})
+
+describe('MobileService chat.settings (SPEC.md §8.5)', () => {
+  it('hands parsed params to the bridge and rejects bad ones', () => {
+    const requests: { op: string; params: unknown }[] = []
+    const env = pairedSetup({
+      chat: { request: (_phone, _id, op, params) => { requests.push({ op, params }) }, dropPhone: () => {}, dropAll: () => {}, projectsChanged: () => {} }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'chat.settings', params: { tabId: 't', model: '', mode: null, extra: 1 } })
+    expect(requests).toEqual([{ op: 'chat.settings', params: { tabId: 't', model: '' } }])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 7, op: 'chat.settings', params: { tabId: 't', mode: 'yolo' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 7, ok: false, error: { code: 'bad-request' } })
+    expect(requests).toHaveLength(1)
   })
 })
 

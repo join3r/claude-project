@@ -176,6 +176,8 @@ public enum DesktopFeature {
     public static let chatNew = "chat.new"
     /// The desktop answers `task.new` (§8.4).
     public static let taskNew = "task.new"
+    /// The desktop answers `chat.settings` (§8.5).
+    public static let chatSettings = "chat.settings"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

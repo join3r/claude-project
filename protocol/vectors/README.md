@@ -99,6 +99,8 @@ Each sample is `{ json, expected }` (plus `op` where the parser needs it). Parse
 | `new.invalid.params[]`, `new.invalid.results[]` | JSON strings that must fail to parse |
 | `taskNew.params[]`, `taskNew.results[]` | `{ json, expected }` for `task.new` (§8.4): its params `{ projectId, prompt, mode? }` and result `{ taskId, tabId }`. Extra fields are dropped and `mode: null` is absent. |
 | `taskNew.invalid.params[]`, `taskNew.invalid.results[]` | JSON strings that must fail to parse (a blank prompt and an unknown `mode` among them) |
+| `settings.params[]` | `{ json, expected }` for `chat.settings` (§8.5) params `{ tabId, mode?, model?, effort? }`. `""` is kept (it means the default); `null` is absent. |
+| `settings.invalid.params[]` | JSON strings that must fail to parse (no field to change and an unknown `mode` among them) |
 
 Tolerance rules the samples exercise (a newer desktop must not break an older phone):
 - An item or prompt with an unknown `kind` parses to `{ kind: "unknown", id, unknownKind: <the kind> }` and keeps its place. Its other fields are dropped.

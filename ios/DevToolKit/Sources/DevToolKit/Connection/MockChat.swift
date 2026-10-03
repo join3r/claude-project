@@ -19,6 +19,34 @@ struct MockChatTranscript: Sendable {
         return "\(prefix)-\(nextId)"
     }
 
+    /// What a desktop on a claude.ai plan sends: the pickers and a part-used meter.
+    static func settings(model: String?, now: Int64) -> (ChatSettings, ChatUsage) {
+        let models = [
+            ChatModelOption(value: "opus", label: "Opus 4.5", description: "Most capable for complex work"),
+            ChatModelOption(value: "sonnet", label: "Sonnet 4.5", description: "Best for everyday tasks"),
+            ChatModelOption(value: "haiku", label: "Haiku 4.5", description: "Fastest for quick answers"),
+        ]
+        let name = model.flatMap { m in models.first { m.contains($0.value) }?.label }
+        let settings = ChatSettings(modelName: name, models: models, defaultEffort: "medium",
+                                    efforts: ["low", "medium", "high", "xhigh", "max"])
+        let usage = ChatUsage(contextTokens: 64_000, contextMax: 200_000, costCents: 412,
+                              fiveHour: ChatLimitWindow(used: 38, resetsAt: now + 2 * 3_600_000 + 16 * 60_000),
+                              sevenDay: ChatLimitWindow(used: 81, resetsAt: now + 3 * 86_400_000))
+        return (settings, usage)
+    }
+
+    static func status(turnStartedAt: Int64, permissionMode: String, model: String) -> ChatStatus {
+        let (settings, usage) = Self.settings(model: model, now: Date().unixMilliseconds)
+        return ChatStatus(busy: true, turnStartedAt: turnStartedAt, process: .running, permissionMode: permissionMode,
+                          model: model, settings: settings, usage: usage)
+    }
+
+    /// A new chat's status: idle, on the default model.
+    static func freshStatus() -> ChatStatus {
+        let (settings, usage) = Self.settings(model: "claude-opus-4-5", now: Date().unixMilliseconds)
+        return ChatStatus(settings: settings, usage: usage)
+    }
+
     func view(tabId: String) -> ChatView {
         let windowed = Array(items.suffix(Self.window))
         return ChatView(tabId: tabId, title: title, status: status, items: windowed,
@@ -132,7 +160,7 @@ enum MockChats {
         let now = now.unixMilliseconds
         return MockChatTranscript(
             title: "Claude",
-            status: ChatStatus(busy: true, turnStartedAt: now - 95_000, process: .running, permissionMode: "acceptEdits", model: "claude-opus-4-5"),
+            status: MockChatTranscript.status(turnStartedAt: now - 95_000, permissionMode: "acceptEdits", model: "claude-opus-4-5"),
             items: items,
             prompts: [ChatPrompt(id: "p-bash", .permission(ChatPermission(
                 toolName: "Bash", title: "Run a shell command", summary: "npm test -- auth",
@@ -171,7 +199,7 @@ enum MockChats {
         ]
         return MockChatTranscript(
             title: "Claude",
-            status: ChatStatus(busy: true, turnStartedAt: now.unixMilliseconds - 40_000, process: .running, permissionMode: "default", model: "claude-sonnet-4-5"),
+            status: MockChatTranscript.status(turnStartedAt: now.unixMilliseconds - 40_000, permissionMode: "default", model: "claude-sonnet-4-5"),
             items: items,
             prompts: [ChatPrompt(id: "p-q", .question(questions))],
             details: ["t1": toolDetail(.object(["pattern": "src/pages/auth/**/*.tsx"]),
@@ -192,7 +220,7 @@ enum MockChats {
         ]
         return MockChatTranscript(
             title: "Claude",
-            status: ChatStatus(busy: true, turnStartedAt: now.unixMilliseconds - 20_000, process: .running, permissionMode: "plan", model: "claude-opus-4-5"),
+            status: MockChatTranscript.status(turnStartedAt: now.unixMilliseconds - 20_000, permissionMode: "plan", model: "claude-opus-4-5"),
             items: items,
             prompts: [ChatPrompt(id: "p-plan", .plan(markdown: """
                 ## Per-team usage chart

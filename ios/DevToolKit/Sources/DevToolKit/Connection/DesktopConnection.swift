@@ -231,6 +231,15 @@ extension DesktopConnection {
         return try decode(result, TaskNewResult.parse)
     }
 
+    /// `chat.settings` (§8.5): change the chat's permission mode, model or
+    /// effort as the desktop's pickers do. Nil leaves a field as it is; ""
+    /// for `model` or `effort` goes back to the default. The new values come
+    /// back in the next `evt chat`.
+    public func updateChatSettings(tabId: String, mode: String? = nil, model: String? = nil, effort: String? = nil) async throws {
+        let params = ChatSettingsParams(tabId: tabId, mode: mode, model: model, effort: effort)
+        _ = try await request(ChatOp.settings, params: params.json)
+    }
+
     /// `chat.detail`: a tool's full input/result, or a truncated item's full text.
     public func chatDetail(tabId: String, itemId: String) async throws -> ChatDetail {
         let result = try await request(ChatOp.detail, params: .object(["tabId": .string(tabId), "itemId": .string(itemId)]))

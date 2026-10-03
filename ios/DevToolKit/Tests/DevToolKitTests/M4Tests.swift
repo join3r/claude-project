@@ -203,7 +203,7 @@ import Testing
         let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
         let events = EventRecorder(mock)
         await mock.start()
-        try await events.waitFor { $0 == .features([DesktopFeature.chatNew, DesktopFeature.taskNew]) }
+        try await events.waitFor { $0 == .features([DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let tabId = try await mock.newChat(taskId: "t-auth")
         try await events.waitFor { event in

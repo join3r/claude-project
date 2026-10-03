@@ -271,6 +271,17 @@ final class ChatModel {
         }
     }
 
+    /// `chat.settings`: one of mode, model or effort; "" for model or effort is
+    /// the default. The new values come back in the next chat event.
+    func updateSettings(mode: String? = nil, model: String? = nil, effort: String? = nil) async {
+        guard !showingCache, let connection = connection() else { return }
+        do {
+            try await connection.updateChatSettings(tabId: route.tabId, mode: mode, model: model, effort: effort)
+        } catch {
+            show(error)
+        }
+    }
+
     func detail(for itemId: String) async throws -> ChatDetail {
         guard let connection = connection() else { throw DesktopConnectionError.notConnected }
         return try await connection.chatDetail(tabId: route.tabId, itemId: itemId)

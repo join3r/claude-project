@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Square, SquareTerminal, X } from 'lucide-react'
 import {
+  CHAT_EFFORT_LEVELS,
   CHAT_PERMISSION_MODES,
   PERMISSIONS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
@@ -50,7 +51,6 @@ interface Props {
 }
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'auto']
 
 type Suggest =
@@ -280,7 +280,7 @@ export default function Composer(props: Props): React.ReactElement {
     { value: '', label: defaultModel ? `Default (${defaultModel})` : 'Default', description: 'What your Claude settings pick' },
     ...pickable.map((m) => ({ value: m.value, label: m.displayName, description: m.description }))
   ]
-  const effortLevels = currentModel?.supportedEffortLevels?.length ? currentModel.supportedEffortLevels : EFFORT_LEVELS
+  const effortLevels = currentModel?.supportedEffortLevels?.length ? currentModel.supportedEffortLevels : CHAT_EFFORT_LEVELS
   // `applied.effort` is null when no effort is sent (a model without effort levels).
   const defaultEffort = info.effort ? undefined : info.applied?.effort ?? undefined
   const modeLabel = CHAT_PERMISSION_MODES.find((m) => m.value === info.permissionMode)?.label ?? 'Ask'

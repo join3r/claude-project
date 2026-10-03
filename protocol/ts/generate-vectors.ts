@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 
@@ -455,14 +455,26 @@ function chatMessages(): unknown {
     { kind: 'plan', id: 'req-3', markdown: '## Plan\n\n1. Add the column\n2. Backfill' },
     { kind: 'permission', id: 'req-4', toolName: 'Write', title: 'Write src/a.ts', summary: 'Write · src/a.ts', canAlwaysAllow: false, agent: true }
   ]
+  const settings = {
+    modelName: 'Opus 4.5',
+    models: [{ value: 'opus', label: 'Opus 4.5', description: 'Most capable' }, { value: 'haiku', label: 'Haiku 4.5' }],
+    defaultEffort: 'medium',
+    efforts: ['low', 'medium', 'high']
+  }
+  const usage = {
+    contextTokens: 48000, contextMax: 200000, costCents: 137,
+    fiveHour: { used: 42, resetsAt: 1790003600000 }, sevenDay: { used: 7 }
+  }
   const view = {
     tabId: 'tab-chat', title: 'Claude', busy: true, turnStartedAt: 1790000000000, process: 'running',
-    permissionMode: 'default', model: 'claude-opus-4-5', items, hasEarlier: true, prompts
+    permissionMode: 'default', model: 'claude-opus-4-5', settings, usage, items, hasEarlier: true, prompts
   }
   const viewWithUnknowns = {
     ...view,
     layout: 'bubbles',
     busy: false, turnStartedAt: null, process: 'hibernating', model: null,
+    settings: { model: 'haiku', modelName: 'Haiku 4.5', models: [{ value: 'haiku', label: 'Haiku 4.5', description: null, tier: 2 }], effort: 'low', defaultEffort: null, efforts: [], speed: 'fast' },
+    usage: { contextTokens: null, costCents: 0, fiveHour: { used: 100, resetsAt: null, scope: 'org' }, sevenDay: null, opus: { used: 3 } },
     items: [
       { ...items[0], images: 0, queued: false, reactions: ['👍'] },
       { kind: 'diagram', id: 'd1', svg: '<svg/>' },
@@ -526,6 +538,7 @@ function chatMessages(): unknown {
     events: [
       sample(event),
       sample({ ...event, seq: 13, upserts: [], removes: ['i10-0'], prompts: [], busy: false, turnStartedAt: null, process: 'exited', processError: 'Claude exited (code 1)', model: null }),
+      sample({ ...event, seq: 15, upserts: [], usage: { ...usage, fiveHour: { used: 43, resetsAt: 1790003600000 } }, settings: { ...settings, effort: 'high', defaultEffort: undefined } }),
       sample({ ...event, seq: 14, upserts: [{ kind: 'poll', id: 'x1', options: [] }, { ...items[3], preview: 'more…', streaming: true }], prompts: viewWithUnknowns.prompts, process: 'napping', cursor: 5 })
     ],
     invalid: {
@@ -556,7 +569,11 @@ function chatMessages(): unknown {
         text({ ...event, removes: [1] }),
         text({ ...event, upserts: [{ kind: 'tool', id: 'x', name: 'Bash', summary: 's', status: 'done' }] }),
         text({ ...event, prompts: [{ kind: 'plan', id: 'p' }] }),
-        text({ ...event, upserts: [{ kind: 'text', markdown: 'no id' }] })
+        text({ ...event, upserts: [{ kind: 'text', markdown: 'no id' }] }),
+        text({ ...event, settings: { models: [] } }),
+        text({ ...event, settings: { ...settings, models: [{ value: 'opus' }] } }),
+        text({ ...event, usage: { fiveHour: { used: 12.5 } } }),
+        text({ ...event, usage: { costCents: -1 } })
       ]
     },
     // §8.2: `chat.new` names a task, so it has parsers of its own.
@@ -585,6 +602,24 @@ function chatMessages(): unknown {
           'null'
         ],
         results: [text({ tabId: 'tab-new' }), text({ taskId: 'task-new' }), '[]']
+      }
+    },
+    // §8.5: `chat.settings` changes the pickers; its result is `{}`.
+    settings: {
+      params: [
+        text({ tabId: 'tab-chat', mode: 'plan' }),
+        text({ tabId: 'tab-chat', model: 'haiku', effort: 'low' }),
+        text({ tabId: 'tab-chat', model: '', effort: '' }),
+        text({ tabId: 'tab-chat', mode: null, effort: 'max', extra: true })
+      ].map((json) => ({ json, expected: parseChatSettingsParams(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ mode: 'plan' }),
+          text({ tabId: 'tab-chat' }),
+          text({ tabId: 'tab-chat', mode: 'yolo' }),
+          text({ tabId: 'tab-chat', model: 4 }),
+          'null'
+        ]
       }
     }
   }
