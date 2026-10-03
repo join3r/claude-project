@@ -69,13 +69,16 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var lastInteractedAt: Int64?
     /// Unix milliseconds. Set while a tab needs the user.
     public var attentionAt: Int64?
+    /// Set on a workspace task: the branch of its worktree (§4.4).
+    public var branch: String?
     public var tabs: [InboxTab]
 
-    public init(id: String, name: String, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil, tabs: [InboxTab]) {
+    public init(id: String, name: String, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil, branch: String? = nil, tabs: [InboxTab]) {
         self.id = id
         self.name = name
         self.lastInteractedAt = lastInteractedAt
         self.attentionAt = attentionAt
+        self.branch = branch
         self.tabs = tabs
     }
 
@@ -85,6 +88,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         name = try c.decode(String.self, forKey: .name)
         lastInteractedAt = try c.decodeIfPresent(Int64.self, forKey: .lastInteractedAt)
         attentionAt = try c.decodeIfPresent(Int64.self, forKey: .attentionAt)
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
         tabs = try c.decodeIfPresent([InboxTab].self, forKey: .tabs) ?? []
     }
 

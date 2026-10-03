@@ -20,16 +20,19 @@ import {
   mapPrompt,
   recordSent,
   toChatView,
+  toolImage,
   viewStatus,
   type SentItems
 } from './chat-view'
-import { AppErrorCode, CHAT_SETTINGS_OP, ChatLimits, ChatOp } from '../../../protocol/ts/index.ts'
+import { fitImage, ImageTooLargeError, type ImageCodec } from './chat-image'
+import { AppErrorCode, CHAT_IMAGE_OP, CHAT_SETTINGS_OP, ChatLimits, ChatOp } from '../../../protocol/ts/index.ts'
 import type {
   AppMessage,
   ChatAnswer,
   ChatAnswerParams,
   ChatDetailParams,
   ChatEarlierParams,
+  ChatImageParams,
   ChatParams,
   ChatSendParams,
   ChatSettingsParams
@@ -75,6 +78,8 @@ export interface ChatBridgeDeps {
   log(message: string): void
   /** A phone is about to send into a chat: the turn it starts is that phone's (push "done", §7.6). */
   onPhoneSend?(phoneId: string, tabId: string): void
+  /** Decodes and resizes `chat.image` images (§8.9). Without it that op answers `unsupported`. */
+  images?: ImageCodec
 }
 
 /**
@@ -243,6 +248,19 @@ export class ChatBridge {
       }
       case CHAT_SETTINGS_OP:
         return this.applySettings(resolved, params as ChatSettingsParams)
+      case CHAT_IMAGE_OP: {
+        const codec = this.deps.images
+        if (!codec) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot send images')
+        const { itemId, index, maxSide } = params as ChatImageParams
+        const image = toolImage(await this.ensureRuntime(resolved), itemId, index)
+        if (!image) throw new OpError(AppErrorCode.NotFound, 'No such image')
+        try {
+          return fitImage(image, maxSide ?? ChatLimits.imageDefaultSide, codec)
+        } catch (err) {
+          if (err instanceof ImageTooLargeError) throw new OpError(AppErrorCode.Internal, err.message)
+          throw err
+        }
+      }
       default:
         throw new OpError(AppErrorCode.Unsupported, `Unknown op ${op}`)
     }

@@ -22,7 +22,7 @@ import { TabActivityRegistry } from './tab-activity-registry'
 import { SleepBlocker } from './sleep-blocker'
 import type { ActivityUpdate } from '../shared/agent-activity'
 import { runIdleCleanupSweep, type IdleCleanupEnvironment } from './idle-cleanup-sweep'
-import { tearDownTaskTabs } from './task-teardown'
+import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from './task-teardown'
 import { PaletteFrecencyStorage } from './palette-frecency-storage'
 import { agentCommandOverride, resolveAgentCommand } from './resolve-agent-command'
 import { findGitBashExe, getShellEnv, setPortableNodeDir } from './shell-env'
@@ -34,7 +34,7 @@ import { registerWindowHandlers } from './ipc/window'
 import { registerSshHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/ssh'
 import { registerAgentHandlers } from './ipc/agents'
 import { registerTerminalHandlers } from './ipc/terminals'
-import { registerWorkspaceHandlers } from './ipc/workspaces'
+import { createWorkspace, listWorkspaceBranches, registerWorkspaceHandlers } from './ipc/workspaces'
 import { registerFileBrowserHandlers } from './ipc/file-browser'
 import { registerGitHandlers } from './ipc/git'
 import { registerNotebookHandlers } from './ipc/notebooks'
@@ -62,10 +62,21 @@ import { createInvite } from './mobile/invite'
 import { RelayClient } from './mobile/relay-client'
 import { createNoiseChannelFactory } from './mobile/channel'
 import { ChatBridge } from './mobile/chat-bridge'
+import { nativeImageCodec } from './mobile/image-codec'
 import { PushEmitter } from './mobile/push-emitter'
 import { addChatTab } from './mobile/new-chat'
-import { addTaskWithChat } from './mobile/new-task'
-import { AppErrorCode, CHAT_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_NEW_FEATURE } from '../../protocol/ts/index.ts'
+import { addTaskWithChat, makeTaskWorkspace, newTaskProject } from './mobile/new-task'
+import { closeTask, findClosableTab, removeTabFromData } from './mobile/close-task'
+import {
+  AppErrorCode,
+  CHAT_IMAGE_FEATURE,
+  CHAT_NEW_FEATURE,
+  CHAT_SETTINGS_FEATURE,
+  TAB_CLOSE_FEATURE,
+  TASK_CLOSE_FEATURE,
+  TASK_NEW_FEATURE,
+  TASK_WORKSPACE_FEATURE
+} from '../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
@@ -74,10 +85,13 @@ import type {
   Project,
   ProjectsData,
   SshConfig,
+  Tab,
   Task,
   TunnelConfig,
+  WorkspaceConfig,
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
+  WorkspaceTarget,
   WindowGeometry,
   WindowViewState,
   NotesRecord
@@ -309,7 +323,8 @@ export class AppRuntime {
         clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
       },
       log,
-      onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId)
+      onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId),
+      images: nativeImageCodec
     })
     push.start()
     service = new MobileService({
@@ -332,7 +347,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE],
+        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_WORKSPACE_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -348,12 +363,38 @@ export class AppRuntime {
         this.commitProjects(added.data)
         return { ok: true, tabId: added.tabId }
       },
-      newTask: async (phoneId, { projectId, prompt, mode }) => {
+      newTask: async (phoneId, { projectId, prompt, mode, workspace: wantsWorkspace }) => {
         if (!this.config.enableClaude) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
         }
-        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt)
-        if (!added.ok) return added
+        let workspace: WorkspaceConfig | undefined
+        if (wantsWorkspace) {
+          const target = newTaskProject(this.projectsStore.peek(), projectId)
+          if (!target.ok) return target
+          const made = await makeTaskWorkspace(target.project, prompt, {
+            listBranches: (project) => listWorkspaceBranches(this.workspaceGit(), this.workspaceTarget(project)),
+            create: async (project, name, baseBranch) => {
+              const created = await createWorkspace(this.workspaceGit(), { ...this.workspaceTarget(project), name, baseBranch })
+              return {
+                worktreePath: created.worktreePath,
+                branchName: created.branchName,
+                baseBranch,
+                relativeProjectPath: created.relativeProjectPath
+              }
+            }
+          })
+          if (!made.ok) return made
+          workspace = made.workspace
+        }
+        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, undefined, undefined, workspace)
+        if (!added.ok) {
+          // The project went away while git ran: leave no worktree behind for it.
+          const owner = workspace && this.projectsStore.peek().projects.find((p) => p.id === projectId)
+          if (owner && workspace) {
+            void this.deleteWorkspace({ ...this.workspaceTarget(owner), ...workspace, force: true }).catch(() => {})
+          }
+          return added
+        }
         this.commitProjects(added.data)
         // The task exists from here on, so a failed start is logged rather than
         // reported: the phone opens the chat either way and sees its state there,
@@ -364,6 +405,21 @@ export class AppRuntime {
           log(`task.new start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
         }
         return { ok: true, taskId: added.taskId, tabId: added.tabId }
+      },
+      closeTask: (params) => closeTask({
+        peek: () => this.projectsStore.peek(),
+        dirtyTabIds: () => this.getDirtyTabIds(),
+        checkWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
+        forceDeleteWorkspace: (project, task, keepBranch) => task.workspace
+          ? this.deleteWorkspace({ ...this.workspaceTarget(project), ...task.workspace, force: true, keepBranch })
+          : Promise.resolve({ status: 'ok' as const }),
+        removeTask: (project, task) => this.removeTaskFromMain(project, task)
+      }, params),
+      closeTab: async (tabId) => {
+        const found = findClosableTab(this.projectsStore.peek(), tabId)
+        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab' }
+        await this.removeTabFromMain(found.project, found.task, found.tab)
+        return { ok: true }
       }
     })
     return service
@@ -485,9 +541,7 @@ export class AppRuntime {
     // No `force`: this both checks that the worktree is clean and the branch merged
     // *and* performs the deletion when it is. Anything else leaves it untouched.
     return this.deleteWorkspace({
-      projectDir: project.ssh ? project.ssh.remoteDir : project.directory,
-      projectId: project.ssh ? project.id : undefined,
-      sshConfig: project.ssh,
+      ...this.workspaceTarget(project),
       worktreePath: task.workspace.worktreePath,
       branchName: task.workspace.branchName,
       baseBranch: task.workspace.baseBranch
@@ -520,21 +574,7 @@ export class AppRuntime {
    * instances, per-window status entries, view state).
    */
   private async removeTaskFromMain(project: Project, task: Task): Promise<void> {
-    const tabIds = await tearDownTaskTabs(project, task, {
-      killPty: (tabId) => {
-        this.ptySessions.discard(tabId)
-        this.chatManager.close(tabId)
-      },
-      deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
-      forgetActivity: (tabId) => {
-        this.statusReporters.delete(tabId)
-        this.activityRegistry.remove(tabId)
-        this.broadcastAgentActivity(tabId)
-      },
-      releaseHooks: (owner, dir, tabId) => owner.ssh
-        ? this.cleanupRemoteHooks(owner.id, owner.ssh, dir, tabId)
-        : this.hookInjector.cleanup(dir, tabId)
-    })
+    const tabIds = await tearDownTaskTabs(project, task, this.teardownTargets())
 
     // Sent before the state commit, and on the same ordered channel: a window that
     // learns the task is gone first unmounts its tabs, and the components that own
@@ -569,6 +609,54 @@ export class AppRuntime {
       })
     }
     this.persistWindowSession()
+  }
+
+  /** What a window does for the tabs it closes, done by main for tabs no window may be showing. */
+  private teardownTargets(): TaskTeardownTargets {
+    return {
+      killPty: (tabId) => {
+        this.ptySessions.discard(tabId)
+        this.chatManager.close(tabId)
+      },
+      deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
+      forgetActivity: (tabId) => {
+        this.statusReporters.delete(tabId)
+        this.activityRegistry.remove(tabId)
+        this.broadcastAgentActivity(tabId)
+      },
+      releaseHooks: (owner, dir, tabId) => owner.ssh
+        ? this.cleanupRemoteHooks(owner.id, owner.ssh, dir, tabId)
+        : this.hookInjector.cleanup(dir, tabId)
+    }
+  }
+
+  /**
+   * Close one tab on main's own behalf (the phone's `tab.close`): the same teardown
+   * as {@link removeTaskFromMain}, for one tab, with the task left in place.
+   */
+  private async removeTabFromMain(project: Project, task: Task, tab: Tab): Promise<void> {
+    const tabIds = await tearDownTabs(project, task, [tab], this.teardownTargets())
+    // Before the commit, for the same reason as `tasks-removed`.
+    this.broadcastToAllWindows('tabs-removed', { projectId: project.id, taskId: task.id, tabIds })
+    this.commitProjects(removeTabFromData(this.projectsStore.peek(), task.id, tab.id))
+  }
+
+  /** Where a project's workspaces live, for the workspace helpers. */
+  private workspaceTarget(project: Project): WorkspaceTarget {
+    return {
+      projectDir: project.ssh ? project.ssh.remoteDir : project.directory,
+      projectId: project.ssh ? project.id : undefined,
+      sshConfig: project.ssh
+    }
+  }
+
+  private workspaceGit() {
+    return {
+      workspaceManager: this.workspaceManager,
+      remoteWorkspaceManager: this.remoteWorkspaceManager,
+      ensureSshConnected: (projectId: string, sshConfig: SshConfig) => this.ensureSshConnected(projectId, sshConfig),
+      socketPath: (projectId: string) => this.sshManager.getSocketPath(projectId)
+    }
   }
 
   async shutdown(): Promise<void> {

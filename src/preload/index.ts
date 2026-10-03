@@ -57,6 +57,12 @@ const api = {
     ipcRenderer.on('tasks-removed', handler)
     return () => ipcRenderer.removeListener('tasks-removed', handler)
   },
+  /** Main closed some of a task's tabs by itself (the phone's `tab.close`); the task stays. */
+  onTabsRemoved: (callback: (removal: TaskRemoval) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, removal: TaskRemoval) => callback(removal)
+    ipcRenderer.on('tabs-removed', handler)
+    return () => ipcRenderer.removeListener('tabs-removed', handler)
+  },
   /** Resolves false when no snapshot was written — nothing destructive may follow. */
   backupProjectsNow: (): Promise<boolean> => ipcRenderer.invoke('backup-projects-now'),
 

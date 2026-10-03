@@ -151,6 +151,7 @@ Desktop rules:
     "tasks": [{
       "id": "…", "name": "fix-auth", "lastInteractedAt": 1790000000000,
       "attentionAt": 1790000000000,
+      "branch": "fix-auth",
       "tabs": [{
         "id": "…", "type": "claude-chat", "title": "Claude",
         "status": "working" | "attention" | "exited" | "idle",
@@ -163,6 +164,7 @@ Desktop rules:
 ```
 - Only agent/terminal tab types are included: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
 - `activity` is an optional short label derived from `AgentActivity`.
+- `branch` is present only on a workspace task (one with its own git worktree): the branch the worktree is on.
 - Home tasks, ephemeral-but-spent projects, and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.
 
@@ -233,7 +235,7 @@ ChatViewItem =
   | { kind: 'text', id, markdown, streaming?: true }
   | { kind: 'thinking', id, preview, streaming?: true }          // preview ≤ 300 chars
   | { kind: 'tool', id, name, summary, status: 'pending'|'running'|'waiting'|'done'|'error'|'denied',
-      hasDetail: boolean, childCount?: number, lastChild?: string }
+      hasDetail: boolean, childCount?: number, lastChild?: string, images?: number }   // images: §8.9
   | { kind: 'notice', id, text, tone: 'muted'|'warning'|'error' }
 ChatViewPrompt =
   | { kind: 'permission', id, toolName, title, summary, detail?: string,  // detail ≤ 4000 chars (e.g. full command / diff excerpt)
@@ -244,7 +246,7 @@ ChatViewPrompt =
 ```
 - `text.markdown` and `user.text` are capped at 16000 chars. Anything past that is cut, ends in "…", and is fetched through `chat.detail`.
 - `tool.summary` is the same one-line label the desktop shows (`summarizeTool` / the item's `label`). `hasDetail` is true when `chat.detail` has something to show (the tool has input or a result).
-- Flags (`queued`, `failed`, `streaming`, `agent`) are either `true` or absent. `images` is only sent when it is at least 1; image bytes are never sent in M2.
+- Flags (`queued`, `failed`, `streaming`, `agent`) are either `true` or absent. `images` is only sent when it is at least 1. A user item's images are only counted. A tool item's `images` (at most 4) counts the images its result carried, and each is fetched with `chat.image` (§8.9); image bytes never travel in the view.
 - Item IDs are unique within a chat and stable across events. A tool item's ID is its `tool_use` ID; a user item's is its message UUID.
 - `settings` and `usage` are labelled and rounded the way the desktop composer shows them, so the phone does no model matching of its own. Like the other status fields they are sent whole in every `evt chat` (§6.4), and a change to either flushes at once.
 - Forward compatibility, extending §4.4: an item or prompt with an unknown `kind` keeps its place and renders as "Needs a newer app" (`protocol/ts` parses it to `{ kind: 'unknown', id, unknownKind }`). An unknown tool `status` reads as `pending`, an unknown notice `tone` as `muted`, and an unknown `process` as `idle`. A known kind missing a required field makes the whole message malformed.
@@ -368,7 +370,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. A phone shows "New chat" only for a desktop that lists `chat.new`, and "New task" only for one that lists `task.new`; an older desktop answers either op `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.6 adds `"task.workspace"`, §8.7 `"task.close"`, §8.8 `"tab.close"` and §8.9 `"chat.image"`. A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, "New workspace" only for one that lists `task.workspace`, and the close actions only for one that lists the matching op. An older desktop answers an op it doesn't know `unsupported` anyway, and one without `task.workspace` ignores `workspace` and starts a plain task, so a phone must not send it there. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (phone → desktop `req`)
 
@@ -384,6 +386,10 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 
 - **New chat:** a "New chat" row in a task's tab list (for desktops that list `chat.new`), disabled while the desktop is offline. It opens the new chat as soon as the op answers.
 - **New task:** a "New task" action on each project (for desktops that list `task.new`), disabled while the desktop is offline. It asks for the first prompt and a permission mode, then opens the new chat as soon as the op answers.
+- **New workspace:** a "New workspace" action next to it (for desktops that list `task.workspace`): the same sheet, sending `workspace: true`.
+- **Close task / Close workspace:** a swipe action on a task row and a button in the task's screen (for desktops that list `task.close`), confirmed first. A `blocker` (§8.7) becomes a second confirmation that names what would be lost, and its answer resends the op with the matching `discard*` flag. For `unmerged`, `uncommitted-and-unmerged` and `check-failed` it also asks whether to keep the branch. A `warning` is shown once the task is gone.
+- **Close tab:** a swipe action on a tab row (for desktops that list `tab.close`), confirmed first for an agent that is working or waiting.
+- **Tool images:** a tool row with `images` (from a desktop that lists `chat.image`) shows a strip of thumbnails under it, fetched with a small `maxSide`. Tapping one opens it full screen, fetched again at the screen's size, with zoom and the share sheet. Against a desktop without the feature the row only says how many images there are. Fetched images are cached in memory for the session, not on disk.
 - **Require Face ID for approvals:** an app setting, off by default. When it is on, every answer to a permission, question or plan in the app asks for device-owner authentication first (Face ID, with the passcode as fallback), and the notification's Allow and Deny open the app, authenticate and then answer instead of answering in the background.
 - **Offline:** the phone keeps the last transcript of each chat it has opened (the view items it holds, at most the §6.4 window) next to the cached inbox, and shows it read-only under the offline banner when the desktop is offline. Returning to the foreground reconnects at once rather than waiting out the relay backoff. Nothing is queued, as before.
 
@@ -408,3 +414,47 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - The desktop applies them in that order (mode, model, effort), so an effort is checked against the model just picked. It answers `{}` once they are applied; the new values arrive in the next `evt chat`. The chat need not be open on this phone. A chat without a live process keeps the values for its next start, as the desktop does.
 - A desktop that implements this op lists `"chat.settings"` in its features (§8.1) and sends `settings` and `usage` in the chat view (§6.2). The phone shows the pickers read-only for a desktop that sends `settings` without listing the feature.
 - Errors: unknown tab, as §6.3 → `not-found`. No field, an unknown `mode`, `model` or `effort` → `bad-request`.
+
+### 8.6 Workspaces with `task.new`
+
+A desktop that lists `"task.workspace"` accepts `workspace: true` in `task.new`'s params (§8.4). Anything but `true` means no workspace.
+- Before it adds the task, the desktop creates a git worktree for it on a new branch, as its + Workspace does on the first prompt. The branch is named after the prompt (lower-case, git-safe, at most 40 characters cut at a word, `task` when nothing is left), with `-2`, `-3`… past existing branches. It forks from `main`, else `master`, else the first local branch. Remote (SSH) projects get the worktree on the remote host.
+- The chat then starts inside the worktree, and the task's inbox entry carries `branch` (§4.4).
+- Errors, besides §8.4's: a project folder that isn't a git repository, or one with no branch → `unsupported`. A worktree that can't be created → `internal`, with git's message. No task is added in either case.
+
+### 8.7 `task.close` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `task.close` | `{ taskId, discardUnsaved?, discardWorkspace?, keepBranch? }` | `{ closed: true, warning? }` or `{ closed: false, blocker, branch?, baseBranch?, message? }` |
+
+- Deletes the task, as the desktop sidebar's Delete task does: its tabs' processes stop, their scrollback and hook injections go, and the task leaves the projects in a main-side commit. Windows showing it move off it. Flags are `true` or absent.
+- Before deleting, the desktop checks in this order and answers `closed: false` with the first `blocker` that applies, changing nothing:
+  - `unsaved`: an editor tab in the task has unsaved changes in a desktop window, unless `discardUnsaved`.
+  - For a workspace task, unless `discardWorkspace`: `uncommitted` (the worktree has uncommitted changes), `unmerged` (the branch isn't merged into `baseBranch`), `uncommitted-and-unmerged`, or `check-failed` (git couldn't answer, with its `message`). These carry `branch` and `baseBranch`.
+- A clean, merged workspace is removed with its branch without asking. With `discardWorkspace`, the worktree is removed whatever its state, and the branch too unless `keepBranch`.
+- `closed: true` may carry a `warning` when the task is gone but its worktree folder was left on disk.
+- A phone treats a `blocker` it doesn't know as `check-failed`.
+- Errors: unknown `taskId`, a home task, or a task in a project hidden from mobile → `not-found`. Missing `taskId` → `bad-request`.
+
+### 8.8 `tab.close` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `tab.close` | `{ tabId }` | `{}` |
+
+- Closes one tab the phone sees in its inbox (§4.4), as its close button on the desktop does: its process stops and its scrollback and hook injection go. The task stays, even without tabs. A chat open on a phone stops sending events, as for a tab closed on the desktop: the tab leaves the next `inbox`, and further `chat.*` ops on it answer `not-found`.
+- Errors: unknown tab, a tab type the inbox doesn't carry, a home tab, or a project hidden from mobile → `not-found`. Missing `tabId` → `bad-request`.
+
+### 8.9 `chat.image` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `chat.image` | `{ tabId, itemId, index, maxSide? }` | `{ mediaType, data }` |
+
+- Returns image `index` (0-based, below the tool item's `images`, §6.2) of tool item `itemId`, as base64 `data` with no `data:` prefix. `mediaType` is one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`.
+- `maxSide` is the longest side the phone wants, in pixels, clamped to 64…4096, default 2048. The desktop scales the image down to fit it (never up) and keeps its type when it can. It sends the original bytes when they already fit. `data` is at most 3000000 characters, so the result fits one message (§6.1). An image that is still too big is re-encoded as JPEG, then scaled down further.
+- The images are the ones the desktop shows under the tool row: images a tool result carried (a Read of a PNG, a browser screenshot), at most 4 per result. A user's attached images are not available.
+- The chat need not be open on this phone. When the chat has no runtime yet, the desktop attaches one first, as for `chat.detail`.
+- A desktop that implements this op lists `"chat.image"` in its features (§8.1) and sends `images` on tool items.
+- Errors: unknown tab, as §6.3, an unknown item, an item that isn't a tool, or an `index` it doesn't have → `not-found`. Missing or malformed params → `bad-request`. An image the desktop can't decode and that doesn't fit as it is → `internal`.

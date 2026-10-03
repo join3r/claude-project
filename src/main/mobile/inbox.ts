@@ -61,6 +61,7 @@ function buildTask(task: Task, lookup: InboxTabLookup): MobileInboxTask {
   const out: MobileInboxTask = { id: task.id, name: task.name, tabs }
   if (task.lastInteractedAt !== undefined) out.lastInteractedAt = task.lastInteractedAt
   if (task.inbox?.attentionAt !== undefined) out.attentionAt = task.inbox.attentionAt
+  if (task.workspace) out.branch = task.workspace.branchName
   return out
 }
 

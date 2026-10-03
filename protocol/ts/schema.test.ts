@@ -125,6 +125,10 @@ describe('JSON Schema', () => {
       expect(validate({ $ref: `chat.schema.json#/$defs/${defs[s.op]}` }, s.expected, 'chat.schema.json'), s.json).toEqual([])
       checked++
     }
+    for (const s of chat.image.results) {
+      expect(validate({ $ref: 'chat.schema.json#/$defs/imageResult' }, s.expected, 'chat.schema.json'), s.json).toEqual([])
+      checked++
+    }
     for (const s of [...chat.events, ...chat.requests]) {
       if (!known(s.expected)) continue
       expect(validate(doc('app-message.schema.json'), s.expected, 'app-message.schema.json'), s.json).toEqual([])

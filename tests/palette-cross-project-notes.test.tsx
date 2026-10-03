@@ -152,6 +152,7 @@ describe('openOrFocusNoteTab navigation', () => {
       onProjectsUpdated: vi.fn().mockReturnValue(() => {}),
       onNotesUpdated: vi.fn().mockReturnValue(() => {}),
       onTasksRemoved: vi.fn().mockReturnValue(() => {}),
+      onTabsRemoved: vi.fn().mockReturnValue(() => {}),
       reportDirtyTabs: vi.fn().mockResolvedValue(undefined),
       onConfigUpdated: vi.fn().mockReturnValue(() => {}),
       sshStatus: vi.fn().mockResolvedValue('disconnected'),

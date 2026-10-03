@@ -9,6 +9,7 @@ struct ChatScreen: View {
     @State private var draft = ""
     @State private var atBottom = true
     @State private var detailItem: ChatItem?
+    @State private var viewerImage: ChatImageRef?
     @FocusState private var composerFocused: Bool
     /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
     @State private var viewportHeight: CGFloat = 0
@@ -40,6 +41,9 @@ struct ChatScreen: View {
                 ItemDetailSheet(item: item) { try await model.detail(for: item.id) }
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .fullScreenCover(item: $viewerImage) { ref in
+                ChatImageViewer(start: ref) { [model] ref, side in try await model.image(ref, maxSide: side) }
             }
             .task { await model.run() }
             .onChange(of: scenePhase) { _, phase in
@@ -119,7 +123,7 @@ struct ChatScreen: View {
                         loadEarlierButton(proxy)
                     }
                     ForEach(model.view?.items ?? []) { item in
-                        ChatItemRow(item: item) { detailItem = $0 }
+                        ChatItemRow(item: item, images: imageActions) { detailItem = $0 }
                             .id(item.id)
                     }
                     // A saved transcript's status is stale: don't show it as running.
@@ -287,6 +291,15 @@ struct ChatScreen: View {
     private var lastSeen: Date? {
         if case .offline(let seen?) = app.state(of: route.desktopId) { return seen }
         return app.desktop(route.desktopId)?.lastSeen
+    }
+
+    /// Tool-result images (§8.9), for a reachable desktop that lists `chat.image`.
+    private var imageActions: ChatImageActions? {
+        guard !readOnly, app.supports(DesktopFeature.chatImage, on: route.desktopId) else { return nil }
+        return ChatImageActions(
+            load: { [model] ref, side in try await model.image(ref, maxSide: side) },
+            open: { viewerImage = $0 }
+        )
     }
 
     /// The desktop answers `chat.settings` and is reachable.

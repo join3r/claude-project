@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 
 /// One canned chat held by `MockDesktopConnection` (the desktop side of a
 /// claude-chat tab, as far as the phone can tell).
@@ -111,6 +113,8 @@ enum MockChats {
                 streaming: false)),
             ChatItem(id: "t1", .tool(ChatTool(name: "Grep", summary: "Grep \"refreshToken\" in src/", status: .done, hasDetail: true))),
             ChatItem(id: "t2", .tool(ChatTool(name: "Read", summary: "Read src/auth/refresh.ts", status: .done, hasDetail: true))),
+            ChatItem(id: "t2s", .tool(ChatTool(name: "mcp__browser__screenshot", summary: "Screenshot of /login after a stale refresh", status: .done,
+                                                hasDetail: true, images: 2))),
             ChatItem(id: "a1", .text(markdown: """
                 Found it. `verifyRefreshToken` throws a `TokenExpiredError`, but `refresh.ts` only catches `JsonWebTokenError`, \
                 so the expired case falls through to the generic handler and becomes a **500**.
@@ -238,5 +242,34 @@ enum MockChats {
             ],
             nextId: 100
         )
+    }
+}
+
+extension MockChatTranscript {
+    /// A stand-in for a tool-result image (`chat.image`, §8.9): a PNG "screenshot"
+    /// whose longest side is `maxSide`, different per `index`.
+    static func image(index: Int, maxSide: Int) -> Data? {
+        let width = max(1, maxSide), height = max(1, maxSide * 5 / 8)
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let w = CGFloat(width), h = CGFloat(height)
+        let hues: [(CGFloat, CGFloat, CGFloat)] = [(0.18, 0.36, 0.86), (0.82, 0.30, 0.24), (0.20, 0.62, 0.38), (0.55, 0.32, 0.78)]
+        let (r, g, b) = hues[index % hues.count]
+        context.setFillColor(red: 0.97, green: 0.97, blue: 0.98, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        // A title bar, a card and a few "text" lines.
+        context.setFillColor(red: r, green: g, blue: b, alpha: 1)
+        context.fill(CGRect(x: 0, y: h * 0.88, width: w, height: h * 0.12))
+        context.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        context.fill(CGRect(x: w * 0.25, y: h * 0.18, width: w * 0.5, height: h * 0.6))
+        context.setFillColor(red: r, green: g, blue: b, alpha: 0.35)
+        for line in 0..<4 {
+            context.fill(CGRect(x: w * 0.3, y: h * (0.62 - CGFloat(line) * 0.1), width: w * (0.4 - CGFloat(line) * 0.05), height: h * 0.04))
+        }
+        guard let image = context.makeImage() else { return nil }
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 }

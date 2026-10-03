@@ -2,7 +2,7 @@ import { firstLine, summarizeTool } from '../../shared/agent-activity'
 import { editPairs, diffLines } from '../../shared/chat-diff'
 import { canAlwaysAllow, planText, promptQuestions } from '../../shared/chat-prompts'
 import { CHAT_EFFORT_LEVELS, findModelOption } from '../../shared/claude-chat'
-import type { ChatItem, ChatLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
+import type { ChatImage, ChatItem, ChatLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
 import { ChatLimits, capText } from '../../../protocol/ts/index.ts'
 import type {
   ChatDetailResult,
@@ -58,6 +58,7 @@ export function mapItem(item: ChatItem): ChatViewItem {
       }
       if (item.childCount !== undefined) out.childCount = item.childCount
       if (item.lastChild !== undefined) out.lastChild = item.lastChild
+      if (item.images && item.images.length > 0) out.images = Math.min(item.images.length, ChatLimits.toolImages)
       return out
     }
     case 'notice':
@@ -234,6 +235,13 @@ export function chatDetail(state: ChatState, itemId: string): ChatDetailResult |
     return { kind: 'tool', input: capText(item.command, ChatLimits.detail).text, result: capText(output, ChatLimits.detail).text }
   }
   return { kind: 'text', markdown: capText(item.text, ChatLimits.detail).text }
+}
+
+/** `chat.image` (§8.9): image `index` of tool item `itemId`, or null when there is none. */
+export function toolImage(state: ChatState, itemId: string, index: number): ChatImage | null {
+  const item = state.items.find((i) => i.id === itemId)
+  if (item?.kind !== 'tool' || index >= ChatLimits.toolImages) return null
+  return item.images?.[index] ?? null
 }
 
 /** Equal keys mean the phone already has this exact item. */

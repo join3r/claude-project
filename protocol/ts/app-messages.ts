@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, TASK_NEW_OP, parseChatViewEvent } from './chat-messages.ts'
+import { CHAT_IMAGE_OP, CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, parseChatViewEvent } from './chat-messages.ts'
 import type { ChatViewEvent } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -62,6 +62,8 @@ export interface InboxTask {
   name: string
   lastInteractedAt?: number
   attentionAt?: number
+  /** Present on a workspace task: the branch its worktree is on (§4.4). */
+  branch?: string
   tabs: InboxTab[]
 }
 
@@ -133,7 +135,10 @@ export const AppOp = {
   ChatDetail: ChatOp.Detail,
   ChatNew: CHAT_NEW_OP,
   TaskNew: TASK_NEW_OP,
+  TaskClose: TASK_CLOSE_OP,
+  TabClose: TAB_CLOSE_OP,
   ChatSettings: CHAT_SETTINGS_OP,
+  ChatImage: CHAT_IMAGE_OP,
   PushRegister: PushOp.Register,
   PushUnregister: PushOp.Unregister
 } as const
@@ -293,6 +298,8 @@ function parseTask(value: unknown): InboxTask {
   if (lastInteractedAt !== undefined) task.lastInteractedAt = lastInteractedAt
   const attentionAt = optInt(o, 'attentionAt')
   if (attentionAt !== undefined) task.attentionAt = attentionAt
+  const branch = optStr(o, 'branch')
+  if (branch !== undefined) task.branch = branch
   return task
 }
 

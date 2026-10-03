@@ -84,7 +84,7 @@ struct RootView: View {
         } detail: {
             NavigationStack(path: $detailPath) {
                 if let ref = taskSelection {
-                    TaskDetailView(ref: ref)
+                    TaskDetailView(ref: ref, onClosed: { taskSelection = nil })
                         .navigationDestination(for: ChatRoute.self) { route in
                             ChatScreen(route: route, app: model)
                         }

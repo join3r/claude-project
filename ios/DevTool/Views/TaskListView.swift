@@ -7,6 +7,7 @@ struct TaskListView: View {
     let scope: SidebarSelection
     @Binding var selection: TaskRef?
     @State private var newTask: NewTaskTarget?
+    @State private var closing: CloseTaskRequest?
 
     var body: some View {
         List(selection: $selection) {
@@ -54,6 +55,9 @@ struct TaskListView: View {
         .sheet(item: $newTask) { target in
             NewTaskSheet(target: target)
         }
+        .closeTaskFlow($closing) { closed in
+            if selection == TaskRef(desktopId: closed.desktopId, taskId: closed.taskId) { selection = nil }
+        }
     }
 
     @ViewBuilder
@@ -73,17 +77,37 @@ struct TaskListView: View {
                         TaskRow(task: task)
                             .tag(TaskRef(desktopId: desktop.id, taskId: task.id))
                             .opacity(offline ? 0.55 : 1)
+                            .swipeActions(edge: .trailing) {
+                                if model.supports(DesktopFeature.taskClose, on: desktop.id) && !offline {
+                                    // Not `role: .destructive`: the row stays until the desktop
+                                    // confirms, and a blocker may keep it.
+                                    Button {
+                                        closing = CloseTaskRequest(desktopId: desktop.id, task: task)
+                                    } label: {
+                                        Label("Close", systemImage: "xmark")
+                                    }
+                                    .tint(.red)
+                                }
+                            }
                     }
                     if project.tasks.isEmpty {
                         Text("No tasks").foregroundStyle(.secondary)
                     }
                     if model.supports(DesktopFeature.taskNew, on: desktop.id) {
                         Button {
-                            newTask = NewTaskTarget(desktopId: desktop.id, project: project)
+                            newTask = NewTaskTarget(desktopId: desktop.id, project: project, workspace: false)
                         } label: {
                             Label("New task", systemImage: "plus")
                         }
                         .disabled(offline)
+                        if model.supports(DesktopFeature.taskWorkspace, on: desktop.id) {
+                            Button {
+                                newTask = NewTaskTarget(desktopId: desktop.id, project: project, workspace: true)
+                            } label: {
+                                Label("New workspace", systemImage: "arrow.triangle.branch")
+                            }
+                            .disabled(offline)
+                        }
                     }
                 } header: {
                     ProjectHeader(project: project, desktopName: showDesktop ? desktop.name : nil)
@@ -168,6 +192,14 @@ struct TaskRow: View {
                 Text(task.name)
                     .font(.body.weight(task.summaryStatus == .attention ? .semibold : .regular))
                     .lineLimit(1)
+                if let branch = task.branch {
+                    Label(branch, systemImage: "arrow.triangle.branch")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .accessibilityLabel("Branch \(branch)")
+                }
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)

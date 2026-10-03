@@ -87,7 +87,8 @@
           "properties": {
             "kind": { "const": "tool" }, "id": { "type": "string" }, "name": { "type": "string" }, "summary": { "type": "string" },
             "status": { "enum": ["pending", "running", "waiting", "done", "error", "denied"] },
-            "hasDetail": { "type": "boolean" }, "childCount": { "type": "integer", "minimum": 0 }, "lastChild": { "type": "string" }
+            "hasDetail": { "type": "boolean" }, "childCount": { "type": "integer", "minimum": 0 }, "lastChild": { "type": "string" },
+            "images": { "type": "integer", "minimum": 1, "description": "Images the result carried, at most 4; fetched with chat.image (§8.9)" }
           }
         },
         {
@@ -159,6 +160,15 @@
           "properties": { "kind": { "const": "text" }, "markdown": { "type": "string" } }
         }
       ]
+    },
+    "imageResult": {
+      "description": "chat.image (§8.9): one tool-result image, base64 without a data: prefix, at most 3000000 chars.",
+      "type": "object",
+      "required": ["mediaType", "data"],
+      "properties": {
+        "mediaType": { "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"] },
+        "data": { "type": "string", "pattern": "^[A-Za-z0-9+/]+=*$" }
+      }
     },
     "chatEvt": {
       "type": "object",

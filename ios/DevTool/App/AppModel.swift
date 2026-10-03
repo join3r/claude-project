@@ -135,10 +135,23 @@ final class AppModel {
 
     /// `task.new` (§8.4): a new task in the project whose Claude chat starts on
     /// `prompt`, and the route to that chat. The task shows up with the next inbox.
-    func newTask(desktopId: String, projectId: String, prompt: String, mode: String?) async throws -> ChatRoute {
+    /// With `workspace` (§8.6) the task gets its own worktree and branch first.
+    func newTask(desktopId: String, projectId: String, prompt: String, mode: String?, workspace: Bool = false) async throws -> ChatRoute {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
-        let result = try await connection.newTask(projectId: projectId, prompt: prompt, mode: mode)
+        let result = try await connection.newTask(projectId: projectId, prompt: prompt, mode: mode, workspace: workspace)
         return ChatRoute(desktopId: desktopId, tabId: result.tabId)
+    }
+
+    /// `task.close` (§8.7). The task leaves with the next inbox.
+    func closeTask(desktopId: String, _ params: TaskCloseParams) async throws -> TaskCloseResult {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.closeTask(params)
+    }
+
+    /// `tab.close` (§8.8). The tab leaves with the next inbox.
+    func closeTab(desktopId: String, tabId: String) async throws {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        try await connection.closeTab(tabId: tabId)
     }
 
     // MARK: - Chat cache

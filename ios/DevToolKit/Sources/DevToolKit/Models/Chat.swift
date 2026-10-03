@@ -105,14 +105,18 @@ public struct ChatTool: Sendable, Equatable {
     public var hasDetail: Bool
     public var childCount: Int?
     public var lastChild: String?
+    /// Images the result carried (at most 4), fetched with `chat.image` (§8.9).
+    public var images: Int?
 
-    public init(name: String, summary: String, status: ChatToolStatus, hasDetail: Bool, childCount: Int? = nil, lastChild: String? = nil) {
+    public init(name: String, summary: String, status: ChatToolStatus, hasDetail: Bool, childCount: Int? = nil, lastChild: String? = nil,
+                images: Int? = nil) {
         self.name = name
         self.summary = summary
         self.status = status
         self.hasDetail = hasDetail
         self.childCount = childCount
         self.lastChild = lastChild
+        self.images = images
     }
 }
 
@@ -423,12 +427,52 @@ public struct TaskNewParams: Sendable, Equatable {
     public var prompt: String
     /// One of `TaskOp.modes`; nil leaves Claude's own default.
     public var mode: String?
+    /// Give the task its own worktree on a new branch (§8.6). Only for desktops
+    /// that list `DesktopFeature.taskWorkspace`.
+    public var workspace: Bool
 
-    public init(projectId: String, prompt: String, mode: String? = nil) {
+    public init(projectId: String, prompt: String, mode: String? = nil, workspace: Bool = false) {
         self.projectId = projectId
         self.prompt = prompt
         self.mode = mode
+        self.workspace = workspace
     }
+}
+
+/// `task.close` (§8.7) params. Each `discard*` flag accepts the loss a blocker
+/// reported; `keepBranch` keeps a discarded workspace's branch.
+public struct TaskCloseParams: Sendable, Equatable {
+    public var taskId: String
+    public var discardUnsaved: Bool
+    public var discardWorkspace: Bool
+    public var keepBranch: Bool
+
+    public init(taskId: String, discardUnsaved: Bool = false, discardWorkspace: Bool = false, keepBranch: Bool = false) {
+        self.taskId = taskId
+        self.discardUnsaved = discardUnsaved
+        self.discardWorkspace = discardWorkspace
+        self.keepBranch = keepBranch
+    }
+}
+
+/// Why `task.close` left a task open (§8.7).
+public enum TaskCloseBlocker: String, Sendable, Equatable, CaseIterable {
+    case unsaved
+    case uncommitted
+    case unmerged
+    case uncommittedAndUnmerged = "uncommitted-and-unmerged"
+    case checkFailed = "check-failed"
+
+    /// The branch may hold work that isn't anywhere else, so the phone asks
+    /// whether to keep it.
+    public var asksAboutBranch: Bool { self != .unsaved && self != .uncommitted }
+}
+
+/// `task.close` result.
+public enum TaskCloseResult: Sendable, Equatable {
+    /// The task is gone; `warning` says what was left behind (a worktree folder).
+    case closed(warning: String?)
+    case blocked(TaskCloseBlocker, branch: String?, baseBranch: String?, message: String?)
 }
 
 /// `task.new` result: the new task and its claude-chat tab, already sent the prompt.
@@ -459,9 +503,46 @@ public struct ChatSettingsParams: Sendable, Equatable {
     }
 }
 
+/// `chat.image` (§8.9) params: image `index` of tool item `itemId`, scaled
+/// by the desktop so its longest side is at most `maxSide` pixels.
+public struct ChatImageParams: Sendable, Equatable {
+    public var tabId: String
+    public var itemId: String
+    public var index: Int
+    public var maxSide: Int?
+
+    /// `maxSide` bounds the desktop clamps to.
+    public static let minSide = 64
+    public static let maxSide = 4096
+
+    public init(tabId: String, itemId: String, index: Int, maxSide: Int? = nil) {
+        self.tabId = tabId
+        self.itemId = itemId
+        self.index = index
+        self.maxSide = maxSide
+    }
+}
+
+/// `chat.image` result: the image bytes and their type (`image/png`, `jpeg`, `gif` or `webp`).
+public struct ChatImageResult: Sendable, Equatable {
+    public static let mediaTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+    public var mediaType: String
+    public var data: Data
+
+    public init(mediaType: String, data: Data) {
+        self.mediaType = mediaType
+        self.data = data
+    }
+}
+
 /// `task.new` (§8.4). It names a project, not a tab, so it isn't one of `ChatParams.ops`.
 public enum TaskOp {
     public static let new = "task.new"
+    /// `task.close` (§8.7).
+    public static let close = "task.close"
+    /// `tab.close` (§8.8): one agent or terminal tab.
+    public static let closeTab = "tab.close"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
 }
@@ -505,6 +586,8 @@ public enum ChatOp {
     public static let new = "chat.new"
     /// `chat.settings` (§8.5); parsed by `ChatSettingsParams`, not `ChatParams`.
     public static let settings = "chat.settings"
+    /// `chat.image` (§8.9); parsed by `ChatImageParams`, not `ChatParams`.
+    public static let image = "chat.image"
 
     /// §6.3 limits.
     public static let maxSendLength = 32_000
@@ -657,7 +740,8 @@ extension ChatItem {
                 status: ChatToolStatus(rawValue: try f.str("status")),
                 hasDetail: try f.bool("hasDetail"),
                 childCount: try f.optInt("childCount").map(Int.init),
-                lastChild: try f.optStr("lastChild")
+                lastChild: try f.optStr("lastChild"),
+                images: try f.optInt("images").flatMap { $0 > 0 ? Int($0) : nil }
             )))
         case "notice":
             return ChatItem(id: id, .notice(text: try f.str("text"), tone: ChatNoticeTone(rawValue: try f.str("tone"))))
@@ -692,6 +776,7 @@ extension ChatItem {
             o["hasDetail"] = .bool(tool.hasDetail)
             if let childCount = tool.childCount { o["childCount"] = .int(Int64(childCount)) }
             if let lastChild = tool.lastChild { o["lastChild"] = .string(lastChild) }
+            if let images = tool.images, images > 0 { o["images"] = .int(Int64(images)) }
         case .notice(let text, let tone):
             o["text"] = .string(text)
             o["tone"] = .string(tone.rawValue)
@@ -868,13 +953,56 @@ extension TaskNewParams {
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ProtocolError("prompt is empty") }
         let mode = try o.optStr("mode")
         if let mode, !TaskOp.modes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
-        return TaskNewParams(projectId: projectId, prompt: prompt, mode: mode)
+        return TaskNewParams(projectId: projectId, prompt: prompt, mode: mode, workspace: o.flag("workspace"))
     }
 
     public var json: JSONValue {
         var fields: JSONObject = ["projectId": .string(projectId), "prompt": .string(prompt)]
         if let mode { fields["mode"] = .string(mode) }
+        if workspace { fields["workspace"] = .bool(true) }
         return .object(fields)
+    }
+}
+
+extension TaskCloseParams {
+    /// The desktop's side: a missing `taskId` throws (`bad-request`).
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> TaskCloseParams {
+        let o = try Fields(value, "params")
+        return TaskCloseParams(taskId: try o.str("taskId"), discardUnsaved: o.flag("discardUnsaved"),
+                               discardWorkspace: o.flag("discardWorkspace"), keepBranch: o.flag("keepBranch"))
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["taskId": .string(taskId)]
+        if discardUnsaved { fields["discardUnsaved"] = .bool(true) }
+        if discardWorkspace { fields["discardWorkspace"] = .bool(true) }
+        if keepBranch { fields["keepBranch"] = .bool(true) }
+        return .object(fields)
+    }
+}
+
+extension TaskCloseResult {
+    /// A blocker this build doesn't know reads as `.checkFailed`.
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> TaskCloseResult {
+        let o = try Fields(value, "result")
+        if try o.bool("closed") { return .closed(warning: try o.optStr("warning")) }
+        let blocker = TaskCloseBlocker(rawValue: try o.str("blocker")) ?? .checkFailed
+        return .blocked(blocker, branch: try o.optStr("branch"), baseBranch: try o.optStr("baseBranch"), message: try o.optStr("message"))
+    }
+
+    public var json: JSONValue {
+        switch self {
+        case .closed(let warning):
+            var fields: JSONObject = ["closed": .bool(true)]
+            if let warning { fields["warning"] = .string(warning) }
+            return .object(fields)
+        case .blocked(let blocker, let branch, let baseBranch, let message):
+            var fields: JSONObject = ["closed": .bool(false), "blocker": .string(blocker.rawValue)]
+            if let branch { fields["branch"] = .string(branch) }
+            if let baseBranch { fields["baseBranch"] = .string(baseBranch) }
+            if let message { fields["message"] = .string(message) }
+            return .object(fields)
+        }
     }
 }
 
@@ -896,6 +1024,36 @@ extension ChatSettingsParams {
         if let model { fields["model"] = .string(model) }
         if let effort { fields["effort"] = .string(effort) }
         return .object(fields)
+    }
+}
+
+extension ChatImageParams {
+    /// The desktop's side: a missing `tabId`, `itemId` or `index` throws
+    /// (`bad-request`); `maxSide` is clamped to `minSide`…`maxSide`.
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatImageParams {
+        let o = try Fields(value, "params")
+        let maxSide = try o.optInt("maxSide").map { Int(min(Int64(Self.maxSide), max(Int64(Self.minSide), $0))) }
+        return ChatImageParams(tabId: try o.str("tabId"), itemId: try o.str("itemId"), index: Int(try o.int("index")), maxSide: maxSide)
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["tabId": .string(tabId), "itemId": .string(itemId), "index": .int(Int64(index))]
+        if let maxSide { fields["maxSide"] = .int(Int64(maxSide)) }
+        return .object(fields)
+    }
+}
+
+extension ChatImageResult {
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> ChatImageResult {
+        let o = try Fields(value, "result")
+        let mediaType = try o.str("mediaType")
+        guard mediaTypes.contains(mediaType) else { throw ProtocolError("unknown mediaType \(mediaType)") }
+        guard let data = Data(base64Encoded: try o.str("data")), !data.isEmpty else { throw ProtocolError("data must be non-empty base64") }
+        return ChatImageResult(mediaType: mediaType, data: data)
+    }
+
+    public var json: JSONValue {
+        .object(["mediaType": .string(mediaType), "data": .string(data.base64EncodedString())])
     }
 }
 

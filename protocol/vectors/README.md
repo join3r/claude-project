@@ -97,8 +97,12 @@ Each sample is `{ json, expected }` (plus `op` where the parser needs it). Parse
 | `invalid.events[]` | JSON strings that must fail to parse |
 | `new.params[]`, `new.results[]` | `{ json, expected }` for `chat.new` (§8.2): its params `{ taskId }` and result `{ tabId }`. Extra fields are dropped. |
 | `new.invalid.params[]`, `new.invalid.results[]` | JSON strings that must fail to parse |
-| `taskNew.params[]`, `taskNew.results[]` | `{ json, expected }` for `task.new` (§8.4): its params `{ projectId, prompt, mode? }` and result `{ taskId, tabId }`. Extra fields are dropped and `mode: null` is absent. |
+| `taskNew.params[]`, `taskNew.results[]` | `{ json, expected }` for `task.new` (§8.4): its params `{ projectId, prompt, mode?, workspace? }` and result `{ taskId, tabId }`. Extra fields are dropped, `mode: null` is absent, and `workspace` is kept only when it is `true` (§8.6). |
 | `taskNew.invalid.params[]`, `taskNew.invalid.results[]` | JSON strings that must fail to parse (a blank prompt and an unknown `mode` among them) |
+| `taskClose.params[]`, `taskClose.results[]` | `{ json, expected }` for `task.close` (§8.7). Flags are kept only when `true`. An unknown `blocker` becomes `check-failed`. |
+| `taskClose.invalid.params[]`, `taskClose.invalid.results[]` | JSON strings that must fail to parse (a result without `closed`, or `closed: false` without `blocker`, among them) |
+| `tabClose.params[]`, `tabClose.invalid.params[]` | `{ json, expected }` for `tab.close` (§8.8) params `{ tabId }`, and JSON strings that must fail to parse |
+| `image.params[]`, `image.results[]`, `image.invalid.params[]`, `image.invalid.results[]` | `{ json, expected }` for `chat.image` (§8.9) params `{ tabId, itemId, index, maxSide? }` (`maxSide` clamped to 64…4096) and results `{ mediaType, data }`, and JSON strings that must fail to parse |
 | `settings.params[]` | `{ json, expected }` for `chat.settings` (§8.5) params `{ tabId, mode?, model?, effort? }`. `""` is kept (it means the default); `null` is absent. |
 | `settings.invalid.params[]` | JSON strings that must fail to parse (no field to change and an unknown `mode` among them) |
 

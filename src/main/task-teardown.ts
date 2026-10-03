@@ -1,4 +1,4 @@
-import type { Project, Task } from '../shared/types'
+import type { Project, Tab, Task } from '../shared/types'
 import { joinWorkspaceDir } from '../shared/workspace-path'
 
 /** The per-tab teardown a window would normally do, as main has to do it. */
@@ -32,7 +32,16 @@ export async function tearDownTaskTabs(
   task: Task,
   targets: TaskTeardownTargets
 ): Promise<string[]> {
-  const tabs = [...task.tabs.left, ...task.tabs.right]
+  return tearDownTabs(project, task, [...task.tabs.left, ...task.tabs.right], targets)
+}
+
+/** {@link tearDownTaskTabs} for some of a task's tabs: one closed from the phone. */
+export async function tearDownTabs(
+  project: Project,
+  task: Task,
+  tabs: Tab[],
+  targets: TaskTeardownTargets
+): Promise<string[]> {
   const dir = taskDir(project, task)
 
   for (const tab of tabs) {

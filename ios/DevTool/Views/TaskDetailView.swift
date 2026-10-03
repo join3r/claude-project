@@ -4,9 +4,16 @@ import SwiftUI
 struct TaskDetailView: View {
     @Environment(AppModel.self) private var model
     let ref: TaskRef
+    /// The phone closed this task (§8.7); the caller leaves the screen.
+    var onClosed: () -> Void = {}
 
     @State private var creatingChat = false
     @State private var newChatError: String?
+    @State private var closingTask: CloseTaskRequest?
+    /// A busy tab waiting on "Close tab?".
+    @State private var confirmTab: InboxTab?
+    @State private var closingTabs: Set<String> = []
+    @State private var closeTabError: String?
 
     var body: some View {
         if let found = model.task(ref) {
@@ -27,6 +34,13 @@ struct TaskDetailView: View {
                         ProjectHeader(project: project, desktopName: nil)
                     }
                     LabeledContent("Desktop", value: desktop?.name ?? "")
+                    if let branch = task.branch {
+                        LabeledContent("Branch") {
+                            Label(branch, systemImage: "arrow.triangle.branch")
+                                .labelStyle(.titleAndIcon)
+                                .lineLimit(1)
+                        }
+                    }
                     LabeledContent("Status") {
                         StatusBadge(status: task.summaryStatus)
                     }
@@ -39,13 +53,26 @@ struct TaskDetailView: View {
 
                 Section {
                     ForEach(task.tabs) { tab in
-                        if tab.type == .claudeChat {
-                            // Only Claude chat tabs open on the phone; the rest are status only.
-                            NavigationLink(value: ChatRoute(desktopId: ref.desktopId, tabId: tab.id)) {
+                        Group {
+                            if tab.type == .claudeChat {
+                                // Only Claude chat tabs open on the phone; the rest are status only.
+                                NavigationLink(value: ChatRoute(desktopId: ref.desktopId, tabId: tab.id)) {
+                                    TabRow(tab: tab)
+                                }
+                            } else {
                                 TabRow(tab: tab)
                             }
-                        } else {
-                            TabRow(tab: tab)
+                        }
+                        .opacity(closingTabs.contains(tab.id) ? 0.4 : 1)
+                        .swipeActions(edge: .trailing) {
+                            if model.supports(DesktopFeature.tabClose, on: ref.desktopId) && !offline {
+                                Button {
+                                    requestCloseTab(tab)
+                                } label: {
+                                    Label("Close", systemImage: "xmark")
+                                }
+                                .tint(.red)
+                            }
                         }
                     }
                     if task.tabs.isEmpty {
@@ -62,8 +89,41 @@ struct TaskDetailView: View {
                     }
                 }
                 .opacity(offline ? 0.55 : 1)
+
+                if model.supports(DesktopFeature.taskClose, on: ref.desktopId) {
+                    Section {
+                        Button(role: .destructive) {
+                            closingTask = CloseTaskRequest(desktopId: ref.desktopId, task: task)
+                        } label: {
+                            Label(task.branch == nil ? "Close task" : "Close workspace", systemImage: "xmark.circle")
+                        }
+                        .tint(.red)
+                        .disabled(offline)
+                    } footer: {
+                        if task.branch != nil {
+                            Text("Removes the worktree from disk. You're asked first if it has uncommitted or unmerged work.")
+                        }
+                    }
+                }
             }
             .listStyle(.insetGrouped)
+            .closeTaskFlow($closingTask) { _ in onClosed() }
+            .confirmationDialog(
+                confirmTab.map { "Close “\($0.title.isEmpty ? $0.type.displayName : $0.title)”?" } ?? "",
+                isPresented: Binding(get: { confirmTab != nil }, set: { if !$0 { confirmTab = nil } }),
+                titleVisibility: .visible,
+                presenting: confirmTab
+            ) { tab in
+                Button("Close tab", role: .destructive) { Task { await closeTab(tab) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { tab in
+                Text(tab.status == .attention ? "It is waiting for you. Closing it stops it on the desktop." : "It is still working. Closing it stops it on the desktop.")
+            }
+            .alert("Couldn't close the tab", isPresented: Binding(get: { closeTabError != nil }, set: { if !$0 { closeTabError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(closeTabError ?? "")
+            }
             .navigationTitle(task.name)
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await model.refresh([ref.desktopId]) }
@@ -103,6 +163,27 @@ struct TaskDetailView: View {
             model.requestedChat = try await model.newChat(in: ref)
         } catch {
             newChatError = error.localizedDescription
+        }
+    }
+
+    /// A working or waiting tab is confirmed first; an idle or exited one closes at once.
+    private func requestCloseTab(_ tab: InboxTab) {
+        if tab.status == .working || tab.status == .attention {
+            confirmTab = tab
+        } else {
+            Task { await closeTab(tab) }
+        }
+    }
+
+    /// `tab.close` (§8.8). The row stays dimmed until the next inbox drops it.
+    private func closeTab(_ tab: InboxTab) async {
+        guard !closingTabs.contains(tab.id) else { return }
+        closingTabs.insert(tab.id)
+        do {
+            try await model.closeTab(desktopId: ref.desktopId, tabId: tab.id)
+        } catch {
+            closingTabs.remove(tab.id)
+            closeTabError = error.localizedDescription
         }
     }
 

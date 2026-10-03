@@ -2,6 +2,7 @@ import DevToolKit
 import Foundation
 import Observation
 import OSLog
+import UIKit
 
 /// One open chat screen: opens the chat on the desktop, applies `evt chat`
 /// through `ChatState`, re-opens after a `seq` gap or a new session, and runs
@@ -58,6 +59,8 @@ final class ChatModel {
     @ObservationIgnored private var opening = false
     @ObservationIgnored private var openGeneration = 0
     @ObservationIgnored private let log = Logger(subsystem: "sk.awantech.devtool", category: "chat")
+    /// Tool-result images fetched this screen (`chat.image`), the largest copy of each.
+    @ObservationIgnored private var images: [ChatImageRef: (side: Int, image: UIImage)] = [:]
 
     init(route: ChatRoute, dependencies: Dependencies) {
         self.route = route
@@ -280,6 +283,19 @@ final class ChatModel {
         } catch {
             show(error)
         }
+    }
+
+    /// `chat.image` (§8.9): a tool-result image whose longest side is at most
+    /// `maxSide` pixels. A larger copy already fetched serves a smaller ask.
+    func image(_ ref: ChatImageRef, maxSide: Int) async throws -> UIImage {
+        if let cached = images[ref], cached.side >= maxSide { return cached.image }
+        guard let connection = connection() else { throw DesktopConnectionError.notConnected }
+        let result = try await connection.chatImage(tabId: route.tabId, itemId: ref.itemId, index: ref.index, maxSide: maxSide)
+        guard let image = UIImage(data: result.data) else {
+            throw DesktopConnectionError.badResponse("\(result.mediaType) image could not be decoded")
+        }
+        if (images[ref]?.side ?? 0) < maxSide { images[ref] = (maxSide, image) }
+        return image
     }
 
     func detail(for itemId: String) async throws -> ChatDetail {

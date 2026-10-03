@@ -75,7 +75,14 @@ describe('buildInbox', () => {
     const [t] = p.tasks
     expect('lastInteractedAt' in t).toBe(false)
     expect('attentionAt' in t).toBe(false)
+    expect('branch' in t).toBe(false)
     expect(t.tabs[0]).toEqual({ id: 'a', type: 'terminal', title: 'a', status: 'idle' })
+  })
+
+  it('names the branch of a workspace task', () => {
+    const workspace = { worktreePath: '/src/p1/.worktrees/fix', branchName: 'fix', baseBranch: 'main', relativeProjectPath: '' }
+    const inbox = buildInbox(data([project('p1', [task('t1', [], { workspace })])]), lookup(), DESKTOP, NOW)
+    expect(inbox.projects[0].tasks[0].branch).toBe('fix')
   })
 
   it('marks SSH projects as remote', () => {

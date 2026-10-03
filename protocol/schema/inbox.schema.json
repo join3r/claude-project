@@ -39,6 +39,7 @@
         "name": { "type": "string" },
         "lastInteractedAt": { "$ref": "#/$defs/unixMs" },
         "attentionAt": { "$ref": "#/$defs/unixMs" },
+        "branch": { "type": "string", "description": "Present on a workspace task: the git branch of its worktree (SPEC.md §4.4)." },
         "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
       }
     },

@@ -14,6 +14,7 @@ import {
   useNativeTheme,
   useSelectionSync,
   useTasksRemovedListener,
+  useTabsRemovedListener,
   useWindowFocused,
   useWindowTitle
 } from './appState/useWindowEffects'
@@ -67,6 +68,7 @@ export function useAppState(): AppActions {
   const theme = useNativeTheme()
   const dirty = useDirtyClosePrompt()
   useTasksRemovedListener(core.updateWindowViewState)
+  useTabsRemovedListener()
   const windowFocused = useWindowFocused()
   usePersistence(core)
   const connectSsh = useConnectSsh()

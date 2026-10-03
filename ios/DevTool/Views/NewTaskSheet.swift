@@ -5,16 +5,19 @@ import SwiftUI
 struct NewTaskTarget: Identifiable, Hashable {
     let desktopId: String
     let project: InboxProject
+    /// "New workspace" (§8.6): the task gets its own worktree and branch.
+    let workspace: Bool
 
-    var id: String { "\(desktopId)/\(project.id)" }
+    var id: String { "\(desktopId)/\(project.id)/\(workspace)" }
 
     static func == (a: NewTaskTarget, b: NewTaskTarget) -> Bool { a.id == b.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-/// "New task" (§8.3, §8.4): the first prompt and a permission mode. The desktop
-/// names the task after the prompt and starts Claude on it; the chat opens as
-/// soon as the task shows up in the inbox.
+/// "New task" and "New workspace" (§8.3, §8.4, §8.6): the first prompt and a
+/// permission mode. The desktop names the task (and a workspace's branch) after
+/// the prompt and starts Claude on it; the chat opens as soon as the task shows
+/// up in the inbox.
 struct NewTaskSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -38,7 +41,11 @@ struct NewTaskSheet: View {
                 } header: {
                     ProjectHeader(project: target.project, desktopName: nil)
                 } footer: {
-                    Text("The task is named after the prompt's first line.")
+                    if target.workspace {
+                        Text("The task and a new branch are named after the prompt's first line. Claude works in its own worktree, forked from main or master.")
+                    } else {
+                        Text("The task is named after the prompt's first line.")
+                    }
                 }
                 Section {
                     Picker("Mode", selection: $mode) {
@@ -55,7 +62,7 @@ struct NewTaskSheet: View {
                     }
                 }
             }
-            .navigationTitle("New task")
+            .navigationTitle(target.workspace ? "New workspace" : "New task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -85,7 +92,8 @@ struct NewTaskSheet: View {
         error = nil
         do {
             let route = try await model.newTask(
-                desktopId: target.desktopId, projectId: target.project.id, prompt: trimmed, mode: mode.isEmpty ? nil : mode
+                desktopId: target.desktopId, projectId: target.project.id, prompt: trimmed,
+                mode: mode.isEmpty ? nil : mode, workspace: target.workspace
             )
             dismiss()
             // RootView waits for the task to appear in the inbox, then pushes the chat.

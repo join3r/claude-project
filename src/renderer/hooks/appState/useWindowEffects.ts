@@ -45,6 +45,23 @@ export function useTasksRemovedListener(updateWindowViewState: UpdateWindowViewS
   }, [updateWindowViewState])
 }
 
+/**
+ * Main closed a tab by itself (the phone's `tab.close`). As for a task: the xterm
+ * and status entries go here, and the projects broadcast drops the tab.
+ */
+export function useTabsRemovedListener(): void {
+  useEffect(() => {
+    return window.api.onTabsRemoved(({ tabIds }) => {
+      for (const tabId of tabIds) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+      }
+      for (const tabId of tabIds) {
+        void window.api.scrollbackDelete(tabId)
+      }
+    })
+  }, [])
+}
+
 export function useWindowFocused(): boolean {
   const [windowFocused, setWindowFocused] = useState(() => (typeof document === 'undefined' ? true : document.hasFocus()))
   useEffect(() => {

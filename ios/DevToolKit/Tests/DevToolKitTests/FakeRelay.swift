@@ -84,6 +84,9 @@ actor FakeRelay: WebSocketConnector {
         var features: [String] = [DesktopFeature.chatNew]
         /// Tabs added with `chat.new`, at the end of task `t`.
         var newTabs: [String] = []
+        var taskNewParams: [TaskNewParams] = []
+        var taskCloseParams: [TaskCloseParams] = []
+        var closedTabs: [String] = []
 
         var id: String { identity.deviceId }
 
@@ -175,9 +178,35 @@ actor FakeRelay: WebSocketConnector {
                         return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
                     }
                     guard parsed.projectId == "p" else { return app(.resError(id: id, code: AppErrorCode.notFound, message: "No such project"), to: from) }
+                    taskNewParams.append(parsed)
                     let tabId = "tab-new-\(newTabs.count + 1)"
                     newTabs.append(tabId)
                     return app(.resOk(id: id, result: TaskNewResult(taskId: "task-new", tabId: tabId).json), to: from)
+                }
+                if op == TaskOp.close || op == TaskOp.closeTab {
+                    let feature = op == TaskOp.close ? DesktopFeature.taskClose : DesktopFeature.tabClose
+                    guard features.contains(feature) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    if op == TaskOp.closeTab {
+                        guard case .object(let o)? = params, case .string(let tabId)? = o["tabId"] else {
+                            return app(.resError(id: id, code: AppErrorCode.badRequest, message: "tabId must be a string"), to: from)
+                        }
+                        closedTabs.append(tabId)
+                        return app(.resOk(id: id, result: .object([:])), to: from)
+                    }
+                    let parsed: TaskCloseParams
+                    do {
+                        parsed = try TaskCloseParams.parse(params)
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
+                    taskCloseParams.append(parsed)
+                    // "t" is a workspace with an unmerged branch until it is discarded.
+                    let result: TaskCloseResult = parsed.discardWorkspace
+                        ? .closed(warning: nil)
+                        : .blocked(.unmerged, branch: "fix", baseBranch: "main", message: nil)
+                    return app(.resOk(id: id, result: result.json), to: from)
                 }
                 if let replies = chat.handle(id: id, op: op, params: params) {
                     return replies.flatMap { app($0, to: from) }

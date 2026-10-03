@@ -178,6 +178,14 @@ public enum DesktopFeature {
     public static let taskNew = "task.new"
     /// The desktop answers `chat.settings` (§8.5).
     public static let chatSettings = "chat.settings"
+    /// `task.new` takes `workspace: true` (§8.6).
+    public static let taskWorkspace = "task.workspace"
+    /// The desktop answers `task.close` (§8.7).
+    public static let taskClose = "task.close"
+    /// The desktop answers `tab.close` (§8.8).
+    public static let tabClose = "tab.close"
+    /// The desktop answers `chat.image` and counts tool items' `images` (§8.9).
+    public static let chatImage = "chat.image"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.
@@ -313,6 +321,7 @@ extension Inbox {
             id: id, name: name,
             lastInteractedAt: try optInt(o, "lastInteractedAt"),
             attentionAt: try optInt(o, "attentionAt"),
+            branch: try optStr(o, "branch"),
             tabs: tabs
         )
     }
@@ -357,6 +366,7 @@ extension InboxTask {
         var o: JSONObject = ["id": .string(id), "name": .string(name)]
         if let lastInteractedAt { o["lastInteractedAt"] = .int(lastInteractedAt) }
         if let attentionAt { o["attentionAt"] = .int(attentionAt) }
+        if let branch { o["branch"] = .string(branch) }
         o["tabs"] = .array(tabs.map(\.json))
         return .object(o)
     }

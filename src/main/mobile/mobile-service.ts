@@ -21,9 +21,14 @@ import {
   deviceId,
   parseChatNewParams,
   parseTaskNewParams,
+  parseTaskCloseParams,
+  parseTabCloseParams,
   type TaskNewParams,
+  type TaskCloseParams,
+  type TaskCloseResult,
   parseChatParams,
   parseChatSettingsParams,
+  parseChatImageParams,
   parsePushParams,
   PushOp,
   ProtocolError
@@ -183,6 +188,10 @@ export interface MobileServiceDeps {
   newChat?(taskId: string): { ok: true; tabId: string } | { ok: false; code: string; message: string }
   /** `task.new` (SPEC.md §8.4): a task with a chat started on a prompt. Without it the op answers `unsupported`. */
   newTask?(phoneId: string, params: TaskNewParams): Promise<{ ok: true; taskId: string; tabId: string } | { ok: false; code: string; message: string }>
+  /** `task.close` (SPEC.md §8.7). Without it the op answers `unsupported`. */
+  closeTask?(params: TaskCloseParams): Promise<{ ok: true; result: TaskCloseResult } | { ok: false; code: string; message: string }>
+  /** `tab.close` (SPEC.md §8.8). Without it the op answers `unsupported`. */
+  closeTab?(tabId: string): Promise<{ ok: true } | { ok: false; code: string; message: string }>
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -486,6 +495,36 @@ export class MobileService {
     for (const id of [...this.pushReplies.keys()]) this.settlePush(id, 'error')
   }
 
+  /**
+   * Parse `params` (`bad-request` on failure), run `work`, and answer once it settles,
+   * unless this phone's session has been replaced by then.
+   */
+  private answerLater<P>(
+    session: Session,
+    id: number,
+    op: string,
+    parse: () => P,
+    work: (params: P) => Promise<{ ok: true; result: unknown; log: string } | { ok: false; code: string; message: string }>
+  ): void {
+    let params: P
+    try {
+      params = parse()
+    } catch (err) {
+      if (!(err instanceof ProtocolError)) throw err
+      session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
+      return
+    }
+    work(params)
+      .catch((err: unknown) => ({ ok: false as const, code: AppErrorCode.Internal, message: err instanceof Error ? err.message : String(err) }))
+      .then((outcome) => {
+        this.log(`${op} phone=${session.phoneId} ${outcome.ok ? outcome.log : `error=${outcome.code}`}`)
+        if (this.sessions.get(session.phoneId) !== session) return
+        session.channel.send(outcome.ok
+          ? { t: 'res', id, ok: true, result: outcome.result }
+          : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })
+      })
+  }
+
   private handlePushOp(session: Session, id: number, op: string, params: unknown): boolean {
     let parsed: ReturnType<typeof parsePushParams>
     try {
@@ -786,12 +825,30 @@ export class MobileService {
         })
       return
     }
+    if (message.op === AppOp.TaskClose && this.deps.closeTask) {
+      const closeTask = this.deps.closeTask
+      this.answerLater(session, id, message.op, () => parseTaskCloseParams(message.params), async (params) => {
+        const outcome = await closeTask(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `task=${params.taskId} closed=${outcome.result.closed}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.TabClose && this.deps.closeTab) {
+      const closeTab = this.deps.closeTab
+      this.answerLater(session, id, message.op, () => parseTabCloseParams(message.params), async ({ tabId }) => {
+        const outcome = await closeTab(tabId)
+        return outcome.ok ? { ok: true, result: {}, log: `tab=${tabId}` } : outcome
+      })
+      return
+    }
     if (this.deps.chat) {
       let chatParams: ReturnType<typeof parseChatParams>
       try {
         chatParams = message.op === AppOp.ChatSettings
           ? parseChatSettingsParams(message.params)
-          : parseChatParams(message.op, message.params)
+          : message.op === AppOp.ChatImage
+            ? parseChatImageParams(message.params)
+            : parseChatParams(message.op, message.params)
       } catch (err) {
         if (!(err instanceof ProtocolError)) throw err
         session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })

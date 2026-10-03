@@ -355,6 +355,33 @@ describe('ChatBridge', () => {
     expect(await req('chat.settings', { tabId: 'nope', mode: 'plan' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
   })
 
+  it('counts tool-result images in the view and serves them with chat.image (§8.9)', async () => {
+    const png = Buffer.from('png-bytes').toString('base64')
+    chats.update('tab-chat', (s: ChatState) => ({
+      ...s,
+      items: [
+        { kind: 'tool', id: 'shot', name: 'Read', label: 'Read shot.png', input: { file_path: 'shot.png' }, status: 'done', result: '', images: [{ mediaType: 'image/png', data: png }, { mediaType: 'image/jpeg', data: png }] },
+        text('t1', 'Here it is')
+      ]
+    }))
+    const open = await req('chat.open', { tabId: 'tab-chat' })
+    expect((open as { result: { view: { items: unknown[] } } }).result.view.items[0]).toMatchObject({ kind: 'tool', id: 'shot', images: 2 })
+
+    // Without a codec the op is unsupported; with one, small images go as they are.
+    expect(await req('chat.image', { tabId: 'tab-chat', itemId: 'shot', index: 0 })).toMatchObject({ ok: false, error: { code: 'unsupported' } })
+    bridge = new ChatBridge({
+      chats,
+      projects: { peek: () => data },
+      timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+      log: (m) => logs.push(m),
+      images: { decode: () => null }
+    })
+    expect(await req('chat.image', { tabId: 'tab-chat', itemId: 'shot', index: 1, maxSide: 300 })).toMatchObject({ ok: true, result: { mediaType: 'image/jpeg', data: png } })
+    for (const params of [{ itemId: 'shot', index: 2 }, { itemId: 't1', index: 0 }, { itemId: 'nope', index: 0 }]) {
+      expect(await req('chat.image', { tabId: 'tab-chat', ...params })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+    }
+  })
+
   it('reports a failing manager call as internal', async () => {
     chats.send = async () => { throw new Error('boom') }
     expect(await req('chat.send', { tabId: 'tab-chat', text: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'boom' } })

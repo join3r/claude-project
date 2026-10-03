@@ -140,7 +140,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -190,6 +190,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
     timers,
     newChat: options.newChat,
     newTask: options.newTask,
+    closeTask: options.closeTask,
+    closeTab: options.closeTab,
     chat: options.chat
   }
   const service = new MobileService(deps)
@@ -208,7 +210,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   }
 }
 
-function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -551,6 +553,20 @@ describe('MobileService chat.settings (SPEC.md §8.5)', () => {
   })
 })
 
+describe('MobileService chat.image (SPEC.md §8.9)', () => {
+  it('hands parsed params to the bridge, clamping maxSide, and rejects bad ones', () => {
+    const requests: { op: string; params: unknown }[] = []
+    const env = pairedSetup({
+      chat: { request: (_phone, _id, op, params) => { requests.push({ op, params }) }, dropPhone: () => {}, dropAll: () => {}, projectsChanged: () => {} }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'chat.image', params: { tabId: 't', itemId: 'i', index: 1, maxSide: 9000 } })
+    expect(requests).toEqual([{ op: 'chat.image', params: { tabId: 't', itemId: 'i', index: 1, maxSide: 4096 } }])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 7, op: 'chat.image', params: { tabId: 't', itemId: 'i' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 7, ok: false, error: { code: 'bad-request' } })
+    expect(requests).toHaveLength(1)
+  })
+})
+
 describe('MobileService chat.new (SPEC.md §8.2)', () => {
   it('answers with the new tab, passes errors through, and rejects a missing taskId', () => {
     const calls: string[] = []
@@ -612,6 +628,49 @@ describe('MobileService task.new (SPEC.md §8.4)', () => {
     const env = pairedSetup()
     env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.new', params: { projectId: 'p1', prompt: 'Go' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService task.close and tab.close (SPEC.md §8.7, §8.8)', () => {
+  it('passes the flags through and answers with the result', async () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      closeTask: async (params) => {
+        calls.push(params)
+        return params.discardWorkspace
+          ? { ok: true, result: { closed: true } }
+          : { ok: true, result: { closed: false, blocker: 'unmerged', branch: 'fix', baseBranch: 'main' } }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.close', params: { taskId: 't1' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { closed: false, blocker: 'unmerged', branch: 'fix', baseBranch: 'main' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'task.close', params: { taskId: 't1', discardWorkspace: true, keepBranch: true } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: true, result: { closed: true } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'task.close', params: {} })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([{ taskId: 't1' }, { taskId: 't1', discardWorkspace: true, keepBranch: true }])
+  })
+
+  it('closes a tab, passing errors through', async () => {
+    const env = pairedSetup({
+      closeTab: async (tabId) => tabId === 'tab1' ? { ok: true } : { ok: false, code: 'not-found', message: 'No such tab' }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'tab.close', params: { tabId: 'tab1' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: {} })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'tab.close', params: { tabId: 'nope' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such tab' } })
+  })
+
+  it('is unsupported without the dependencies', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.close', params: { taskId: 't1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'tab.close', params: { tabId: 'tab1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
   })
 })
 

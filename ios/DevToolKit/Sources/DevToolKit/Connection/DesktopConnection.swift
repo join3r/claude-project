@@ -222,13 +222,28 @@ extension DesktopConnection {
     /// Claude chat starts on it. The desktop answers once the prompt is sent,
     /// which includes starting Claude, so this waits longer than other ops; a
     /// retry after a timeout could make a second task.
-    public func newTask(projectId: String, prompt: String, mode: String? = nil) async throws -> TaskNewResult {
+    /// With `workspace` (§8.6) the desktop first creates a worktree on a new
+    /// branch named after the prompt.
+    public func newTask(projectId: String, prompt: String, mode: String? = nil, workspace: Bool = false) async throws -> TaskNewResult {
         guard prompt.utf16.count <= ChatOp.maxSendLength else {
             throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Prompts are limited to \(ChatOp.maxSendLength) characters.")
         }
-        let params = TaskNewParams(projectId: projectId, prompt: prompt, mode: mode)
+        let params = TaskNewParams(projectId: projectId, prompt: prompt, mode: mode, workspace: workspace)
         let result = try await request(TaskOp.new, params: params.json, timeout: .seconds(60))
         return try decode(result, TaskNewResult.parse)
+    }
+
+    /// `task.close` (§8.7): delete the task, and its worktree for a workspace.
+    /// Work that would be lost comes back as `.blocked` until it is discarded.
+    /// Git can take a while, so this waits longer than other ops.
+    public func closeTask(_ params: TaskCloseParams) async throws -> TaskCloseResult {
+        let result = try await request(TaskOp.close, params: params.json, timeout: .seconds(60))
+        return try decode(result, TaskCloseResult.parse)
+    }
+
+    /// `tab.close` (§8.8): close one agent or terminal tab; the task stays.
+    public func closeTab(tabId: String) async throws {
+        _ = try await request(TaskOp.closeTab, params: .object(["tabId": .string(tabId)]))
     }
 
     /// `chat.settings` (§8.5): change the chat's permission mode, model or
@@ -238,6 +253,15 @@ extension DesktopConnection {
     public func updateChatSettings(tabId: String, mode: String? = nil, model: String? = nil, effort: String? = nil) async throws {
         let params = ChatSettingsParams(tabId: tabId, mode: mode, model: model, effort: effort)
         _ = try await request(ChatOp.settings, params: params.json)
+    }
+
+    /// `chat.image` (§8.9): one image a tool result carried, its longest side
+    /// at most `maxSide` pixels. Full-size images can take a while to encode
+    /// and arrive in several fragments, so this waits longer than other ops.
+    public func chatImage(tabId: String, itemId: String, index: Int, maxSide: Int) async throws -> ChatImageResult {
+        let params = ChatImageParams(tabId: tabId, itemId: itemId, index: index, maxSide: maxSide)
+        let result = try await request(ChatOp.image, params: params.json, timeout: .seconds(60))
+        return try decode(result, ChatImageResult.parse)
     }
 
     /// `chat.detail`: a tool's full input/result, or a truncated item's full text.

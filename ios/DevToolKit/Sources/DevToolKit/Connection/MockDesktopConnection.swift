@@ -150,6 +150,19 @@ public actor MockDesktopConnection: DesktopConnection {
             case .tool(let tool): return ChatDetail.tool(input: "{}", result: tool.status.isActive ? nil : "(no output)").json
             default: throw notFound()
             }
+        case ChatOp.image:
+            let parsed: ChatImageParams
+            do {
+                parsed = try ChatImageParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard let chat = chats[parsed.tabId], let item = chat.item(parsed.itemId),
+                  case .tool(let tool) = item.content, parsed.index < (tool.images ?? 0),
+                  let data = MockChatTranscript.image(index: parsed.index, maxSide: parsed.maxSide ?? 2048) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such image")
+            }
+            return ChatImageResult(mediaType: "image/png", data: data).json
         case ChatOp.send:
             let tabId = try string("tabId"), text = try string("text")
             guard chats[tabId] != nil else { throw notFound() }
@@ -184,9 +197,20 @@ public actor MockDesktopConnection: DesktopConnection {
             } catch {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
-            let result = try addTask(projectId: parsed.projectId, prompt: parsed.prompt)
+            let result = try addTask(projectId: parsed.projectId, prompt: parsed.prompt, workspace: parsed.workspace)
             startReply(tabId: result.tabId, text: parsed.prompt)
             return result.json
+        case TaskOp.close:
+            let parsed: TaskCloseParams
+            do {
+                parsed = try TaskCloseParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return try removeTask(parsed).json
+        case TaskOp.closeTab:
+            try removeTab(tabId: try string("tabId"))
+            return .object([:])
         case ChatOp.settings:
             let parsed: ChatSettingsParams
             do {
@@ -251,7 +275,7 @@ public actor MockDesktopConnection: DesktopConnection {
 
     /// `task.new`: a task at the end of the project, named after the prompt's
     /// first line, with one claude-chat tab.
-    private func addTask(projectId: String, prompt: String) throws -> TaskNewResult {
+    private func addTask(projectId: String, prompt: String, workspace: Bool) throws -> TaskNewResult {
         guard let p = inbox.projects.firstIndex(where: { $0.id == projectId }) else {
             throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
         }
@@ -261,11 +285,58 @@ public actor MockDesktopConnection: DesktopConnection {
         let firstLine = prompt.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
         let name = firstLine.count > 50 ? String(firstLine.prefix(49)) + "…" : firstLine
         let tab = InboxTab(id: tabId, type: .claudeChat, title: "Claude", status: .idle, since: now)
-        inbox.projects[p].tasks.append(InboxTask(id: taskId, name: name, lastInteractedAt: now, tabs: [tab]))
+        let branch = workspace ? Self.branchName(prompt) : nil
+        inbox.projects[p].tasks.append(InboxTask(id: taskId, name: name, lastInteractedAt: now, branch: branch, tabs: [tab]))
         inbox.generatedAt = now
         chats[tabId] = MockChatTranscript(title: "Claude", status: MockChatTranscript.freshStatus(), items: [], prompts: [], details: [:])
         continuation.yield(.inbox(inbox))
         return TaskNewResult(taskId: taskId, tabId: tabId)
+    }
+
+    /// Roughly the desktop's branch rule (§8.6), enough for the demo.
+    private static func branchName(_ prompt: String) -> String {
+        let slug = prompt.lowercased()
+            .map { $0.isLetter || $0.isNumber ? String($0) : "-" }
+            .joined()
+            .split(separator: "-")
+            .joined(separator: "-")
+        return slug.isEmpty ? "task" : String(slug.prefix(40))
+    }
+
+    /// `task.close`: a workspace task reports its branch as unmerged until the
+    /// phone discards it, so the demo shows the second confirmation.
+    private func removeTask(_ params: TaskCloseParams) throws -> TaskCloseResult {
+        for p in inbox.projects.indices {
+            guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == params.taskId }) else { continue }
+            let task = inbox.projects[p].tasks[t]
+            if let branch = task.branch, !params.discardWorkspace {
+                return .blocked(.unmerged, branch: branch, baseBranch: "main", message: nil)
+            }
+            for tab in task.tabs {
+                scripts[tab.id]?.cancel()
+                chats[tab.id] = nil
+            }
+            inbox.projects[p].tasks.remove(at: t)
+            inbox.generatedAt = Date().unixMilliseconds
+            continuation.yield(.inbox(inbox))
+            return .closed(warning: nil)
+        }
+        throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
+    }
+
+    /// `tab.close`: drops the tab; the task stays.
+    private func removeTab(tabId: String) throws {
+        for p in inbox.projects.indices {
+            for t in inbox.projects[p].tasks.indices where inbox.projects[p].tasks[t].tabs.contains(where: { $0.id == tabId }) {
+                inbox.projects[p].tasks[t].tabs.removeAll { $0.id == tabId }
+                scripts[tabId]?.cancel()
+                chats[tabId] = nil
+                inbox.generatedAt = Date().unixMilliseconds
+                continuation.yield(.inbox(inbox))
+                return
+            }
+        }
+        throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such tab")
     }
 
     /// Applies a change to a chat and, when the phone has it open, sends the event.
@@ -433,7 +504,10 @@ public actor MockDesktopConnection: DesktopConnection {
             guard (try? await Task.sleep(for: .milliseconds(200))) != nil else { return }
         }
 
-        continuation.yield(.features([DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings]))
+        continuation.yield(.features([
+            DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
+            DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+        ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
         inbox.generatedAt = Date().unixMilliseconds

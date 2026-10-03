@@ -4,6 +4,8 @@ import SwiftUI
 /// One transcript row.
 struct ChatItemRow: View {
     let item: ChatItem
+    /// Fetches and opens tool-result images; nil shows only how many there are.
+    var images: ChatImageActions? = nil
     let onOpenDetail: (ChatItem) -> Void
 
     var body: some View {
@@ -15,7 +17,14 @@ struct ChatItemRow: View {
         case .thinking(let preview, let streaming):
             ThinkingRow(preview: preview, streaming: streaming)
         case .tool(let tool):
-            ToolRow(tool: tool) { onOpenDetail(item) }
+            if let count = tool.images, count > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    ToolRow(tool: tool) { onOpenDetail(item) }
+                    ToolImages(itemId: item.id, count: min(count, 4), actions: images)
+                }
+            } else {
+                ToolRow(tool: tool) { onOpenDetail(item) }
+            }
         case .notice(let text, let tone):
             NoticeRow(text: text, tone: tone)
         case .unknown:

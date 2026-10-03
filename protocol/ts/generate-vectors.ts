@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 
@@ -225,6 +225,9 @@ function appMessages(): unknown {
             { id: 'tab1', type: 'claude-chat', title: 'Claude', status: 'working', since: 1790000000000, activity: 'Running Bash' },
             { id: 'tab2', type: 'terminal', title: 'zsh', status: 'idle' }
           ]
+        }, {
+          id: 't2', name: 'Fix the login redirect', branch: 'fix-the-login-redirect',
+          tabs: [{ id: 'tab3', type: 'claude-chat', title: 'Claude', status: 'idle' }]
         }]
       },
       { id: 'p2', name: 'remote-box', remote: true, tasks: [] }
@@ -237,7 +240,7 @@ function appMessages(): unknown {
     projects: [{
       id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true,
       tasks: [{
-        id: 't1', name: 'fix-auth', notes: 'x', attentionAt: null,
+        id: 't1', name: 'fix-auth', notes: 'x', attentionAt: null, branch: null,
         tabs: [
           { id: 'tab1', type: 'gemini', title: 'Gemini', status: 'thinking', since: 5, badge: 3 },
           { id: 'tab2', type: 'pi', title: 'Pi', status: 'attention', activity: null }
@@ -436,6 +439,7 @@ function chatMessages(): unknown {
     tool,
     { kind: 'tool', id: 'toolu_02', name: 'Agent', summary: 'Explore · find auth code', status: 'running', hasDetail: true, childCount: 3, lastChild: 'Grep · verifyToken' },
     { kind: 'notice', id: 'n9-0', text: 'Interrupted', tone: 'muted' },
+    { kind: 'tool', id: 'toolu_04', name: 'Read', summary: 'Read · screenshot.png', status: 'done', hasDetail: true, images: 2 },
     { kind: 'text', id: 'i10-0', markdown: 'All 42 tests pass', streaming: true }
   ]
   const prompts = [
@@ -573,7 +577,8 @@ function chatMessages(): unknown {
         text({ ...event, settings: { models: [] } }),
         text({ ...event, settings: { ...settings, models: [{ value: 'opus' }] } }),
         text({ ...event, usage: { fiveHour: { used: 12.5 } } }),
-        text({ ...event, usage: { costCents: -1 } })
+        text({ ...event, usage: { costCents: -1 } }),
+        text({ ...event, upserts: [{ kind: 'tool', id: 'x', name: 'Read', summary: 's', status: 'done', hasDetail: true, images: 'two' }] })
       ]
     },
     // §8.2: `chat.new` names a task, so it has parsers of its own.
@@ -590,7 +595,10 @@ function chatMessages(): unknown {
       params: [
         text({ projectId: 'p1', prompt: 'Fix the login redirect' }),
         text({ projectId: 'p1', prompt: 'Plan the refactor', mode: 'plan' }),
-        text({ projectId: 'p1', prompt: 'Go', mode: null, extra: true })
+        text({ projectId: 'p1', prompt: 'Go', mode: null, extra: true }),
+        // §8.6: a workspace task; anything but `true` is no workspace.
+        text({ projectId: 'p1', prompt: 'Fix the login redirect', workspace: true }),
+        text({ projectId: 'p1', prompt: 'Go', workspace: 'yes' })
       ].map((json) => ({ json, expected: parseTaskNewParams(JSON.parse(json)) })),
       results: [text({ taskId: 'task-new', tabId: 'tab-new' }), text({ taskId: 'task-new', tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseTaskNewResult(JSON.parse(json)) })),
       invalid: {
@@ -602,6 +610,55 @@ function chatMessages(): unknown {
           'null'
         ],
         results: [text({ tabId: 'tab-new' }), text({ taskId: 'task-new' }), '[]']
+      }
+    },
+    // §8.7: `task.close` reports what would be lost until the phone discards it.
+    taskClose: {
+      params: [
+        text({ taskId: 't1' }),
+        text({ taskId: 't1', discardUnsaved: true, discardWorkspace: true, keepBranch: true }),
+        text({ taskId: 't1', discardWorkspace: 1, keepBranch: null, extra: true })
+      ].map((json) => ({ json, expected: parseTaskCloseParams(JSON.parse(json)) })),
+      results: [
+        text({ closed: true }),
+        text({ closed: true, warning: 'The worktree could not be removed.' }),
+        text({ closed: false, blocker: 'unsaved' }),
+        text({ closed: false, blocker: 'unmerged', branch: 'fix-login', baseBranch: 'main' }),
+        text({ closed: false, blocker: 'check-failed', branch: 'fix-login', message: 'git failed', extra: 1 }),
+        text({ closed: false, blocker: 'stash-pending', branch: 'fix-login' })
+      ].map((json) => ({ json, expected: parseTaskCloseResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), text({ taskId: 7 }), 'null'],
+        results: [text({}), text({ closed: false }), text({ closed: 'yes' }), '[]']
+      }
+    },
+    // §8.8: `tab.close` names a tab; its result is `{}`.
+    tabClose: {
+      params: [text({ tabId: 'tab2' }), text({ tabId: 'tab2', extra: true })].map((json) => ({ json, expected: parseTabCloseParams(JSON.parse(json)) })),
+      invalid: { params: [text({}), text({ tabId: null }), 'null'] }
+    },
+    // §8.9: `chat.image` fetches one tool-result image.
+    image: {
+      params: [
+        text({ tabId: 'tab-chat', itemId: 'toolu_04', index: 0 }),
+        text({ tabId: 'tab-chat', itemId: 'toolu_04', index: 1, maxSide: 600 }),
+        text({ tabId: 'tab-chat', itemId: 'toolu_04', index: 0, maxSide: 10, extra: true }),
+        text({ tabId: 'tab-chat', itemId: 'toolu_04', index: 0, maxSide: 100000 }),
+        text({ tabId: 'tab-chat', itemId: 'toolu_04', index: 2, maxSide: null })
+      ].map((json) => ({ json, expected: parseChatImageParams(JSON.parse(json)) })),
+      results: [
+        text({ mediaType: 'image/png', data: 'iVBORw0KGgo=' }),
+        text({ mediaType: 'image/jpeg', data: '/9j/4AAQ', width: 640 })
+      ].map((json) => ({ json, expected: parseChatImageResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ tabId: 'tab-chat', itemId: 'toolu_04' }),
+          text({ tabId: 'tab-chat', index: 0 }),
+          text({ tabId: 'tab-chat', itemId: 'toolu_04', index: -1 }),
+          text({ tabId: 'tab-chat', itemId: 'toolu_04', index: 1.5 }),
+          'null'
+        ],
+        results: [text({ mediaType: 'image/png' }), text({ mediaType: 'image/png', data: '' }), text({ mediaType: 'image/tiff', data: 'AAAA' }), '[]']
       }
     },
     // §8.5: `chat.settings` changes the pickers; its result is `{}`.

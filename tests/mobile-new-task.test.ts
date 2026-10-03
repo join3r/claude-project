@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addTaskWithChat } from '../src/main/mobile/new-task'
+import { addTaskWithChat, makeTaskWorkspace, type WorkspaceGit } from '../src/main/mobile/new-task'
 import { createHomeTask, type ProjectsData } from '../src/shared/types'
 
 function data(extra: Partial<ProjectsData['projects'][number]> = {}): ProjectsData {
@@ -53,5 +53,52 @@ describe('addTaskWithChat (SPEC.md §8.4)', () => {
     expect(addTaskWithChat(data(), 'nope', 'Go')).toMatchObject({ ok: false, code: 'not-found' })
     expect(addTaskWithChat(data({ hideFromMobile: true }), 'p1', 'Go')).toMatchObject({ ok: false, code: 'not-found' })
     expect(addTaskWithChat(data({ shellCommand: { command: 'npm run dev' } }), 'p1', 'Go')).toMatchObject({ ok: false, code: 'unsupported' })
+  })
+})
+
+describe('makeTaskWorkspace (SPEC.md §8.6)', () => {
+  const project = data().projects[0]
+
+  function git(branches: string[], failures: string[] = []): WorkspaceGit & { created: string[] } {
+    const created: string[] = []
+    return {
+      created,
+      listBranches: async () => branches,
+      create: async (_project, name, baseBranch) => {
+        created.push(`${name}<${baseBranch}`)
+        if (failures.includes(name)) throw new Error(`Branch "${name}" already exists`)
+        return { worktreePath: `/src/api/.worktrees/${name}`, branchName: name, baseBranch, relativeProjectPath: '' }
+      }
+    }
+  }
+
+  it('forks a branch named after the prompt from main, else master', async () => {
+    const g = git(['feature', 'master'])
+    expect(await makeTaskWorkspace(project, 'Fix the login redirect', g)).toEqual({
+      ok: true,
+      workspace: { worktreePath: '/src/api/.worktrees/fix-the-login-redirect', branchName: 'fix-the-login-redirect', baseBranch: 'master', relativeProjectPath: '' }
+    })
+    expect(g.created).toEqual(['fix-the-login-redirect<master'])
+  })
+
+  it('steps past listed branches and ones made since the listing', async () => {
+    const g = git(['main', 'fix-it'], ['fix-it-2'])
+    const made = await makeTaskWorkspace(project, 'Fix it', g)
+    expect(made.ok && made.workspace.branchName).toBe('fix-it-3')
+    expect(g.created).toEqual(['fix-it-2<main', 'fix-it-3<main'])
+  })
+
+  it('reports a folder that is not a repository, and a creation that fails', async () => {
+    const notGit: WorkspaceGit = { listBranches: async () => { throw new Error('not a git repository') }, create: async () => { throw new Error('unreachable') } }
+    expect(await makeTaskWorkspace(project, 'Go', notGit)).toMatchObject({ ok: false, code: 'unsupported' })
+    expect(await makeTaskWorkspace(project, 'Go', git([]))).toMatchObject({ ok: false, code: 'unsupported' })
+    const broken: WorkspaceGit = { listBranches: async () => ['main'], create: async () => { throw new Error('disk full') } }
+    expect(await makeTaskWorkspace(project, 'Go', broken)).toEqual({ ok: false, code: 'internal', message: 'disk full' })
+  })
+
+  it('records the workspace on the task', () => {
+    const workspace = { worktreePath: '/w', branchName: 'go', baseBranch: 'main', relativeProjectPath: '' }
+    const result = addTaskWithChat(data(), 'p1', 'Go', counter(), 1, workspace)
+    expect(result.ok && result.data.projects[0].tasks[2].workspace).toEqual(workspace)
   })
 })

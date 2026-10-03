@@ -42,8 +42,35 @@ export const TASK_NEW_FEATURE = 'task.new'
 export const TASK_NEW_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const
 export type TaskNewMode = (typeof TASK_NEW_MODES)[number]
 
-export interface TaskNewParams { projectId: string; prompt: string; mode?: TaskNewMode }
+export interface TaskNewParams { projectId: string; prompt: string; mode?: TaskNewMode; workspace?: boolean }
 export interface TaskNewResult { taskId: string; tabId: string }
+
+/** The handshake feature (§8.1) a desktop lists when `task.new` takes `workspace: true` (§8.6). */
+export const TASK_WORKSPACE_FEATURE = 'task.workspace'
+
+/**
+ * `task.close` (SPEC.md §8.7): delete a task, and its worktree when it is a
+ * workspace. Work that would be lost is reported instead, until the phone resends
+ * with the matching `discard*` flag.
+ */
+export const TASK_CLOSE_OP = 'task.close'
+/** The handshake feature (§8.1) a desktop lists when it answers `task.close`. */
+export const TASK_CLOSE_FEATURE = 'task.close'
+/** Why `task.close` left a task open (§8.7). */
+export const TASK_CLOSE_BLOCKERS = ['unsaved', 'uncommitted', 'unmerged', 'uncommitted-and-unmerged', 'check-failed'] as const
+export type TaskCloseBlocker = (typeof TASK_CLOSE_BLOCKERS)[number]
+
+export interface TaskCloseParams { taskId: string; discardUnsaved?: boolean; discardWorkspace?: boolean; keepBranch?: boolean }
+export type TaskCloseResult =
+  | { closed: true; warning?: string }
+  | { closed: false; blocker: TaskCloseBlocker; branch?: string; baseBranch?: string; message?: string }
+
+/** `tab.close` (SPEC.md §8.8): close one agent or terminal tab of a task. */
+export const TAB_CLOSE_OP = 'tab.close'
+/** The handshake feature (§8.1) a desktop lists when it answers `tab.close`. */
+export const TAB_CLOSE_FEATURE = 'tab.close'
+
+export interface TabCloseParams { tabId: string }
 
 /**
  * `chat.settings` (SPEC.md §8.5): change an open chat's permission mode, model or
@@ -55,6 +82,19 @@ export const CHAT_SETTINGS_OP = 'chat.settings'
 export const CHAT_SETTINGS_FEATURE = 'chat.settings'
 
 export interface ChatSettingsParams { tabId: string; mode?: TaskNewMode; model?: string; effort?: string }
+
+/**
+ * `chat.image` (SPEC.md §8.9): one image a tool result carried (a Read of a PNG, a
+ * browser screenshot), downscaled by the desktop to fit `maxSide` and one message.
+ */
+export const CHAT_IMAGE_OP = 'chat.image'
+/** The handshake feature (§8.1) a desktop lists when it answers `chat.image` and counts `tool.images`. */
+export const CHAT_IMAGE_FEATURE = 'chat.image'
+/** The image types `chat.image` answers with. */
+export const CHAT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
+
+export interface ChatImageParams { tabId: string; itemId: string; index: number; maxSide?: number }
+export interface ChatImageResult { mediaType: string; data: string }
 
 /** Caps from §6.2–§6.4. */
 export const ChatLimits = {
@@ -73,7 +113,15 @@ export const ChatLimits = {
   /** Largest (and default) `chat.earlier` limit. */
   earlier: 100,
   /** `evt chat` per subscription per second. */
-  eventsPerSecond: 4
+  eventsPerSecond: 4,
+  /** `tool.images`: images kept per tool result. */
+  toolImages: 4,
+  /** `chat.image` `maxSide` bounds and default, in pixels. */
+  imageMinSide: 64,
+  imageMaxSide: 4096,
+  imageDefaultSide: 2048,
+  /** `chat.image` base64 `data`, so the result fits one message (§6.1). */
+  imageData: 3_000_000
 } as const
 
 export type ChatViewToolStatus = 'pending' | 'running' | 'waiting' | 'done' | 'error' | 'denied'
@@ -92,6 +140,8 @@ export interface ChatViewToolItem {
   hasDetail: boolean
   childCount?: number
   lastChild?: string
+  /** Images the result carried, 1–4; fetched one at a time with `chat.image`. */
+  images?: number
 }
 export interface ChatViewNoticeItem { kind: 'notice'; id: string; text: string; tone: ChatViewTone }
 /** An item kind from a newer desktop: keep its place, show "Needs a newer app". */
@@ -210,7 +260,7 @@ export type ChatAnswer =
 
 export interface ChatAnswerParams { tabId: string; promptId: string; answer: ChatAnswer }
 
-export type ChatParams = ChatTabParams | ChatEarlierParams | ChatSendParams | ChatDetailParams | ChatAnswerParams | ChatSettingsParams
+export type ChatParams = ChatTabParams | ChatEarlierParams | ChatSendParams | ChatDetailParams | ChatAnswerParams | ChatSettingsParams | ChatImageParams
 
 export interface ChatOpenResult { seq: number; view: ChatView }
 export interface ChatEarlierResult { items: ChatViewItem[]; hasEarlier: boolean }
@@ -326,6 +376,8 @@ export function parseChatViewItem(value: unknown): ChatViewItem {
       if (childCount !== undefined) item.childCount = childCount
       const lastChild = optStr(o, 'lastChild')
       if (lastChild !== undefined) item.lastChild = lastChild
+      const images = optInt(o, 'images')
+      if (images !== undefined && images > 0) item.images = images
       return item
     }
     case 'notice':
@@ -563,10 +615,49 @@ export function parseTaskNewParams(params: unknown): TaskNewParams {
   const prompt = str(o, 'prompt')
   if (prompt.length > ChatLimits.send) fail(`prompt over ${ChatLimits.send} characters`)
   if (!prompt.trim()) fail('prompt is empty')
+  const out: TaskNewParams = { projectId, prompt }
   const mode = optStr(o, 'mode')
-  if (mode === undefined) return { projectId, prompt }
-  if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
-  return { projectId, prompt, mode: mode as TaskNewMode }
+  if (mode !== undefined) {
+    if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
+    out.mode = mode as TaskNewMode
+  }
+  if (flag(o, 'workspace')) out.workspace = true
+  return out
+}
+
+/** `task.close` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `taskId`. */
+export function parseTaskCloseParams(params: unknown): TaskCloseParams {
+  const o = obj(params, 'params')
+  const out: TaskCloseParams = { taskId: str(o, 'taskId') }
+  if (flag(o, 'discardUnsaved')) out.discardUnsaved = true
+  if (flag(o, 'discardWorkspace')) out.discardWorkspace = true
+  if (flag(o, 'keepBranch')) out.keepBranch = true
+  return out
+}
+
+/**
+ * `task.close` result (the phone's side). A blocker this build doesn't know reads as
+ * `check-failed`, which the phone words generically.
+ */
+export function parseTaskCloseResult(value: unknown): TaskCloseResult {
+  const o = obj(value, 'result')
+  if (bool(o, 'closed')) {
+    const warning = optStr(o, 'warning')
+    return warning === undefined ? { closed: true } : { closed: true, warning }
+  }
+  const out: TaskCloseResult = { closed: false, blocker: soft<TaskCloseBlocker>(o, 'blocker', TASK_CLOSE_BLOCKERS, 'check-failed') }
+  const branch = optStr(o, 'branch')
+  if (branch !== undefined) out.branch = branch
+  const baseBranch = optStr(o, 'baseBranch')
+  if (baseBranch !== undefined) out.baseBranch = baseBranch
+  const message = optStr(o, 'message')
+  if (message !== undefined) out.message = message
+  return out
+}
+
+/** `tab.close` params (the desktop's side). */
+export function parseTabCloseParams(params: unknown): TabCloseParams {
+  return { tabId: str(obj(params, 'params'), 'tabId') }
 }
 
 /**
@@ -587,6 +678,29 @@ export function parseChatSettingsParams(params: unknown): ChatSettingsParams {
   if (effort !== undefined) out.effort = effort
   if (out.mode === undefined && out.model === undefined && out.effort === undefined) fail('nothing to change')
   return out
+}
+
+/**
+ * `chat.image` params (the desktop's side). Throws ProtocolError — `bad-request` — on
+ * a missing `tabId`, `itemId` or `index`. `maxSide` is clamped to
+ * {@link ChatLimits.imageMinSide}…{@link ChatLimits.imageMaxSide}.
+ */
+export function parseChatImageParams(params: unknown): ChatImageParams {
+  const o = obj(params, 'params')
+  const out: ChatImageParams = { tabId: str(o, 'tabId'), itemId: str(o, 'itemId'), index: int(o, 'index') }
+  const maxSide = optInt(o, 'maxSide')
+  if (maxSide !== undefined) out.maxSide = Math.min(ChatLimits.imageMaxSide, Math.max(ChatLimits.imageMinSide, maxSide))
+  return out
+}
+
+/** `chat.image` result (the phone's side). A `mediaType` outside {@link CHAT_IMAGE_TYPES} or empty `data` throws. */
+export function parseChatImageResult(value: unknown): ChatImageResult {
+  const o = obj(value, 'result')
+  const mediaType = str(o, 'mediaType')
+  if (!(CHAT_IMAGE_TYPES as readonly string[]).includes(mediaType)) fail(`unknown mediaType ${mediaType}`)
+  const data = str(o, 'data')
+  if (!data) fail('data is empty')
+  return { mediaType, data }
 }
 
 /** `task.new` result (the phone's side). */

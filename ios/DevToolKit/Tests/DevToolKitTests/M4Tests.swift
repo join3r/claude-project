@@ -96,6 +96,39 @@ import Testing
     }
 }
 
+/// `task.close` and `tab.close` samples in `protocol/vectors/chat-messages.json` (§8.7, §8.8).
+@Suite struct TaskCloseVectorTests {
+    @Test func paramsAndResults() throws {
+        let file = try Vectors.load("chat-messages.json")
+        let taskClose = try #require(file["taskClose"])
+        #expect(!taskClose["params"].array.isEmpty && !taskClose["results"].array.isEmpty)
+        for sample in taskClose["params"].array {
+            let parsed = try TaskCloseParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for sample in taskClose["results"].array {
+            let parsed = try TaskCloseResult.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in taskClose["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try TaskCloseParams.parse(try JSONValue.parse(json.str)) }
+        }
+        for json in taskClose["invalid"]["results"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try TaskCloseResult.parse(try JSONValue.parse(json.str)) }
+        }
+        // `tab.close` params are just a tab ID; the phone only builds them.
+        let tabClose = try #require(file["tabClose"])
+        for sample in tabClose["params"].array {
+            let tabId = try #require(try JSONValue.parse(sample["json"].str)["tabId"]?.stringValue)
+            #expect(JSONValue.object(["tabId": .string(tabId)]) == sample["expected"])
+        }
+    }
+
+    @Test func blockersThatRiskTheBranchAskAboutIt() {
+        #expect(TaskCloseBlocker.allCases.filter(\.asksAboutBranch) == [.unmerged, .uncommittedAndUnmerged, .checkFailed])
+    }
+}
+
 /// `features`, `chat.new` and `reconnectNow()` over `RelayDesktopConnection`.
 @Suite(.serialized) struct M4ConnectionTests {
     static let isFeatures: @Sendable (DesktopConnectionEvent) -> Bool = {
@@ -139,6 +172,34 @@ import Testing
         await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
             _ = try await connection.newTask(projectId: "nope", prompt: "Go")
         }
+        await connection.stop()
+    }
+
+    @Test func workspaceAndCloseOpsWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        let features = [DesktopFeature.taskNew, DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose]
+        desktop.features = features
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features(Set(features)) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        _ = try await connection.newTask(projectId: "p", prompt: "Fix the login", workspace: true)
+        #expect(desktop.requests.last?.params == .object(["projectId": "p", "prompt": "Fix the login", "workspace": true]))
+
+        let blocked = try await connection.closeTask(TaskCloseParams(taskId: "t"))
+        #expect(blocked == .blocked(.unmerged, branch: "fix", baseBranch: "main", message: nil))
+        #expect(desktop.requests.last?.params == .object(["taskId": "t"]))
+        let closed = try await connection.closeTask(TaskCloseParams(taskId: "t", discardWorkspace: true, keepBranch: true))
+        #expect(closed == .closed(warning: nil))
+        #expect(desktop.requests.last?.params == .object(["taskId": "t", "discardWorkspace": true, "keepBranch": true]))
+
+        try await connection.closeTab(tabId: "tab-chat")
+        #expect(desktop.requests.last?.op == TaskOp.closeTab)
+        #expect(desktop.closedTabs == ["tab-chat"])
         await connection.stop()
     }
 
@@ -203,7 +264,10 @@ import Testing
         let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
         let events = EventRecorder(mock)
         await mock.start()
-        try await events.waitFor { $0 == .features([DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings]) }
+        try await events.waitFor { $0 == .features([
+            DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
+            DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+        ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let tabId = try await mock.newChat(taskId: "t-auth")
         try await events.waitFor { event in
@@ -238,6 +302,47 @@ import Testing
         #expect(text == "Add rate limiting\nto the login route")
         await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
             _ = try await mock.newTask(projectId: "missing", prompt: "Go")
+        }
+        await mock.stop()
+    }
+}
+
+/// `MockDesktopConnection`'s workspaces and closing (§8.6–§8.8).
+@Suite struct MockCloseTests {
+    @Test func workspaceTaskAsksBeforeItCloses() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor(RelayConnectionTests.isInbox)
+        let result = try await mock.newTask(projectId: "p-api", prompt: "Fix the login redirect", workspace: true)
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event else { return false }
+            return inbox.projects.flatMap(\.tasks).first { $0.id == result.taskId }?.branch == "fix-the-login-redirect"
+        }
+        let blocked = try await mock.closeTask(TaskCloseParams(taskId: result.taskId))
+        #expect(blocked == .blocked(.unmerged, branch: "fix-the-login-redirect", baseBranch: "main", message: nil))
+        #expect(try await mock.closeTask(TaskCloseParams(taskId: result.taskId, discardWorkspace: true)) == .closed(warning: nil))
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event else { return false }
+            return !inbox.projects.flatMap(\.tasks).contains { $0.id == result.taskId }
+        }
+        await mock.stop()
+    }
+
+    @Test func closesATabAndKeepsTheTask() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor(RelayConnectionTests.isInbox)
+        let tabId = try await mock.newChat(taskId: "t-auth")
+        try await mock.closeTab(tabId: tabId)
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event else { return false }
+            let task = inbox.projects.flatMap(\.tasks).first { $0.id == "t-auth" }
+            return task != nil && !(task?.tabs.contains { $0.id == tabId } ?? true)
+        }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such tab")) {
+            try await mock.closeTab(tabId: tabId)
         }
         await mock.stop()
     }

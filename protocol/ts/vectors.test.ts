@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -163,7 +163,17 @@ describe('M2 vectors', () => {
     for (const s of file.taskNew.results) expect(parseTaskNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.taskNew.invalid.params) expect(() => parseTaskNewParams(JSON.parse(s)), s).toThrow()
     for (const s of file.taskNew.invalid.results) expect(() => parseTaskNewResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.taskClose.params) expect(parseTaskCloseParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.taskClose.results) expect(parseTaskCloseResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.taskClose.invalid.params) expect(() => parseTaskCloseParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.taskClose.invalid.results) expect(() => parseTaskCloseResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.tabClose.params) expect(parseTabCloseParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.tabClose.invalid.params) expect(() => parseTabCloseParams(JSON.parse(s)), s).toThrow()
     for (const s of file.settings.params) expect(parseChatSettingsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.settings.invalid.params) expect(() => parseChatSettingsParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.image.params) expect(parseChatImageParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.image.results) expect(parseChatImageResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.image.invalid.params) expect(() => parseChatImageParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.image.invalid.results) expect(() => parseChatImageResult(JSON.parse(s)), s).toThrow()
   })
 })
