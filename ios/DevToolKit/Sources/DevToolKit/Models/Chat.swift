@@ -338,6 +338,38 @@ public struct ChatNewResult: Sendable, Equatable {
     }
 }
 
+/// `task.new` (§8.4) params: a new task in `projectId` whose Claude chat starts on `prompt`.
+public struct TaskNewParams: Sendable, Equatable {
+    public var projectId: String
+    public var prompt: String
+    /// One of `TaskOp.modes`; nil leaves Claude's own default.
+    public var mode: String?
+
+    public init(projectId: String, prompt: String, mode: String? = nil) {
+        self.projectId = projectId
+        self.prompt = prompt
+        self.mode = mode
+    }
+}
+
+/// `task.new` result: the new task and its claude-chat tab, already sent the prompt.
+public struct TaskNewResult: Sendable, Equatable {
+    public var taskId: String
+    public var tabId: String
+
+    public init(taskId: String, tabId: String) {
+        self.taskId = taskId
+        self.tabId = tabId
+    }
+}
+
+/// `task.new` (§8.4). It names a project, not a tab, so it isn't one of `ChatParams.ops`.
+public enum TaskOp {
+    public static let new = "task.new"
+    /// The permission modes `task.new` accepts, in the order the phone offers them.
+    public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
+}
+
 /// `chat.detail` result.
 public enum ChatDetail: Sendable, Equatable {
     /// Pretty JSON input and the result text, each at most 200000 chars.
@@ -650,6 +682,36 @@ extension ChatNewResult {
     }
 
     public var json: JSONValue { .object(["tabId": .string(tabId)]) }
+}
+
+extension TaskNewParams {
+    /// The desktop's side: a missing `projectId`, a blank or over-long prompt, or an
+    /// unknown `mode` throws (`bad-request`).
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> TaskNewParams {
+        let o = try Fields(value, "params")
+        let projectId = try o.str("projectId")
+        let prompt = try o.str("prompt")
+        if prompt.utf16.count > ChatOp.maxSendLength { throw ProtocolError("prompt over \(ChatOp.maxSendLength) characters") }
+        if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ProtocolError("prompt is empty") }
+        let mode = try o.optStr("mode")
+        if let mode, !TaskOp.modes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
+        return TaskNewParams(projectId: projectId, prompt: prompt, mode: mode)
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["projectId": .string(projectId), "prompt": .string(prompt)]
+        if let mode { fields["mode"] = .string(mode) }
+        return .object(fields)
+    }
+}
+
+extension TaskNewResult {
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> TaskNewResult {
+        let o = try Fields(value, "result")
+        return TaskNewResult(taskId: try o.str("taskId"), tabId: try o.str("tabId"))
+    }
+
+    public var json: JSONValue { .object(["taskId": .string(taskId), "tabId": .string(tabId)]) }
 }
 
 extension ChatDetail {

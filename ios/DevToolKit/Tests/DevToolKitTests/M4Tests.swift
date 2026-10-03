@@ -56,6 +56,46 @@ import Testing
     }
 }
 
+/// `task.new` samples in `protocol/vectors/chat-messages.json` (§8.4).
+@Suite struct TaskNewVectorTests {
+    @Test func paramsAndResults() throws {
+        let taskNew = try #require(try Vectors.load("chat-messages.json")["taskNew"])
+        #expect(!taskNew["params"].array.isEmpty)
+        for sample in taskNew["params"].array {
+            let parsed = try TaskNewParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        #expect(!taskNew["results"].array.isEmpty)
+        for sample in taskNew["results"].array {
+            let parsed = try TaskNewResult.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+    }
+
+    @Test func invalid() throws {
+        let invalid = try #require(try Vectors.load("chat-messages.json")["taskNew"]?["invalid"])
+        #expect(!invalid["params"].array.isEmpty && !invalid["results"].array.isEmpty)
+        for json in invalid["params"].array {
+            #expect(throws: (any Error).self, "\(json.str)") {
+                _ = try TaskNewParams.parse(try JSONValue.parse(json.str))
+            }
+        }
+        for json in invalid["results"].array {
+            #expect(throws: (any Error).self, "\(json.str)") {
+                _ = try TaskNewResult.parse(try JSONValue.parse(json.str))
+            }
+        }
+    }
+
+    @Test func promptIsCappedLikeChatSend() throws {
+        let over = String(repeating: "x", count: ChatOp.maxSendLength + 1)
+        #expect(throws: ProtocolError.self) {
+            _ = try TaskNewParams.parse(.object(["projectId": "p", "prompt": .string(over)]))
+        }
+        #expect(try ChatParams.parse(op: TaskOp.new, .object(["projectId": "p", "prompt": "Go"])) == nil)
+    }
+}
+
 /// `features`, `chat.new` and `reconnectNow()` over `RelayDesktopConnection`.
 @Suite(.serialized) struct M4ConnectionTests {
     static let isFeatures: @Sendable (DesktopConnectionEvent) -> Bool = {
@@ -79,6 +119,27 @@ import Testing
             _ = try await o.connection.newChat(taskId: "nope")
         }
         await o.connection.stop()
+    }
+
+    @Test func taskNewWorksWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        desktop.features = [DesktopFeature.chatNew, DesktopFeature.taskNew]
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features([DesktopFeature.chatNew, DesktopFeature.taskNew]) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        let result = try await connection.newTask(projectId: "p", prompt: "Fix the login", mode: "plan")
+        #expect(result == TaskNewResult(taskId: "task-new", tabId: "tab-new-1"))
+        #expect(desktop.requests.last?.op == TaskOp.new)
+        #expect(desktop.requests.last?.params == .object(["projectId": "p", "prompt": "Fix the login", "mode": "plan"]))
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
+            _ = try await connection.newTask(projectId: "nope", prompt: "Go")
+        }
+        await connection.stop()
     }
 
     @Test func olderDesktopListsNoFeatures() async throws {
@@ -142,7 +203,7 @@ import Testing
         let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
         let events = EventRecorder(mock)
         await mock.start()
-        try await events.waitFor { $0 == .features([DesktopFeature.chatNew]) }
+        try await events.waitFor { $0 == .features([DesktopFeature.chatNew, DesktopFeature.taskNew]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let tabId = try await mock.newChat(taskId: "t-auth")
         try await events.waitFor { event in
@@ -154,6 +215,29 @@ import Testing
         #expect(opened.view.items.isEmpty)
         await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")) {
             _ = try await mock.newChat(taskId: "missing")
+        }
+        await mock.stop()
+    }
+
+    @Test func addsATaskWhoseChatStartsOnThePrompt() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor(RelayConnectionTests.isInbox)
+        let result = try await mock.newTask(projectId: "p-api", prompt: "Add rate limiting\nto the login route", mode: "plan")
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event else { return false }
+            let task = inbox.projects.first { $0.id == "p-api" }?.tasks.last
+            return task?.id == result.taskId && task?.name == "Add rate limiting" && task?.tabs.first?.id == result.tabId
+        }
+        let opened = try await mock.openChat(tabId: result.tabId)
+        guard case .user(let text, _, _, _)? = opened.view.items.first?.content else {
+            Issue.record("expected the prompt as the first item")
+            return
+        }
+        #expect(text == "Add rate limiting\nto the login route")
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
+            _ = try await mock.newTask(projectId: "missing", prompt: "Go")
         }
         await mock.stop()
     }

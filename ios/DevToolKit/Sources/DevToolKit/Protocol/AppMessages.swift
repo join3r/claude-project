@@ -174,6 +174,8 @@ public enum AppOp {
 public enum DesktopFeature {
     /// The desktop answers `chat.new` (§8.2).
     public static let chatNew = "chat.new"
+    /// The desktop answers `task.new` (§8.4).
+    public static let taskNew = "task.new"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

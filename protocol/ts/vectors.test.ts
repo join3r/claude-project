@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -159,5 +159,9 @@ describe('M2 vectors', () => {
     for (const s of file.new.results) expect(parseChatNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.new.invalid.params) expect(() => parseChatNewParams(JSON.parse(s)), s).toThrow()
     for (const s of file.new.invalid.results) expect(() => parseChatNewResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.taskNew.params) expect(parseTaskNewParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.taskNew.results) expect(parseTaskNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.taskNew.invalid.params) expect(() => parseTaskNewParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.taskNew.invalid.results) expect(() => parseTaskNewResult(JSON.parse(s)), s).toThrow()
   })
 })

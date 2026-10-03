@@ -351,7 +351,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`. A phone shows "New chat" only for a desktop that lists `chat.new`; an older desktop answers the op `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, and one that also implements §8.4 adds `"task.new"`. A phone shows "New chat" only for a desktop that lists `chat.new`, and "New task" only for one that lists `task.new`; an older desktop answers either op `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (phone → desktop `req`)
 
@@ -366,5 +366,17 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 ### 8.3 Phone behaviour (no wire rules)
 
 - **New chat:** a "New chat" row in a task's tab list (for desktops that list `chat.new`), disabled while the desktop is offline. It opens the new chat as soon as the op answers.
+- **New task:** a "New task" action on each project (for desktops that list `task.new`), disabled while the desktop is offline. It asks for the first prompt and a permission mode, then opens the new chat as soon as the op answers.
 - **Require Face ID for approvals:** an app setting, off by default. When it is on, every answer to a permission, question or plan in the app asks for device-owner authentication first (Face ID, with the passcode as fallback), and the notification's Allow and Deny open the app, authenticate and then answer instead of answering in the background.
 - **Offline:** the phone keeps the last transcript of each chat it has opened (the view items it holds, at most the §6.4 window) next to the cached inbox, and shows it read-only under the offline banner when the desktop is offline. Returning to the foreground reconnects at once rather than waiting out the relay backoff. Nothing is queued, as before.
+
+### 8.4 `task.new` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `task.new` | `{ projectId, prompt, mode? }` | `{ taskId, tabId }` |
+
+- `prompt` is the first message (≤ 32000 chars, not blank, as `chat.send`). `mode` is one of `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`. Absent, Claude starts in its own default mode.
+- The desktop adds a task at the end of the project, named after the prompt's first non-empty line (whitespace collapsed, at most 50 characters with a trailing `…`), with one `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) in its left pane. It saves this as a main-side projects commit, like §8.2. It doesn't select the task or switch any window's visible tab.
+- The desktop then attaches the chat's runtime (which starts the process), applies `mode`, and sends `prompt` as a `chat.send` from this phone would, so a `done` push (§7.6) follows the turn. It answers once the prompt is sent. The phone opens the chat with `chat.open`, and the task appears in the next `inbox` event.
+- Errors: unknown `projectId` or a project hidden from mobile (§4.4) → `not-found`. A shell-command project or Claude turned off in the desktop's settings → `unsupported`. Missing or malformed params → `bad-request`.

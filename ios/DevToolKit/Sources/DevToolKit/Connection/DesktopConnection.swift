@@ -218,6 +218,19 @@ extension DesktopConnection {
         return try decode(result, ChatNewResult.parse).tabId
     }
 
+    /// `task.new` (§8.4): a new task in the project, named after `prompt`, whose
+    /// Claude chat starts on it. The desktop answers once the prompt is sent,
+    /// which includes starting Claude, so this waits longer than other ops; a
+    /// retry after a timeout could make a second task.
+    public func newTask(projectId: String, prompt: String, mode: String? = nil) async throws -> TaskNewResult {
+        guard prompt.utf16.count <= ChatOp.maxSendLength else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Prompts are limited to \(ChatOp.maxSendLength) characters.")
+        }
+        let params = TaskNewParams(projectId: projectId, prompt: prompt, mode: mode)
+        let result = try await request(TaskOp.new, params: params.json, timeout: .seconds(60))
+        return try decode(result, TaskNewResult.parse)
+    }
+
     /// `chat.detail`: a tool's full input/result, or a truncated item's full text.
     public func chatDetail(tabId: String, itemId: String) async throws -> ChatDetail {
         let result = try await request(ChatOp.detail, params: .object(["tabId": .string(tabId), "itemId": .string(itemId)]))

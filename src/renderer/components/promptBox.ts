@@ -7,6 +7,9 @@
 import { NEW_TASK_NAME, PROMPT_BOX_AGENTS } from '../../shared/types'
 import type { AiTabType, AppConfig, Project, PromptBoxAgent } from '../../shared/types'
 import { branchSlug } from './newTask'
+import { taskNameFromPrompt } from '../../shared/task-name'
+
+export { taskNameFromPrompt }
 
 export const PROMPT_BOX_AGENT_LABEL: Record<PromptBoxAgent, string> = {
   'claude-chat': 'Claude',
@@ -24,15 +27,6 @@ export interface PendingPrompt {
   model?: string
   /** Claude chat only. */
   effort?: string
-}
-
-const TASK_NAME_MAX = 50
-
-/** A task name from the prompt's first non-empty line, whitespace collapsed, cut to fit the sidebar. */
-export function taskNameFromPrompt(text: string, max = TASK_NAME_MAX): string {
-  const line = text.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).find((l) => l.length > 0) ?? ''
-  if (line.length <= max) return line
-  return line.slice(0, max - 1).trimEnd() + '…'
 }
 
 /** Only a task still carrying the placeholder name is renamed; a name someone typed stays. */

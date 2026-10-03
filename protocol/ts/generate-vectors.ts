@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseTaskNewParams, parseTaskNewResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 
@@ -566,6 +566,25 @@ function chatMessages(): unknown {
       invalid: {
         params: [text({}), text({ taskId: 7 }), text({ tabId: 'tab-chat' }), 'null'],
         results: [text({}), text({ tabId: null }), '[]']
+      }
+    },
+    // §8.4: `task.new` names a project and carries the first prompt.
+    taskNew: {
+      params: [
+        text({ projectId: 'p1', prompt: 'Fix the login redirect' }),
+        text({ projectId: 'p1', prompt: 'Plan the refactor', mode: 'plan' }),
+        text({ projectId: 'p1', prompt: 'Go', mode: null, extra: true })
+      ].map((json) => ({ json, expected: parseTaskNewParams(JSON.parse(json)) })),
+      results: [text({ taskId: 'task-new', tabId: 'tab-new' }), text({ taskId: 'task-new', tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseTaskNewResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ prompt: 'no project' }),
+          text({ projectId: 'p1' }),
+          text({ projectId: 'p1', prompt: '   ' }),
+          text({ projectId: 'p1', prompt: 'Go', mode: 'yolo' }),
+          'null'
+        ],
+        results: [text({ tabId: 'tab-new' }), text({ taskId: 'task-new' }), '[]']
       }
     }
   }

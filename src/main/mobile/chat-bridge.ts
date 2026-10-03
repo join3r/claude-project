@@ -51,6 +51,8 @@ export interface ChatBridgeChats {
   ): Promise<{ snapshot: ChatSnapshot; stop: () => void }>
   snapshot(tabId: string): ChatSnapshot | null
   send(tabId: string, text: string): Promise<void>
+  /** Optional so a bridge without it still serves every `chat.*` op; `task.new` uses it for `mode`. */
+  setPermissionMode?(tabId: string, mode: string): Promise<void>
   interrupt(tabId: string): Promise<void>
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean
 }
@@ -140,6 +142,19 @@ export class ChatBridge {
         if (!(err instanceof OpError)) this.deps.log(`mobile chatOp op=${op} error=${message}`)
         phone.send({ t: 'res', id, ok: false, error: { code, message } })
       })
+  }
+
+  /**
+   * `task.new` (SPEC.md §8.4): start a chat tab that was just committed on its first
+   * prompt, in `mode` when given, as a send from this phone (so its `done` push follows).
+   */
+  async startTask(phoneId: string, tabId: string, prompt: string, mode?: string): Promise<void> {
+    const resolved = this.resolve(tabId)
+    if (!resolved) throw new OpError(AppErrorCode.NotFound, 'No such tab')
+    await this.ensureRuntime(resolved)
+    if (mode) await this.deps.chats.setPermissionMode?.(tabId, mode)
+    this.deps.onPhoneSend?.(phoneId, tabId)
+    await this.deps.chats.send(tabId, prompt)
   }
 
   /** The phone's session ended: forget its subscription. */

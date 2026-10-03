@@ -133,6 +133,14 @@ final class AppModel {
         return ChatRoute(desktopId: ref.desktopId, tabId: tabId)
     }
 
+    /// `task.new` (§8.4): a new task in the project whose Claude chat starts on
+    /// `prompt`, and the route to that chat. The task shows up with the next inbox.
+    func newTask(desktopId: String, projectId: String, prompt: String, mode: String?) async throws -> ChatRoute {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        let result = try await connection.newTask(projectId: projectId, prompt: prompt, mode: mode)
+        return ChatRoute(desktopId: desktopId, tabId: result.tabId)
+    }
+
     // MARK: - Chat cache
 
     func cachedChat(_ route: ChatRoute) -> CachedChat? {

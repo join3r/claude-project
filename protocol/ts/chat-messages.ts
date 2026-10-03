@@ -31,6 +31,20 @@ export const CHAT_NEW_FEATURE = 'chat.new'
 export interface ChatNewParams { taskId: string }
 export interface ChatNewResult { tabId: string }
 
+/**
+ * `task.new` (SPEC.md §8.4): a new task in a project, with one claude-chat tab that
+ * starts on `prompt`. Like `chat.new` it names no tab, so it has parsers of its own.
+ */
+export const TASK_NEW_OP = 'task.new'
+/** The handshake feature (§8.1) a desktop lists when it answers `task.new`. */
+export const TASK_NEW_FEATURE = 'task.new'
+/** The permission modes `task.new` may start Claude in (§8.4). */
+export const TASK_NEW_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const
+export type TaskNewMode = (typeof TASK_NEW_MODES)[number]
+
+export interface TaskNewParams { projectId: string; prompt: string; mode?: TaskNewMode }
+export interface TaskNewResult { taskId: string; tabId: string }
+
 /** Caps from §6.2–§6.4. */
 export const ChatLimits = {
   /** `text.markdown` / `user.text` in the view; longer ones end in "…" and come through `chat.detail`. */
@@ -433,6 +447,29 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
 /** `chat.new` params (the desktop's side). Throws ProtocolError on a missing `taskId`. */
 export function parseChatNewParams(params: unknown): ChatNewParams {
   return { taskId: str(obj(params, 'params'), 'taskId') }
+}
+
+/**
+ * `task.new` params (the desktop's side). Throws ProtocolError — `bad-request` — on
+ * a missing `projectId`, a blank prompt or one over {@link ChatLimits.send}
+ * characters, or a `mode` outside {@link TASK_NEW_MODES}.
+ */
+export function parseTaskNewParams(params: unknown): TaskNewParams {
+  const o = obj(params, 'params')
+  const projectId = str(o, 'projectId')
+  const prompt = str(o, 'prompt')
+  if (prompt.length > ChatLimits.send) fail(`prompt over ${ChatLimits.send} characters`)
+  if (!prompt.trim()) fail('prompt is empty')
+  const mode = optStr(o, 'mode')
+  if (mode === undefined) return { projectId, prompt }
+  if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
+  return { projectId, prompt, mode: mode as TaskNewMode }
+}
+
+/** `task.new` result (the phone's side). */
+export function parseTaskNewResult(value: unknown): TaskNewResult {
+  const o = obj(value, 'result')
+  return { taskId: str(o, 'taskId'), tabId: str(o, 'tabId') }
 }
 
 /** `chat.new` result (the phone's side). */

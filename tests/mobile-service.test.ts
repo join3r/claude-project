@@ -140,7 +140,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -188,7 +188,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
     broadcastState: (s) => states.push(s),
     log: () => {},
     timers,
-    newChat: options.newChat
+    newChat: options.newChat,
+    newTask: options.newTask
   }
   const service = new MobileService(deps)
   const transport = () => transports[transports.length - 1]
@@ -206,7 +207,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   }
 }
 
-function pairedSetup(options: { newChat?: MobileServiceDeps['newChat'] } = {}) {
+function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -556,6 +557,45 @@ describe('MobileService chat.new (SPEC.md §8.2)', () => {
   it('is unsupported without the dependency', () => {
     const env = pairedSetup()
     env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.new', params: { taskId: 't1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService task.new (SPEC.md §8.4)', () => {
+  it('answers with the new task and tab, passes errors through, and rejects bad params', async () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      newTask: async (phoneId, params) => {
+        calls.push({ phoneId, ...params })
+        return params.projectId === 'p1'
+          ? { ok: true, taskId: 'task-new', tabId: 'tab-new' }
+          : { ok: false, code: 'not-found', message: 'No such project' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.new', params: { projectId: 'p1', prompt: 'Fix it', mode: 'plan' } })
+    await Promise.resolve(); await Promise.resolve()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { taskId: 'task-new', tabId: 'tab-new' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'task.new', params: { projectId: 'nope', prompt: 'Fix it' } })
+    await Promise.resolve(); await Promise.resolve()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such project' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'task.new', params: { projectId: 'p1', prompt: '  ' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([
+      { phoneId: env.keys.id, projectId: 'p1', prompt: 'Fix it', mode: 'plan' },
+      { phoneId: env.keys.id, projectId: 'nope', prompt: 'Fix it' }
+    ])
+  })
+
+  it('answers internal when the desktop side throws', async () => {
+    const env = pairedSetup({ newTask: async () => { throw new Error('boom') } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.new', params: { projectId: 'p1', prompt: 'Go' } })
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: false, error: { code: 'internal', message: 'boom' } })
+  })
+
+  it('is unsupported without the dependency', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.new', params: { projectId: 'p1', prompt: 'Go' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
   })
 })

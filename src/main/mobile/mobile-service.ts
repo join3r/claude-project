@@ -20,6 +20,8 @@ import {
   constantTimeEqual,
   deviceId,
   parseChatNewParams,
+  parseTaskNewParams,
+  type TaskNewParams,
   parseChatParams,
   parsePushParams,
   PushOp,
@@ -178,6 +180,8 @@ export interface MobileServiceDeps {
   chat?: Pick<ChatBridge, 'request' | 'dropPhone' | 'dropAll' | 'projectsChanged'>
   /** `chat.new` (SPEC.md §8.2): adds a chat tab to a task. Without it the op answers `unsupported`. */
   newChat?(taskId: string): { ok: true; tabId: string } | { ok: false; code: string; message: string }
+  /** `task.new` (SPEC.md §8.4): a task with a chat started on a prompt. Without it the op answers `unsupported`. */
+  newTask?(phoneId: string, params: TaskNewParams): Promise<{ ok: true; taskId: string; tabId: string } | { ok: false; code: string; message: string }>
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -759,6 +763,26 @@ export class MobileService {
       session.channel.send(outcome.ok
         ? { t: 'res', id, ok: true, result: { tabId: outcome.tabId } }
         : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })
+      return
+    }
+    if (message.op === AppOp.TaskNew && this.deps.newTask) {
+      let params: TaskNewParams
+      try {
+        params = parseTaskNewParams(message.params)
+      } catch (err) {
+        if (!(err instanceof ProtocolError)) throw err
+        session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
+        return
+      }
+      this.deps.newTask(session.phoneId, params)
+        .catch((err: unknown) => ({ ok: false as const, code: AppErrorCode.Internal, message: err instanceof Error ? err.message : String(err) }))
+        .then((outcome) => {
+          this.log(`task.new project=${params.projectId} phone=${session.phoneId} ${outcome.ok ? `task=${outcome.taskId} tab=${outcome.tabId}` : `error=${outcome.code}`}`)
+          if (this.sessions.get(session.phoneId) !== session) return
+          session.channel.send(outcome.ok
+            ? { t: 'res', id, ok: true, result: { taskId: outcome.taskId, tabId: outcome.tabId } }
+            : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })
+        })
       return
     }
     if (this.deps.chat) {

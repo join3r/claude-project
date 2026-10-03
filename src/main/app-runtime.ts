@@ -64,7 +64,8 @@ import { createNoiseChannelFactory } from './mobile/channel'
 import { ChatBridge } from './mobile/chat-bridge'
 import { PushEmitter } from './mobile/push-emitter'
 import { addChatTab } from './mobile/new-chat'
-import { AppErrorCode, CHAT_NEW_FEATURE } from '../../protocol/ts/index.ts'
+import { addTaskWithChat } from './mobile/new-task'
+import { AppErrorCode, CHAT_NEW_FEATURE, TASK_NEW_FEATURE } from '../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
@@ -331,7 +332,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [CHAT_NEW_FEATURE],
+        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -346,6 +347,23 @@ export class AppRuntime {
         if (!added.ok) return added
         this.commitProjects(added.data)
         return { ok: true, tabId: added.tabId }
+      },
+      newTask: async (phoneId, { projectId, prompt, mode }) => {
+        if (!this.config.enableClaude) {
+          return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
+        }
+        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt)
+        if (!added.ok) return added
+        this.commitProjects(added.data)
+        // The task exists from here on, so a failed start is logged rather than
+        // reported: the phone opens the chat either way and sees its state there,
+        // where a retry of task.new would only make a second task.
+        try {
+          await bridge.startTask(phoneId, added.tabId, prompt, mode)
+        } catch (err) {
+          log(`task.new start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
+        }
+        return { ok: true, taskId: added.taskId, tabId: added.tabId }
       }
     })
     return service

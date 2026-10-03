@@ -6,6 +6,7 @@ struct TaskListView: View {
     @Environment(AppModel.self) private var model
     let scope: SidebarSelection
     @Binding var selection: TaskRef?
+    @State private var newTask: NewTaskTarget?
 
     var body: some View {
         List(selection: $selection) {
@@ -50,6 +51,9 @@ struct TaskListView: View {
         .refreshable {
             await model.refresh(scopeDesktops.map(\.id))
         }
+        .sheet(item: $newTask) { target in
+            NewTaskSheet(target: target)
+        }
     }
 
     @ViewBuilder
@@ -72,6 +76,14 @@ struct TaskListView: View {
                     }
                     if project.tasks.isEmpty {
                         Text("No tasks").foregroundStyle(.secondary)
+                    }
+                    if model.supports(DesktopFeature.taskNew, on: desktop.id) {
+                        Button {
+                            newTask = NewTaskTarget(desktopId: desktop.id, project: project)
+                        } label: {
+                            Label("New task", systemImage: "plus")
+                        }
+                        .disabled(offline)
                     }
                 } header: {
                     ProjectHeader(project: project, desktopName: showDesktop ? desktop.name : nil)

@@ -164,6 +164,21 @@ actor FakeRelay: WebSocketConnector {
                     newTabs.append(tabId)
                     return app(.resOk(id: id, result: ChatNewResult(tabId: tabId).json), to: from)
                 }
+                if op == TaskOp.new {
+                    guard features.contains(DesktopFeature.taskNew) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    let parsed: TaskNewParams
+                    do {
+                        parsed = try TaskNewParams.parse(params)
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
+                    guard parsed.projectId == "p" else { return app(.resError(id: id, code: AppErrorCode.notFound, message: "No such project"), to: from) }
+                    let tabId = "tab-new-\(newTabs.count + 1)"
+                    newTabs.append(tabId)
+                    return app(.resOk(id: id, result: TaskNewResult(taskId: "task-new", tabId: tabId).json), to: from)
+                }
                 if let replies = chat.handle(id: id, op: op, params: params) {
                     return replies.flatMap { app($0, to: from) }
                 }

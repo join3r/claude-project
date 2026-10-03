@@ -17,6 +17,7 @@ import {
   ChatLimits,
   capText,
   parseChatNewParams,
+  parseTaskNewParams,
   parseChatNewResult,
   parseChatParams,
   parseChatResult,
@@ -147,6 +148,13 @@ describe('chat parsers', () => {
     expect(() => parseChatParams('chat.send', { tabId: 't', text: 'x'.repeat(ChatLimits.send + 1) })).toThrow(ProtocolError)
     expect(parseChatParams('chat.send', { tabId: 't', text: 'x'.repeat(ChatLimits.send) })).toMatchObject({ tabId: 't' })
     expect(parseChatResult('chat.send', { anything: 1 })).toEqual({})
+  })
+
+  it('parses task.new (§8.4) and caps its prompt like chat.send', () => {
+    expect(parseTaskNewParams({ projectId: 'p1', prompt: 'Go', mode: 'plan' })).toEqual({ projectId: 'p1', prompt: 'Go', mode: 'plan' })
+    expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'x'.repeat(ChatLimits.send + 1) })).toThrow(ProtocolError)
+    expect(parseTaskNewParams({ projectId: 'p1', prompt: 'x'.repeat(ChatLimits.send) }).prompt).toHaveLength(ChatLimits.send)
+    expect(parseChatParams('task.new', { projectId: 'p1', prompt: 'Go' })).toBeNull()
   })
 
   it('parses chat.new (§8.2), which names a task and not a tab', () => {

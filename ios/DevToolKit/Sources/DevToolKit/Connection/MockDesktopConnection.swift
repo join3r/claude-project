@@ -177,6 +177,16 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             return ChatNewResult(tabId: try addChat(taskId: taskId)).json
+        case TaskOp.new:
+            let parsed: TaskNewParams
+            do {
+                parsed = try TaskNewParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            let result = try addTask(projectId: parsed.projectId, prompt: parsed.prompt)
+            startReply(tabId: result.tabId, text: parsed.prompt)
+            return result.json
         case ChatOp.interrupt:
             let tabId = try string("tabId")
             guard chats[tabId] != nil else { throw notFound() }
@@ -213,6 +223,25 @@ public actor MockDesktopConnection: DesktopConnection {
             return tabId
         }
         throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
+    }
+
+    /// `task.new`: a task at the end of the project, named after the prompt's
+    /// first line, with one claude-chat tab.
+    private func addTask(projectId: String, prompt: String) throws -> TaskNewResult {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == projectId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        newChatCount += 1
+        let tabId = "tab-new-\(newChatCount)", taskId = "task-new-\(newChatCount)"
+        let now = Date().unixMilliseconds
+        let firstLine = prompt.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+        let name = firstLine.count > 50 ? String(firstLine.prefix(49)) + "…" : firstLine
+        let tab = InboxTab(id: tabId, type: .claudeChat, title: "Claude", status: .idle, since: now)
+        inbox.projects[p].tasks.append(InboxTask(id: taskId, name: name, lastInteractedAt: now, tabs: [tab]))
+        inbox.generatedAt = now
+        chats[tabId] = MockChatTranscript(title: "Claude", status: ChatStatus(), items: [], prompts: [], details: [:])
+        continuation.yield(.inbox(inbox))
+        return TaskNewResult(taskId: taskId, tabId: tabId)
     }
 
     /// Applies a change to a chat and, when the phone has it open, sends the event.
@@ -380,7 +409,7 @@ public actor MockDesktopConnection: DesktopConnection {
             guard (try? await Task.sleep(for: .milliseconds(200))) != nil else { return }
         }
 
-        continuation.yield(.features([DesktopFeature.chatNew]))
+        continuation.yield(.features([DesktopFeature.chatNew, DesktopFeature.taskNew]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
         inbox.generatedAt = Date().unixMilliseconds

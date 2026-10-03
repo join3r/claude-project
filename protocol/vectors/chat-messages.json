@@ -695,5 +695,61 @@
         "[]"
       ]
     }
+  },
+  "taskNew": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Fix the login redirect\"}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Fix the login redirect"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Plan the refactor\",\"mode\":\"plan\"}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Plan the refactor",
+          "mode": "plan"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"mode\":null,\"extra\":true}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Go"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"taskId\":\"task-new\",\"tabId\":\"tab-new\"}",
+        "expected": {
+          "taskId": "task-new",
+          "tabId": "tab-new"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"task-new\",\"tabId\":\"tab-new\",\"seq\":0}",
+        "expected": {
+          "taskId": "task-new",
+          "tabId": "tab-new"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"prompt\":\"no project\"}",
+        "{\"projectId\":\"p1\"}",
+        "{\"projectId\":\"p1\",\"prompt\":\"   \"}",
+        "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"mode\":\"yolo\"}",
+        "null"
+      ],
+      "results": [
+        "{\"tabId\":\"tab-new\"}",
+        "{\"taskId\":\"task-new\"}",
+        "[]"
+      ]
+    }
   }
 }

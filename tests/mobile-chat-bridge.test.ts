@@ -289,6 +289,26 @@ describe('ChatBridge', () => {
     expect(bridge.openTab('phone-1')).toBeNull()
   })
 
+  it('starts a task.new chat: attaches, applies the mode, then sends as the phone (§8.4)', async () => {
+    const sends: string[] = []
+    bridge = new ChatBridge({
+      chats,
+      projects: { peek: () => data },
+      timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+      log: () => {},
+      onPhoneSend: (phoneId, tabId) => sends.push(`${phoneId}:${tabId}:${chats.modes.length}`)
+    })
+    await bridge.startTask('phone-1', 'tab-chat', 'Fix the login', 'plan')
+    expect(chats.runtimes.get('tab-chat')?.config.sessionId).toBe('sess-1')
+    expect(chats.modes).toEqual([{ tabId: 'tab-chat', mode: 'plan' }])
+    expect(chats.sent).toEqual([{ tabId: 'tab-chat', text: 'Fix the login' }])
+    expect(sends).toEqual(['phone-1:tab-chat:1'])
+
+    await bridge.startTask('phone-1', 'tab-chat', 'Again')
+    expect(chats.modes).toHaveLength(1)
+    await expect(bridge.startTask('phone-1', 'nope', 'x')).rejects.toMatchObject({ code: 'not-found' })
+  })
+
   it('reports a failing manager call as internal', async () => {
     chats.send = async () => { throw new Error('boom') }
     expect(await req('chat.send', { tabId: 'tab-chat', text: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'boom' } })

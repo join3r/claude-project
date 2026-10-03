@@ -51,6 +51,12 @@ export class FakeChats implements ChatBridgeChats {
     this.update(tabId, (s) => ({ ...s, busy: true, items: [...s.items, { kind: 'user', id: `u${this.sent.length}`, text, images: 0 }] }))
   }
 
+  readonly modes: { tabId: string; mode: string }[] = []
+
+  async setPermissionMode(tabId: string, mode: string): Promise<void> {
+    this.modes.push({ tabId, mode })
+  }
+
   async interrupt(tabId: string): Promise<void> {
     this.interrupts.push(tabId)
   }
