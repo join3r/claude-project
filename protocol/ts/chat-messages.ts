@@ -73,6 +73,16 @@ export const TAB_CLOSE_FEATURE = 'tab.close'
 export interface TabCloseParams { tabId: string }
 
 /**
+ * `pin.set` (SPEC.md §8.10): pin or unpin a project, or a task when `taskId` is
+ * set, in the desktop sidebar's Pinned list.
+ */
+export const PIN_SET_OP = 'pin.set'
+/** The handshake feature (§8.1) a desktop lists when it answers `pin.set` and sends `pinned`. */
+export const PIN_FEATURE = 'pin'
+
+export interface PinSetParams { projectId: string; taskId?: string; pinned: boolean }
+
+/**
  * `chat.settings` (SPEC.md §8.5): change an open chat's permission mode, model or
  * effort, as the desktop composer's pickers do. An absent field stays as it is; an
  * empty `model` or `effort` goes back to Claude's settings default.
@@ -658,6 +668,15 @@ export function parseTaskCloseResult(value: unknown): TaskCloseResult {
 /** `tab.close` params (the desktop's side). */
 export function parseTabCloseParams(params: unknown): TabCloseParams {
   return { tabId: str(obj(params, 'params'), 'tabId') }
+}
+
+/** `pin.set` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `projectId` or `pinned`. */
+export function parsePinSetParams(params: unknown): PinSetParams {
+  const o = obj(params, 'params')
+  const out: PinSetParams = { projectId: str(o, 'projectId'), pinned: bool(o, 'pinned') }
+  const taskId = optStr(o, 'taskId')
+  if (taskId !== undefined) out.taskId = taskId
+  return out
 }
 
 /**

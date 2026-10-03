@@ -67,11 +67,13 @@ import { PushEmitter } from './mobile/push-emitter'
 import { addChatTab } from './mobile/new-chat'
 import { addTaskWithChat, makeTaskWorkspace, newTaskProject } from './mobile/new-task'
 import { closeTask, findClosableTab, removeTabFromData } from './mobile/close-task'
+import { setPinInData } from './mobile/pin'
 import {
   AppErrorCode,
   CHAT_IMAGE_FEATURE,
   CHAT_NEW_FEATURE,
   CHAT_SETTINGS_FEATURE,
+  PIN_FEATURE,
   TAB_CLOSE_FEATURE,
   TASK_CLOSE_FEATURE,
   TASK_NEW_FEATURE,
@@ -347,7 +349,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_WORKSPACE_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE],
+        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_WORKSPACE_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -419,6 +421,12 @@ export class AppRuntime {
         const found = findClosableTab(this.projectsStore.peek(), tabId)
         if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab' }
         await this.removeTabFromMain(found.project, found.task, found.tab)
+        return { ok: true }
+      },
+      setPin: (params) => {
+        const outcome = setPinInData(this.projectsStore.peek(), params)
+        if (!outcome.ok) return outcome
+        if (outcome.changed) this.commitProjects(outcome.data)
         return { ok: true }
       }
     })

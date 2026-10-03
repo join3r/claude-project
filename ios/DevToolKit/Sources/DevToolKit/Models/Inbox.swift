@@ -10,11 +10,14 @@ public struct Inbox: Codable, Sendable, Equatable {
     /// Unix milliseconds.
     public var generatedAt: Int64
     public var projects: [InboxProject]
+    /// The desktop sidebar's Pinned list, in its order (§4.4).
+    public var pinned: [InboxPin]
 
-    public init(desktop: InboxDesktop, generatedAt: Int64, projects: [InboxProject]) {
+    public init(desktop: InboxDesktop, generatedAt: Int64, projects: [InboxProject], pinned: [InboxPin] = []) {
         self.desktop = desktop
         self.generatedAt = generatedAt
         self.projects = projects
+        self.pinned = pinned
     }
 
     public init(from decoder: any Decoder) throws {
@@ -22,9 +25,49 @@ public struct Inbox: Codable, Sendable, Equatable {
         desktop = try c.decode(InboxDesktop.self, forKey: .desktop)
         generatedAt = try c.decodeIfPresent(Int64.self, forKey: .generatedAt) ?? 0
         projects = try c.decodeIfPresent([InboxProject].self, forKey: .projects) ?? []
+        pinned = try c.decodeIfPresent([InboxPin].self, forKey: .pinned) ?? []
     }
 
     public var generatedDate: Date { Date(unixMilliseconds: generatedAt) }
+
+    public func isPinned(projectId: String, taskId: String? = nil) -> Bool {
+        pinned.contains(InboxPin(projectId: projectId, taskId: taskId))
+    }
+
+    /// The pins this inbox can show, in order. A pin whose project or task
+    /// isn't here is skipped (§4.4).
+    public var resolvedPins: [ResolvedPin] {
+        pinned.compactMap { pin in
+            guard let project = projects.first(where: { $0.id == pin.projectId }) else { return nil }
+            guard let taskId = pin.taskId else { return .project(project) }
+            guard let task = project.tasks.first(where: { $0.id == taskId }) else { return nil }
+            return .task(task, project: project)
+        }
+    }
+}
+
+/// One entry of the desktop's Pinned list: a project, or one of its tasks.
+public struct InboxPin: Codable, Sendable, Hashable {
+    public var projectId: String
+    public var taskId: String?
+
+    public init(projectId: String, taskId: String? = nil) {
+        self.projectId = projectId
+        self.taskId = taskId
+    }
+}
+
+/// A pin matched to what it names in the inbox.
+public enum ResolvedPin: Sendable, Equatable, Identifiable {
+    case project(InboxProject)
+    case task(InboxTask, project: InboxProject)
+
+    public var id: String {
+        switch self {
+        case .project(let project): "project:\(project.id)"
+        case .task(let task, let project): "task:\(project.id):\(task.id)"
+        }
+    }
 }
 
 public struct InboxDesktop: Codable, Sendable, Equatable {

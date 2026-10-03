@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 
@@ -231,7 +231,8 @@ function appMessages(): unknown {
         }]
       },
       { id: 'p2', name: 'remote-box', remote: true, tasks: [] }
-    ]
+    ],
+    pinned: [{ projectId: 'p1', taskId: 't2' }, { projectId: 'p2' }]
   }
   const withExtras = {
     desktop: { id: inbox.desktop.id, name: 'join3r-mbp', color: 'blue' },
@@ -246,7 +247,8 @@ function appMessages(): unknown {
           { id: 'tab2', type: 'pi', title: 'Pi', status: 'attention', activity: null }
         ]
       }]
-    }]
+    }],
+    pinned: [{ projectId: 'p1', taskId: null, color: 'red' }]
   }
   const withExtrasExpected = {
     desktop: { id: inbox.desktop.id, name: 'join3r-mbp' },
@@ -260,7 +262,8 @@ function appMessages(): unknown {
           { id: 'tab2', type: 'pi', title: 'Pi', status: 'attention' }
         ]
       }]
-    }]
+    }],
+    pinned: [{ projectId: 'p1' }]
   }
   const phonePair = { v: 1, min: 1, app: 'ios/0.1.0', features: [], kind: 'pair', proof, deviceName: "Vladimir's iPhone", ed: phoneEd }
   const phoneResume = { v: 1, min: 1, app: 'ios/0.1.0', features: ['x'], kind: 'resume', deviceName: 'iPad', ed: phoneEd }
@@ -636,6 +639,15 @@ function chatMessages(): unknown {
     tabClose: {
       params: [text({ tabId: 'tab2' }), text({ tabId: 'tab2', extra: true })].map((json) => ({ json, expected: parseTabCloseParams(JSON.parse(json)) })),
       invalid: { params: [text({}), text({ tabId: null }), 'null'] }
+    },
+    // §8.10: `pin.set` pins or unpins a project, or a task with `taskId`; its result is `{}`.
+    pinSet: {
+      params: [
+        text({ projectId: 'p1', pinned: true }),
+        text({ projectId: 'p1', taskId: 't2', pinned: false }),
+        text({ projectId: 'p1', taskId: null, pinned: true, extra: 1 })
+      ].map((json) => ({ json, expected: parsePinSetParams(JSON.parse(json)) })),
+      invalid: { params: [text({ pinned: true }), text({ projectId: 'p1' }), text({ projectId: 'p1', pinned: 'yes' }), text({ projectId: 'p1', taskId: 7, pinned: true }), 'null'] }
     },
     // §8.9: `chat.image` fetches one tool-result image.
     image: {

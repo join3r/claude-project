@@ -23,6 +23,8 @@ import {
   parseTaskNewParams,
   parseTaskCloseParams,
   parseTabCloseParams,
+  parsePinSetParams,
+  type PinSetParams,
   type TaskNewParams,
   type TaskCloseParams,
   type TaskCloseResult,
@@ -192,6 +194,8 @@ export interface MobileServiceDeps {
   closeTask?(params: TaskCloseParams): Promise<{ ok: true; result: TaskCloseResult } | { ok: false; code: string; message: string }>
   /** `tab.close` (SPEC.md §8.8). Without it the op answers `unsupported`. */
   closeTab?(tabId: string): Promise<{ ok: true } | { ok: false; code: string; message: string }>
+  /** `pin.set` (SPEC.md §8.10). Without it the op answers `unsupported`. */
+  setPin?(params: PinSetParams): { ok: true } | { ok: false; code: string; message: string }
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -839,6 +843,22 @@ export class MobileService {
         const outcome = await closeTab(tabId)
         return outcome.ok ? { ok: true, result: {}, log: `tab=${tabId}` } : outcome
       })
+      return
+    }
+    if (message.op === AppOp.PinSet && this.deps.setPin) {
+      let params: PinSetParams
+      try {
+        params = parsePinSetParams(message.params)
+      } catch (err) {
+        if (!(err instanceof ProtocolError)) throw err
+        session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
+        return
+      }
+      const outcome = this.deps.setPin(params)
+      this.log(`pin.set project=${params.projectId}${params.taskId ? ` task=${params.taskId}` : ''} pinned=${params.pinned} phone=${session.phoneId}${outcome.ok ? '' : ` error=${outcome.code}`}`)
+      session.channel.send(outcome.ok
+        ? { t: 'res', id, ok: true, result: {} }
+        : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })
       return
     }
     if (this.deps.chat) {

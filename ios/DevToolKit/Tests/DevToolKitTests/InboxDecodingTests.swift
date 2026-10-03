@@ -37,6 +37,22 @@ import Testing
         #expect(tab.since == 1_790_000_000_000)
     }
 
+    @Test func resolvesPinsInOrderSkippingUnknownOnes() throws {
+        let inbox = try decode("""
+        {
+          "desktop": { "id": "d1", "name": "desk" }, "generatedAt": 1,
+          "projects": [
+            { "id": "p1", "name": "a", "tasks": [{ "id": "t1", "name": "x", "tabs": [] }] },
+            { "id": "p2", "name": "b", "tasks": [] }
+          ],
+          "pinned": [{ "projectId": "p2" }, { "projectId": "gone" }, { "projectId": "p1", "taskId": "t1" }, { "projectId": "p1", "taskId": "gone" }]
+        }
+        """)
+        #expect(inbox.resolvedPins.map(\.id) == ["project:p2", "task:p1:t1"])
+        #expect(inbox.isPinned(projectId: "p1", taskId: "t1"))
+        #expect(!inbox.isPinned(projectId: "p1"))
+    }
+
     @Test func toleratesUnknownValuesAndFields() throws {
         let inbox = try decode("""
         {

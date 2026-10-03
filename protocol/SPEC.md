@@ -159,7 +159,8 @@ Desktop rules:
         "activity": "Running Bash"
       }]
     }]
-  }]
+  }],
+  "pinned": [{ "projectId": "…" }, { "projectId": "…", "taskId": "…" }]
 }
 ```
 - Only agent/terminal tab types are included: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
@@ -167,6 +168,7 @@ Desktop rules:
 - `branch` is present only on a workspace task (one with its own git worktree): the branch the worktree is on.
 - Home tasks, ephemeral-but-spent projects, and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.
+- `pinned` is the desktop sidebar's Pinned list in its order: a project, or one of its tasks when `taskId` is set. A pin whose project or task isn't in `projects` (hidden, spent, gone, a home task) is left out, and the field is absent when nothing is left. A phone ignores a pin it can't resolve.
 
 ## 5. Test vectors (`protocol/vectors/`)
 - `noise-ik.json`: fixed static and ephemeral keys for both sides, prologue, payloads, and the expected message 1 and message 2 bytes, then 3 transport messages each way with their expected ciphertexts. The TS implementation must *also* pass the official cacophony `Noise_IK_25519_AESGCM_SHA256` vectors, which ensures the generated vectors aren't just self-consistent.
@@ -370,7 +372,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.6 adds `"task.workspace"`, §8.7 `"task.close"`, §8.8 `"tab.close"` and §8.9 `"chat.image"`. A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, "New workspace" only for one that lists `task.workspace`, and the close actions only for one that lists the matching op. An older desktop answers an op it doesn't know `unsupported` anyway, and one without `task.workspace` ignores `workspace` and starts a plain task, so a phone must not send it there. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.6 adds `"task.workspace"`, §8.7 `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"` and §8.10 `"pin"`. A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, "New workspace" only for one that lists `task.workspace`, and the close actions only for one that lists the matching op. An older desktop answers an op it doesn't know `unsupported` anyway, and one without `task.workspace` ignores `workspace` and starts a plain task, so a phone must not send it there. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (phone → desktop `req`)
 
@@ -390,6 +392,7 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - **Close task / Close workspace:** a swipe action on a task row and a button in the task's screen (for desktops that list `task.close`), confirmed first. A `blocker` (§8.7) becomes a second confirmation that names what would be lost, and its answer resends the op with the matching `discard*` flag. For `unmerged`, `uncommitted-and-unmerged` and `check-failed` it also asks whether to keep the branch. A `warning` is shown once the task is gone.
 - **Close tab:** a swipe action on a tab row (for desktops that list `tab.close`), confirmed first for an agent that is working or waiting.
 - **Tool images:** a tool row with `images` (from a desktop that lists `chat.image`) shows a strip of thumbnails under it, fetched with a small `maxSide`. Tapping one opens it full screen, fetched again at the screen's size, with zoom and the share sheet. Against a desktop without the feature the row only says how many images there are. Fetched images are cached in memory for the session, not on disk.
+- **Pinned:** a "Pinned" section above the projects lists the desktop's `pinned` entries in order, a project as a row that opens its tasks and a task as a task row. For a desktop that lists `pin`, a project's header menu and a task row's swipe and context menu offer Pin or Unpin, disabled while the desktop is offline. Against a desktop without the feature the section is still shown, read-only.
 - **Require Face ID for approvals:** an app setting, off by default. When it is on, every answer to a permission, question or plan in the app asks for device-owner authentication first (Face ID, with the passcode as fallback), and the notification's Allow and Deny open the app, authenticate and then answer instead of answering in the background.
 - **Offline:** the phone keeps the last transcript of each chat it has opened (the view items it holds, at most the §6.4 window) next to the cached inbox, and shows it read-only under the offline banner when the desktop is offline. Returning to the foreground reconnects at once rather than waiting out the relay backoff. Nothing is queued, as before.
 
@@ -458,3 +461,13 @@ A desktop that lists `"task.workspace"` accepts `workspace: true` in `task.new`'
 - The chat need not be open on this phone. When the chat has no runtime yet, the desktop attaches one first, as for `chat.detail`.
 - A desktop that implements this op lists `"chat.image"` in its features (§8.1) and sends `images` on tool items.
 - Errors: unknown tab, as §6.3, an unknown item, an item that isn't a tool, or an `index` it doesn't have → `not-found`. Missing or malformed params → `bad-request`. An image the desktop can't decode and that doesn't fit as it is → `internal`.
+
+### 8.10 `pin.set` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `pin.set` | `{ projectId, taskId?, pinned }` | `{}` |
+
+- Pins (`pinned: true`) or unpins (`false`) the project, or its task `taskId`, in the desktop sidebar's Pinned list, as the sidebar's Pin and Unpin do. A new pin goes to the end of the list. Pinning what is already pinned, or unpinning what isn't, changes nothing and still answers `{}`. The desktop saves the change as a main-side projects commit, and the new list arrives in the next `inbox` event.
+- A desktop that implements this op lists `"pin"` in its features (§8.1).
+- Errors: unknown `projectId`, a project hidden from mobile (§4.4), or an unknown or home `taskId` → `not-found`. Missing `projectId`, a `pinned` that isn't a boolean, or a malformed `taskId` → `bad-request`.

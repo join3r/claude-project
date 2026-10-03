@@ -186,6 +186,8 @@ public enum DesktopFeature {
     public static let tabClose = "tab.close"
     /// The desktop answers `chat.image` and counts tool items' `images` (§8.9).
     public static let chatImage = "chat.image"
+    /// The desktop answers `pin.set` (§8.10).
+    public static let pin = "pin"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.
@@ -290,8 +292,14 @@ extension Inbox {
         return Inbox(
             desktop: InboxDesktop(id: try desktop.str("id"), name: try desktop.str("name")),
             generatedAt: try o.int("generatedAt"),
-            projects: try o.array("projects").map { (v) throws(ProtocolError) in try parseProject(v) }
+            projects: try o.array("projects").map { (v) throws(ProtocolError) in try parseProject(v) },
+            pinned: o.isUnset("pinned") ? [] : try o.array("pinned").map { (v) throws(ProtocolError) in try parsePin(v) }
         )
+    }
+
+    private static func parsePin(_ value: JSONValue) throws(ProtocolError) -> InboxPin {
+        let o = try Fields(value, "pin")
+        return InboxPin(projectId: try o.str("projectId"), taskId: try optStr(o, "taskId"))
     }
 
     private static func optInt(_ f: Fields, _ key: String) throws(ProtocolError) -> Int64? {
@@ -343,11 +351,21 @@ extension Inbox {
 
     /// Wire JSON, in the TS key order.
     public var json: JSONValue {
-        .object([
+        var o: JSONObject = [
             "desktop": .object(["id": .string(desktop.id), "name": .string(desktop.name)]),
             "generatedAt": .int(generatedAt),
             "projects": .array(projects.map(\.json)),
-        ])
+        ]
+        if !pinned.isEmpty { o["pinned"] = .array(pinned.map(\.json)) }
+        return .object(o)
+    }
+}
+
+extension InboxPin {
+    var json: JSONValue {
+        var o: JSONObject = ["projectId": .string(projectId)]
+        if let taskId { o["taskId"] = .string(taskId) }
+        return .object(o)
     }
 }
 

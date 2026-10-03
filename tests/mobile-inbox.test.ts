@@ -171,6 +171,27 @@ describe('buildInbox', () => {
     expect(inbox.projects.map(p => p.id)).toEqual(['c', 'a', 'b'])
   })
 
+  it('carries the Pinned list in its order, leaving out what the phone cannot see', () => {
+    const p1 = project('p1', [task('t1', []), task('t2', [])])
+    const hidden = project('hidden', [task('h1', [])], { hideFromMobile: true })
+    const d: ProjectsData = {
+      ...data([p1, hidden]),
+      pinnedItems: [
+        { type: 'task', projectId: 'p1', taskId: 't2' },
+        { type: 'project', projectId: 'hidden' },
+        { type: 'task', projectId: 'hidden', taskId: 'h1' },
+        { type: 'task', projectId: 'p1', taskId: 'gone' },
+        { type: 'task', projectId: 'p1', taskId: p1.tasks[0].id },
+        { type: 'project', projectId: 'p1' }
+      ]
+    }
+    expect(buildInbox(d, lookup(), DESKTOP, NOW).pinned).toEqual([{ projectId: 'p1', taskId: 't2' }, { projectId: 'p1' }])
+  })
+
+  it('leaves pinned out when nothing is pinned', () => {
+    expect(buildInbox(data([project('p1', [])]), lookup(), DESKTOP, NOW)).not.toHaveProperty('pinned')
+  })
+
   it('does not share structure with the input', () => {
     const p = project('p1', [task('t1', [tab('a', 'terminal')])])
     const inbox = buildInbox(data([p]), lookup(), DESKTOP, NOW)
@@ -187,5 +208,7 @@ describe('inboxContentKey', () => {
     const c = buildInbox(d, lookup({ a: 'working' }), DESKTOP, 2)
     expect(inboxContentKey(a)).toBe(inboxContentKey(b))
     expect(inboxContentKey(a)).not.toBe(inboxContentKey(c))
+    const pinned = buildInbox({ ...d, pinnedItems: [{ type: 'project', projectId: 'p1' }] }, lookup(), DESKTOP, 2)
+    expect(inboxContentKey(a)).not.toBe(inboxContentKey(pinned))
   })
 })

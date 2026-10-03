@@ -15,11 +15,20 @@
       }
     },
     "generatedAt": { "$ref": "#/$defs/unixMs" },
-    "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } }
+    "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } },
+    "pinned": { "type": "array", "items": { "$ref": "#/$defs/pin" }, "description": "The desktop sidebar's Pinned list, in its order (SPEC.md §4.4). Absent when nothing is pinned." }
   },
   "$defs": {
     "deviceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
     "unixMs": { "type": "integer", "minimum": 0 },
+    "pin": {
+      "type": "object",
+      "required": ["projectId"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "taskId": { "type": "string", "description": "Set when the pin is a task of the project rather than the project itself." }
+      }
+    },
     "project": {
       "type": "object",
       "required": ["id", "name", "remote", "tasks"],

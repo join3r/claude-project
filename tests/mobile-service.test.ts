@@ -140,7 +140,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -192,6 +192,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
     newTask: options.newTask,
     closeTask: options.closeTask,
     closeTab: options.closeTab,
+    setPin: options.setPin,
     chat: options.chat
   }
   const service = new MobileService(deps)
@@ -210,7 +211,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   }
 }
 
-function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -671,6 +672,31 @@ describe('MobileService task.close and tab.close (SPEC.md §8.7, §8.8)', () => 
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
     env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'tab.close', params: { tabId: 'tab1' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService pin.set (SPEC.md §8.10)', () => {
+  it('passes the params through and answers {}', () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      setPin: (params) => {
+        calls.push(params)
+        return params.projectId === 'p1' ? { ok: true } : { ok: false, code: 'not-found', message: 'No such project' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'pin.set', params: { projectId: 'p1', taskId: 't1', pinned: true } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: {} })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'pin.set', params: { projectId: 'nope', pinned: false } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such project' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'pin.set', params: { projectId: 'p1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([{ projectId: 'p1', taskId: 't1', pinned: true }, { projectId: 'nope', pinned: false }])
+  })
+
+  it('is unsupported without the dependency', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'pin.set', params: { projectId: 'p1', pinned: true } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
   })
 })
 

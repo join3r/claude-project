@@ -18,6 +18,8 @@ final class AppModel {
     var visibleChat: ChatRoute?
     /// A chat to navigate to (a tapped notification). `RootView` opens it and clears it.
     var requestedChat: ChatRoute?
+    /// A failed Pin / Unpin (§8.10); `RootView` shows it and clears it.
+    var pinError: String?
 
     /// Push registration (SPEC.md §7.4); told about every established session.
     @ObservationIgnored weak var push: PushManager?
@@ -152,6 +154,28 @@ final class AppModel {
     func closeTab(desktopId: String, tabId: String) async throws {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
         try await connection.closeTab(tabId: tabId)
+    }
+
+    /// `pin.set` (§8.10). The list changes at once and the next inbox
+    /// confirms it; a failure puts it back and sets `pinError`.
+    func setPin(_ pin: InboxPin, pinned: Bool, desktopId: String) async {
+        guard let connection = connections[desktopId] else {
+            pinError = DesktopConnectionError.notConnected.localizedDescription
+            return
+        }
+        applyPin(pin, pinned: pinned, desktopId: desktopId)
+        do {
+            try await connection.setPin(pin, pinned: pinned)
+        } catch {
+            applyPin(pin, pinned: !pinned, desktopId: desktopId)
+            pinError = error.localizedDescription
+        }
+    }
+
+    private func applyPin(_ pin: InboxPin, pinned: Bool, desktopId: String) {
+        guard var inbox = inboxes[desktopId], inbox.pinned.contains(pin) != pinned else { return }
+        if pinned { inbox.pinned.append(pin) } else { inbox.pinned.removeAll { $0 == pin } }
+        inboxes[desktopId] = inbox
     }
 
     // MARK: - Chat cache

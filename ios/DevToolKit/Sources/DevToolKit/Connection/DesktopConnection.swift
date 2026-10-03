@@ -246,6 +246,12 @@ extension DesktopConnection {
         _ = try await request(TaskOp.closeTab, params: .object(["tabId": .string(tabId)]))
     }
 
+    /// `pin.set` (§8.10): pin or unpin a project, or its task when `taskId` is
+    /// set. The new list comes back in the next inbox.
+    public func setPin(_ pin: InboxPin, pinned: Bool) async throws {
+        _ = try await request(TaskOp.setPin, params: PinSetParams(pin: pin, pinned: pinned).json)
+    }
+
     /// `chat.settings` (§8.5): change the chat's permission mode, model or
     /// effort as the desktop's pickers do. Nil leaves a field as it is; ""
     /// for `model` or `effort` goes back to the default. The new values come

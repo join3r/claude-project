@@ -87,6 +87,7 @@ actor FakeRelay: WebSocketConnector {
         var taskNewParams: [TaskNewParams] = []
         var taskCloseParams: [TaskCloseParams] = []
         var closedTabs: [String] = []
+        var pinSetParams: [PinSetParams] = []
 
         var id: String { identity.deviceId }
 
@@ -207,6 +208,19 @@ actor FakeRelay: WebSocketConnector {
                         ? .closed(warning: nil)
                         : .blocked(.unmerged, branch: "fix", baseBranch: "main", message: nil)
                     return app(.resOk(id: id, result: result.json), to: from)
+                }
+                if op == TaskOp.setPin {
+                    guard features.contains(DesktopFeature.pin) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    let parsed: PinSetParams
+                    do {
+                        parsed = try PinSetParams.parse(params)
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
+                    pinSetParams.append(parsed)
+                    return app(.resOk(id: id, result: .object([:])), to: from)
                 }
                 if let replies = chat.handle(id: id, op: op, params: params) {
                     return replies.flatMap { app($0, to: from) }

@@ -1,6 +1,7 @@
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
 import {
   isHomeTask,
+  pinnedItemKey,
   isSpentEphemeralProject,
   type Project,
   type ProjectsData,
@@ -11,6 +12,7 @@ import {
 import { INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
 import type {
   Inbox as MobileInbox,
+  InboxPin as MobileInboxPin,
   InboxProject as MobileInboxProject,
   InboxTab as MobileInboxTab,
   InboxTask as MobileInboxTask
@@ -99,6 +101,29 @@ function orderedProjects(data: ProjectsData): Project[] {
 }
 
 /**
+ * The sidebar's Pinned list, in its order, cut to what the phone sees: a pin whose
+ * project is hidden or spent, or whose task is gone or a home task, is left out.
+ */
+function buildPinned(data: ProjectsData, visible: readonly Project[]): MobileInboxPin[] {
+  const byId = new Map(visible.map((project) => [project.id, project]))
+  const seen = new Set<string>()
+  const out: MobileInboxPin[] = []
+  for (const item of data.pinnedItems ?? []) {
+    const project = byId.get(item.projectId)
+    if (!project) continue
+    if (item.type === 'task') {
+      const task = (project.tasks ?? []).find((t) => t.id === item.taskId)
+      if (!task || isHomeTask(task)) continue
+    }
+    const key = pinnedItemKey(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(item.type === 'task' ? { projectId: item.projectId, taskId: item.taskId } : { projectId: item.projectId })
+  }
+  return out
+}
+
+/**
  * The phone's read-only picture of this desktop (SPEC.md §4.4). Pure: hidden and
  * spent projects are filtered here, before anything is encrypted, and only agent
  * and terminal tabs make it out.
@@ -109,14 +134,18 @@ export function buildInbox(
   desktop: { id: string; name: string },
   now: number
 ): MobileInbox {
-  return {
+  const visible = orderedProjects(data).filter(isVisibleOnMobile)
+  const inbox: MobileInbox = {
     desktop: { id: desktop.id, name: desktop.name },
     generatedAt: now,
-    projects: orderedProjects(data).filter(isVisibleOnMobile).map((project) => buildProject(project, lookup))
+    projects: visible.map((project) => buildProject(project, lookup))
   }
+  const pinned = buildPinned(data, visible)
+  if (pinned.length > 0) inbox.pinned = pinned
+  return inbox
 }
 
 /** Everything but `generatedAt`: equal keys mean the phone would see nothing new. */
 export function inboxContentKey(inbox: MobileInbox): string {
-  return JSON.stringify({ desktop: inbox.desktop, projects: inbox.projects })
+  return JSON.stringify({ desktop: inbox.desktop, projects: inbox.projects, pinned: inbox.pinned })
 }

@@ -55,6 +55,11 @@ struct RootView: View {
                 showSettings = false
             })
         }
+        .alert("Couldn't change the pin", isPresented: Binding(get: { model.pinError != nil }, set: { if !$0 { model.pinError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.pinError ?? "")
+        }
         .onAppear { if sidebar == nil { sidebar = defaultSidebar } }
         .onChange(of: model.desktops.map(\.id)) { _, ids in
             if case .desktop(let id) = sidebar, !ids.contains(id) { sidebar = defaultSidebar }

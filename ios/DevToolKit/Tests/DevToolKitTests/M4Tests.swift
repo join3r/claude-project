@@ -124,6 +124,19 @@ import Testing
         }
     }
 
+    @Test func pinSetParams() throws {
+        let file = try Vectors.load("chat-messages.json")
+        let pinSet = try #require(file["pinSet"])
+        #expect(!pinSet["params"].array.isEmpty)
+        for sample in pinSet["params"].array {
+            let parsed = try PinSetParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in pinSet["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try PinSetParams.parse(try JSONValue.parse(json.str)) }
+        }
+    }
+
     @Test func blockersThatRiskTheBranchAskAboutIt() {
         #expect(TaskCloseBlocker.allCases.filter(\.asksAboutBranch) == [.unmerged, .uncommittedAndUnmerged, .checkFailed])
     }
@@ -203,6 +216,28 @@ import Testing
         await connection.stop()
     }
 
+    @Test func pinSetWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        desktop.features = [DesktopFeature.pin]
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features([DesktopFeature.pin]) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        try await connection.setPin(InboxPin(projectId: "p", taskId: "t"), pinned: true)
+        #expect(desktop.requests.last?.op == TaskOp.setPin)
+        #expect(desktop.requests.last?.params == .object(["projectId": "p", "taskId": "t", "pinned": true]))
+        try await connection.setPin(InboxPin(projectId: "p"), pinned: false)
+        #expect(desktop.pinSetParams == [
+            PinSetParams(pin: InboxPin(projectId: "p", taskId: "t"), pinned: true),
+            PinSetParams(pin: InboxPin(projectId: "p"), pinned: false),
+        ])
+        await connection.stop()
+    }
+
     @Test func olderDesktopListsNoFeatures() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
@@ -267,6 +302,7 @@ import Testing
         try await events.waitFor { $0 == .features([
             DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+            DesktopFeature.pin,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let tabId = try await mock.newChat(taskId: "t-auth")

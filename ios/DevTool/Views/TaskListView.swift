@@ -71,24 +71,25 @@ struct TaskListView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            let pins = inbox.resolvedPins
+            if !pins.isEmpty {
+                Section {
+                    ForEach(pins) { pin in
+                        switch pin {
+                        case .task(let task, let project):
+                            taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: true)
+                        case .project(let project):
+                            pinnedProject(project, desktop: desktop, inbox: inbox)
+                        }
+                    }
+                } header: {
+                    Text(showDesktop ? "Pinned · \(desktop.name)" : "Pinned")
+                }
+            }
             ForEach(inbox.projects) { project in
                 Section {
                     ForEach(sortedTasks(project)) { task in
-                        TaskRow(task: task)
-                            .tag(TaskRef(desktopId: desktop.id, taskId: task.id))
-                            .opacity(offline ? 0.55 : 1)
-                            .swipeActions(edge: .trailing) {
-                                if model.supports(DesktopFeature.taskClose, on: desktop.id) && !offline {
-                                    // Not `role: .destructive`: the row stays until the desktop
-                                    // confirms, and a blocker may keep it.
-                                    Button {
-                                        closing = CloseTaskRequest(desktopId: desktop.id, task: task)
-                                    } label: {
-                                        Label("Close", systemImage: "xmark")
-                                    }
-                                    .tint(.red)
-                                }
-                            }
+                        taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: false)
                     }
                     if project.tasks.isEmpty {
                         Text("No tasks").foregroundStyle(.secondary)
@@ -110,7 +111,22 @@ struct TaskListView: View {
                         }
                     }
                 } header: {
-                    ProjectHeader(project: project, desktopName: showDesktop ? desktop.name : nil)
+                    HStack {
+                        ProjectHeader(project: project, desktopName: showDesktop ? desktop.name : nil)
+                        Spacer(minLength: 8)
+                        if canPin(desktop) {
+                            let pinned = inbox.isPinned(projectId: project.id)
+                            Button {
+                                togglePin(InboxPin(projectId: project.id), pinned: pinned, desktop: desktop)
+                            } label: {
+                                Image(systemName: pinned ? "pin.fill" : "pin")
+                                    .foregroundStyle(pinned ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(offline)
+                            .accessibilityLabel(pinned ? "Unpin \(project.name)" : "Pin \(project.name)")
+                        }
+                    }
                 }
             }
         } else {
@@ -127,6 +143,93 @@ struct TaskListView: View {
                 }
             }
         }
+    }
+
+    /// A task row: selects the task, swipes to pin or close it.
+    private func taskRow(_ task: InboxTask, project: InboxProject, desktop: DesktopRecord, inbox: Inbox, showProject: Bool) -> some View {
+        let offline = model.isOffline(desktop.id)
+        let pin = InboxPin(projectId: project.id, taskId: task.id)
+        let pinned = inbox.isPinned(projectId: project.id, taskId: task.id)
+        return TaskRow(task: task, project: showProject ? project : nil)
+            .tag(TaskRef(desktopId: desktop.id, taskId: task.id))
+            .opacity(offline ? 0.55 : 1)
+            .swipeActions(edge: .leading) {
+                if canPin(desktop) && !offline {
+                    Button {
+                        togglePin(pin, pinned: pinned, desktop: desktop)
+                    } label: {
+                        Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin")
+                    }
+                    .tint(.orange)
+                }
+            }
+            .swipeActions(edge: .trailing) {
+                if model.supports(DesktopFeature.taskClose, on: desktop.id) && !offline {
+                    // Not `role: .destructive`: the row stays until the desktop
+                    // confirms, and a blocker may keep it.
+                    Button {
+                        closing = CloseTaskRequest(desktopId: desktop.id, task: task)
+                    } label: {
+                        Label("Close", systemImage: "xmark")
+                    }
+                    .tint(.red)
+                }
+            }
+            .contextMenu {
+                if canPin(desktop) {
+                    Button {
+                        togglePin(pin, pinned: pinned, desktop: desktop)
+                    } label: {
+                        Label(pinned ? "Unpin task" : "Pin task", systemImage: pinned ? "pin.slash" : "pin")
+                    }
+                    .disabled(offline)
+                }
+            }
+    }
+
+    /// A pinned project, opened in place to its tasks as the desktop's Pinned list does.
+    private func pinnedProject(_ project: InboxProject, desktop: DesktopRecord, inbox: Inbox) -> some View {
+        let offline = model.isOffline(desktop.id)
+        let pin = InboxPin(projectId: project.id)
+        return DisclosureGroup {
+            ForEach(sortedTasks(project)) { task in
+                taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: false)
+            }
+            if project.tasks.isEmpty {
+                Text("No tasks").foregroundStyle(.secondary)
+            }
+        } label: {
+            ProjectHeader(project: project, desktopName: nil)
+                .opacity(offline ? 0.55 : 1)
+        }
+        .swipeActions(edge: .leading) {
+            if canPin(desktop) && !offline {
+                Button {
+                    togglePin(pin, pinned: true, desktop: desktop)
+                } label: {
+                    Label("Unpin", systemImage: "pin.slash")
+                }
+                .tint(.orange)
+            }
+        }
+        .contextMenu {
+            if canPin(desktop) {
+                Button {
+                    togglePin(pin, pinned: true, desktop: desktop)
+                } label: {
+                    Label("Unpin project", systemImage: "pin.slash")
+                }
+                .disabled(offline)
+            }
+        }
+    }
+
+    private func canPin(_ desktop: DesktopRecord) -> Bool {
+        model.supports(DesktopFeature.pin, on: desktop.id)
+    }
+
+    private func togglePin(_ pin: InboxPin, pinned: Bool, desktop: DesktopRecord) {
+        Task { await model.setPin(pin, pinned: !pinned, desktopId: desktop.id) }
     }
 
     private var scopeDesktops: [DesktopRecord] {
@@ -185,6 +288,8 @@ struct ProjectHeader: View {
 
 struct TaskRow: View {
     let task: InboxTask
+    /// Set where the row is out of its project's section (the Pinned list).
+    var project: InboxProject? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -200,7 +305,7 @@ struct TaskRow: View {
                         .lineLimit(1)
                         .accessibilityLabel("Branch \(branch)")
                 }
-                Text(subtitle)
+                Text(project.map { "\(projectLabel($0)) · \(subtitle)" } ?? subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -210,6 +315,11 @@ struct TaskRow: View {
         }
         .padding(.vertical, 2)
         .alignmentGuide(.listRowSeparatorLeading) { d in d[.leading] }
+    }
+
+    private func projectLabel(_ project: InboxProject) -> String {
+        if let emoji = project.emoji, !emoji.isEmpty { return "\(emoji) \(project.name)" }
+        return project.name
     }
 
     /// The activity of the most relevant tab, else a tab count and recency.

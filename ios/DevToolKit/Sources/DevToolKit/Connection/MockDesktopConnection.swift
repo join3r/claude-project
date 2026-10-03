@@ -211,6 +211,15 @@ public actor MockDesktopConnection: DesktopConnection {
         case TaskOp.closeTab:
             try removeTab(tabId: try string("tabId"))
             return .object([:])
+        case TaskOp.setPin:
+            let parsed: PinSetParams
+            do {
+                parsed = try PinSetParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            try setPin(parsed)
+            return .object([:])
         case ChatOp.settings:
             let parsed: ChatSettingsParams
             do {
@@ -337,6 +346,18 @@ public actor MockDesktopConnection: DesktopConnection {
             }
         }
         throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such tab")
+    }
+
+    /// `pin.set`: appends or removes the pin, as the desktop sidebar does.
+    private func setPin(_ params: PinSetParams) throws {
+        guard let project = inbox.projects.first(where: { $0.id == params.pin.projectId }),
+              params.pin.taskId.map({ id in project.tasks.contains { $0.id == id } }) ?? true
+        else { throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project or task") }
+        let isPinned = inbox.pinned.contains(params.pin)
+        guard isPinned != params.pinned else { return }
+        if params.pinned { inbox.pinned.append(params.pin) } else { inbox.pinned.removeAll { $0 == params.pin } }
+        inbox.generatedAt = Date().unixMilliseconds
+        continuation.yield(.inbox(inbox))
     }
 
     /// Applies a change to a chat and, when the phone has it open, sends the event.
@@ -507,6 +528,7 @@ public actor MockDesktopConnection: DesktopConnection {
         continuation.yield(.features([
             DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+            DesktopFeature.pin,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -623,7 +645,8 @@ public enum MockInbox {
                         InboxTab(id: "tab-10", type: .terminal, title: "ssh prod-1", status: .working, since: ago(15), activity: "kubectl rollout"),
                     ]),
                 ]),
-            ]
+            ],
+            pinned: [InboxPin(projectId: "p-web", taskId: "t-charts"), InboxPin(projectId: "p-infra")]
         )
     }
 }

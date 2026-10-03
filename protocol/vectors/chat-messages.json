@@ -999,6 +999,41 @@
       ]
     }
   },
+  "pinSet": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\",\"pinned\":true}",
+        "expected": {
+          "projectId": "p1",
+          "pinned": true
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"taskId\":\"t2\",\"pinned\":false}",
+        "expected": {
+          "projectId": "p1",
+          "pinned": false,
+          "taskId": "t2"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"taskId\":null,\"pinned\":true,\"extra\":1}",
+        "expected": {
+          "projectId": "p1",
+          "pinned": true
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"pinned\":true}",
+        "{\"projectId\":\"p1\"}",
+        "{\"projectId\":\"p1\",\"pinned\":\"yes\"}",
+        "{\"projectId\":\"p1\",\"taskId\":7,\"pinned\":true}",
+        "null"
+      ]
+    }
+  },
   "image": {
     "params": [
       {

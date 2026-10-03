@@ -126,6 +126,17 @@ struct TaskDetailView: View {
             }
             .navigationTitle(task.name)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if model.supports(DesktopFeature.pin, on: ref.desktopId) {
+                    let pinned = model.inboxes[ref.desktopId]?.isPinned(projectId: project.id, taskId: task.id) ?? false
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.fill" : "pin") {
+                            Task { await model.setPin(InboxPin(projectId: project.id, taskId: task.id), pinned: !pinned, desktopId: ref.desktopId) }
+                        }
+                        .disabled(offline)
+                    }
+                }
+            }
             .refreshable { await model.refresh([ref.desktopId]) }
             .alert("Couldn't start a chat", isPresented: Binding(get: { newChatError != nil }, set: { if !$0 { newChatError = nil } })) {
                 Button("OK", role: .cancel) {}

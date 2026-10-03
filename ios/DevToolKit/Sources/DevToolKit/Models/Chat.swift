@@ -455,6 +455,17 @@ public struct TaskCloseParams: Sendable, Equatable {
     }
 }
 
+/// `pin.set` (§8.10) params: pin or unpin a project, or its task when `pin.taskId` is set.
+public struct PinSetParams: Sendable, Equatable {
+    public var pin: InboxPin
+    public var pinned: Bool
+
+    public init(pin: InboxPin, pinned: Bool) {
+        self.pin = pin
+        self.pinned = pinned
+    }
+}
+
 /// Why `task.close` left a task open (§8.7).
 public enum TaskCloseBlocker: String, Sendable, Equatable, CaseIterable {
     case unsaved
@@ -543,6 +554,8 @@ public enum TaskOp {
     public static let close = "task.close"
     /// `tab.close` (§8.8): one agent or terminal tab.
     public static let closeTab = "tab.close"
+    /// `pin.set` (§8.10): pin or unpin a project or task.
+    public static let setPin = "pin.set"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
 }
@@ -977,6 +990,21 @@ extension TaskCloseParams {
         if discardUnsaved { fields["discardUnsaved"] = .bool(true) }
         if discardWorkspace { fields["discardWorkspace"] = .bool(true) }
         if keepBranch { fields["keepBranch"] = .bool(true) }
+        return .object(fields)
+    }
+}
+
+extension PinSetParams {
+    /// The desktop's side: a missing `projectId` or a non-boolean `pinned` throws (`bad-request`).
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> PinSetParams {
+        let o = try Fields(value, "params")
+        return PinSetParams(pin: InboxPin(projectId: try o.str("projectId"), taskId: try o.optStr("taskId")), pinned: try o.bool("pinned"))
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["projectId": .string(pin.projectId)]
+        if let taskId = pin.taskId { fields["taskId"] = .string(taskId) }
+        fields["pinned"] = .bool(pinned)
         return .object(fields)
     }
 }

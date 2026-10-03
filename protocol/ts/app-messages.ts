@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { CHAT_IMAGE_OP, CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, parseChatViewEvent } from './chat-messages.ts'
+import { CHAT_IMAGE_OP, CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, parseChatViewEvent } from './chat-messages.ts'
 import type { ChatViewEvent } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -75,10 +75,18 @@ export interface InboxProject {
   tasks: InboxTask[]
 }
 
+/** One entry of the desktop's Pinned list (§4.4): a project, or a task when `taskId` is set. */
+export interface InboxPin {
+  projectId: string
+  taskId?: string
+}
+
 export interface Inbox {
   desktop: { id: string; name: string }
   generatedAt: number
   projects: InboxProject[]
+  /** The desktop sidebar's Pinned list, in its order; absent when nothing is pinned (§4.4). */
+  pinned?: InboxPin[]
 }
 
 export interface ReqMessage {
@@ -137,6 +145,7 @@ export const AppOp = {
   TaskNew: TASK_NEW_OP,
   TaskClose: TASK_CLOSE_OP,
   TabClose: TAB_CLOSE_OP,
+  PinSet: PIN_SET_OP,
   ChatSettings: CHAT_SETTINGS_OP,
   ChatImage: CHAT_IMAGE_OP,
   PushRegister: PushOp.Register,
@@ -316,15 +325,28 @@ function parseProject(value: unknown): InboxProject {
   return project
 }
 
+function parsePin(value: unknown): InboxPin {
+  const o = obj(value, 'pin')
+  const pin: InboxPin = { projectId: str(o, 'projectId') }
+  const taskId = optStr(o, 'taskId')
+  if (taskId !== undefined) pin.taskId = taskId
+  return pin
+}
+
 /** Validates an `Inbox` value (already-parsed JSON, e.g. `res.result` or `evt.inbox`). */
 export function parseInbox(value: unknown): Inbox {
   const o = obj(value, 'inbox')
   const desktop = obj(o.desktop, 'desktop')
-  return {
+  const inbox: Inbox = {
     desktop: { id: str(desktop, 'id'), name: str(desktop, 'name') },
     generatedAt: int(o, 'generatedAt'),
     projects: arr(o, 'projects').map(parseProject)
   }
+  if (o.pinned !== undefined && o.pinned !== null) {
+    const pinned = arr(o, 'pinned').map(parsePin)
+    if (pinned.length > 0) inbox.pinned = pinned
+  }
+  return inbox
 }
 
 /**
