@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import type { CleanupActivity, EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, IdleTaskCleanupConfig, NewTaskAutoOpen, TabStatusValue, TerminalColorScheme } from '../../shared/types'
+import type { CleanupActivity, EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, IdleTaskCleanupConfig, TabStatusValue, TerminalColorScheme } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses } from '../context/TabStatusContext'
 import { findIdleCleanupCandidates } from '../../shared/idle-cleanup'
-import { isAutoOpenAvailable } from './newTaskTabs'
 import { TERMINAL_SCHEME_OPTIONS } from './terminalThemes'
 import {
   EDITOR_FONT_SIZE_MAX,
@@ -15,7 +14,6 @@ import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, S
 import ExternalIdesSettings from './ExternalIdesSettings'
 import MobileSettings from './settings/MobileSettings'
 import UpdatesSettings from './settings/UpdatesSettings'
-import { formatShortcutForApp } from '../../shared/shortcut-label'
 
 interface Props {
   onClose: () => void
@@ -62,15 +60,6 @@ const editorWhitespaceOptions: Array<{ value: EditorRenderWhitespace; label: str
   { value: 'trailing', label: 'Trailing' },
   { value: 'all', label: 'All' },
   { value: 'none', label: 'None' }
-]
-
-const newTaskAutoOpenOptions: Array<{ value: NewTaskAutoOpen; label: string }> = [
-  { value: 'none', label: 'Nothing' },
-  { value: 'claude', label: 'Claude Code' },
-  { value: 'codex', label: 'Codex' },
-  { value: 'pi', label: 'Pi' },
-  { value: 'terminal', label: 'Terminal' },
-  { value: 'browser', label: 'Browser' }
 ]
 
 const themeOptions = [
@@ -649,30 +638,6 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                   {config.taskRecencyHighlight.mode === 'rank'
                     ? 'The most recently focused tasks stay highlighted.'
                     : 'Highlights fade as tasks go untouched.'}
-                </HelperText>
-              </SetBlock>
-            </FormGroup>
-
-            <GrpHead>New task</GrpHead>
-            <FormGroup>
-              <SetBlock label="Open automatically">
-                <Select
-                  value={config.newTaskAutoOpen}
-                  onChange={(e) => updateConfig({ newTaskAutoOpen: e.target.value as NewTaskAutoOpen })}
-                >
-                  {newTaskAutoOpenOptions.map((option) => {
-                    const available = isAutoOpenAvailable(option.value, config)
-                    return (
-                      <option key={option.value} value={option.value} disabled={!available}>
-                        {available ? option.label : `${option.label} (turned off in AI Tools)`}
-                      </option>
-                    )
-                  })}
-                </Select>
-                <HelperText>
-                  {isAutoOpenAvailable(config.newTaskAutoOpen, config)
-                    ? `Applies to the New task composer (${formatShortcutForApp('CmdOrCtrl+N')}, or the pencil in the inbox) — the + Task button in the project tree still makes an empty task.`
-                    : 'That tool is turned off under AI Tools, so new tasks open nothing. Turn it on there, or pick another option.'}
                 </HelperText>
               </SetBlock>
             </FormGroup>

@@ -8,7 +8,7 @@
 
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, AI_TAB_TYPES, CLAUDE_CHAT_LABEL } from '../../shared/types'
-import type { AiTabType, ClaudeView, NewTaskAutoOpen, Tab, TabType } from '../../shared/types'
+import type { AiTabType, ClaudeView, Tab, TabType } from '../../shared/types'
 
 export type CreateTabOptions = {
   filePath?: string
@@ -50,34 +50,6 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
     ...(noteId ? { noteId } : {}),
     ...(cwd ? { cwd } : {})
   }
-}
-
-/** The enable flags an auto-open choice depends on — the AI tools can be turned off. */
-export type EnabledTools = { enableClaude: boolean; enableCodex: boolean; enablePi: boolean }
-
-/** Which enable flag gates a choice, if any. */
-export function autoOpenRequires(value: NewTaskAutoOpen): keyof EnabledTools | null {
-  if (value === 'claude') return 'enableClaude'
-  if (value === 'codex') return 'enableCodex'
-  if (value === 'pi') return 'enablePi'
-  return null
-}
-
-/** False when the choice names an AI tool the app is configured to hide. */
-export function isAutoOpenAvailable(value: NewTaskAutoOpen, enabled: EnabledTools): boolean {
-  const flag = autoOpenRequires(value)
-  return flag === null || enabled[flag]
-}
-
-/**
- * Tabs a freshly composed task starts with. Opening a tab for a disabled tool
- * would put a tab in the task the rest of the app refuses to offer, so that case
- * opens nothing — the Settings row says as much rather than failing silently.
- */
-export function newTaskInitialTabs(value: NewTaskAutoOpen, enabled: EnabledTools, claudeView: ClaudeView = 'terminal'): Tab[] {
-  if (value === 'none') return []
-  if (!isAutoOpenAvailable(value, enabled)) return []
-  return [createTab(claudeTabType(value, claudeView))]
 }
 
 /** A Claude choice opens as whichever view Settings picks; anything else is itself. */

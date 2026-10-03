@@ -211,7 +211,9 @@ export class Storage {
     }
     try {
       const parsed = result.data
-      const { collapsedFolderIds: _legacy, ...rest } = parsed
+      // Retired keys: the folder tree's collapse state, and the new-task auto-open
+      // setting the empty task's prompt box replaced.
+      const { collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, ...rest } = parsed
       const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
       config.windowsTerminal = coerceWindowsTerminal(config.windowsTerminal)
       const savedEditors = (rest.externalEditors && typeof rest.externalEditors === 'object')

@@ -413,7 +413,7 @@ export default function Composer(props: Props): React.ReactElement {
   )
 }
 
-const MODE_HELP: Record<string, string> = {
+export const MODE_HELP: Record<string, string> = {
   default: 'Ask before edits and commands your rules don’t allow',
   acceptEdits: 'Edit files without asking; still ask for commands',
   plan: 'Research and propose a plan; change nothing',

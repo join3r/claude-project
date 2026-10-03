@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { Project, Tag, WorkspaceConfig } from '../../shared/types'
-import { isShellCommandProject } from '../../shared/types'
+import { NEW_TASK_NAME, isShellCommandProject } from '../../shared/types'
 import { dirBasename } from '../../shared/paths'
 import { Modal, SetBlock, Field, LinkBtn, PrimaryButton, HelperText, Switch, menuCls, menuItemCls } from './ui'
 import AddLocalProject from './AddLocalProject'
@@ -254,7 +254,7 @@ export default function NewTaskModal({
 
   const handleCreate = async (): Promise<void> => {
     if (!valid || creating || !target) return
-    const taskName = name.trim()
+    const taskName = name.trim() || NEW_TASK_NAME
 
     if (!workspaceOn) {
       onCreate(target, taskName)
@@ -462,7 +462,7 @@ export default function NewTaskModal({
           )}
         </SetBlock>
 
-        <SetBlock label="Task name">
+        <SetBlock label="Task name (optional)">
           <Field
             ref={nameRef}
             value={name}

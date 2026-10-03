@@ -148,12 +148,12 @@ describe('NewTaskModal', () => {
     expect(onCreate).toHaveBeenCalledWith(inProject('p1'), 'Quick one')
   })
 
-  it('refuses to create without a name', async () => {
+  it('creates an unnamed task, which its first prompt names later', async () => {
     renderModal()
     const create = screen.getByText('Create') as HTMLButtonElement
-    expect(create.disabled).toBe(true)
+    expect(create.disabled).toBe(false)
     await act(async () => { fireEvent.click(create) })
-    expect(onCreate).not.toHaveBeenCalled()
+    expect(onCreate).toHaveBeenCalledWith(expect.anything(), 'New Task')
   })
 
   it('creates the worktree before the task when a workspace is requested', async () => {

@@ -36,7 +36,8 @@ describe('Storage', () => {
     expect(config.editorWordWrap).toBe('off')
     expect(config.diffRenderSideBySide).toBe(true)
     expect(config.defaultSidebarTab).toBe('inbox')
-    expect(config.newTaskAutoOpen).toBe('none')
+    expect(config.promptBoxAgent).toBe('claude-chat')
+    expect(config.promptBoxMode).toBe('')
     expect(config.piCommand).toBe('')
     expect(config.claudeCommand).toBe('')
     expect(config.codexCommand).toBe('')
@@ -45,13 +46,18 @@ describe('Storage', () => {
     expect(config.externalEditors).toEqual({ editors: [], defaultId: null })
   })
 
+  it('drops the retired new-task auto-open setting on load', () => {
+    fs.writeFileSync(path.join(testDir, 'config.json'), JSON.stringify({ newTaskAutoOpen: 'claude' }))
+    const config = storage.loadConfig() as unknown as Record<string, unknown>
+    expect('newTaskAutoOpen' in config).toBe(false)
+  })
+
   it('fills in new config defaults for configs written before the key existed', () => {
     fs.writeFileSync(path.join(testDir, 'config.json'), JSON.stringify({ fontSize: 16 }))
     const config = storage.loadConfig()
     expect(config.fontSize).toBe(16)
     expect(config.defaultSidebarTab).toBe('inbox')
-    // Pre-existing configs must keep opening nothing until the user opts in.
-    expect(config.newTaskAutoOpen).toBe('none')
+    expect(config.promptBoxAgent).toBe('claude-chat')
     expect(config.piCommand).toBe('')
     expect(config.portableNodeDir).toBe('')
     expect(config.windowsTerminal).toBe('git-bash')

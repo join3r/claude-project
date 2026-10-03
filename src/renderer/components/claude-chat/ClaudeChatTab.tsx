@@ -17,6 +17,7 @@ import ColdCacheNotice from './ColdCacheNotice'
 import PermissionsDialog from './PermissionsDialog'
 import Composer from './Composer'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
+import { takePendingPrompt } from '../promptBox'
 import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
 import { chatContextMenuAt } from './chatContextMenu'
 import { handleCodeCopyClick } from './markdown'
@@ -127,11 +128,23 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
       const snapshot = getChatState(tabId)
       if (snapshot.pending.length > 0) applyStatus('hook-needs-input')
       else if (snapshot.busy) applyStatus('hook-working')
+      // Opened from an empty task's prompt box: apply its choices, then send.
+      const first = takePendingPrompt(tabId)
+      if (!first) return
+      markTaskInteracted(projectId, taskId)
+      void (async () => {
+        if (first.mode) await window.api.chatSetMode(tabId, first.mode)
+        if (first.model) await window.api.chatSetModel(tabId, first.model)
+        if (first.effort) await window.api.chatSetEffort(tabId, first.effort)
+        await window.api.chatSend(tabId, first.text)
+      })().catch((err: unknown) => {
+        setAttachError(err instanceof Error ? err.message : String(err))
+      })
     }).catch((err: unknown) => {
       attachedRef.current = false
       setAttachError(err instanceof Error ? err.message : String(err))
     })
-  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus])
+  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, taskId])
 
   useEffect(() => {
     if (visible) applyStatus('visit')

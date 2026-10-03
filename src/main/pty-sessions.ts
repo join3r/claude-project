@@ -287,7 +287,8 @@ export class PtySessions {
         if (remotePort) {
           const remoteExtPath = piExtensionRemotePath()
           hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
-          remoteArgs = [...(args ?? []), '-e', remoteExtPath]
+          // Ahead of the caller's args, so a first prompt stays the last argument.
+          remoteArgs = ['-e', remoteExtPath, ...(args ?? [])]
           remoteEnv = {
             ...extraEnv,
             DEVTOOL_HOOK_PORT: String(remotePort),
@@ -316,7 +317,8 @@ export class PtySessions {
       let localArgs = args
       let localEnv = extraEnv
       if (isPiLocal) {
-        localArgs = [...(args ?? []), '-e', piExtensionLocalPath()]
+        // Ahead of the caller's args, so a first prompt stays the last argument.
+        localArgs = ['-e', piExtensionLocalPath(), ...(args ?? [])]
         localEnv = {
           ...extraEnv,
           DEVTOOL_HOOK_PORT: String(deps.hookPort()),

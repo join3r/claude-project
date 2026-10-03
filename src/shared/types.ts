@@ -25,9 +25,12 @@ export const CLAUDE_CHAT_LABEL = 'Claude'
 /** Which way a new Claude tab opens: the terminal UI, or DevTool's chat. */
 export type ClaudeView = 'terminal' | 'chat'
 
-/** What the New-task composer opens in a task it just created. */
-export const NEW_TASK_AUTO_OPEN = ['none', 'claude', 'codex', 'pi', 'browser', 'terminal'] as const
-export type NewTaskAutoOpen = typeof NEW_TASK_AUTO_OPEN[number]
+/** What a task is called until its first prompt names it. */
+export const NEW_TASK_NAME = 'New Task'
+
+/** The agents an empty task's prompt box can start: Claude as a chat or a terminal, Codex, Pi. */
+export const PROMPT_BOX_AGENTS = ['claude-chat', 'claude', 'codex', 'pi'] as const
+export type PromptBoxAgent = typeof PROMPT_BOX_AGENTS[number]
 
 /**
  * The live state of one tab's process. Lives in shared rather than in the
@@ -433,7 +436,10 @@ export interface AppConfig {
   lastProjectId: string | null
   lastTaskId: string | null
   defaultSidebarTab: SidebarTab
-  newTaskAutoOpen: NewTaskAutoOpen
+  /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
+  promptBoxAgent: PromptBoxAgent
+  /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
+  promptBoxMode: string
   taskRecencyHighlight: {
     enabled: boolean
     mode: 'rank' | 'time'
@@ -655,8 +661,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastProjectId: null,
   lastTaskId: null,
   defaultSidebarTab: 'inbox',
-  // Opt-in: creating a task keeps behaving exactly as before until you pick a tool.
-  newTaskAutoOpen: 'none',
+  promptBoxAgent: 'claude-chat',
+  promptBoxMode: '',
   taskRecencyHighlight: {
     enabled: true,
     mode: 'rank',

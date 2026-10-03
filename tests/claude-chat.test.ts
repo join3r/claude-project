@@ -8,7 +8,7 @@ import { JsonLineGate, sdkAddedEnv } from '../src/main/claude-chat/remote-spawn'
 import { coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput } from '../src/main/claude-chat/chat-session'
 import { coldCacheText, formatIdle } from '../src/renderer/components/claude-chat/ColdCacheNotice'
 import { parseTranscriptLines, remoteTranscriptScript } from '../src/main/claude-chat/transcript'
-import { claudeTabType, createTab, newTaskInitialTabs } from '../src/renderer/components/newTaskTabs'
+import { claudeTabType, createTab } from '../src/renderer/components/newTaskTabs'
 
 const MSG = 'msg_1'
 
@@ -395,7 +395,5 @@ describe('chat tabs', () => {
     expect(claudeTabType('claude', 'chat')).toBe('claude-chat')
     expect(claudeTabType('claude', 'terminal')).toBe('claude')
     expect(claudeTabType('pi', 'chat')).toBe('pi')
-    const enabled = { enableClaude: true, enableCodex: false, enablePi: false }
-    expect(newTaskInitialTabs('claude', enabled, 'chat')[0].type).toBe('claude-chat')
   })
 })

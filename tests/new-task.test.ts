@@ -44,7 +44,10 @@ describe('isNewTaskDraftValid', () => {
     expect(isNewTaskDraftValid(base)).toBe(true)
     expect(isNewTaskDraftValid({ ...base, target: null })).toBe(false)
     expect(isNewTaskDraftValid({ ...base, target: { kind: 'project', projectId: '' } })).toBe(false)
-    expect(isNewTaskDraftValid({ ...base, name: '   ' })).toBe(false)
+  })
+
+  it('allows an unnamed task, which the first prompt names', () => {
+    expect(isNewTaskDraftValid({ ...base, name: '   ' })).toBe(true)
   })
 
   it('accepts a bare directory as the destination', () => {

@@ -12,9 +12,12 @@ import { ProjectHome } from './ProjectHome'
 import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
-import type { Tab, AiTabType, SshConfig, ShellCommandConfig } from '../../shared/types'
+import TaskPromptBox from './TaskPromptBox'
+import type { Tab, AiTabType, Project, SshConfig, ShellCommandConfig } from '../../shared/types'
 import type { PaneSide } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
+
+const emptyLinkCls = 'bg-transparent border-0 p-0 text-sm text-text-muted underline decoration-border-strong underline-offset-[3px] cursor-pointer hover:text-text'
 
 interface Props {
   tabs: Tab[]
@@ -27,6 +30,8 @@ interface Props {
   sshConfig?: SshConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
+  /** Set on the left pane of a task with no tabs at all: it shows the first-prompt box. */
+  promptBox?: { project: Project; taskName: string }
   style?: React.CSSProperties
   onPaneFocus?: (pane: PaneSide) => void
   tabDragState: TabDragState | null
@@ -47,6 +52,7 @@ export default function Pane({
   sshConfig,
   shellCommand,
   aiToolArgs,
+  promptBox,
   style,
   onPaneFocus,
   tabDragState,
@@ -55,7 +61,7 @@ export default function Pane({
   onTabDropTargetChange,
   onTabDragComplete
 }: Props): React.ReactElement {
-  const { effectiveTheme } = useApp()
+  const { effectiveTheme, addTab } = useApp()
   const isEmptyDropTarget = tabs.length === 0 && tabDropTarget?.pane === pane
 
   return (
@@ -81,8 +87,23 @@ export default function Pane({
         onTabDragComplete={onTabDragComplete}
       />
       <div className="flex-1 overflow-hidden relative">
-        {tabs.length === 0 && (
-          <div className="flex-1 flex items-center justify-center h-full text-text-muted text-base">Open a terminal or browser tab</div>
+        {tabs.length === 0 && promptBox && (
+          <TaskPromptBox
+            project={promptBox.project}
+            taskId={taskId}
+            taskName={promptBox.taskName}
+            projectDir={projectDir}
+            visible={taskVisible}
+          />
+        )}
+        {tabs.length === 0 && !promptBox && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 h-full text-text-muted text-base">
+            <span>Open a terminal or browser tab</span>
+            <span className="flex gap-3">
+              <button type="button" className={emptyLinkCls} onClick={() => addTab(projectId, taskId, pane, 'terminal')}>Terminal</button>
+              <button type="button" className={emptyLinkCls} onClick={() => addTab(projectId, taskId, pane, 'browser')}>Browser</button>
+            </span>
+          </div>
         )}
         {tabs.map((tab) => {
           if (tab.type === 'terminal') {

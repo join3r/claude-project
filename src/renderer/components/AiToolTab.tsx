@@ -31,6 +31,7 @@ import '@xterm/xterm/css/xterm.css'
 import { buildXtermTheme } from './terminalThemes'
 import { noteAgentTabTyped } from '../agentLink/agentTabRecency'
 import { agentTerminalReady, onAgentInsert, showAgentLinkNotice } from '../agentLink/linkToAgent'
+import { initialPromptArgs, takePendingPrompt } from './promptBox'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -152,6 +153,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
   // Agent links (Ctrl+L) that arrived before the PTY was spawned or while its
   // scrollback was replaying; pasted once input would reach the process.
   const pendingInsertsRef = useRef<string[]>([])
+  // The prompt box's first prompt, when it has to be pasted rather than passed as an
+  // argument: once pasted, Enter submits it.
+  const submitAfterInsertRef = useRef(false)
   // When this xterm got attached to its running PTY (spawn resolved and scrollback
   // replayed); null while detached. `spawnedRef` flips earlier, before the async
   // spawn, so it cannot tell whether a write would reach the process yet.
@@ -650,7 +654,19 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
 
             const command = AI_TAB_META[toolType].command
             const parsedExtra = parseExtraArgs(extraArgs)
-            const args = buildAiToolArgs(toolType, parsedExtra, resumeSessionId)
+            // Opened from an empty task's prompt box: start on its prompt. It goes in
+            // as an argument, except locally on Windows, where a `.cmd` shim runs under
+            // cmd.exe and would reinterpret it; there it is pasted once the TUI is up.
+            const first = takePendingPrompt(tabId)
+            const pasteFirst = !!first && window.api.platform === 'win32' && !sshConfig
+            const args = [
+              ...buildAiToolArgs(toolType, parsedExtra, resumeSessionId),
+              ...(first ? initialPromptArgs(toolType, first, parsedExtra, !pasteFirst) : [])
+            ]
+            if (first && pasteFirst) {
+              pendingInsertsRef.current.push(first.text.trim())
+              submitAfterInsertRef.current = true
+            }
 
             let extraEnv: Record<string, string> | undefined
             if (isHookTab) {
@@ -752,6 +768,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       return
     }
     for (const text of pendingInsertsRef.current.splice(0)) pasteIntoTerminal(entry.term, text)
+    if (submitAfterInsertRef.current) {
+      submitAfterInsertRef.current = false
+      setTimeout(() => window.api.ptyWrite(tabId, '\r'), 150)
+    }
     entry.term.focus()
   }, [tabId])
 

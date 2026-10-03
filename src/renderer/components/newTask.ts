@@ -53,13 +53,13 @@ export interface NewTaskDraft {
 }
 
 /**
- * A draft is submittable when it names a task, and — for a workspace task — has
- * both a branch to create and a branch to create it from.
+ * A draft is submittable once it has somewhere to go. The name is optional: an
+ * unnamed task opens on its prompt box and the first prompt names it. A workspace
+ * task also needs a branch to create and a branch to create it from.
  */
 export function isNewTaskDraftValid(draft: NewTaskDraft): boolean {
   if (!draft.target) return false
   if (draft.target.kind === 'project' ? !draft.target.projectId : !draft.target.directory) return false
-  if (!draft.name.trim()) return false
   if (!draft.workspace) return true
   return draft.branch.trim().length > 0 && draft.baseBranch.length > 0
 }

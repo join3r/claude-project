@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
-import { isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import { NEW_TASK_NAME, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
 import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import CreateWorkspaceModal from './CreateWorkspaceModal'
@@ -16,7 +16,6 @@ import NewTaskModal from './NewTaskModal'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import { isSettled, isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
-import { newTaskInitialTabs } from './newTaskTabs'
 import { useResizeHandle } from '../hooks/useResizeHandle'
 import { ChevronRight, Filter, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
 import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
@@ -91,13 +90,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const id = window.setInterval(() => setNow(Date.now()), inboxActive ? 15_000 : 60_000)
     return () => window.clearInterval(id)
   }, [config?.taskRecencyHighlight?.enabled, config?.taskRecencyHighlight?.mode, inboxActive])
-
-  // Tabs the composer seeds a new task with. Passed into the create call rather
-  // than opened afterwards, so the task and its tab land in one state write.
-  const composerInitialTabs = useCallback(
-    () => (config ? newTaskInitialTabs(config.newTaskAutoOpen, config, config.claudeDefaultView) : []),
-    [config]
-  )
 
   const handleSelectTask = useCallback((projectId: string, task: Task) => {
     switchToTask(projectId, task.id)
@@ -284,9 +276,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     beginEdit(project.id, project.name)
   }
 
+  // No inline rename: the task opens on its prompt box, and the first prompt names it.
   const handleAddTask = (projectId: string) => {
-    const task = addTask(projectId, 'New Task')
-    beginEdit(task.id, task.name, projectId)
+    addTask(projectId, NEW_TASK_NAME)
   }
 
   const findTask = useCallback((projectId: string, taskId: string): Task | undefined =>
@@ -1021,9 +1013,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onAddProject={addProject}
           onCreate={(target, name) => {
             if (target.kind === 'dir') {
-              addTaskInDirectory(target.directory, name, composerInitialTabs())
+              addTaskInDirectory(target.directory, name)
             } else {
-              addTask(target.projectId, name, composerInitialTabs())
+              addTask(target.projectId, name)
               // The task is selected on create; expand its project so switching back
               // to the tree doesn't hide the thing you just made.
               setProjectExpanded(target.projectId, true)
@@ -1032,9 +1024,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           }}
           onCreateWorkspace={(target, name, workspace) => {
             if (target.kind === 'dir') {
-              addTaskInDirectory(target.directory, name, composerInitialTabs(), workspace)
+              addTaskInDirectory(target.directory, name, [], workspace)
             } else {
-              addWorkspaceTask(target.projectId, name, workspace, composerInitialTabs())
+              addWorkspaceTask(target.projectId, name, workspace)
               setProjectExpanded(target.projectId, true)
             }
             setNewTaskOpen(false)
