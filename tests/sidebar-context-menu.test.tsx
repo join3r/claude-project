@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { DEFAULT_CONFIG, createHomeTask, type Project, type ProjectsData } from '../src/shared/types'
 import { AppProvider } from '../src/renderer/context/AppContext'
 import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
@@ -31,14 +31,16 @@ function buildProjects(): Project[] {
 }
 
 let saved: ProjectsData[]
+let pinnedItems: ProjectsData['pinnedItems']
 
 beforeEach(() => {
   saved = []
+  pinnedItems = []
   const known: Record<string, unknown> = {
-    loadProjects: vi.fn().mockResolvedValue({
+    loadProjects: vi.fn().mockImplementation(async () => ({
       revision: 0,
-      data: { projects: buildProjects(), tags: [], projectOrder: ['p1'], pinnedItems: [] }
-    }),
+      data: { projects: buildProjects(), tags: [], projectOrder: ['p1'], pinnedItems }
+    })),
     loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG }),
     loadWindowState: vi.fn().mockResolvedValue({ expandedProjectIds: ['p1'], sidebarTab: 'projects' }),
     notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
@@ -153,6 +155,50 @@ describe('Sidebar context menu', () => {
     fireEvent.contextMenu(row)
     fireEvent.click(await screen.findByRole('button', { name: /Reveal in Finder|Show in/ }))
     expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha')
+  })
+})
+
+describe('Sidebar pins', () => {
+  const lastTasks = () => saved[saved.length - 1]?.projects[0].tasks ?? []
+
+  it('adds a task and a workspace from a pinned project', async () => {
+    pinnedItems = [{ type: 'project', projectId: 'p1' }]
+    renderSidebar()
+    const pinned = (await screen.findByText('Pinned')).parentElement!
+    fireEvent.click(within(pinned).getByTitle('New task'))
+    await waitFor(() => expect(lastTasks()).toHaveLength(3))
+    expect(lastTasks()[2]).toMatchObject({ name: 'New Task' })
+    expect(lastTasks()[2].workspaceDraft).toBeUndefined()
+
+    fireEvent.click(within(pinned).getByTitle('New workspace'))
+    await waitFor(() => expect(lastTasks()).toHaveLength(4))
+    expect(lastTasks()[3].workspaceDraft).toEqual({})
+  })
+
+  it('adds a sibling task from a pinned task', async () => {
+    pinnedItems = [{ type: 'task', projectId: 'p1', taskId: 't1' }]
+    renderSidebar()
+    const pinned = (await screen.findByText('Pinned')).parentElement!
+    fireEvent.click(within(pinned).getByTitle('New task in Alpha Project'))
+    await waitFor(() => expect(lastTasks()).toHaveLength(3))
+  })
+
+  it('offers + Task and + Workspace under an expanded pinned project', async () => {
+    pinnedItems = [{ type: 'project', projectId: 'p1' }]
+    renderSidebar()
+    const pinned = (await screen.findByText('Pinned')).parentElement!
+    expect(within(pinned).queryByText('Workspace')).toBeNull()
+    fireEvent.click(pinned.querySelector('[data-pin-key] button')!)
+    fireEvent.click(within(pinned).getByText('Workspace'))
+    await waitFor(() => expect(lastTasks()[2]?.workspaceDraft).toEqual({}))
+  })
+
+  it('adds a workspace from a project\'s context menu', async () => {
+    renderSidebar()
+    await screen.findByText('Alpha Project')
+    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'New workspace' }))
+    await waitFor(() => expect(lastTasks()[2]?.workspaceDraft).toEqual({}))
   })
 })
 

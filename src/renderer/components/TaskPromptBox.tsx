@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, GitBranch } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { CHAT_PERMISSION_MODES } from '../../shared/claude-chat'
 import type { Project, PromptBoxAgent, TabType, WorkspaceDraft } from '../../shared/types'
 import ChipMenu from './claude-chat/ChipMenu'
-import { MODE_HELP } from './claude-chat/Composer'
+import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
 import {
   PROMPT_BOX_AGENT_LABEL,
   agentTakesMode,
@@ -25,21 +24,6 @@ interface Props {
   projectDir: string
   visible: boolean
 }
-
-// Models aren't known until a session runs (`supportedModels()`), so the box offers
-// the aliases every Claude Code version accepts.
-const MODEL_OPTIONS = [
-  { value: '', label: 'Default' },
-  { value: 'opus', label: 'Opus' },
-  { value: 'sonnet', label: 'Sonnet' },
-  { value: 'haiku', label: 'Haiku' }
-]
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
-const MODE_OPTIONS = [
-  { value: '', label: 'Default', description: 'Whatever your Claude settings choose' },
-  ...CHAT_PERMISSION_MODES.map((m) => ({ value: m.value, label: m.label, description: MODE_HELP[m.value] }))
-]
-const MODE_CYCLE = ['', 'default', 'acceptEdits', 'plan', 'auto']
 
 const linkCls = 'bg-transparent border-0 p-0 text-sm text-text-muted underline decoration-border-strong underline-offset-[3px] cursor-pointer hover:text-text'
 
@@ -128,12 +112,9 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
       void send()
     } else if (e.key === 'Tab' && e.shiftKey && takesMode) {
       e.preventDefault()
-      const index = MODE_CYCLE.indexOf(currentMode)
-      setMode(MODE_CYCLE[(index + 1) % MODE_CYCLE.length])
+      setMode(nextMode(currentMode))
     }
   }
-
-  const modeLabel = MODE_OPTIONS.find((m) => m.value === currentMode)?.label ?? 'Default'
 
   return (
     <div className="h-full overflow-y-auto flex items-center justify-center px-5 py-6">
@@ -160,13 +141,13 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
               <ChipMenu label={`Model: ${MODEL_OPTIONS.find((m) => m.value === model)?.label ?? model}`} title="Model" options={MODEL_OPTIONS} value={model} onChange={pick(setModel)} />
             )}
             {takesMode && (
-              <ChipMenu label={`Mode: ${modeLabel}`} title="Permission mode (Shift+Tab cycles)" options={MODE_OPTIONS} value={currentMode} onChange={pick(setMode)} />
+              <ChipMenu label={`Mode: ${modeLabel(currentMode)}`} title="Permission mode (Shift+Tab cycles)" options={MODE_OPTIONS} value={currentMode} onChange={pick(setMode)} />
             )}
             {agent === 'claude-chat' && (
               <ChipMenu
                 label={`Effort: ${effort || 'Default'}`}
                 title="Thinking effort"
-                options={[{ value: '', label: 'Default' }, ...EFFORT_LEVELS.map((level) => ({ value: level, label: level }))]}
+                options={EFFORT_OPTIONS}
                 value={effort}
                 onChange={pick(setEffort)}
               />
@@ -196,24 +177,6 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-/** The agent chip: like ChipMenu, but it stands out, since it decides what Enter starts. */
-function AgentMenu({ agents, value, onChange }: { agents: PromptBoxAgent[]; value: PromptBoxAgent; onChange: (agent: PromptBoxAgent) => void }): React.ReactElement {
-  if (agents.length === 1) {
-    return <span className="inline-flex items-center h-5 px-1.5 rounded-md bg-surface-3 text-xs text-text">{PROMPT_BOX_AGENT_LABEL[value]}</span>
-  }
-  return (
-    <div className="[&>div>button]:bg-surface-3 [&>div>button]:text-text">
-      <ChipMenu
-        label={PROMPT_BOX_AGENT_LABEL[value]}
-        title="Agent"
-        options={agents.map((a) => ({ value: a, label: PROMPT_BOX_AGENT_LABEL[a], description: a === 'claude-chat' ? 'Chat view' : a === 'claude' ? 'Terminal view' : undefined }))}
-        value={value}
-        onChange={(next) => onChange(next as PromptBoxAgent)}
-      />
     </div>
   )
 }

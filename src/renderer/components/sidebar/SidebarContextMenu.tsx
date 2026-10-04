@@ -51,7 +51,9 @@ export default function SidebarContextMenu({
   beginEdit,
   isPinned,
   setDuplicateProjectId,
-  setProjectSettingsId
+  setProjectSettingsId,
+  onAddTask,
+  onAddWorkspace
 }: {
   contextMenu: SidebarContextMenuState | null
   snoozeSubmenu: boolean
@@ -66,6 +68,8 @@ export default function SidebarContextMenu({
   isPinned: (item: PinnedItem) => boolean
   setDuplicateProjectId: (projectId: string) => void
   setProjectSettingsId: (projectId: string) => void
+  onAddTask: (projectId: string) => void
+  onAddWorkspace: (projectId: string) => void
 }): React.ReactElement {
   const {
     projects, togglePinnedItem, updateProject, setProjectExpanded, connectSsh, removeProject,
@@ -102,6 +106,24 @@ export default function SidebarContextMenu({
       {contextMenu && !snoozeSubmenu && (
         <div ref={contextMenuPos.ref} className={`fixed z-(--z-menu) ${menuCls}`} style={contextMenuPos.style} onMouseDown={(e) => e.stopPropagation()}>
           <>
+            {contextMenu.type === 'project' && (() => {
+              const project = projects.find(p => p.id === contextMenu.projectId)
+              if (!project) return null
+              return (
+                <div className="border-b border-hair pb-1 mb-1">
+                  <button className={menuItemCls} onClick={() => {
+                    onAddTask(project.id)
+                    closeContextMenu()
+                  }}>New task</button>
+                  {!isShellCommandProject(project) && (
+                    <button className={menuItemCls} onClick={() => {
+                      onAddWorkspace(project.id)
+                      closeContextMenu()
+                    }}>New workspace</button>
+                  )}
+                </div>
+              )
+            })()}
             {contextMenu.type === 'task' && (() => {
               const task = findTask(contextMenu.projectId, contextMenu.taskId!)
               if (!task) return null

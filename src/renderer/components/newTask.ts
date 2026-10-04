@@ -1,11 +1,11 @@
 /**
- * Helpers for the "New task" composer. Task names are free-form prose ("fix the
- * inbox badge count"), but a workspace turns that name into a git branch, and git
- * rejects most of what reads naturally. These keep the two apart: you name the
- * task like a subject line, the branch is derived and stays editable.
+ * Helpers for the "New task" composer: pick where the task goes, type its first
+ * prompt, send. The prompt names the task and, for a workspace, its branch.
  */
 
 import { fuzzyMatch } from '../palette/fuzzy'
+import type { PromptBoxAgent, WorkspaceConfig, WorkspaceDraft } from '../../shared/types'
+import type { PendingPrompt } from './promptBox'
 import { branchSlug, defaultBaseBranch } from '../../shared/branch-name'
 
 export { branchSlug, defaultBaseBranch }
@@ -19,35 +19,43 @@ export type NewTaskTarget =
   | { kind: 'project'; projectId: string }
   | { kind: 'dir'; directory: string }
 
+/** What the composer asks for: a task, maybe an agent started on it, maybe a worktree. */
+export interface NewTaskSubmission {
+  target: NewTaskTarget
+  /** The agent tab to open with the first prompt; absent, the task opens on its prompt box. */
+  start?: { agent: PromptBoxAgent; prompt: PendingPrompt }
+  /** A worktree already cut for the task. */
+  workspace?: WorkspaceConfig
+  /** A workspace still to be cut, when the first prompt names it. */
+  workspaceDraft?: WorkspaceDraft
+}
+
 export interface NewTaskDraft {
   target: NewTaskTarget | null
-  name: string
+  /** The first prompt. It names the task, and the branch when there is a workspace. */
+  prompt: string
   /** Whether the task should get its own worktree + branch. */
   workspace: boolean
-  branch: string
   baseBranch: string
 }
 
 /**
- * A draft is submittable once it has somewhere to go. The name is optional: an
- * unnamed task opens on its prompt box and the first prompt names it. A workspace
- * task also needs a branch to create it from, and a branch to create unless it is
- * left pending (no name, no branch).
+ * A draft is submittable once it has somewhere to go. The prompt is optional: a
+ * task created without one opens on its prompt box. A workspace also needs a
+ * branch to fork from.
  */
 export function isNewTaskDraftValid(draft: NewTaskDraft): boolean {
   if (!draft.target) return false
   if (draft.target.kind === 'project' ? !draft.target.projectId : !draft.target.directory) return false
-  if (!draft.workspace) return true
-  if (!draft.baseBranch) return false
-  return draft.branch.trim().length > 0 || isPendingWorkspaceDraft(draft)
+  return !draft.workspace || !!draft.baseBranch
 }
 
 /**
- * A workspace asked for with neither a task name nor a branch: the task opens on
- * its prompt box and the worktree is created once the first prompt names it.
+ * A workspace asked for without a prompt: nothing to name the branch after yet,
+ * so the task opens on its prompt box and the worktree is cut on the first send.
  */
 export function isPendingWorkspaceDraft(draft: NewTaskDraft): boolean {
-  return draft.workspace && !draft.name.trim() && !draft.branch.trim()
+  return draft.workspace && !draft.prompt.trim()
 }
 
 /**

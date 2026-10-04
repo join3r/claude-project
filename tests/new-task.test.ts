@@ -37,17 +37,16 @@ describe('branchSlug', () => {
 })
 
 describe('isNewTaskDraftValid', () => {
-  const target = { kind: 'project' as const, projectId: 'p1' }
-  const base = { target, name: 'Do the thing', workspace: false, branch: '', baseBranch: '' }
+  const base = { target: { kind: 'project' as const, projectId: 'p1' }, prompt: 'Do the thing', workspace: false, baseBranch: '' }
 
-  it('needs a destination and a name', () => {
+  it('needs a destination', () => {
     expect(isNewTaskDraftValid(base)).toBe(true)
     expect(isNewTaskDraftValid({ ...base, target: null })).toBe(false)
     expect(isNewTaskDraftValid({ ...base, target: { kind: 'project', projectId: '' } })).toBe(false)
   })
 
-  it('allows an unnamed task, which the first prompt names', () => {
-    expect(isNewTaskDraftValid({ ...base, name: '   ' })).toBe(true)
+  it('allows a task with no prompt, which opens on its prompt box', () => {
+    expect(isNewTaskDraftValid({ ...base, prompt: '   ' })).toBe(true)
   })
 
   it('accepts a bare directory as the destination', () => {
@@ -55,24 +54,17 @@ describe('isNewTaskDraftValid', () => {
     expect(isNewTaskDraftValid({ ...base, target: { kind: 'dir', directory: '' } })).toBe(false)
   })
 
-  it('ignores branch fields when no workspace is requested', () => {
-    expect(isNewTaskDraftValid({ ...base, branch: '', baseBranch: '' })).toBe(true)
-  })
-
-  it('requires both branches once a workspace is requested', () => {
+  it('requires a base branch once a workspace is requested', () => {
     const ws = { ...base, workspace: true }
     expect(isNewTaskDraftValid(ws)).toBe(false)
-    expect(isNewTaskDraftValid({ ...ws, branch: 'do-the-thing' })).toBe(false)
-    expect(isNewTaskDraftValid({ ...ws, branch: 'do-the-thing', baseBranch: 'main' })).toBe(true)
-    expect(isNewTaskDraftValid({ ...ws, branch: '  ', baseBranch: 'main' })).toBe(false)
+    expect(isNewTaskDraftValid({ ...ws, baseBranch: 'main' })).toBe(true)
   })
 
-  it('leaves an unnamed workspace with no branch pending until its first prompt', () => {
-    const pending = { ...base, name: '', workspace: true, branch: '', baseBranch: 'main' }
+  it('leaves a workspace with no prompt pending until its first prompt', () => {
+    const pending = { ...base, prompt: '', workspace: true, baseBranch: 'main' }
     expect(isNewTaskDraftValid(pending)).toBe(true)
     expect(isPendingWorkspaceDraft(pending)).toBe(true)
-    expect(isNewTaskDraftValid({ ...pending, baseBranch: '' })).toBe(false)
-    expect(isPendingWorkspaceDraft({ ...pending, branch: 'mine' })).toBe(false)
+    expect(isPendingWorkspaceDraft({ ...pending, prompt: 'Fix it' })).toBe(false)
     expect(isPendingWorkspaceDraft({ ...pending, workspace: false })).toBe(false)
   })
 })

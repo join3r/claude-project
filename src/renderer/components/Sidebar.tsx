@@ -12,11 +12,14 @@ import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
+import type { NewTaskSubmission } from './newTask'
+import { createTab } from './newTaskTabs'
+import { agentTakesMode, setPendingPrompt, taskNameFromPrompt } from './promptBox'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
 import { isSettled, isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
 import { useResizeHandle } from '../hooks/useResizeHandle'
-import { ChevronRight, Filter, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
+import { ChevronRight, Filter, GitBranch, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
 import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
@@ -297,6 +300,34 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     addPendingWorkspaceTask(projectId, NEW_TASK_NAME)
   }
 
+  /**
+   * File what the composer asked for. A task that starts an agent is born with the
+   * agent's tab already in it; the tab picks the prompt up on its first spawn.
+   */
+  const handleComposedTask = ({ target, start, workspace, workspaceDraft }: NewTaskSubmission) => {
+    const tab = start ? createTab(start.agent) : null
+    const tabs = tab ? [tab] : []
+    const name = start ? taskNameFromPrompt(start.prompt.text) : NEW_TASK_NAME
+    if (tab && start) {
+      setPendingPrompt(tab.id, start.prompt)
+      updateConfig({
+        promptBoxAgent: start.agent,
+        ...(agentTakesMode(start.agent) ? { promptBoxMode: start.prompt.mode ?? '' } : {})
+      })
+    }
+    if (target.kind === 'dir') {
+      addTaskInDirectory(target.directory, name, tabs, workspace, workspaceDraft)
+    } else {
+      if (workspace) addWorkspaceTask(target.projectId, name, workspace, tabs)
+      else if (workspaceDraft) addPendingWorkspaceTask(target.projectId, name, workspaceDraft)
+      else addTask(target.projectId, name, tabs)
+      // The task is selected on create; expand its project so switching back
+      // to the tree doesn't hide the thing you just made.
+      setProjectExpanded(target.projectId, true)
+    }
+    setNewTaskOpen(false)
+  }
+
   const handleDeleteTask = async (projectId: string, taskId: string) => {
     const project = projects.find(p => p.id === projectId)
     const task = project?.tasks.find(t => t.id === taskId)
@@ -415,6 +446,26 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   const { pinDragIndex, pinDropIndex, handlePinMouseDown } = usePinnedDrag(resolvedPins, setPinnedOrder)
+
+  /** The "+ Task  + Workspace" row closing an expanded project, in the tree or under a pin. */
+  const renderAddTaskRow = (project: Project, indentCls: string = TASK_ROW_PL) => (
+    <div className={`flex items-center gap-0.5 flex-wrap mx-1.5 ${indentCls} pr-2 py-0.5`}>
+      <button
+        className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
+        onClick={() => handleAddTask(project.id)}
+      >
+        <Plus size={12} className="inline mr-0.5" /> Task
+      </button>
+      {!isShellCommandProject(project) && (
+        <button
+          className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
+          onClick={() => handleAddWorkspace(project.id)}
+        >
+          <Plus size={12} className="inline mr-0.5" /> Workspace
+        </button>
+      )}
+    </div>
+  )
 
   const renderProject = (project: Project) => {
     const isExpanded = expandedProjects.has(project.id)
@@ -576,22 +627,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
             <div className={`h-0.5 bg-accent mr-2 rounded-sm ${TASK_ROW_ML}`} />
           )}
-          <div className={`flex items-center gap-0.5 flex-wrap mx-1.5 ${TASK_ROW_PL} pr-2 py-0.5`}>
-            <button
-              className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
-              onClick={() => handleAddTask(project.id)}
-            >
-              <Plus size={12} className="inline mr-0.5" /> Task
-            </button>
-            {!isShellCommandProject(project) && (
-              <button
-                className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
-                onClick={() => handleAddWorkspace(project.id)}
-              >
-                <Plus size={12} className="inline mr-0.5" /> Workspace
-              </button>
-            )}
-          </div>
+          {renderAddTaskRow(project)}
         </div>
       )}
     </div>
@@ -695,6 +731,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                         <TaskStatusDot task={pin.task!} allStatuses={allStatuses} />
                       )}
                       <RowActions>
+                        {/* A task pin adds a sibling: the task's project is where its work lives. */}
+                        <RowAction title={isProjectPin ? 'New task' : `New task in ${pin.project.name}`} onClick={() => handleAddTask(pin.project.id)}>
+                          <Plus size={13} />
+                        </RowAction>
+                        {!isShellCommandProject(pin.project) && (
+                          <RowAction title={isProjectPin ? 'New workspace' : `New workspace in ${pin.project.name}`} onClick={() => handleAddWorkspace(pin.project.id)}>
+                            <GitBranch size={13} />
+                          </RowAction>
+                        )}
                         <RowAction title="Unpin" onClick={() => togglePinnedItem(pin.item)}>
                           <X size={13} />
                         </RowAction>
@@ -722,6 +767,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                       </div>
                     )
                   })}
+                  {isPinExpanded && renderAddTaskRow(pin.project, 'pl-[40px]')}
                 </React.Fragment>
               )
             })}
@@ -901,6 +947,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         isPinned={isPinned}
         setDuplicateProjectId={setDuplicateProjectId}
         setProjectSettingsId={setProjectSettingsId}
+        onAddTask={handleAddTask}
+        onAddWorkspace={handleAddWorkspace}
       />
 
       <div className="px-3 py-2 border-t border-hair">
@@ -1003,43 +1051,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         )
       })()}
 
-      {newTaskOpen && (
+      {newTaskOpen && config && (
         <NewTaskModal
           projects={orderedProjects}
           defaultProjectId={selectedProjectId}
           getProjectDir={getProjectDir}
+          config={config}
           allTags={tags}
           onEnsureTag={addTag}
           onAddProject={addProject}
-          onCreate={(target, name) => {
-            if (target.kind === 'dir') {
-              addTaskInDirectory(target.directory, name)
-            } else {
-              addTask(target.projectId, name)
-              // The task is selected on create; expand its project so switching back
-              // to the tree doesn't hide the thing you just made.
-              setProjectExpanded(target.projectId, true)
-            }
-            setNewTaskOpen(false)
-          }}
-          onCreatePendingWorkspace={(target, baseBranch) => {
-            if (target.kind === 'dir') {
-              addTaskInDirectory(target.directory, NEW_TASK_NAME, [], undefined, { baseBranch })
-            } else {
-              addPendingWorkspaceTask(target.projectId, NEW_TASK_NAME, { baseBranch })
-              setProjectExpanded(target.projectId, true)
-            }
-            setNewTaskOpen(false)
-          }}
-          onCreateWorkspace={(target, name, workspace) => {
-            if (target.kind === 'dir') {
-              addTaskInDirectory(target.directory, name, [], workspace)
-            } else {
-              addWorkspaceTask(target.projectId, name, workspace)
-              setProjectExpanded(target.projectId, true)
-            }
-            setNewTaskOpen(false)
-          }}
+          onCreate={handleComposedTask}
           onClose={() => setNewTaskOpen(false)}
         />
       )}
