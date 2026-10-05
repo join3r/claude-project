@@ -46,7 +46,9 @@ public struct InboxPartition: Sendable, Equatable {
 
     public init() {}
 
-    public init(_ inboxes: [(desktopId: String, inbox: Inbox)], now: Date) {
+    /// `workingLast` sinks tasks whose agent is working below the rest of
+    /// Active, as the desktop's "Move working tasks to the end of the Inbox".
+    public init(_ inboxes: [(desktopId: String, inbox: Inbox)], now: Date, workingLast: Bool = false) {
         var needsYou: [(InboxEntry, Int)] = []
         var active: [(InboxEntry, Int)] = []
         var settled: [(InboxEntry, Int)] = []
@@ -77,6 +79,11 @@ public struct InboxPartition: Sendable, Equatable {
         }
         self.needsYou = sorted(needsYou, by: { $0.statusSince ?? nowMs }, descending: false)
         self.active = sorted(active, by: \.lastActivityAt, descending: true)
+        if workingLast {
+            // Partitioning keeps the recency order within each half.
+            let working = self.active.filter { $0.task.summaryStatus == .working }
+            self.active = self.active.filter { $0.task.summaryStatus != .working } + working
+        }
         self.settled = sorted(settled, by: { $0.settledAt ?? 0 }, descending: true)
         self.snoozed = sorted(snoozed, by: { $0.snoozeUntilAttention ? Int64.max : ($0.snoozedUntil ?? Int64.max) }, descending: false)
     }

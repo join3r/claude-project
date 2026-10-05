@@ -47,6 +47,16 @@ import Testing
         #expect(unread.unreadCount == 1)
     }
 
+    @Test func sinksWorkingTasksOnlyWhenAsked() {
+        let a = inbox("a", [
+            InboxTask(id: "busy", name: "", eventAt: Self.nowMs, tabs: [tab("1", .working, since: Self.nowMs - 1_000)]),
+            InboxTask(id: "recent", name: "", eventAt: Self.nowMs - 10, tabs: []),
+            InboxTask(id: "older", name: "", eventAt: Self.nowMs - 500, tabs: []),
+        ])
+        #expect(InboxPartition([("a", a)], now: Self.now).active.map(\.task.id) == ["busy", "recent", "older"])
+        #expect(InboxPartition([("a", a)], now: Self.now, workingLast: true).active.map(\.task.id) == ["recent", "older", "busy"])
+    }
+
     @Test func appliesActionsAsTheDesktopWould() {
         let task = InboxTask(id: "t", name: "", unread: true, settledAt: 5, tabs: [])
         #expect(!task.applying(.read, now: Self.now).unread)

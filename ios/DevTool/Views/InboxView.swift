@@ -10,6 +10,7 @@ struct InboxView: View {
     @State private var showSnoozed = false
     /// The row whose Snooze swipe is asking for a preset.
     @State private var snoozing: InboxEntry?
+    @AppStorage(InboxSettings.workingLastKey) private var workingLast = false
 
     var body: some View {
         // Wait times and snooze expiry are worked out against the clock; the
@@ -33,7 +34,7 @@ struct InboxView: View {
     }
 
     private func list(now: Date) -> some View {
-        let partition = model.inboxPartition(now: now)
+        let partition = model.inboxPartition(now: now, workingLast: workingLast)
         return List(selection: $selection) {
             DesktopBanners(desktops: model.desktops)
             if partition.isEmpty {
@@ -101,6 +102,8 @@ struct InboxView: View {
         let offline = model.isOffline(entry.desktopId)
         let canTriage = model.supports(DesktopFeature.taskTriage, on: entry.desktopId) && !offline
         let unread = entry.task.unread
+        // The agent has the ball: nothing for you to do yet, so the row recedes.
+        let working = group != .snoozed && entry.task.summaryStatus == .working
         return InboxRow(
             entry: entry,
             group: group,
@@ -108,7 +111,7 @@ struct InboxView: View {
             now: now
         )
         .tag(ref)
-        .opacity(offline ? 0.55 : 1)
+        .opacity(offline || working ? 0.5 : 1)
         .swipeActions(edge: .leading) {
             if canTriage {
                 Button {
@@ -230,10 +233,12 @@ struct InboxRow: View {
         let task = entry.task
         let status = task.summaryStatus
         let activity = task.lastActivityAt
+        // A working task drops its dot, as on the desktop: the agent has the ball.
+        let showDot = task.unread && status != .working
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             UnreadDot()
-                .opacity(task.unread ? 1 : 0)
-                .accessibilityHidden(!task.unread)
+                .opacity(showDot ? 1 : 0)
+                .accessibilityHidden(!showDot)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(task.name)
@@ -252,7 +257,7 @@ struct InboxRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    if group != .snoozed, status == .attention || status == .working {
+                    if group != .snoozed, status == .attention {
                         Image(systemName: status.symbol)
                             .foregroundStyle(status.color)
                     }
@@ -280,6 +285,12 @@ struct InboxRow: View {
         if let desktopName { parts.append(desktopName) }
         return parts.joined(separator: " · ")
     }
+}
+
+/// Phone-only Inbox preferences (the phone merges several desktops, so it
+/// does not follow any one desktop's setting).
+enum InboxSettings {
+    static let workingLastKey = "inboxWorkingLast"
 }
 
 /// The blue dot of an unread task.

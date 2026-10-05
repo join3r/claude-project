@@ -95,8 +95,8 @@ final class AppModel {
     }
 
     /// Every paired desktop's tasks in the desktop inbox's groups (§8.3), in sidebar order.
-    func inboxPartition(now: Date) -> InboxPartition {
-        InboxPartition(desktops.compactMap { desktop in inboxes[desktop.id].map { (desktop.id, $0) } }, now: now)
+    func inboxPartition(now: Date, workingLast: Bool = false) -> InboxPartition {
+        InboxPartition(desktops.compactMap { desktop in inboxes[desktop.id].map { (desktop.id, $0) } }, now: now, workingLast: workingLast)
     }
 
         func attentionCount(for desktopId: String) -> Int {

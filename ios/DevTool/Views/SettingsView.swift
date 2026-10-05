@@ -29,6 +29,8 @@ struct SettingsView: View {
                     Text("Forgetting removes the desktop from this device. To cut off access completely, also revoke this device in DevTool → Settings → Mobile.")
                 }
 
+                InboxSection()
+
                 NotificationsSection()
 
                 SecuritySection()
@@ -101,6 +103,20 @@ private struct SecuritySection: View {
             return "Set a passcode in iOS Settings to use this, or turn it off."
         }
         return "Ask for \(methodName) before answering a permission request, question or plan. Allow and Deny on a notification then open the app first."
+    }
+}
+
+private struct InboxSection: View {
+    @AppStorage(InboxSettings.workingLastKey) private var workingLast = false
+
+    var body: some View {
+        Section {
+            Toggle("Move working tasks to the end", isOn: $workingLast)
+        } header: {
+            Text("Inbox")
+        } footer: {
+            Text("Tasks whose agent is still running sink below the ones waiting on you.")
+        }
     }
 }
 
