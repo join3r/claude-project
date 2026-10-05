@@ -90,7 +90,8 @@ export function partitionInbox(
   entries: { task: Task; project: Project }[],
   allStatuses: Record<string, TabStatusValue>,
   statusSince: Record<string, number>,
-  now: number
+  now: number,
+  { workingLast = false }: { workingLast?: boolean } = {}
 ): InboxPartition {
   const needsYou: InboxEntry[] = []
   const active: InboxEntry[] = []
@@ -119,6 +120,8 @@ export function partitionInbox(
   // Longest wait first — the point of the tier is surfacing what has been blocked longest.
   needsYou.sort((a, b) => (a.since ?? now) - (b.since ?? now))
   active.sort((a, b) => lastActivityAt(b.task) - lastActivityAt(a.task))
+  // Stable sort: working rows keep their recency order among themselves.
+  if (workingLast) active.sort((a, b) => Number(a.status === 'working') - Number(b.status === 'working'))
   settled.sort((a, b) => (inboxState(b.task).settledAt ?? 0) - (inboxState(a.task).settledAt ?? 0))
   snoozed.sort((a, b) => wakeAt(a.task) - wakeAt(b.task))
 

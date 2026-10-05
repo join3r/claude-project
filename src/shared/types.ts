@@ -447,6 +447,8 @@ export interface AppConfig {
   lastProjectId: string | null
   lastTaskId: string | null
   defaultSidebarTab: SidebarTab
+  /** Inbox: sink tasks whose agent is working to the bottom of their group. */
+  inboxWorkingLast: boolean
   /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
@@ -672,6 +674,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastProjectId: null,
   lastTaskId: null,
   defaultSidebarTab: 'inbox',
+  inboxWorkingLast: false,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
   taskRecencyHighlight: {

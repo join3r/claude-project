@@ -564,6 +564,16 @@ export default function Settings({ onClose }: Props): React.ReactElement {
 
             <Group>
               <GroupRow
+                label="Move working tasks to the end of the Inbox"
+                sub="Tasks whose agent is still running sink below the ones waiting on you."
+                trailing={
+                  <Switch
+                    checked={config.inboxWorkingLast}
+                    onChange={(inboxWorkingLast) => updateConfig({ inboxWorkingLast })}
+                  />
+                }
+              />
+              <GroupRow
                 label="Highlight recently focused tasks"
                 trailing={
                   <Switch

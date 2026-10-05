@@ -894,6 +894,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           statusSince={statusSince}
           activities={agentActivities}
           now={now}
+          workingLast={config?.inboxWorkingLast ?? false}
         />
       ) : (
       <div className="sidebar-list flex-1 overflow-y-auto py-1">

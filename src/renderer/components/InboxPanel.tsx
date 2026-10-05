@@ -27,6 +27,8 @@ type Props = {
   statusSince: Record<string, number>
   activities: Record<string, AgentActivity>
   now: number
+  /** Settings → Sidebar: working rows sink to the bottom of their group. */
+  workingLast?: boolean
 }
 
 const STATUS_LABEL: Record<NonNullable<TabStatusValue>, string> = {
@@ -42,14 +44,13 @@ const STATUS_LABEL: Record<NonNullable<TabStatusValue>, string> = {
  * identical and the amber stops meaning anything.
  */
 function StatusDot({ status }: { status: TabStatusValue }): React.ReactElement {
+  // Working rows never get here: InboxRow drops the dot while the agent runs.
   const stateClass =
-    status === 'working'
-      ? 'bg-status-working status-pulse'
-      : status === 'attention'
-        ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
-        : status === 'exited'
-          ? 'bg-status-exited'
-          : 'bg-accent'
+    status === 'attention'
+      ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
+      : status === 'exited'
+        ? 'bg-status-exited'
+        : 'bg-accent'
   return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stateClass}`} />
 }
 
@@ -121,6 +122,9 @@ function InboxRow({
 }): React.ReactElement {
   const { task, project, unread, yourTurn } = entry
   const activity = lastActivityAt(task)
+  // The agent has the ball: nothing for you to do yet, so the row recedes and
+  // drops its dot rather than pulsing for attention it does not need.
+  const working = entry.status === 'working'
 
   return (
     <div
@@ -128,6 +132,7 @@ function InboxRow({
         'group mx-1.5 px-2 py-1.5 rounded-md cursor-pointer text-sm text-text',
         'transition-colors duration-(--motion-fast)',
         turnClass(entry.status, yourTurn, selected),
+        working && !selected ? 'opacity-50 hover:opacity-100' : '',
         selected ? 'bg-sel' : 'hover:bg-surface-3'
       ].join(' ')}
       onClick={onSelect}
@@ -135,7 +140,7 @@ function InboxRow({
       title={agent.tooltip}
     >
       <div className="flex items-center gap-1.5">
-        {unread || entry.status || yourTurn
+        {!working && (unread || entry.status || yourTurn)
           ? <StatusDot status={entry.status} />
           : <span className="w-1.5 shrink-0" />}
         <span
@@ -229,7 +234,8 @@ export default function InboxPanel({
   allStatuses,
   statusSince,
   activities,
-  now
+  now,
+  workingLast = false
 }: Props): React.ReactElement {
   const [settledCollapsed, setSettledCollapsed] = useState(true)
   const [snoozedCollapsed, setSnoozedCollapsed] = useState(true)
@@ -242,8 +248,8 @@ export default function InboxPanel({
         entries.push({ task, project })
       }
     }
-    return partitionInbox(entries, allStatuses, statusSince, now)
-  }, [projects, allStatuses, statusSince, now])
+    return partitionInbox(entries, allStatuses, statusSince, now, { workingLast })
+  }, [projects, allStatuses, statusSince, now, workingLast])
 
   const total =
     partition.needsYou.length + partition.active.length +

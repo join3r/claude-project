@@ -222,6 +222,16 @@ describe('partitionInbox', () => {
     expect(result.settled.every(e => !e.yourTurn)).toBe(true)
     expect(result.snoozed.every(e => !e.yourTurn)).toBe(true)
   })
+
+  it('sinks working rows to the end of active only when asked', () => {
+    const busy = makeTask('busy', { eventAt: NOW }, { aiTabIds: ['w'] })
+    const withBusy = [...entries, { task: busy, project }]
+    const working = { ...statuses, w: 'working' as const }
+    expect(partitionInbox(withBusy, working, since, NOW).active.map(e => e.task.id))
+      .toEqual(['busy', 'recent', 'older'])
+    expect(partitionInbox(withBusy, working, since, NOW, { workingLast: true }).active.map(e => e.task.id))
+      .toEqual(['recent', 'older', 'busy'])
+  })
 })
 
 describe('snoozePresets', () => {
