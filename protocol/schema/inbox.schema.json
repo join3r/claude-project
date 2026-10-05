@@ -48,6 +48,11 @@
         "name": { "type": "string" },
         "lastInteractedAt": { "$ref": "#/$defs/unixMs" },
         "attentionAt": { "$ref": "#/$defs/unixMs" },
+        "eventAt": { "$ref": "#/$defs/unixMs", "description": "The task's last event: a hook notification or stop, a terminal bell, a process exit (SPEC.md §4.4)." },
+        "unread": { "const": true, "description": "Present while the desktop counts the task unread (SPEC.md §4.4)." },
+        "settledAt": { "$ref": "#/$defs/unixMs", "description": "Present while the task is settled (SPEC.md §4.4)." },
+        "snoozedUntil": { "$ref": "#/$defs/unixMs", "description": "Present while a timed snooze hasn't passed at generatedAt (SPEC.md §4.4)." },
+        "snoozeUntilAttention": { "const": true, "description": "Present while the task is snoozed until it needs the user (SPEC.md §4.4)." },
         "branch": { "type": "string", "description": "Present on a workspace task: the git branch of its worktree (SPEC.md §4.4)." },
         "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
       }

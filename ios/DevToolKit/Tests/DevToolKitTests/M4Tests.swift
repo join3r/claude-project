@@ -137,6 +137,19 @@ import Testing
         }
     }
 
+    @Test func taskTriageParams() throws {
+        let file = try Vectors.load("chat-messages.json")
+        let triage = try #require(file["taskTriage"])
+        #expect(!triage["params"].array.isEmpty)
+        for sample in triage["params"].array {
+            let parsed = try TaskTriageParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in triage["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try TaskTriageParams.parse(try JSONValue.parse(json.str)) }
+        }
+    }
+
     @Test func blockersThatRiskTheBranchAskAboutIt() {
         #expect(TaskCloseBlocker.allCases.filter(\.asksAboutBranch) == [.unmerged, .uncommittedAndUnmerged, .checkFailed])
     }
@@ -238,6 +251,30 @@ import Testing
         await connection.stop()
     }
 
+    @Test func taskTriageWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        desktop.features = [DesktopFeature.taskTriage]
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features([DesktopFeature.taskTriage]) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        try await connection.triage(taskId: "t", .snooze(until: 1_790_003_600_000))
+        #expect(desktop.requests.last?.op == TaskOp.triage)
+        #expect(desktop.requests.last?.params == .object(["taskId": "t", "action": "snooze", "until": .int(1_790_003_600_000)]))
+        try await connection.triage(taskId: "t", .snoozeUntilAttention)
+        try await connection.triage(taskId: "t", .read)
+        #expect(desktop.taskTriageParams == [
+            TaskTriageParams(taskId: "t", action: .snooze(until: 1_790_003_600_000)),
+            TaskTriageParams(taskId: "t", action: .snoozeUntilAttention),
+            TaskTriageParams(taskId: "t", action: .read),
+        ])
+        await connection.stop()
+    }
+
     @Test func olderDesktopListsNoFeatures() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
@@ -302,7 +339,7 @@ import Testing
         try await events.waitFor { $0 == .features([
             DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
-            DesktopFeature.pin,
+            DesktopFeature.pin, DesktopFeature.taskTriage,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let tabId = try await mock.newChat(taskId: "t-auth")

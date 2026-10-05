@@ -83,6 +83,19 @@ export const PIN_FEATURE = 'pin'
 export interface PinSetParams { projectId: string; taskId?: string; pinned: boolean }
 
 /**
+ * `task.triage` (SPEC.md §8.11): the desktop inbox's Mark read, Mark unread, Settle,
+ * Unsettle, Snooze and Unsnooze, for one task.
+ */
+export const TASK_TRIAGE_OP = 'task.triage'
+/** The handshake feature (§8.1) a desktop lists when it answers `task.triage` and sends the triage fields (§4.4). */
+export const TASK_TRIAGE_FEATURE = 'task.triage'
+export const TASK_TRIAGE_ACTIONS = ['read', 'unread', 'settle', 'unsettle', 'snooze', 'unsnooze'] as const
+export type TaskTriageAction = (typeof TASK_TRIAGE_ACTIONS)[number]
+
+/** A `snooze` carries exactly one of `until` and `untilAttention`; the other actions carry neither. */
+export interface TaskTriageParams { taskId: string; action: TaskTriageAction; until?: number; untilAttention?: true }
+
+/**
  * `chat.settings` (SPEC.md §8.5): change an open chat's permission mode, model or
  * effort, as the desktop composer's pickers do. An absent field stays as it is; an
  * empty `model` or `effort` goes back to Claude's settings default.
@@ -676,6 +689,26 @@ export function parsePinSetParams(params: unknown): PinSetParams {
   const out: PinSetParams = { projectId: str(o, 'projectId'), pinned: bool(o, 'pinned') }
   const taskId = optStr(o, 'taskId')
   if (taskId !== undefined) out.taskId = taskId
+  return out
+}
+
+/**
+ * `task.triage` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `taskId`, an unknown `action`, or a `snooze` without exactly one of `until`
+ * and `untilAttention: true`. Other actions drop both.
+ */
+export function parseTaskTriageParams(params: unknown): TaskTriageParams {
+  const o = obj(params, 'params')
+  const taskId = str(o, 'taskId')
+  const action = str(o, 'action')
+  if (!(TASK_TRIAGE_ACTIONS as readonly string[]).includes(action)) fail(`unknown action ${action}`)
+  const out: TaskTriageParams = { taskId, action: action as TaskTriageAction }
+  if (action !== 'snooze') return out
+  const until = optInt(o, 'until')
+  const untilAttention = flag(o, 'untilAttention')
+  if ((until !== undefined) === untilAttention) fail('snooze needs exactly one of until and untilAttention')
+  if (until !== undefined) out.until = until
+  else out.untilAttention = true
   return out
 }
 

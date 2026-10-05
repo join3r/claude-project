@@ -1,4 +1,5 @@
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
+import { isSettled, isSnoozed, isUnread } from '../../shared/inbox-state'
 import {
   isHomeTask,
   pinnedItemKey,
@@ -56,13 +57,32 @@ function buildTab(tab: Tab & { type: MobileTabType }, lookup: InboxTabLookup): M
   return out
 }
 
-function buildTask(task: Task, lookup: InboxTabLookup): MobileInboxTask {
+/**
+ * The task's triage state as the desktop inbox reads it (SPEC.md §4.4), through the
+ * same predicates, so the phone groups it the way the window does. A snooze wins over
+ * a settle, as in `partitionInbox`.
+ */
+function addTriage(out: MobileInboxTask, task: Task, now: number): void {
+  const inbox = task.inbox
+  if (!inbox) return
+  if (inbox.eventAt !== undefined) out.eventAt = inbox.eventAt
+  if (isUnread(task)) out.unread = true
+  if (isSnoozed(task, now)) {
+    if (inbox.snoozeUntilAttention) out.snoozeUntilAttention = true
+    else if (inbox.snoozedUntil !== undefined) out.snoozedUntil = inbox.snoozedUntil
+  } else if (isSettled(task) && inbox.settledAt !== undefined) {
+    out.settledAt = inbox.settledAt
+  }
+}
+
+function buildTask(task: Task, lookup: InboxTabLookup, now: number): MobileInboxTask {
   const tabs = [...(task.tabs?.left ?? []), ...(task.tabs?.right ?? [])]
     .filter(isMobileTab)
     .map((tab) => buildTab(tab, lookup))
   const out: MobileInboxTask = { id: task.id, name: task.name, tabs }
   if (task.lastInteractedAt !== undefined) out.lastInteractedAt = task.lastInteractedAt
   if (task.inbox?.attentionAt !== undefined) out.attentionAt = task.inbox.attentionAt
+  addTriage(out, task, now)
   if (task.workspace) out.branch = task.workspace.branchName
   return out
 }
@@ -72,12 +92,12 @@ export function isVisibleOnMobile(project: Project): boolean {
   return !project.hideFromMobile && !isSpentEphemeralProject(project)
 }
 
-function buildProject(project: Project, lookup: InboxTabLookup): MobileInboxProject {
+function buildProject(project: Project, lookup: InboxTabLookup, now: number): MobileInboxProject {
   const out: MobileInboxProject = {
     id: project.id,
     name: project.name,
     remote: !!project.ssh,
-    tasks: (project.tasks ?? []).filter((task) => !isHomeTask(task)).map((task) => buildTask(task, lookup))
+    tasks: (project.tasks ?? []).filter((task) => !isHomeTask(task)).map((task) => buildTask(task, lookup, now))
   }
   if (project.emoji) out.emoji = project.emoji
   return out
@@ -138,7 +158,7 @@ export function buildInbox(
   const inbox: MobileInbox = {
     desktop: { id: desktop.id, name: desktop.name },
     generatedAt: now,
-    projects: visible.map((project) => buildProject(project, lookup))
+    projects: visible.map((project) => buildProject(project, lookup, now))
   }
   const pinned = buildPinned(data, visible)
   if (pinned.length > 0) inbox.pinned = pinned

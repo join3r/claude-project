@@ -188,6 +188,8 @@ public enum DesktopFeature {
     public static let chatImage = "chat.image"
     /// The desktop answers `pin.set` (§8.10).
     public static let pin = "pin"
+    /// The desktop answers `task.triage` and sends the triage fields (§8.11, §4.4).
+    public static let taskTriage = "task.triage"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.
@@ -329,6 +331,11 @@ extension Inbox {
             id: id, name: name,
             lastInteractedAt: try optInt(o, "lastInteractedAt"),
             attentionAt: try optInt(o, "attentionAt"),
+            eventAt: try optInt(o, "eventAt"),
+            unread: o["unread"] == .bool(true),
+            settledAt: try optInt(o, "settledAt"),
+            snoozedUntil: try optInt(o, "snoozedUntil"),
+            snoozeUntilAttention: o["snoozeUntilAttention"] == .bool(true),
             branch: try optStr(o, "branch"),
             tabs: tabs
         )
@@ -384,6 +391,11 @@ extension InboxTask {
         var o: JSONObject = ["id": .string(id), "name": .string(name)]
         if let lastInteractedAt { o["lastInteractedAt"] = .int(lastInteractedAt) }
         if let attentionAt { o["attentionAt"] = .int(attentionAt) }
+        if let eventAt { o["eventAt"] = .int(eventAt) }
+        if unread { o["unread"] = .bool(true) }
+        if let settledAt { o["settledAt"] = .int(settledAt) }
+        if let snoozedUntil { o["snoozedUntil"] = .int(snoozedUntil) }
+        if snoozeUntilAttention { o["snoozeUntilAttention"] = .bool(true) }
         if let branch { o["branch"] = .string(branch) }
         o["tabs"] = .array(tabs.map(\.json))
         return .object(o)

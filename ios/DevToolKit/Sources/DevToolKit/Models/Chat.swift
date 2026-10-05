@@ -466,6 +466,40 @@ public struct PinSetParams: Sendable, Equatable {
     }
 }
 
+/// `task.triage` (§8.11) params: one of the desktop inbox's row actions.
+public struct TaskTriageParams: Sendable, Equatable {
+    public enum Action: Sendable, Equatable {
+        case read
+        case unread
+        case settle
+        case unsettle
+        /// Until a Unix-ms time.
+        case snooze(until: Int64)
+        /// Until a tab next needs the user.
+        case snoozeUntilAttention
+        case unsnooze
+
+        public var name: String {
+            switch self {
+            case .read: "read"
+            case .unread: "unread"
+            case .settle: "settle"
+            case .unsettle: "unsettle"
+            case .snooze, .snoozeUntilAttention: "snooze"
+            case .unsnooze: "unsnooze"
+            }
+        }
+    }
+
+    public var taskId: String
+    public var action: Action
+
+    public init(taskId: String, action: Action) {
+        self.taskId = taskId
+        self.action = action
+    }
+}
+
 /// Why `task.close` left a task open (§8.7).
 public enum TaskCloseBlocker: String, Sendable, Equatable, CaseIterable {
     case unsaved
@@ -556,6 +590,8 @@ public enum TaskOp {
     public static let closeTab = "tab.close"
     /// `pin.set` (§8.10): pin or unpin a project or task.
     public static let setPin = "pin.set"
+    /// `task.triage` (§8.11): read, unread, settle, snooze and their undo.
+    public static let triage = "task.triage"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
 }
@@ -1005,6 +1041,46 @@ extension PinSetParams {
         var fields: JSONObject = ["projectId": .string(pin.projectId)]
         if let taskId = pin.taskId { fields["taskId"] = .string(taskId) }
         fields["pinned"] = .bool(pinned)
+        return .object(fields)
+    }
+}
+
+extension TaskTriageParams {
+    /// The desktop's side: a missing `taskId`, an unknown `action`, or a
+    /// `snooze` without exactly one of `until` and `untilAttention: true`
+    /// throws (`bad-request`). Other actions ignore both.
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> TaskTriageParams {
+        let o = try Fields(value, "params")
+        let taskId = try o.str("taskId")
+        let name = try o.str("action")
+        let action: Action
+        switch name {
+        case "read": action = .read
+        case "unread": action = .unread
+        case "settle": action = .settle
+        case "unsettle": action = .unsettle
+        case "unsnooze": action = .unsnooze
+        case "snooze":
+            let until = try o.optInt("until")
+            let untilAttention = o.flag("untilAttention")
+            switch (until, untilAttention) {
+            case (let until?, false): action = .snooze(until: until)
+            case (nil, true): action = .snoozeUntilAttention
+            default: throw ProtocolError("snooze needs exactly one of until and untilAttention")
+            }
+        default:
+            throw ProtocolError("unknown action \(name)")
+        }
+        return TaskTriageParams(taskId: taskId, action: action)
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["taskId": .string(taskId), "action": .string(action.name)]
+        switch action {
+        case .snooze(let until): fields["until"] = .int(until)
+        case .snoozeUntilAttention: fields["untilAttention"] = .bool(true)
+        default: break
+        }
         return .object(fields)
     }
 }

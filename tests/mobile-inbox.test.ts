@@ -192,6 +192,35 @@ describe('buildInbox', () => {
     expect(buildInbox(data([project('p1', [])]), lookup(), DESKTOP, NOW)).not.toHaveProperty('pinned')
   })
 
+  it('carries the triage state the desktop inbox groups by (SPEC.md §4.4)', () => {
+    const tasks = [
+      task('unread', [], { inbox: { eventAt: 10, visitedAt: 5 } }),
+      task('read', [], { inbox: { eventAt: 10, visitedAt: 20 } }),
+      task('forced', [], { inbox: { visitedAt: 20, forcedUnread: true } }),
+      task('settled', [], { inbox: { eventAt: 10, settledAt: 30, visitedAt: 30 } }),
+      task('unsettled', [], { inbox: { eventAt: 40, settledAt: 30, visitedAt: 30 } }),
+      task('timed', [], { inbox: { snoozedAt: 1, snoozedUntil: NOW + 60_000, settledAt: 30 } }),
+      task('expired', [], { inbox: { snoozedAt: 1, snoozedUntil: NOW - 1 } }),
+      task('attention', [], { inbox: { snoozedAt: 50, snoozeUntilAttention: true } }),
+      task('woken', [], { inbox: { snoozedAt: 50, snoozeUntilAttention: true, attentionAt: 60 } })
+    ]
+    const inbox = buildInbox(data([project('p1', tasks)]), lookup(), DESKTOP, NOW)
+    const triage = Object.fromEntries(inbox.projects[0].tasks.map(({ id, eventAt, unread, settledAt, snoozedUntil, snoozeUntilAttention }) =>
+      [id, JSON.parse(JSON.stringify({ eventAt, unread, settledAt, snoozedUntil, snoozeUntilAttention }))]))
+    expect(triage).toEqual({
+      unread: { eventAt: 10, unread: true },
+      read: { eventAt: 10 },
+      forced: { unread: true },
+      settled: { eventAt: 10, settledAt: 30 },
+      unsettled: { eventAt: 40, unread: true },
+      // Snooze wins over settle, as in the window's partitionInbox.
+      timed: { snoozedUntil: NOW + 60_000 },
+      expired: {},
+      attention: { snoozeUntilAttention: true },
+      woken: {}
+    })
+  })
+
   it('does not share structure with the input', () => {
     const p = project('p1', [task('t1', [tab('a', 'terminal')])])
     const inbox = buildInbox(data([p]), lookup(), DESKTOP, NOW)

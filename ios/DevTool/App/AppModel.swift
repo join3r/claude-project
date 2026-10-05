@@ -20,6 +20,8 @@ final class AppModel {
     var requestedChat: ChatRoute?
     /// A failed Pin / Unpin (§8.10); `RootView` shows it and clears it.
     var pinError: String?
+    /// A failed Settle, Snooze or Mark unread (§8.11); `RootView` shows it and clears it.
+    var triageError: String?
 
     /// Push registration (SPEC.md §7.4); told about every established session.
     @ObservationIgnored weak var push: PushManager?
@@ -92,7 +94,12 @@ final class AppModel {
         return nil
     }
 
-    func attentionCount(for desktopId: String) -> Int {
+    /// Every paired desktop's tasks in the desktop inbox's groups (§8.3), in sidebar order.
+    func inboxPartition(now: Date) -> InboxPartition {
+        InboxPartition(desktops.compactMap { desktop in inboxes[desktop.id].map { (desktop.id, $0) } }, now: now)
+    }
+
+        func attentionCount(for desktopId: String) -> Int {
         inboxes[desktopId]?.projects.reduce(0) { sum, project in
             sum + project.tasks.filter { $0.summaryStatus == .attention }.count
         } ?? 0
@@ -176,6 +183,45 @@ final class AppModel {
         guard var inbox = inboxes[desktopId], inbox.pinned.contains(pin) != pinned else { return }
         if pinned { inbox.pinned.append(pin) } else { inbox.pinned.removeAll { $0 == pin } }
         inboxes[desktopId] = inbox
+    }
+
+    /// `task.triage` (§8.11). The row moves at once and the next inbox
+    /// confirms it. A failure puts it back, unless an inbox has replaced it
+    /// meanwhile, and sets `triageError`; a failed `read` is left to the next inbox.
+    func triage(_ action: TaskTriageParams.Action, task ref: TaskRef) async {
+        guard let connection = connections[ref.desktopId] else {
+            if action != .read { triageError = DesktopConnectionError.notConnected.localizedDescription }
+            return
+        }
+        let before = task(ref)?.task
+        let applied = updateTask(ref) { $0.applying(action, now: Date()) }
+        do {
+            try await connection.triage(taskId: ref.taskId, action)
+        } catch {
+            guard action != .read else { return }
+            if let before, let applied, task(ref)?.task == applied { updateTask(ref) { _ in before } }
+            triageError = error.localizedDescription
+        }
+    }
+
+    /// Opening an unread task reads it on the desktop too (§8.3).
+    func markRead(_ ref: TaskRef) {
+        guard supports(DesktopFeature.taskTriage, on: ref.desktopId), !isOffline(ref.desktopId),
+              task(ref)?.task.unread == true else { return }
+        Task { await triage(.read, task: ref) }
+    }
+
+    @discardableResult
+    private func updateTask(_ ref: TaskRef, _ change: (InboxTask) -> InboxTask) -> InboxTask? {
+        guard var inbox = inboxes[ref.desktopId] else { return nil }
+        for p in inbox.projects.indices {
+            guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == ref.taskId }) else { continue }
+            let next = change(inbox.projects[p].tasks[t])
+            inbox.projects[p].tasks[t] = next
+            inboxes[ref.desktopId] = inbox
+            return next
+        }
+        return nil
     }
 
     // MARK: - Chat cache

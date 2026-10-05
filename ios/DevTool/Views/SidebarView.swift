@@ -9,6 +9,9 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
+            Label("Inbox", systemImage: "tray")
+                .badge(model.inboxPartition(now: Date()).unreadCount)
+                .tag(SidebarSelection.inbox)
             if model.desktops.count > 1 {
                 Label("All desktops", systemImage: "square.stack.3d.up")
                     .badge(model.desktops.reduce(0) { $0 + model.attentionCount(for: $1.id) })

@@ -25,6 +25,8 @@ import {
   parseTabCloseParams,
   parsePinSetParams,
   type PinSetParams,
+  parseTaskTriageParams,
+  type TaskTriageParams,
   type TaskNewParams,
   type TaskCloseParams,
   type TaskCloseResult,
@@ -196,6 +198,8 @@ export interface MobileServiceDeps {
   closeTab?(tabId: string): Promise<{ ok: true } | { ok: false; code: string; message: string }>
   /** `pin.set` (SPEC.md §8.10). Without it the op answers `unsupported`. */
   setPin?(params: PinSetParams): { ok: true } | { ok: false; code: string; message: string }
+  /** `task.triage` (SPEC.md §8.11). Without it the op answers `unsupported`. */
+  triageTask?(params: TaskTriageParams): { ok: true } | { ok: false; code: string; message: string }
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -856,6 +860,22 @@ export class MobileService {
       }
       const outcome = this.deps.setPin(params)
       this.log(`pin.set project=${params.projectId}${params.taskId ? ` task=${params.taskId}` : ''} pinned=${params.pinned} phone=${session.phoneId}${outcome.ok ? '' : ` error=${outcome.code}`}`)
+      session.channel.send(outcome.ok
+        ? { t: 'res', id, ok: true, result: {} }
+        : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })
+      return
+    }
+    if (message.op === AppOp.TaskTriage && this.deps.triageTask) {
+      let params: TaskTriageParams
+      try {
+        params = parseTaskTriageParams(message.params)
+      } catch (err) {
+        if (!(err instanceof ProtocolError)) throw err
+        session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
+        return
+      }
+      const outcome = this.deps.triageTask(params)
+      this.log(`task.triage task=${params.taskId} action=${params.action} phone=${session.phoneId}${outcome.ok ? '' : ` error=${outcome.code}`}`)
       session.channel.send(outcome.ok
         ? { t: 'res', id, ok: true, result: {} }
         : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })

@@ -70,7 +70,7 @@ Each sample is `{ json, expected }`. Parse the `json` string with the matching p
 | `phoneHello[]` | message 1 payload |
 | `desktopHello[]` | message 2 payload |
 | `appMessages[]` | transport message. `expected: null` means "unknown type, ignore it". A `req` with an unknown `op` still parses, and the receiver answers `unsupported`. `res` keeps `result` as raw JSON (for `inbox.get`, validate it as an `Inbox`). A missing `error.message` becomes `""`. |
-| `inboxWithUnknownFields` | `Inbox` from a newer desktop: extra fields are dropped, `null` optional fields are treated as absent, an unknown tab `type` is kept as a string, and an unknown `status` becomes `"idle"` |
+| `inboxWithUnknownFields` | `Inbox` from a newer desktop: extra fields are dropped, `null` optional fields are treated as absent, `unread` and `snoozeUntilAttention` other than `true` are absent, an unknown tab `type` is kept as a string, and an unknown `status` becomes `"idle"` |
 | `invalid.phoneHello[]`, `invalid.desktopHello[]`, `invalid.appMessages[]` | JSON strings that must fail to parse |
 | `versionNegotiation[]` | `{ local, remote, result }`: `negotiateVersion(local, remote)` returns `{ ok: true, version }` or `{ ok: false, update: "local" \| "remote" }`, where `update` names the side that is too old |
 
@@ -103,6 +103,7 @@ Each sample is `{ json, expected }` (plus `op` where the parser needs it). Parse
 | `taskClose.invalid.params[]`, `taskClose.invalid.results[]` | JSON strings that must fail to parse (a result without `closed`, or `closed: false` without `blocker`, among them) |
 | `tabClose.params[]`, `tabClose.invalid.params[]` | `{ json, expected }` for `tab.close` (§8.8) params `{ tabId }`, and JSON strings that must fail to parse |
 | `pinSet.params[]`, `pinSet.invalid.params[]` | `{ json, expected }` for `pin.set` (§8.10) params `{ projectId, taskId?, pinned }` (`taskId: null` is absent), and JSON strings that must fail to parse |
+| `taskTriage.params[]`, `taskTriage.invalid.params[]` | `{ json, expected }` for `task.triage` (§8.11) params `{ taskId, action, until?, untilAttention? }` (`until` and `untilAttention` are kept only on `snooze`, which needs exactly one of them), and JSON strings that must fail to parse |
 | `image.params[]`, `image.results[]`, `image.invalid.params[]`, `image.invalid.results[]` | `{ json, expected }` for `chat.image` (§8.9) params `{ tabId, itemId, index, maxSide? }` (`maxSide` clamped to 64…4096) and results `{ mediaType, data }`, and JSON strings that must fail to parse |
 | `settings.params[]` | `{ json, expected }` for `chat.settings` (§8.5) params `{ tabId, mode?, model?, effort? }`. `""` is kept (it means the default); `null` is absent. |
 | `settings.invalid.params[]` | JSON strings that must fail to parse (no field to change and an unknown `mode` among them) |

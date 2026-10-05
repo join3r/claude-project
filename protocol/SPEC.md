@@ -151,6 +151,8 @@ Desktop rules:
     "tasks": [{
       "id": "…", "name": "fix-auth", "lastInteractedAt": 1790000000000,
       "attentionAt": 1790000000000,
+      "eventAt": 1790000000000, "unread": true,
+      "settledAt": 1790000000000, "snoozedUntil": 1790000000000, "snoozeUntilAttention": true,
       "branch": "fix-auth",
       "tabs": [{
         "id": "…", "type": "claude-chat", "title": "Claude",
@@ -166,6 +168,7 @@ Desktop rules:
 - Only agent/terminal tab types are included: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
 - `activity` is an optional short label derived from `AgentActivity`.
 - `branch` is present only on a workspace task (one with its own git worktree): the branch the worktree is on.
+- The triage fields carry the desktop inbox's state for the task (§8.11). `eventAt` is the task's last event: a hook notification or stop, a terminal bell, a process exit. `unread: true` is present while the desktop counts the task unread. `settledAt` is present while the task is settled (an event after the settle un-settles it). `snoozedUntil` is present while a timed snooze hasn't passed at `generatedAt`, and `snoozeUntilAttention: true` while the task is snoozed until it needs the user. A desktop sends at most one of the two snooze fields, and drops `settledAt` from a snoozed task. A receiver treats `unread` and `snoozeUntilAttention` other than `true` as absent.
 - Home tasks, ephemeral-but-spent projects, and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.
 - `pinned` is the desktop sidebar's Pinned list in its order: a project, or one of its tasks when `taskId` is set. A pin whose project or task isn't in `projects` (hidden, spent, gone, a home task) is left out, and the field is absent when nothing is left. A phone ignores a pin it can't resolve.
@@ -372,7 +375,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.6 adds `"task.workspace"`, §8.7 `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"` and §8.10 `"pin"`. A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, "New workspace" only for one that lists `task.workspace`, and the close actions only for one that lists the matching op. An older desktop answers an op it doesn't know `unsupported` anyway, and one without `task.workspace` ignores `workspace` and starts a plain task, so a phone must not send it there. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.6 adds `"task.workspace"`, §8.7 `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"` and §8.11 `"task.triage"`. A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, "New workspace" only for one that lists `task.workspace`, and the close actions only for one that lists the matching op. An older desktop answers an op it doesn't know `unsupported` anyway, and one without `task.workspace` ignores `workspace` and starts a plain task, so a phone must not send it there. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (phone → desktop `req`)
 
@@ -393,6 +396,7 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - **Close tab:** a swipe action on a tab row (for desktops that list `tab.close`), confirmed first for an agent that is working or waiting.
 - **Tool images:** a tool row with `images` (from a desktop that lists `chat.image`) shows a strip of thumbnails under it, fetched with a small `maxSide`. Tapping one opens it full screen, fetched again at the screen's size, with zoom and the share sheet. Against a desktop without the feature the row only says how many images there are. Fetched images are cached in memory for the session, not on disk.
 - **Pinned:** a "Pinned" section above the projects lists the desktop's `pinned` entries in order, a project as a row that opens its tasks and a task as a task row. For a desktop that lists `pin`, a project's header menu and a task row's swipe and context menu offer Pin or Unpin, disabled while the desktop is offline. Against a desktop without the feature the section is still shown, read-only.
+- **Inbox:** an Inbox entry above the desktops, and the screen the app opens to, lists every task of every paired desktop in the desktop inbox's groups: **Needs you** (a tab needs the user, longest wait first), then the rest by last activity (`eventAt` or `lastInteractedAt`), then **Settled** and **Snoozed**, both collapsed. A timed snooze ends on the phone's clock at `snoozedUntil`. Unread tasks are marked. For a desktop that lists `task.triage`, a task row offers Settle (or Unsettle), Snooze with the desktop's presets (until it needs you, 1 hour, this evening at 18:00, tomorrow at 9:00, Monday at 9:00, in the phone's time zone), Unsnooze, and Mark read or unread, disabled while the desktop is offline. Opening an unread task, or a task's screen staying open while it turns unread, sends `read`. Against a desktop without the feature the groups are still shown, read-only.
 - **Require Face ID for approvals:** an app setting, off by default. When it is on, every answer to a permission, question or plan in the app asks for device-owner authentication first (Face ID, with the passcode as fallback), and the notification's Allow and Deny open the app, authenticate and then answer instead of answering in the background.
 - **Offline:** the phone keeps the last transcript of each chat it has opened (the view items it holds, at most the §6.4 window) next to the cached inbox, and shows it read-only under the offline banner when the desktop is offline. Returning to the foreground reconnects at once rather than waiting out the relay backoff. Nothing is queued, as before.
 
@@ -471,3 +475,21 @@ A desktop that lists `"task.workspace"` accepts `workspace: true` in `task.new`'
 - Pins (`pinned: true`) or unpins (`false`) the project, or its task `taskId`, in the desktop sidebar's Pinned list, as the sidebar's Pin and Unpin do. A new pin goes to the end of the list. Pinning what is already pinned, or unpinning what isn't, changes nothing and still answers `{}`. The desktop saves the change as a main-side projects commit, and the new list arrives in the next `inbox` event.
 - A desktop that implements this op lists `"pin"` in its features (§8.1).
 - Errors: unknown `projectId`, a project hidden from mobile (§4.4), or an unknown or home `taskId` → `not-found`. Missing `projectId`, a `pinned` that isn't a boolean, or a malformed `taskId` → `bad-request`.
+
+### 8.11 `task.triage` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `task.triage` | `{ taskId, action, until?, untilAttention? }` | `{}` |
+
+- Applies one of the desktop inbox's actions to the task, as its row actions and context menu do. `action` is one of:
+  - `read`: marks the task visited, as switching to it on the desktop does, and clears a manual unread.
+  - `unread`: marks it unread until the next visit.
+  - `settle`: settles it ("done for now"). This also marks it read and ends a snooze. An event after the settle un-settles it.
+  - `unsettle`: undoes a settle.
+  - `snooze`: hides it until `until` (Unix ms), or, with `untilAttention: true`, until a tab next needs the user. Exactly one of the two must be present. This also marks it read and replaces a settle.
+  - `unsnooze`: ends a snooze.
+- An action that wouldn't change what the inbox shows (`read` on a read task, `unsettle` on a task that isn't settled, and so on) changes nothing and still answers `{}`. Otherwise the desktop saves the change as a main-side projects commit and answers once it is made. The new state arrives in the next `inbox` event (§4.4).
+- `until` and `untilAttention` are ignored on actions other than `snooze`.
+- A desktop that implements this op lists `"task.triage"` in its features (§8.1) and sends the triage fields (§4.4).
+- Errors: unknown `taskId`, a home task, or a task in a project hidden from mobile → `not-found`. Missing `taskId`, an unknown `action`, or a `snooze` without exactly one of `until` (a non-negative integer) and `untilAttention: true` → `bad-request`.

@@ -68,6 +68,7 @@ import { addChatTab } from './mobile/new-chat'
 import { addTaskWithChat, makeTaskWorkspace, newTaskProject } from './mobile/new-task'
 import { closeTask, findClosableTab, removeTabFromData } from './mobile/close-task'
 import { setPinInData } from './mobile/pin'
+import { triageTaskInData } from './mobile/triage'
 import {
   AppErrorCode,
   CHAT_IMAGE_FEATURE,
@@ -77,6 +78,7 @@ import {
   TAB_CLOSE_FEATURE,
   TASK_CLOSE_FEATURE,
   TASK_NEW_FEATURE,
+  TASK_TRIAGE_FEATURE,
   TASK_WORKSPACE_FEATURE
 } from '../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../shared/mobile'
@@ -349,7 +351,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_WORKSPACE_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE],
+        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_WORKSPACE_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -425,6 +427,12 @@ export class AppRuntime {
       },
       setPin: (params) => {
         const outcome = setPinInData(this.projectsStore.peek(), params)
+        if (!outcome.ok) return outcome
+        if (outcome.changed) this.commitProjects(outcome.data)
+        return { ok: true }
+      },
+      triageTask: (params) => {
+        const outcome = triageTaskInData(this.projectsStore.peek(), params, Date.now())
         if (!outcome.ok) return outcome
         if (outcome.changed) this.commitProjects(outcome.data)
         return { ok: true }

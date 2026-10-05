@@ -1034,6 +1034,74 @@
       ]
     }
   },
+  "taskTriage": {
+    "params": [
+      {
+        "json": "{\"taskId\":\"t1\",\"action\":\"read\"}",
+        "expected": {
+          "taskId": "t1",
+          "action": "read"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"action\":\"unread\",\"until\":5}",
+        "expected": {
+          "taskId": "t1",
+          "action": "unread"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"action\":\"settle\"}",
+        "expected": {
+          "taskId": "t1",
+          "action": "settle"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"action\":\"unsettle\"}",
+        "expected": {
+          "taskId": "t1",
+          "action": "unsettle"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":1790003600000}",
+        "expected": {
+          "taskId": "t1",
+          "action": "snooze",
+          "until": 1790003600000
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"action\":\"snooze\",\"untilAttention\":true,\"until\":null}",
+        "expected": {
+          "taskId": "t1",
+          "action": "snooze",
+          "untilAttention": true
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"action\":\"unsnooze\",\"untilAttention\":true,\"extra\":1}",
+        "expected": {
+          "taskId": "t1",
+          "action": "unsnooze"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"action\":\"read\"}",
+        "{\"taskId\":\"t1\"}",
+        "{\"taskId\":\"t1\",\"action\":\"archive\"}",
+        "{\"taskId\":\"t1\",\"action\":\"snooze\"}",
+        "{\"taskId\":\"t1\",\"action\":\"snooze\",\"untilAttention\":false}",
+        "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":1790003600000,\"untilAttention\":true}",
+        "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":-1}",
+        "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":\"1790003600000\"}",
+        "null"
+      ]
+    }
+  },
   "image": {
     "params": [
       {

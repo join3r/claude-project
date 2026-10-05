@@ -11,37 +11,7 @@ struct TaskListView: View {
 
     var body: some View {
         List(selection: $selection) {
-            let problems = scopeDesktops.filter { model.state(of: $0.id).problem != nil }
-            if !problems.isEmpty {
-                Section {
-                    ForEach(problems) { desktop in
-                        if let problem = model.state(of: desktop.id).problem {
-                            ConnectionProblemBanner(
-                                desktopName: desktop.name,
-                                problem: problem,
-                                onPairAgain: model.presentPairing
-                            )
-                        }
-                    }
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listSectionSpacing(.compact)
-            }
-            let offline = scopeDesktops.filter { model.isOffline($0.id) && model.state(of: $0.id).problem == nil }
-            if !offline.isEmpty {
-                Section {
-                    ForEach(offline) { desktop in
-                        OfflineBanner(
-                            title: scopeDesktops.count == 1 ? "Desktop" : desktop.name,
-                            lastSeen: offlineLastSeen(desktop)
-                        )
-                    }
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listSectionSpacing(.compact)
-            }
+            DesktopBanners(desktops: scopeDesktops)
             ForEach(scopeDesktops) { desktop in
                 desktopSections(desktop)
             }
@@ -234,7 +204,7 @@ struct TaskListView: View {
 
     private var scopeDesktops: [DesktopRecord] {
         switch scope {
-        case .all: model.desktops
+        case .all, .inbox: model.desktops
         case .desktop(let id): model.desktops.filter { $0.id == id }
         }
     }
@@ -242,13 +212,9 @@ struct TaskListView: View {
     private var title: String {
         switch scope {
         case .all: "All desktops"
+        case .inbox: "Inbox"
         case .desktop(let id): model.desktop(id)?.name ?? "Desktop"
         }
-    }
-
-    private func offlineLastSeen(_ desktop: DesktopRecord) -> Date? {
-        if case .offline(let seen?) = model.state(of: desktop.id) { return seen }
-        return desktop.lastSeen
     }
 
     /// Tasks that need you first (newest attention first), then by last interaction.
@@ -260,6 +226,51 @@ struct TaskListView: View {
             if a.sortTimestamp != b.sortTimestamp { return a.sortTimestamp > b.sortTimestamp }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
+    }
+}
+
+/// Connection problems, then "offline · last seen" banners, for the desktops a list shows.
+struct DesktopBanners: View {
+    @Environment(AppModel.self) private var model
+    let desktops: [DesktopRecord]
+
+    var body: some View {
+        let problems = desktops.filter { model.state(of: $0.id).problem != nil }
+        if !problems.isEmpty {
+            Section {
+                ForEach(problems) { desktop in
+                    if let problem = model.state(of: desktop.id).problem {
+                        ConnectionProblemBanner(
+                            desktopName: desktop.name,
+                            problem: problem,
+                            onPairAgain: model.presentPairing
+                        )
+                    }
+                }
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listSectionSpacing(.compact)
+        }
+        let offline = desktops.filter { model.isOffline($0.id) && model.state(of: $0.id).problem == nil }
+        if !offline.isEmpty {
+            Section {
+                ForEach(offline) { desktop in
+                    OfflineBanner(
+                        title: desktops.count == 1 ? "Desktop" : desktop.name,
+                        lastSeen: lastSeen(desktop)
+                    )
+                }
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .listSectionSpacing(.compact)
+        }
+    }
+
+    private func lastSeen(_ desktop: DesktopRecord) -> Date? {
+        if case .offline(let seen?) = model.state(of: desktop.id) { return seen }
+        return desktop.lastSeen
     }
 }
 
@@ -294,9 +305,12 @@ struct TaskRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(task.name)
-                    .font(.body.weight(task.summaryStatus == .attention ? .semibold : .regular))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if task.unread { UnreadDot() }
+                    Text(task.name)
+                        .font(.body.weight(task.summaryStatus == .attention || task.unread ? .semibold : .regular))
+                        .lineLimit(1)
+                }
                 if let branch = task.branch {
                     Label(branch, systemImage: "arrow.triangle.branch")
                         .font(.caption)

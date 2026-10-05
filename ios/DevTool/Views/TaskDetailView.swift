@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TaskDetailView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     let ref: TaskRef
     /// The phone closed this task (§8.7); the caller leaves the screen.
     var onClosed: () -> Void = {}
@@ -43,6 +44,9 @@ struct TaskDetailView: View {
                     }
                     LabeledContent("Status") {
                         StatusBadge(status: task.summaryStatus)
+                    }
+                    if let triage = triageText(task) {
+                        LabeledContent("Inbox", value: triage)
                     }
                     if let last = task.lastInteractedAt {
                         LabeledContent("Last used") {
@@ -126,7 +130,21 @@ struct TaskDetailView: View {
             }
             .navigationTitle(task.name)
             .navigationBarTitleDisplayMode(.inline)
+            // Reading the task here reads it on the desktop too (§8.3), and so
+            // does an event arriving while it is on screen. Marking it unread
+            // here sticks until the next event.
+            .onAppear { readIfActive() }
+            .onChange(of: task.eventAt) { readIfActive() }
+            .onChange(of: scenePhase) { readIfActive() }
             .toolbar {
+                if model.supports(DesktopFeature.taskTriage, on: ref.desktopId) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu("Inbox", systemImage: "tray") {
+                            TriageMenuItems(ref: ref, task: task, now: Date())
+                        }
+                        .disabled(offline)
+                    }
+                }
                 if model.supports(DesktopFeature.pin, on: ref.desktopId) {
                     let pinned = model.inboxes[ref.desktopId]?.isPinned(projectId: project.id, taskId: task.id) ?? false
                     ToolbarItem(placement: .topBarTrailing) {
@@ -195,6 +213,30 @@ struct TaskDetailView: View {
         } catch {
             closingTabs.remove(tab.id)
             closeTabError = error.localizedDescription
+        }
+    }
+
+    private func readIfActive() {
+        if scenePhase == .active { model.markRead(ref) }
+    }
+
+    /// The task's triage state, when it isn't simply in the inbox.
+    private func triageText(_ task: InboxTask) -> String? {
+        let now = Date()
+        switch task.inboxGroup(now: now) {
+        case .snoozed:
+            if task.snoozeUntilAttention { return "Snoozed until it needs you" }
+            guard let until = task.snoozedUntil else { return "Snoozed" }
+            let date = Date(unixMilliseconds: until)
+            let calendar = Calendar.current
+            let time = date.formatted(date: .omitted, time: .shortened)
+            if calendar.isDateInToday(date) { return "Snoozed until \(time)" }
+            if calendar.isDateInTomorrow(date) { return "Snoozed until tomorrow \(time)" }
+            return "Snoozed until \(date.formatted(.dateTime.weekday(.wide).hour().minute()))"
+        case .settled:
+            return "Settled"
+        case .needsYou, .active:
+            return task.unread ? "Unread" : nil
         }
     }
 

@@ -140,7 +140,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -193,6 +193,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
     closeTask: options.closeTask,
     closeTab: options.closeTab,
     setPin: options.setPin,
+    triageTask: options.triageTask,
     chat: options.chat
   }
   const service = new MobileService(deps)
@@ -211,7 +212,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   }
 }
 
-function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -696,6 +697,31 @@ describe('MobileService pin.set (SPEC.md §8.10)', () => {
   it('is unsupported without the dependency', () => {
     const env = pairedSetup()
     env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'pin.set', params: { projectId: 'p1', pinned: true } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService task.triage (SPEC.md §8.11)', () => {
+  it('passes the params through and answers {}', () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      triageTask: (params) => {
+        calls.push(params)
+        return params.taskId === 't1' ? { ok: true } : { ok: false, code: 'not-found', message: 'No such task' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.triage', params: { taskId: 't1', action: 'snooze', untilAttention: true } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: {} })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'task.triage', params: { taskId: 'nope', action: 'read' } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such task' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'task.triage', params: { taskId: 't1', action: 'snooze' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([{ taskId: 't1', action: 'snooze', untilAttention: true }, { taskId: 'nope', action: 'read' }])
+  })
+
+  it('is unsupported without the dependency', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.triage', params: { taskId: 't1', action: 'read' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
   })
 })

@@ -37,6 +37,23 @@ import Testing
         #expect(tab.since == 1_790_000_000_000)
     }
 
+    @Test func decodesTriageFields() throws {
+        let inbox = try decode("""
+        {
+          "desktop": { "id": "d1", "name": "desk" }, "generatedAt": 1,
+          "projects": [{ "id": "p1", "name": "a", "tasks": [
+            { "id": "t1", "name": "x", "eventAt": 5, "unread": true, "settledAt": 7, "tabs": [] },
+            { "id": "t2", "name": "y", "snoozedUntil": 9, "tabs": [] },
+            { "id": "t3", "name": "z", "unread": "yes", "snoozeUntilAttention": true, "tabs": [] }
+          ] }]
+        }
+        """)
+        let tasks = try #require(inbox.projects.first?.tasks)
+        #expect(tasks[0].eventAt == 5 && tasks[0].unread && tasks[0].settledAt == 7)
+        #expect(tasks[1].snoozedUntil == 9 && !tasks[1].unread && !tasks[1].snoozeUntilAttention)
+        #expect(!tasks[2].unread && tasks[2].snoozeUntilAttention)
+    }
+
     @Test func resolvesPinsInOrderSkippingUnknownOnes() throws {
         let inbox = try decode("""
         {

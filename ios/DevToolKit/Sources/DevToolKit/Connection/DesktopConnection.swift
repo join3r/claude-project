@@ -252,6 +252,12 @@ extension DesktopConnection {
         _ = try await request(TaskOp.setPin, params: PinSetParams(pin: pin, pinned: pinned).json)
     }
 
+    /// `task.triage` (§8.11): mark a task read or unread, settle or snooze it,
+    /// or undo either. The new state comes back in the next inbox.
+    public func triage(taskId: String, _ action: TaskTriageParams.Action) async throws {
+        _ = try await request(TaskOp.triage, params: TaskTriageParams(taskId: taskId, action: action).json)
+    }
+
     /// `chat.settings` (§8.5): change the chat's permission mode, model or
     /// effort as the desktop's pickers do. Nil leaves a field as it is; ""
     /// for `model` or `effort` goes back to the default. The new values come

@@ -112,15 +112,36 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var lastInteractedAt: Int64?
     /// Unix milliseconds. Set while a tab needs the user.
     public var attentionAt: Int64?
+    /// Unix milliseconds. The task's last event: a hook notification or
+    /// stop, a terminal bell, a process exit (§4.4).
+    public var eventAt: Int64?
+    /// The desktop counts the task unread (§4.4).
+    public var unread: Bool
+    /// Unix milliseconds. Set while the task is settled.
+    public var settledAt: Int64?
+    /// Unix milliseconds. A timed snooze; it ends on the phone's clock.
+    public var snoozedUntil: Int64?
+    /// Snoozed until a tab next needs the user.
+    public var snoozeUntilAttention: Bool
     /// Set on a workspace task: the branch of its worktree (§4.4).
     public var branch: String?
     public var tabs: [InboxTab]
 
-    public init(id: String, name: String, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil, branch: String? = nil, tabs: [InboxTab]) {
+    public init(
+        id: String, name: String, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
+        eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil,
+        snoozedUntil: Int64? = nil, snoozeUntilAttention: Bool = false,
+        branch: String? = nil, tabs: [InboxTab]
+    ) {
         self.id = id
         self.name = name
         self.lastInteractedAt = lastInteractedAt
         self.attentionAt = attentionAt
+        self.eventAt = eventAt
+        self.unread = unread
+        self.settledAt = settledAt
+        self.snoozedUntil = snoozedUntil
+        self.snoozeUntilAttention = snoozeUntilAttention
         self.branch = branch
         self.tabs = tabs
     }
@@ -131,6 +152,11 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         name = try c.decode(String.self, forKey: .name)
         lastInteractedAt = try c.decodeIfPresent(Int64.self, forKey: .lastInteractedAt)
         attentionAt = try c.decodeIfPresent(Int64.self, forKey: .attentionAt)
+        eventAt = try c.decodeIfPresent(Int64.self, forKey: .eventAt)
+        unread = (try? c.decodeIfPresent(Bool.self, forKey: .unread)) == true
+        settledAt = try c.decodeIfPresent(Int64.self, forKey: .settledAt)
+        snoozedUntil = try c.decodeIfPresent(Int64.self, forKey: .snoozedUntil)
+        snoozeUntilAttention = (try? c.decodeIfPresent(Bool.self, forKey: .snoozeUntilAttention)) == true
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
         tabs = try c.decodeIfPresent([InboxTab].self, forKey: .tabs) ?? []
     }
@@ -143,6 +169,26 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     /// Sort key for task lists: attention first by recency, then last interaction.
     public var sortTimestamp: Int64 {
         max(attentionAt ?? 0, lastInteractedAt ?? 0)
+    }
+
+    /// Last time anything happened in the task, ours or the agent's (the
+    /// desktop's `lastActivityAt`).
+    public var lastActivityAt: Int64 {
+        max(eventAt ?? 0, lastInteractedAt ?? 0)
+    }
+
+    /// Snoozed at `now`: until it needs you, or until `snoozedUntil` on the phone's clock.
+    public func isSnoozed(now: Date) -> Bool {
+        if snoozeUntilAttention { return true }
+        guard let snoozedUntil else { return false }
+        return now.unixMilliseconds < snoozedUntil
+    }
+
+    /// When the task's current status began: the oldest `since` among the tabs
+    /// in that status (the desktop's `taskStatusSince`).
+    public var statusSince: Int64? {
+        let status = summaryStatus
+        return tabs.filter { $0.status == status }.compactMap(\.since).min()
     }
 }
 

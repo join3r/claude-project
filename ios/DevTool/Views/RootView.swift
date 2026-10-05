@@ -2,6 +2,8 @@ import DevToolKit
 import SwiftUI
 
 enum SidebarSelection: Hashable {
+    /// Every desktop's tasks in the desktop inbox's groups (§8.3).
+    case inbox
     case all
     case desktop(String)
 }
@@ -60,11 +62,16 @@ struct RootView: View {
         } message: {
             Text(model.pinError ?? "")
         }
+        .alert("Couldn't update the inbox", isPresented: Binding(get: { model.triageError != nil }, set: { if !$0 { model.triageError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.triageError ?? "")
+        }
         .onAppear { if sidebar == nil { sidebar = defaultSidebar } }
         .onChange(of: model.desktops.map(\.id)) { _, ids in
             if case .desktop(let id) = sidebar, !ids.contains(id) { sidebar = defaultSidebar }
             if let ref = taskSelection, !ids.contains(ref.desktopId) { taskSelection = nil }
-            if sidebar == nil || (sidebar == .all && ids.count == 1) { sidebar = defaultSidebar }
+            if sidebar == nil || (sidebar == .all && ids.count < 2) { sidebar = defaultSidebar }
         }
         .onChange(of: sidebar) { _, _ in
             if let ref = taskSelection, !scopeIds.contains(ref.desktopId) { taskSelection = nil }
@@ -85,7 +92,12 @@ struct RootView: View {
                 onPair: model.presentPairing
             )
         } content: {
-            TaskListView(scope: sidebar ?? defaultSidebar, selection: $taskSelection)
+            switch sidebar ?? defaultSidebar {
+            case .inbox:
+                InboxView(selection: $taskSelection)
+            case let scope:
+                TaskListView(scope: scope, selection: $taskSelection)
+            }
         } detail: {
             NavigationStack(path: $detailPath) {
                 if let ref = taskSelection {
@@ -103,14 +115,11 @@ struct RootView: View {
         }
     }
 
-    private var defaultSidebar: SidebarSelection {
-        if model.desktops.count == 1, let only = model.desktops.first { return .desktop(only.id) }
-        return .all
-    }
+    private var defaultSidebar: SidebarSelection { .inbox }
 
     private var scopeIds: [String] {
         switch sidebar ?? defaultSidebar {
-        case .all: model.desktops.map(\.id)
+        case .inbox, .all: model.desktops.map(\.id)
         case .desktop(let id): [id]
         }
     }
@@ -158,7 +167,8 @@ struct RootView: View {
         for _ in 0..<100 {
             if let found = model.tab(desktopId: route.desktopId, tabId: route.tabId) {
                 demoNavigating = true
-                sidebar = .desktop(route.desktopId)
+                // The Inbox (or All desktops) already lists the task; stay there.
+                if !scopeIds.contains(route.desktopId) { sidebar = .desktop(route.desktopId) }
                 let ref = TaskRef(desktopId: route.desktopId, taskId: found.task.id)
                 if taskSelection != ref {
                     taskSelection = ref
@@ -171,7 +181,7 @@ struct RootView: View {
             }
             try? await Task.sleep(for: .milliseconds(100))
         }
-        sidebar = .desktop(route.desktopId)
+        if !scopeIds.contains(route.desktopId) { sidebar = .desktop(route.desktopId) }
     }
 
     /// Debug-only shortcuts for screenshots (`-demoRoute`).

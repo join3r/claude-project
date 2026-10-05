@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams } from './chat-messages.ts'
+import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 
@@ -221,13 +221,18 @@ function appMessages(): unknown {
         id: 'p1', name: 'api-server', emoji: '🚀', remote: false,
         tasks: [{
           id: 't1', name: 'fix-auth', lastInteractedAt: 1790000000000, attentionAt: 1790000000000,
+          eventAt: 1790000000000, unread: true,
           tabs: [
             { id: 'tab1', type: 'claude-chat', title: 'Claude', status: 'working', since: 1790000000000, activity: 'Running Bash' },
             { id: 'tab2', type: 'terminal', title: 'zsh', status: 'idle' }
           ]
         }, {
-          id: 't2', name: 'Fix the login redirect', branch: 'fix-the-login-redirect',
+          id: 't2', name: 'Fix the login redirect', settledAt: 1789990000000, branch: 'fix-the-login-redirect',
           tabs: [{ id: 'tab3', type: 'claude-chat', title: 'Claude', status: 'idle' }]
+        }, {
+          id: 't3', name: 'bump-deps', snoozedUntil: 1790003600000, tabs: []
+        }, {
+          id: 't4', name: 'flaky-e2e', snoozeUntilAttention: true, tabs: []
         }]
       },
       { id: 'p2', name: 'remote-box', remote: true, tasks: [] }
@@ -242,6 +247,7 @@ function appMessages(): unknown {
       id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true,
       tasks: [{
         id: 't1', name: 'fix-auth', notes: 'x', attentionAt: null, branch: null,
+        unread: false, settledAt: null, snoozeUntilAttention: 'yes',
         tabs: [
           { id: 'tab1', type: 'gemini', title: 'Gemini', status: 'thinking', since: 5, badge: 3 },
           { id: 'tab2', type: 'pi', title: 'Pi', status: 'attention', activity: null }
@@ -648,6 +654,31 @@ function chatMessages(): unknown {
         text({ projectId: 'p1', taskId: null, pinned: true, extra: 1 })
       ].map((json) => ({ json, expected: parsePinSetParams(JSON.parse(json)) })),
       invalid: { params: [text({ pinned: true }), text({ projectId: 'p1' }), text({ projectId: 'p1', pinned: 'yes' }), text({ projectId: 'p1', taskId: 7, pinned: true }), 'null'] }
+    },
+    // §8.11: `task.triage` marks a task read or unread, settles, snoozes or undoes either; its result is `{}`.
+    taskTriage: {
+      params: [
+        text({ taskId: 't1', action: 'read' }),
+        text({ taskId: 't1', action: 'unread', until: 5 }),
+        text({ taskId: 't1', action: 'settle' }),
+        text({ taskId: 't1', action: 'unsettle' }),
+        text({ taskId: 't1', action: 'snooze', until: 1790003600000 }),
+        text({ taskId: 't1', action: 'snooze', untilAttention: true, until: null }),
+        text({ taskId: 't1', action: 'unsnooze', untilAttention: true, extra: 1 })
+      ].map((json) => ({ json, expected: parseTaskTriageParams(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ action: 'read' }),
+          text({ taskId: 't1' }),
+          text({ taskId: 't1', action: 'archive' }),
+          text({ taskId: 't1', action: 'snooze' }),
+          text({ taskId: 't1', action: 'snooze', untilAttention: false }),
+          text({ taskId: 't1', action: 'snooze', until: 1790003600000, untilAttention: true }),
+          text({ taskId: 't1', action: 'snooze', until: -1 }),
+          text({ taskId: 't1', action: 'snooze', until: '1790003600000' }),
+          'null'
+        ]
+      }
     },
     // §8.9: `chat.image` fetches one tool-result image.
     image: {

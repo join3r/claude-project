@@ -220,6 +220,15 @@ public actor MockDesktopConnection: DesktopConnection {
             }
             try setPin(parsed)
             return .object([:])
+        case TaskOp.triage:
+            let parsed: TaskTriageParams
+            do {
+                parsed = try TaskTriageParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            try triage(parsed)
+            return .object([:])
         case ChatOp.settings:
             let parsed: ChatSettingsParams
             do {
@@ -358,6 +367,22 @@ public actor MockDesktopConnection: DesktopConnection {
         if params.pinned { inbox.pinned.append(params.pin) } else { inbox.pinned.removeAll { $0 == params.pin } }
         inbox.generatedAt = Date().unixMilliseconds
         continuation.yield(.inbox(inbox))
+    }
+
+    /// `task.triage`: applies the action as the desktop would and sends the inbox.
+    private func triage(_ params: TaskTriageParams) throws {
+        for p in inbox.projects.indices {
+            guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == params.taskId }) else { continue }
+            let now = Date()
+            let task = inbox.projects[p].tasks[t]
+            let next = task.applying(params.action, now: now)
+            guard next != task else { return }
+            inbox.projects[p].tasks[t] = next
+            inbox.generatedAt = now.unixMilliseconds
+            continuation.yield(.inbox(inbox))
+            return
+        }
+        throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
     }
 
     /// Applies a change to a chat and, when the phone has it open, sends the event.
@@ -528,7 +553,7 @@ public actor MockDesktopConnection: DesktopConnection {
         continuation.yield(.features([
             DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
-            DesktopFeature.pin,
+            DesktopFeature.pin, DesktopFeature.taskTriage,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -564,6 +589,12 @@ public actor MockDesktopConnection: DesktopConnection {
         case .working:
             tab.status = .attention
             tab.activity = "Wants to run npm test"
+            // An attention event, as the desktop records it: unread, un-settled,
+            // and an "until it needs me" snooze wakes.
+            task.eventAt = now
+            task.unread = true
+            task.settledAt = nil
+            task.snoozeUntilAttention = false
         case .attention:
             tab.status = .working
             tab.activity = "Running Bash"
@@ -617,15 +648,15 @@ public enum MockInbox {
             generatedAt: t,
             projects: [
                 InboxProject(id: "p-api", name: "api-server", emoji: "🚀", tasks: [
-                    InboxTask(id: "t-auth", name: "fix-auth", lastInteractedAt: ago(3), attentionAt: ago(1), tabs: [
+                    InboxTask(id: "t-auth", name: "fix-auth", lastInteractedAt: ago(3), attentionAt: ago(1), eventAt: ago(1), unread: true, tabs: [
                         InboxTab(id: "tab-1", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Wants to run npm test"),
                         InboxTab(id: "tab-2", type: .terminal, title: "zsh", status: .idle, since: ago(40)),
                     ]),
-                    InboxTask(id: "t-rate", name: "rate-limiter", lastInteractedAt: ago(12), tabs: [
+                    InboxTask(id: "t-rate", name: "rate-limiter", lastInteractedAt: ago(12), eventAt: ago(6), unread: true, tabs: [
                         InboxTab(id: "tab-3", type: .claude, title: "Claude Code", status: .working, since: ago(4), activity: "Running Bash"),
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),
                     ]),
-                    InboxTask(id: "t-docs", name: "openapi-docs", lastInteractedAt: ago(180), tabs: [
+                    InboxTask(id: "t-docs", name: "openapi-docs", lastInteractedAt: ago(180), eventAt: ago(170), settledAt: ago(160), tabs: [
                         InboxTab(id: "tab-5", type: .terminal, title: "npm run docs", status: .exited, since: ago(170)),
                     ]),
                 ]),
@@ -635,12 +666,12 @@ public enum MockInbox {
                         InboxTab(id: "tab-6", type: .pi, title: "Pi", status: .working, since: ago(2), activity: "Reading files"),
                         InboxTab(id: "tab-7", type: .terminal, title: "vite", status: .idle, since: ago(25)),
                     ]),
-                    InboxTask(id: "t-login", name: "login-redesign", lastInteractedAt: ago(60 * 26), tabs: [
+                    InboxTask(id: "t-login", name: "login-redesign", lastInteractedAt: ago(60 * 26), snoozedUntil: t + 3 * 3_600_000, tabs: [
                         InboxTab(id: "tab-8", type: .claudeChat, title: "Claude", status: .idle, since: ago(60 * 26)),
                     ]),
                 ]),
                 InboxProject(id: "p-infra", name: "infra", emoji: "🛠️", remote: true, tasks: [
-                    InboxTask(id: "t-k8s", name: "k8s-upgrade", lastInteractedAt: ago(90), tabs: [
+                    InboxTask(id: "t-k8s", name: "k8s-upgrade", lastInteractedAt: ago(90), eventAt: ago(15), tabs: [
                         InboxTab(id: "tab-9", type: .claude, title: "Claude Code", status: .idle, since: ago(90)),
                         InboxTab(id: "tab-10", type: .terminal, title: "ssh prod-1", status: .working, since: ago(15), activity: "kubectl rollout"),
                     ]),

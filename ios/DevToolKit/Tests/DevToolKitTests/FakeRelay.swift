@@ -88,6 +88,7 @@ actor FakeRelay: WebSocketConnector {
         var taskCloseParams: [TaskCloseParams] = []
         var closedTabs: [String] = []
         var pinSetParams: [PinSetParams] = []
+        var taskTriageParams: [TaskTriageParams] = []
 
         var id: String { identity.deviceId }
 
@@ -220,6 +221,19 @@ actor FakeRelay: WebSocketConnector {
                         return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
                     }
                     pinSetParams.append(parsed)
+                    return app(.resOk(id: id, result: .object([:])), to: from)
+                }
+                if op == TaskOp.triage {
+                    guard features.contains(DesktopFeature.taskTriage) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    let parsed: TaskTriageParams
+                    do {
+                        parsed = try TaskTriageParams.parse(params)
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
+                    taskTriageParams.append(parsed)
                     return app(.resOk(id: id, result: .object([:])), to: from)
                 }
                 if let replies = chat.handle(id: id, op: op, params: params) {

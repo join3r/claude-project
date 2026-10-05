@@ -85,7 +85,7 @@
       }
     },
     {
-      "json": "{\"t\":\"res\",\"id\":1,\"ok\":true,\"result\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"branch\":\"fix-the-login-redirect\",\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":\"t2\"},{\"projectId\":\"p2\"}]}}",
+      "json": "{\"t\":\"res\",\"id\":1,\"ok\":true,\"result\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"settledAt\":1789990000000,\"branch\":\"fix-the-login-redirect\",\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"snoozedUntil\":1790003600000,\"tabs\":[]},{\"id\":\"t4\",\"name\":\"flaky-e2e\",\"snoozeUntilAttention\":true,\"tabs\":[]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":\"t2\"},{\"projectId\":\"p2\"}]}}",
       "expected": {
         "t": "res",
         "id": 1,
@@ -108,6 +108,8 @@
                   "name": "fix-auth",
                   "lastInteractedAt": 1790000000000,
                   "attentionAt": 1790000000000,
+                  "eventAt": 1790000000000,
+                  "unread": true,
                   "tabs": [
                     {
                       "id": "tab1",
@@ -128,6 +130,7 @@
                 {
                   "id": "t2",
                   "name": "Fix the login redirect",
+                  "settledAt": 1789990000000,
                   "branch": "fix-the-login-redirect",
                   "tabs": [
                     {
@@ -137,6 +140,18 @@
                       "status": "idle"
                     }
                   ]
+                },
+                {
+                  "id": "t3",
+                  "name": "bump-deps",
+                  "snoozedUntil": 1790003600000,
+                  "tabs": []
+                },
+                {
+                  "id": "t4",
+                  "name": "flaky-e2e",
+                  "snoozeUntilAttention": true,
+                  "tabs": []
                 }
               ]
             },
@@ -172,7 +187,7 @@
       }
     },
     {
-      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"branch\":\"fix-the-login-redirect\",\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":\"t2\"},{\"projectId\":\"p2\"}]}}",
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"settledAt\":1789990000000,\"branch\":\"fix-the-login-redirect\",\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"snoozedUntil\":1790003600000,\"tabs\":[]},{\"id\":\"t4\",\"name\":\"flaky-e2e\",\"snoozeUntilAttention\":true,\"tabs\":[]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":\"t2\"},{\"projectId\":\"p2\"}]}}",
       "expected": {
         "t": "evt",
         "e": "inbox",
@@ -209,7 +224,9 @@
                     }
                   ],
                   "lastInteractedAt": 1790000000000,
-                  "attentionAt": 1790000000000
+                  "attentionAt": 1790000000000,
+                  "eventAt": 1790000000000,
+                  "unread": true
                 },
                 {
                   "id": "t2",
@@ -222,7 +239,20 @@
                       "status": "idle"
                     }
                   ],
+                  "settledAt": 1789990000000,
                   "branch": "fix-the-login-redirect"
+                },
+                {
+                  "id": "t3",
+                  "name": "bump-deps",
+                  "tabs": [],
+                  "snoozedUntil": 1790003600000
+                },
+                {
+                  "id": "t4",
+                  "name": "flaky-e2e",
+                  "tabs": [],
+                  "snoozeUntilAttention": true
                 }
               ],
               "emoji": "🚀"
@@ -247,7 +277,7 @@
       }
     },
     {
-      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":2,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":null,\"color\":\"red\"}]},\"compressed\":false}",
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":2,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":null,\"color\":\"red\"}]},\"compressed\":false}",
       "expected": {
         "t": "evt",
         "e": "inbox",
@@ -320,7 +350,7 @@
     }
   ],
   "inboxWithUnknownFields": {
-    "json": "{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":null,\"color\":\"red\"}]}",
+    "json": "{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":null,\"color\":\"red\"}]}",
     "expected": {
       "desktop": {
         "id": "20671253fbf6054273bb719d3a34999b",

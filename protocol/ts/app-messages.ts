@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { CHAT_IMAGE_OP, CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, parseChatViewEvent } from './chat-messages.ts'
+import { CHAT_IMAGE_OP, CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent } from './chat-messages.ts'
 import type { ChatViewEvent } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -62,6 +62,16 @@ export interface InboxTask {
   name: string
   lastInteractedAt?: number
   attentionAt?: number
+  /** The task's last event (a hook notification or stop, a bell, an exit), for "last activity" (§4.4). */
+  eventAt?: number
+  /** Present while the desktop counts the task unread (§4.4). */
+  unread?: true
+  /** Present while the task is settled (§4.4). */
+  settledAt?: number
+  /** Present while a timed snooze hasn't passed at `generatedAt` (§4.4). */
+  snoozedUntil?: number
+  /** Present while the task is snoozed until it needs the user (§4.4). */
+  snoozeUntilAttention?: true
   /** Present on a workspace task: the branch its worktree is on (§4.4). */
   branch?: string
   tabs: InboxTab[]
@@ -146,6 +156,7 @@ export const AppOp = {
   TaskClose: TASK_CLOSE_OP,
   TabClose: TAB_CLOSE_OP,
   PinSet: PIN_SET_OP,
+  TaskTriage: TASK_TRIAGE_OP,
   ChatSettings: CHAT_SETTINGS_OP,
   ChatImage: CHAT_IMAGE_OP,
   PushRegister: PushOp.Register,
@@ -307,6 +318,14 @@ function parseTask(value: unknown): InboxTask {
   if (lastInteractedAt !== undefined) task.lastInteractedAt = lastInteractedAt
   const attentionAt = optInt(o, 'attentionAt')
   if (attentionAt !== undefined) task.attentionAt = attentionAt
+  const eventAt = optInt(o, 'eventAt')
+  if (eventAt !== undefined) task.eventAt = eventAt
+  if (o.unread === true) task.unread = true
+  const settledAt = optInt(o, 'settledAt')
+  if (settledAt !== undefined) task.settledAt = settledAt
+  const snoozedUntil = optInt(o, 'snoozedUntil')
+  if (snoozedUntil !== undefined) task.snoozedUntil = snoozedUntil
+  if (o.snoozeUntilAttention === true) task.snoozeUntilAttention = true
   const branch = optStr(o, 'branch')
   if (branch !== undefined) task.branch = branch
   return task
