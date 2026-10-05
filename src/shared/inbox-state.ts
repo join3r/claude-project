@@ -79,3 +79,17 @@ export function taskStatus(task: Task, allStatuses: Record<string, TabStatusValu
 export function lastActivityAt(task: Task): number {
   return Math.max(inboxState(task).eventAt ?? 0, task.lastInteractedAt ?? 0)
 }
+
+/**
+ * The ball is in your court: the agent is not running, and the last thing that
+ * happened in the task was the agent (a Stop, a question, a bell, an exit) rather
+ * than you. Unlike unread this survives a visit — looking at the reply is not
+ * answering it. Typing into the task (or settling/snoozing it) hands it back.
+ */
+export function isYourTurn(task: Task, status: TabStatusValue): boolean {
+  if (status === 'working') return false
+  if (status === 'attention') return true
+  const eventAt = inboxState(task).eventAt
+  if (typeof eventAt !== 'number') return false
+  return eventAt > (task.lastInteractedAt ?? 0)
+}

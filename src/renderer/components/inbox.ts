@@ -1,12 +1,12 @@
 import type { Project, Task } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
-import { inboxState, isSettled, isSnoozed, isUnread, lastActivityAt, taskStatus } from '../../shared/inbox-state'
+import { inboxState, isSettled, isSnoozed, isUnread, isYourTurn, lastActivityAt, taskStatus } from '../../shared/inbox-state'
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
 
 // The triage predicates themselves moved to shared/inbox-state.ts when idle
 // cleanup moved into main — both processes must answer them identically. They
 // are re-exported here because this module is the inbox's façade.
-export { inboxState, isSettled, isSnoozed, isUnread, lastActivityAt, taskStatus }
+export { inboxState, isSettled, isSnoozed, isUnread, isYourTurn, lastActivityAt, taskStatus }
 
 /** Oldest `since` stamp across the task's AI tabs — how long it has been waiting. */
 export function taskStatusSince(
@@ -71,6 +71,8 @@ export interface InboxEntry {
   /** When the current status began — null when unknown (e.g. after a restart). */
   since: number | null
   unread: boolean
+  /** Waiting on you rather than the agent — see isYourTurn. Never set on settled or snoozed rows. */
+  yourTurn: boolean
 }
 
 export interface InboxPartition {
@@ -102,12 +104,16 @@ export function partitionInbox(
       project,
       status,
       since: taskStatusSince(task, allStatuses, statusSince),
-      unread: isUnread(task)
+      unread: isUnread(task),
+      yourTurn: false
     }
     if (isSnoozed(task, now)) snoozed.push(entry)
     else if (isSettled(task)) settled.push(entry)
-    else if (status === 'attention') needsYou.push(entry)
-    else active.push(entry)
+    else {
+      entry.yourTurn = isYourTurn(task, status)
+      if (status === 'attention') needsYou.push(entry)
+      else active.push(entry)
+    }
   }
 
   // Longest wait first — the point of the tier is surfacing what has been blocked longest.

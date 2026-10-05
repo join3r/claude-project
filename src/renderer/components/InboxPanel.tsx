@@ -86,6 +86,20 @@ function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey, agent: Tas
 
 type GroupKey = 'needsYou' | 'active' | 'settled' | 'snoozed'
 
+/**
+ * Rows waiting on you get a left bar and a faint tint, so "your move" reads at a
+ * glance whether or not you have already looked. Amber for a blocked agent
+ * (question, permission), accent for one that finished and is waiting for your
+ * reply. The bar is an inset shadow so it does not shift the row's content.
+ */
+function turnClass(status: TabStatusValue, yourTurn: boolean, selected: boolean): string {
+  if (!yourTurn) return ''
+  if (status === 'attention') {
+    return `shadow-[inset_2px_0_0_var(--color-status-attention)] ${selected ? '' : 'bg-status-attention/10'}`
+  }
+  return `shadow-[inset_2px_0_0_var(--color-accent)] ${selected ? '' : 'bg-accent/10'}`
+}
+
 function InboxRow({
   entry,
   group,
@@ -105,7 +119,7 @@ function InboxRow({
   onContextMenu: (e: React.MouseEvent) => void
   onSettle: () => void
 }): React.ReactElement {
-  const { task, project, unread } = entry
+  const { task, project, unread, yourTurn } = entry
   const activity = lastActivityAt(task)
 
   return (
@@ -113,6 +127,7 @@ function InboxRow({
       className={[
         'group mx-1.5 px-2 py-1.5 rounded-md cursor-pointer text-sm text-text',
         'transition-colors duration-(--motion-fast)',
+        turnClass(entry.status, yourTurn, selected),
         selected ? 'bg-sel' : 'hover:bg-surface-3'
       ].join(' ')}
       onClick={onSelect}
@@ -120,7 +135,7 @@ function InboxRow({
       title={agent.tooltip}
     >
       <div className="flex items-center gap-1.5">
-        {unread || entry.status
+        {unread || entry.status || yourTurn
           ? <StatusDot status={entry.status} />
           : <span className="w-1.5 shrink-0" />}
         <span

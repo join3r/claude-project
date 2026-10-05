@@ -4,6 +4,7 @@ import {
   isSettled,
   isSnoozed,
   isUnread,
+  isYourTurn,
   lastActivityAt,
   partitionInbox,
   snoozePresets,
@@ -132,6 +133,33 @@ describe('taskStatus', () => {
   })
 })
 
+describe('isYourTurn', () => {
+  it('is true once the agent stopped after your last input, read or not', () => {
+    const task = makeTask('t', { eventAt: NOW, visitedAt: NOW + 5000 }, { lastInteractedAt: NOW - 60_000 })
+    expect(isUnread(task)).toBe(false)
+    expect(isYourTurn(task, null)).toBe(true)
+  })
+
+  it('hands the turn back once you type into the task', () => {
+    const task = makeTask('t', { eventAt: NOW - 60_000 }, { lastInteractedAt: NOW })
+    expect(isYourTurn(task, null)).toBe(false)
+  })
+
+  it('is never your turn while the agent is working', () => {
+    const task = makeTask('t', { eventAt: NOW }, { lastInteractedAt: NOW - 60_000 })
+    expect(isYourTurn(task, 'working')).toBe(false)
+  })
+
+  it('is always your turn when the agent is blocked on you', () => {
+    const task = makeTask('t', { eventAt: NOW - 60_000 }, { lastInteractedAt: NOW })
+    expect(isYourTurn(task, 'attention')).toBe(true)
+  })
+
+  it('is false for a task nothing has happened in', () => {
+    expect(isYourTurn(makeTask('t'), null)).toBe(false)
+  })
+})
+
 describe('lastActivityAt', () => {
   it('takes the later of our interaction and the agent\'s event', () => {
     expect(lastActivityAt(makeTask('t', { eventAt: NOW }, { lastInteractedAt: NOW - 5000 }))).toBe(NOW)
@@ -179,6 +207,20 @@ describe('partitionInbox', () => {
     )
     expect(result.needsYou).toHaveLength(0)
     expect(result.snoozed).toHaveLength(1)
+  })
+
+  it('flags your-turn rows, but never settled or snoozed ones', () => {
+    const settledAfterStop = makeTask('settled-stop', { eventAt: NOW - 5000, settledAt: NOW })
+    const result = partitionInbox(
+      [...entries, { task: settledAfterStop, project }],
+      statuses,
+      since,
+      NOW
+    )
+    expect(result.needsYou.every(e => e.yourTurn)).toBe(true)
+    expect(result.active.find(e => e.task.id === 'recent')?.yourTurn).toBe(true)
+    expect(result.settled.every(e => !e.yourTurn)).toBe(true)
+    expect(result.snoozed.every(e => !e.yourTurn)).toBe(true)
   })
 })
 
