@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { CHAT_PERMISSION_MODES, type ChatPrompt, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { summarizeTool } from '../../../shared/agent-activity'
 import {
@@ -28,14 +29,38 @@ export const primaryBtn = `${btn} border-transparent bg-accent text-accent-ink h
 export const secondaryBtn = `${btn} border-border bg-surface-2 text-text hover:bg-surface-3`
 export const quietBtn = `${btn} border-transparent bg-transparent text-text-muted hover:text-text hover:bg-surface-2`
 
-function Card({ title, children }: { title: React.ReactNode; children: React.ReactNode }): React.ReactElement {
+interface CardProps {
+  title: string
+  /** One line shown beside the title while the card is collapsed. */
+  summary?: string
+  children: React.ReactNode
+  /** The actions: pinned below the body, which scrolls when the dock runs out of room. */
+  footer: React.ReactNode
+}
+
+function Card({ title, summary, children, footer }: CardProps): React.ReactElement {
+  // Collapsing gets a tall card out of the way so the conversation above it can be read.
+  const [collapsed, setCollapsed] = useState(false)
   return (
-    <div className="rounded-lg border border-[color-mix(in_srgb,var(--color-status-attention)_45%,var(--color-border))] bg-surface shadow-pop overflow-hidden">
-      <div className="px-3 pt-2 pb-1 text-sm font-medium text-text flex items-center gap-2">
+    <div className="min-h-0 flex flex-col rounded-lg border border-[color-mix(in_srgb,var(--color-status-attention)_45%,var(--color-border))] bg-surface shadow-pop overflow-hidden">
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        title={collapsed ? 'Show' : 'Collapse'}
+        onClick={() => setCollapsed((c) => !c)}
+        className={`shrink-0 w-full px-3 pt-2 ${collapsed ? 'pb-2' : 'pb-1'} text-left text-sm font-medium text-text flex items-center gap-2 cursor-pointer`}
+      >
         <span className="w-1.5 h-1.5 rounded-full bg-status-attention shrink-0" />
-        {title}
-      </div>
-      <div className="px-3 pb-2.5 flex flex-col gap-2">{children}</div>
+        <span className="truncate shrink-0 max-w-[60%]">{title}</span>
+        {collapsed && summary && <span className="min-w-0 truncate font-normal text-text-muted">{summary}</span>}
+        <ChevronDown size={13} className={`ml-auto shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${collapsed ? 'rotate-180' : ''}`} />
+      </button>
+      {!collapsed && (
+        <>
+          <div className="min-h-0 overflow-y-auto px-3 pb-2 flex flex-col gap-2">{children}</div>
+          <div className="shrink-0 px-3 pb-2.5 flex flex-col gap-2">{footer}</div>
+        </>
+      )}
     </div>
   )
 }
@@ -71,55 +96,55 @@ function PermissionCard({ prompt, onRespond, permissionMode }: Props): React.Rea
   } else if (Object.keys(input).length > 0) {
     detail = <pre className="chat-pre text-text-muted">{JSON.stringify(input, null, 2)}</pre>
   }
+  const footer = denying ? (
+    <form
+      className="flex gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault()
+        onRespond({ behavior: 'deny', message: reason })
+      }}
+    >
+      <input
+        autoFocus
+        className="flex-1 min-w-0 h-(--ctl-h-sm) px-2 rounded-md border-[0.5px] border-border bg-field text-sm text-text outline-none focus:border-border-focus"
+        placeholder="Tell Claude what to do instead (optional)"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setDenying(false) } }}
+      />
+      <button type="submit" className={secondaryBtn}>Deny</button>
+    </form>
+  ) : (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" className={primaryBtn} onClick={() => onRespond({ behavior: 'allow' })}>Allow</button>
+        {canAlways && (
+          <button type="button" className={secondaryBtn} onClick={() => onRespond({ behavior: 'allow', always: true })} title={always}>
+            Always allow
+          </button>
+        )}
+        {offerAuto && (
+          <button
+            type="button"
+            className={secondaryBtn}
+            title="Allow this, then let Claude's classifier approve safe actions for the rest of this session"
+            onClick={() => onRespond({ behavior: 'allow', mode: 'auto' })}
+          >
+            Allow, switch to Auto
+          </button>
+        )}
+        <button type="button" className={quietBtn} onClick={() => setDenying(true)}>Deny…</button>
+      </div>
+      {always && <div className="text-xs text-text-subtle whitespace-pre-line">Always allow: {always}</div>}
+    </>
+  )
   return (
-    <Card title={<span className="truncate">{prompt.title ?? `Allow ${prompt.toolName}?`}</span>}>
+    <Card title={prompt.title ?? `Allow ${prompt.toolName}?`} summary={label} footer={footer}>
       {!pairs && <div className="text-sm text-text">{label}</div>}
       {prompt.description && !pairs && prompt.description !== label && <div className="text-sm text-text-muted">{prompt.description}</div>}
       {prompt.reason && <div className="text-xs text-text-subtle">{prompt.reason}</div>}
       {prompt.blockedPath && <div className="text-xs text-text-subtle">Outside the project: <span className="font-mono">{prompt.blockedPath}</span></div>}
       {detail && <div className="max-h-56 overflow-auto">{detail}</div>}
-      {denying ? (
-        <form
-          className="flex gap-1.5"
-          onSubmit={(e) => {
-            e.preventDefault()
-            onRespond({ behavior: 'deny', message: reason })
-          }}
-        >
-          <input
-            autoFocus
-            className="flex-1 min-w-0 h-(--ctl-h-sm) px-2 rounded-md border-[0.5px] border-border bg-field text-sm text-text outline-none focus:border-border-focus"
-            placeholder="Tell Claude what to do instead (optional)"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setDenying(false) } }}
-          />
-          <button type="submit" className={secondaryBtn}>Deny</button>
-        </form>
-      ) : (
-        <>
-          <div className="flex flex-wrap gap-1.5">
-            <button type="button" className={primaryBtn} onClick={() => onRespond({ behavior: 'allow' })}>Allow</button>
-            {canAlways && (
-              <button type="button" className={secondaryBtn} onClick={() => onRespond({ behavior: 'allow', always: true })} title={always}>
-                Always allow
-              </button>
-            )}
-            {offerAuto && (
-              <button
-                type="button"
-                className={secondaryBtn}
-                title="Allow this, then let Claude's classifier approve safe actions for the rest of this session"
-                onClick={() => onRespond({ behavior: 'allow', mode: 'auto' })}
-              >
-                Allow, switch to Auto
-              </button>
-            )}
-            <button type="button" className={quietBtn} onClick={() => setDenying(true)}>Deny…</button>
-          </div>
-          {always && <div className="text-xs text-text-subtle whitespace-pre-line">Always allow: {always}</div>}
-        </>
-      )}
     </Card>
   )
 }
@@ -179,8 +204,16 @@ function QuestionCard({ prompt, onRespond }: Props): React.ReactElement {
     onRespond(questionAnswerResponse(prompt, answers))
   }
 
+  const summary = questions.length > 1 ? `${questions[0]?.question} (+${questions.length - 1} more)` : questions[0]?.question
+  const footer = (
+    <div className="flex gap-1.5">
+      <button type="button" className={primaryBtn} disabled={!complete} onClick={submit}>Answer</button>
+      <button type="button" className={quietBtn} onClick={() => onRespond(dismissQuestionResponse())}>Skip</button>
+    </div>
+  )
+
   return (
-    <Card title="Claude has a question">
+    <Card title="Claude has a question" summary={summary} footer={footer}>
       {questions.map((q, index) => (
         <div key={index} className="flex flex-col gap-1.5">
           <div className="text-base text-text">
@@ -216,10 +249,6 @@ function QuestionCard({ prompt, onRespond }: Props): React.ReactElement {
           </div>
         </div>
       ))}
-      <div className="flex gap-1.5">
-        <button type="button" className={primaryBtn} disabled={!complete} onClick={submit}>Answer</button>
-        <button type="button" className={quietBtn} onClick={() => onRespond(dismissQuestionResponse())}>Skip</button>
-      </div>
     </Card>
   )
 }
@@ -229,51 +258,57 @@ function PlanCard({ prompt, onRespond }: Props): React.ReactElement {
   const [revising, setRevising] = useState(false)
   const plan = planText(prompt.input)
   const html = useMemo(() => renderChatMarkdown(plan || '_No plan text._'), [plan])
+  const footer = revising ? (
+    <form
+      className="flex gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault()
+        onRespond(planFeedbackResponse(feedback))
+      }}
+    >
+      <input
+        autoFocus
+        className="flex-1 min-w-0 h-(--ctl-h-sm) px-2 rounded-md border-[0.5px] border-border bg-field text-sm text-text outline-none focus:border-border-focus"
+        placeholder="What should change?"
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setRevising(false) } }}
+      />
+      <button type="submit" className={secondaryBtn}>Send feedback</button>
+    </form>
+  ) : (
+    <div className="flex flex-wrap gap-1.5">
+      <button
+        type="button"
+        className={primaryBtn}
+        onClick={() => onRespond(planApprovalResponse(prompt, false))}
+      >
+        Approve
+      </button>
+      <button
+        type="button"
+        className={secondaryBtn}
+        title="Approve, and accept file edits without asking for the rest of this session"
+        onClick={() => onRespond(planApprovalResponse(prompt, true))}
+      >
+        Approve, auto-accept edits
+      </button>
+      <button type="button" className={quietBtn} onClick={() => setRevising(true)}>Keep planning…</button>
+    </div>
+  )
   return (
-    <Card title="Plan ready for review">
+    <Card title="Plan ready for review" summary={planSummary(plan)} footer={footer}>
       <div
-        className="note-preview chat-md max-h-[45vh] overflow-auto rounded-md bg-surface-2 border-[0.5px] border-border px-3 py-2 text-base"
+        className="note-preview chat-md rounded-md bg-surface-2 border-[0.5px] border-border px-3 py-2 text-base"
         // Sanitized by DOMPurify in renderChatMarkdown.
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      {revising ? (
-        <form
-          className="flex gap-1.5"
-          onSubmit={(e) => {
-            e.preventDefault()
-            onRespond(planFeedbackResponse(feedback))
-          }}
-        >
-          <input
-            autoFocus
-            className="flex-1 min-w-0 h-(--ctl-h-sm) px-2 rounded-md border-[0.5px] border-border bg-field text-sm text-text outline-none focus:border-border-focus"
-            placeholder="What should change?"
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setRevising(false) } }}
-          />
-          <button type="submit" className={secondaryBtn}>Send feedback</button>
-        </form>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            className={primaryBtn}
-            onClick={() => onRespond(planApprovalResponse(prompt, false))}
-          >
-            Approve
-          </button>
-          <button
-            type="button"
-            className={secondaryBtn}
-            title="Approve, and accept file edits without asking for the rest of this session"
-            onClick={() => onRespond(planApprovalResponse(prompt, true))}
-          >
-            Approve, auto-accept edits
-          </button>
-          <button type="button" className={quietBtn} onClick={() => setRevising(true)}>Keep planning…</button>
-        </div>
-      )}
     </Card>
   )
+}
+
+/** The plan's first line of text, without its Markdown heading marks. */
+function planSummary(plan: string): string | undefined {
+  const line = plan.split('\n').map((l) => l.trim()).find(Boolean)
+  return line?.replace(/^#+\s*/, '')
 }

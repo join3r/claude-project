@@ -347,7 +347,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
           </div>
         </div>
       </div>
-      <div className="max-w-[860px] w-full mx-auto px-5 pb-3 flex flex-col gap-2 relative">
+      {/* Capped at half the tab so a tall prompt card can't push the conversation out of
+          view: the prompt stack is what gives (its cards scroll inside); the composer keeps its size. */}
+      <div className="max-w-[860px] w-full max-h-[50%] min-h-0 mx-auto px-5 pb-3 flex flex-col gap-2 relative">
         {!atBottom && (
           <button
             type="button"
@@ -360,9 +362,13 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
         {attachError && (
           <div className="text-sm text-danger rounded-md border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] px-2 py-1">{attachError}</div>
         )}
-        {state.pending.map((prompt) => (
-          <PromptCard key={prompt.id} prompt={prompt} permissionMode={state.info.permissionMode} onRespond={(response) => respond(prompt.id, response)} />
-        ))}
+        {state.pending.length > 0 && (
+          <div className="min-h-0 flex flex-col gap-2">
+            {state.pending.map((prompt) => (
+              <PromptCard key={prompt.id} prompt={prompt} permissionMode={state.info.permissionMode} onRespond={(response) => respond(prompt.id, response)} />
+            ))}
+          </div>
+        )}
         {coldCache && <ColdCacheNotice cache={coldCache} onDismiss={() => setDismissedCache(coldCache)} />}
         {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
         <Composer
