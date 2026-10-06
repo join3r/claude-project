@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { ChevronRight } from 'lucide-react'
-import type { GitStatusResult, GitStatusEntry } from '../../shared/types'
+import { ChevronRight, GitBranch } from 'lucide-react'
+import type { GitRepoStatus, GitStatusResult, GitStatusEntry } from '../../shared/types'
 import { gitEntryPaths } from '../../shared/types'
 import { ContextMenu, LinkBtn, type ContextMenuItem } from './ui'
 import { revealInFolderLabel } from '../utils/revealLabel'
@@ -25,7 +25,45 @@ const SECTIONS: { key: SectionKey; label: string }[] = [
   { key: 'untracked', label: 'Untracked' },
 ]
 
+const EMPTY_ROOT: GitRepoStatus = { path: '', staged: [], unstaged: [], untracked: [] }
+
+/**
+ * One block per repository. A project that is a single repo looks exactly as
+ * before; one with nested repos (or only nested repos) gets a header per repo,
+ * each with its own Pull/Push and commit box.
+ */
 export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props) {
+  const repos = gitStatus ? gitStatus.repos : [EMPTY_ROOT]
+  if (repos.length === 0) {
+    return <div className="flex items-center justify-center p-6 text-text-muted text-base">Not a git repository</div>
+  }
+  const showHeaders = !(repos.length === 1 && repos[0].path === '')
+  const rootName = projectDir.split(/[\\/]/).filter(Boolean).pop() ?? projectDir
+  return (
+    <div className="overflow-y-auto text-base">
+      {repos.map((repo) => (
+        <RepoPanel
+          key={repo.path}
+          repo={repo}
+          title={showHeaders ? (repo.path || rootName) : null}
+          projectDir={projectDir}
+          onFileClick={onFileClick}
+        />
+      ))}
+    </div>
+  )
+}
+
+interface RepoPanelProps {
+  repo: GitRepoStatus
+  /** Header label, or null for a lone root repo (no header). */
+  title: string | null
+  projectDir: string
+  onFileClick: (filePath: string) => void
+}
+
+function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
+  const [repoCollapsed, setRepoCollapsed] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [commitMsg, setCommitMsg] = useState('')
@@ -66,7 +104,7 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     if (busy || files.length === 0) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitStage(projectDir, files)
+      const result = await window.api.fbGitStage(projectDir, repo.path, files)
       if (!result.success) showFeedback('error', result.message)
       refreshStatus()
     } catch {
@@ -74,13 +112,13 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
 
   const handleUnstage = useCallback(async (files: string[]) => {
     if (busy || files.length === 0) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitUnstage(projectDir, files)
+      const result = await window.api.fbGitUnstage(projectDir, repo.path, files)
       if (!result.success) showFeedback('error', result.message)
       refreshStatus()
     } catch {
@@ -88,13 +126,13 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
 
   const handleDiscard = useCallback(async (files: string[]) => {
     if (busy || files.length === 0) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitDiscard(projectDir, files)
+      const result = await window.api.fbGitDiscard(projectDir, repo.path, files)
       if (result.success) {
         showFeedback('success', result.message)
       } else {
@@ -106,22 +144,21 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
 
   const handleStageAll = useCallback(() => {
-    if (!gitStatus) return
     const files = [
-      ...gitStatus.unstaged.flatMap(gitEntryPaths),
-      ...gitStatus.untracked.flatMap(gitEntryPaths),
+      ...repo.unstaged.flatMap(gitEntryPaths),
+      ...repo.untracked.flatMap(gitEntryPaths),
     ]
     handleStage(files)
-  }, [gitStatus, handleStage])
+  }, [repo, handleStage])
 
   const handlePull = useCallback(async () => {
     if (busy) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitPull(projectDir)
+      const result = await window.api.fbGitPull(projectDir, repo.path)
       showFeedback(result.success ? 'success' : 'error', result.message)
       if (result.success) refreshStatus()
     } catch {
@@ -129,13 +166,13 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
 
   const handleCommit = useCallback(async () => {
     if (busy || !commitMsg.trim()) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitCommit(projectDir, commitMsg)
+      const result = await window.api.fbGitCommit(projectDir, repo.path, commitMsg)
       showFeedback(result.success ? 'success' : 'error', result.message)
       if (result.success) {
         setCommitMsg('')
@@ -146,13 +183,13 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, commitMsg, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, commitMsg, showFeedback, refreshStatus])
 
   const handlePush = useCallback(async () => {
     if (busy) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitPush(projectDir)
+      const result = await window.api.fbGitPush(projectDir, repo.path)
       showFeedback(result.success ? 'success' : 'error', result.message)
       if (result.success) refreshStatus()
     } catch {
@@ -160,27 +197,22 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
 
-  const isEmpty =
-    !gitStatus ||
-    (gitStatus.staged.length === 0 &&
-      gitStatus.unstaged.length === 0 &&
-      gitStatus.untracked.length === 0)
+  const changeCount = repo.staged.length + repo.unstaged.length + repo.untracked.length
+  const isEmpty = changeCount === 0
 
-  const hasStagedFiles = gitStatus && gitStatus.staged.length > 0
-  const hasUnstagedOrUntracked = gitStatus &&
-    (gitStatus.unstaged.length > 0 || gitStatus.untracked.length > 0)
+  const hasStagedFiles = repo.staged.length > 0
+  const hasUnstagedOrUntracked = repo.unstaged.length > 0 || repo.untracked.length > 0
 
   const handleSectionAction = useCallback((key: SectionKey) => {
-    if (!gitStatus) return
-    const files = gitStatus[key].flatMap(gitEntryPaths)
+    const files = repo[key].flatMap(gitEntryPaths)
     if (key === 'staged') {
       handleUnstage(files)
     } else {
       handleStage(files)
     }
-  }, [gitStatus, handleStage, handleUnstage])
+  }, [repo, handleStage, handleUnstage])
 
   const handleFileAction = useCallback((key: SectionKey, entry: GitStatusEntry) => {
     const files = gitEntryPaths(entry)
@@ -192,7 +224,20 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
   }, [handleStage, handleUnstage])
 
   return (
-    <div className="overflow-y-auto text-base">
+    <div className={title !== null ? 'border-b border-hair' : undefined}>
+      {title !== null && (
+        <div
+          className="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer select-none bg-surface-2 text-text hover:bg-surface-3 transition-colors duration-(--motion-fast)"
+          onClick={() => setRepoCollapsed(c => !c)}
+          title={repo.path ? `${projectDir}/${repo.path}` : projectDir}
+        >
+          <ChevronRight size={12} className={`shrink-0 text-text-muted transition-transform duration-(--motion-fast) ${repoCollapsed ? '' : 'rotate-90'}`} />
+          <GitBranch size={12} className="shrink-0 text-text-muted" />
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{title}</span>
+          {changeCount > 0 && <span className="text-text-muted opacity-70">({changeCount})</span>}
+        </div>
+      )}
+      {!repoCollapsed && (<>
       <div className="p-2 border-b border-hair flex flex-col gap-1.5">
         <div className="flex items-center gap-3 px-0.5">
           <LinkBtn onClick={handlePull} disabled={busy} title="Git Pull">{busy ? '…' : 'Pull'}</LinkBtn>
@@ -230,10 +275,10 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
         )}
       </div>
       {isEmpty ? (
-        <div className="flex items-center justify-center p-6 text-text-muted">No changes</div>
+        <div className={`flex items-center justify-center text-text-muted ${title !== null ? 'p-3' : 'p-6'}`}>No changes</div>
       ) : (
         SECTIONS.map(({ key, label }) => {
-          const entries = gitStatus![key]
+          const entries = repo[key]
           if (entries.length === 0) return null
           const collapsed = collapsedSections.has(key)
           return (
@@ -258,6 +303,7 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
                   <FileRow
                     key={entry.relativePath}
                     entry={entry}
+                    repoPath={repo.path}
                     sectionKey={key}
                     busy={busy}
                     onFileClick={onFileClick}
@@ -273,6 +319,7 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
           )
         })
       )}
+      </>)}
       <ContextMenu menu={menu} onClose={closeMenu} items={menu ? fileMenuItems(menu.sectionKey, menu.entry) : []} />
     </div>
   )
@@ -310,6 +357,8 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
 
 interface FileRowProps {
   entry: GitStatusEntry
+  /** The repo the entry belongs to; rows show paths relative to it. */
+  repoPath: string
   sectionKey: SectionKey
   busy: boolean
   onFileClick: (filePath: string) => void
@@ -318,7 +367,12 @@ interface FileRowProps {
   onContextMenu: (e: React.MouseEvent) => void
 }
 
-function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard, onContextMenu }: FileRowProps) {
+/** A project-relative path shown relative to its repo. */
+function repoRelative(repoPath: string, filePath: string): string {
+  return repoPath && filePath.startsWith(`${repoPath}/`) ? filePath.slice(repoPath.length + 1) : filePath
+}
+
+function FileRow({ entry, repoPath, sectionKey, busy, onFileClick, onAction, onDiscard, onContextMenu }: FileRowProps) {
   const badgeCls = BADGE_CLASSES[sectionKey]
   const [confirmDiscard, setConfirmDiscard] = useState(false)
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -355,8 +409,8 @@ function FileRow({ entry, sectionKey, busy, onFileClick, onAction, onDiscard, on
         {entry.status}
       </span>
       <span className="overflow-hidden text-ellipsis whitespace-nowrap" title={entry.origPath ? `${entry.origPath} → ${entry.relativePath}` : entry.relativePath}>
-        {entry.relativePath}
-        {entry.origPath && <span className="text-text-muted"> ← {entry.origPath}</span>}
+        {repoRelative(repoPath, entry.relativePath)}
+        {entry.origPath && <span className="text-text-muted"> ← {repoRelative(repoPath, entry.origPath)}</span>}
       </span>
       {onDiscard && (
         <button

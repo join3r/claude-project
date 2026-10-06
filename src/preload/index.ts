@@ -354,18 +354,20 @@ const api = {
     ipcRenderer.invoke('git-commit-history', projectCwd),
   fbGitDiff: (projectCwd: string, relativeFilePath: string): Promise<string> =>
     ipcRenderer.invoke('fb-git-diff', projectCwd, relativeFilePath),
-  fbGitStage: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-stage', projectCwd, files),
-  fbGitUnstage: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-unstage', projectCwd, files),
-  fbGitDiscard: (projectCwd: string, files: string[]): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-discard', projectCwd, files),
-  fbGitPull: (projectCwd: string): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-pull', projectCwd),
-  fbGitCommit: (projectCwd: string, message: string): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-commit', projectCwd, message),
-  fbGitPush: (projectCwd: string): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-push', projectCwd),
+  // `repo` is a GitRepoStatus.path (project-relative, '' for the root);
+  // `files` are project-relative paths inside it.
+  fbGitStage: (projectCwd: string, repo: string, files: string[]): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-stage', projectCwd, repo, files),
+  fbGitUnstage: (projectCwd: string, repo: string, files: string[]): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-unstage', projectCwd, repo, files),
+  fbGitDiscard: (projectCwd: string, repo: string, files: string[]): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-discard', projectCwd, repo, files),
+  fbGitPull: (projectCwd: string, repo: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-pull', projectCwd, repo),
+  fbGitCommit: (projectCwd: string, repo: string, message: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-commit', projectCwd, repo, message),
+  fbGitPush: (projectCwd: string, repo: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-push', projectCwd, repo),
 
   // Menu: file browser toggle
   onMenuToggleFileBrowser: (callback: () => void): (() => void) => {

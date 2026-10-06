@@ -67,8 +67,10 @@ describe('git panel right-click menu', () => {
     staged: [],
     unstaged: [{ relativePath: 'src/a.ts', status: 'M' }, { relativePath: 'gone.ts', status: 'D' }],
     untracked: [],
-    summary: {} as GitStatusResult['summary']
+    summary: {} as GitStatusResult['summary'],
+    repos: []
   }
+  status.repos = [{ path: '', staged: status.staged, unstaged: status.unstaged, untracked: status.untracked }]
 
   it('reveals a file, and discards only after asking', () => {
     render(<GitStatus gitStatus={status} projectDir="/repo" onFileClick={vi.fn()} />)
@@ -79,7 +81,27 @@ describe('git panel right-click menu', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     fireEvent.contextMenu(screen.getByText('src/a.ts'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Discard changes…' }))
-    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', ['src/a.ts'])
+    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', '', ['src/a.ts'])
+  })
+
+  it('gives each nested repo its own block, with repo-relative rows and operations', () => {
+    const entry = { relativePath: 'lib/x/b.ts', status: 'M' as const }
+    const nested: GitStatusResult = {
+      staged: [], unstaged: [entry], untracked: [], summary: {} as GitStatusResult['summary'],
+      repos: [{ path: 'lib/x', staged: [], unstaged: [entry], untracked: [] }]
+    }
+    render(<GitStatus gitStatus={nested} projectDir="/repo" onFileClick={vi.fn()} />)
+    expect(screen.getByText('lib/x')).toBeTruthy()
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    fireEvent.contextMenu(screen.getByText('b.ts'))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Discard changes…' }))
+    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', 'lib/x', ['lib/x/b.ts'])
+  })
+
+  it('says so when the project holds no repo at all', () => {
+    const none: GitStatusResult = { staged: [], unstaged: [], untracked: [], summary: {} as GitStatusResult['summary'], repos: [] }
+    render(<GitStatus gitStatus={none} projectDir="/repo" onFileClick={vi.fn()} />)
+    expect(screen.getByText('Not a git repository')).toBeTruthy()
   })
 
   it('offers no reveal for a deleted file', () => {

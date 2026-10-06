@@ -1,4 +1,5 @@
 import { execFile } from 'child_process'
+import path from 'path'
 import { promisify } from 'util'
 import type {
   CommitHistoryResult,
@@ -6,9 +7,11 @@ import type {
   GitOperationResult,
   GitPostureLastCommit,
   GitPostureResult,
+  GitRepoStatus,
   GitStatusResult
 } from '../../shared/types'
 import { parseNumstat } from '../git-diff-summary'
+import { nestedGitRepos, repoForPath, toProjectEntries, toRepoPath } from '../git-repos'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from '../git-status-parse'
 import { findGitBashExe } from '../shell-env'
 import type { IpcRegistrar } from './registrar'
@@ -95,6 +98,19 @@ async function readGitDiffSummary(cwd: string): Promise<GitDiffSummary> {
   }
 }
 
+/** One repo's status and line summary, or null when `cwd` is not inside a git repo. */
+async function readRepoStatus(cwd: string): Promise<(ReturnType<typeof parseGitStatusZ> & { summary: GitDiffSummary }) | null> {
+  try {
+    const [{ stdout }, summary] = await Promise.all([
+      execFileAsync('git', GIT_STATUS_ARGS, { cwd }),
+      readGitDiffSummary(cwd)
+    ])
+    return { ...parseGitStatusZ(stdout), summary }
+  } catch {
+    return null
+  }
+}
+
 function operationFailure(err: unknown): GitOperationResult {
   const stderr = (err as { stderr?: string })?.stderr?.trim()
   return { success: false, message: stderr || (err instanceof Error ? err.message : String(err)) }
@@ -120,18 +136,33 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     }
   }
 
-  /** A mutating git command in an allowed directory, reported as a GitOperationResult. */
+  /**
+   * The directory of `repo` (project-relative, `''` for the root) inside an
+   * allowed project. A nested repo must be one the scan found, so a renderer
+   * can't point git at an arbitrary subdirectory.
+   */
+  const resolveRepo = async (projectCwd: string, repo: string): Promise<string> => {
+    const root = await deps.resolveRoot(projectCwd)
+    if (!repo) return root
+    if (!(await nestedGitRepos(root)).includes(repo) && !(await nestedGitRepos(root, { fresh: true })).includes(repo)) {
+      throw new Error(`Not a git repository in this project: ${repo}`)
+    }
+    return path.join(root, ...repo.split('/'))
+  }
+
+  /** Project-relative paths as paths inside `repo`; a path outside it is refused. */
+  const repoPaths = (repo: string, files: string[]): string[] => files.map((file) => {
+    const inner = toRepoPath(repo, file)
+    if (inner === null) throw new Error(`${file} is not inside ${repo}`)
+    return inner
+  })
+
+  /** A mutating git command in an allowed repo, reported as a GitOperationResult. */
   const operation = (
     run: (cwd: string) => Promise<GitOperationResult>
-  ) => async (projectCwd: string): Promise<GitOperationResult> => {
-    let cwd: string
+  ) => async (projectCwd: string, repo: string): Promise<GitOperationResult> => {
     try {
-      cwd = await deps.resolveRoot(projectCwd)
-    } catch (err) {
-      return operationFailure(err)
-    }
-    try {
-      return await run(cwd)
+      return await run(await resolveRepo(projectCwd, repo))
     } catch (err) {
       return operationFailure(err)
     }
@@ -167,66 +198,81 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
   })
 
   ipc.handle('fb-git-status', [str], async (_event, projectCwd): Promise<GitStatusResult> => {
-    const empty: GitStatusResult = { staged: [], unstaged: [], untracked: [], summary: { added: 0, deleted: 0 } }
+    const result: GitStatusResult = { staged: [], unstaged: [], untracked: [], summary: { added: 0, deleted: 0 }, repos: [] }
     const cwd = await rootOrNull(projectCwd)
-    if (!cwd) return empty
-    try {
-      const [{ stdout }, summary] = await Promise.all([
-        execFileAsync('git', GIT_STATUS_ARGS, { cwd }),
-        readGitDiffSummary(cwd)
-      ])
-      const { staged, unstaged, untracked } = parseGitStatusZ(stdout)
-      return { staged, unstaged, untracked, summary }
-    } catch {
-      return empty
-    }
+    if (!cwd) return result
+    const nested = await nestedGitRepos(cwd)
+    // The root is whatever repo git finds from the project folder (possibly
+    // none); nested repos are the subfolders with their own `.git`.
+    const repos = ['', ...nested]
+    const statuses = await Promise.all(repos.map(repo => readRepoStatus(path.join(cwd, ...repo.split('/')))))
+    statuses.forEach((status, i) => {
+      if (!status) return
+      const repo = repos[i]
+      const entry: GitRepoStatus = {
+        path: repo,
+        staged: toProjectEntries(repo, status.staged, nested),
+        unstaged: toProjectEntries(repo, status.unstaged, nested),
+        untracked: toProjectEntries(repo, status.untracked, nested)
+      }
+      result.repos.push(entry)
+      result.staged.push(...entry.staged)
+      result.unstaged.push(...entry.unstaged)
+      result.untracked.push(...entry.untracked)
+      result.summary.added += status.summary.added
+      result.summary.deleted += status.summary.deleted
+    })
+    return result
   })
 
   ipc.handle('fb-git-diff', [str, str], async (_event, projectCwd, relativeFilePath): Promise<string> => {
-    const cwd = await rootOrNull(projectCwd)
-    if (!cwd) return ''
+    const root = await rootOrNull(projectCwd)
+    if (!root) return ''
     try {
+      const repo = repoForPath(await nestedGitRepos(root), relativeFilePath)
+      const cwd = path.join(root, ...repo.split('/').filter(Boolean))
+      const repoPath = toRepoPath(repo, relativeFilePath) ?? relativeFilePath
       // The trailing `--` keeps a path that starts with `-` from being read
       // as an option; the raw path is passed through untouched.
-      const { stdout } = await execFileAsync('git', ['show', `HEAD:${relativeFilePath}`, '--'], { cwd })
+      const { stdout } = await execFileAsync('git', ['show', `HEAD:${repoPath}`, '--'], { cwd })
       return stdout
     } catch {
       return ''
     }
   })
 
-  ipc.handle('fb-git-stage', [str, stringList], (_event, projectCwd, files) => operation(async (cwd) => {
-    await execFileAsync('git', ['add', '--', ...files], { cwd, timeout: 10000 })
+  ipc.handle('fb-git-stage', [str, str, stringList], (_event, projectCwd, repo, files) => operation(async (cwd) => {
+    await execFileAsync('git', ['add', '--', ...repoPaths(repo, files)], { cwd, timeout: 10000 })
     return { success: true, message: `Staged ${files.length} file(s)` }
-  })(projectCwd))
+  })(projectCwd, repo))
 
-  ipc.handle('fb-git-unstage', [str, stringList], (_event, projectCwd, files) => operation(async (cwd) => {
-    await execFileAsync('git', ['reset', 'HEAD', '--', ...files], { cwd, timeout: 10000 })
+  ipc.handle('fb-git-unstage', [str, str, stringList], (_event, projectCwd, repo, files) => operation(async (cwd) => {
+    await execFileAsync('git', ['reset', 'HEAD', '--', ...repoPaths(repo, files)], { cwd, timeout: 10000 })
     return { success: true, message: `Unstaged ${files.length} file(s)` }
-  })(projectCwd))
+  })(projectCwd, repo))
 
-  ipc.handle('fb-git-discard', [str, stringList], (_event, projectCwd, files) => operation(async (cwd) => {
-    await execFileAsync('git', ['checkout', '--', ...files], { cwd, timeout: 10000 })
+  ipc.handle('fb-git-discard', [str, str, stringList], (_event, projectCwd, repo, files) => operation(async (cwd) => {
+    await execFileAsync('git', ['checkout', '--', ...repoPaths(repo, files)], { cwd, timeout: 10000 })
     return { success: true, message: `Discarded changes in ${files.length} file(s)` }
-  })(projectCwd))
+  })(projectCwd, repo))
 
-  ipc.handle('fb-git-pull', [str], (_event, projectCwd) => operation(async (cwd) => {
+  ipc.handle('fb-git-pull', [str, str], (_event, projectCwd, repo) => operation(async (cwd) => {
     const { stdout, stderr } = await execFileAsync('git', ['pull'], { cwd, timeout: 60000 })
     return { success: true, message: stdout.trim() || stderr.trim() || 'Pull complete' }
-  })(projectCwd))
+  })(projectCwd, repo))
 
-  ipc.handle('fb-git-commit', [str, str], async (_event, projectCwd, commitMessage) => {
+  ipc.handle('fb-git-commit', [str, str, str], async (_event, projectCwd, repo, commitMessage) => {
     if (!commitMessage || !commitMessage.trim()) {
       return { success: false, message: 'Commit message cannot be empty' }
     }
     return operation(async (cwd) => {
       const { stdout } = await execFileAsync('git', ['commit', '-m', commitMessage.trim()], { cwd, timeout: 30000 })
       return { success: true, message: stdout.trim() || 'Committed' }
-    })(projectCwd)
+    })(projectCwd, repo)
   })
 
-  ipc.handle('fb-git-push', [str], (_event, projectCwd) => operation(async (cwd) => {
+  ipc.handle('fb-git-push', [str, str], (_event, projectCwd, repo) => operation(async (cwd) => {
     const { stdout, stderr } = await execFileAsync('git', ['push'], { cwd, timeout: 60000 })
     return { success: true, message: stdout.trim() || stderr.trim() || 'Push complete' }
-  })(projectCwd))
+  })(projectCwd, repo))
 }

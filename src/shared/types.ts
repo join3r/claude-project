@@ -576,11 +576,26 @@ export interface GitDiffSummary {
   deleted: number
 }
 
+/** One repository inside a project: the root (`path: ''`) or a nested checkout. */
+export interface GitRepoStatus {
+  /** Project-relative, `/`-separated; `''` for the project root. */
+  path: string
+  staged: GitStatusEntry[]
+  unstaged: GitStatusEntry[]
+  untracked: GitStatusEntry[]
+}
+
+/**
+ * Every entry path is project-relative, nested repos included. The flat lists
+ * merge all repos (file tree colouring, the toolbar summary); `repos` keeps
+ * them apart for the git panel.
+ */
 export interface GitStatusResult {
   staged: GitStatusEntry[]
   unstaged: GitStatusEntry[]
   untracked: GitStatusEntry[]
   summary: GitDiffSummary
+  repos: GitRepoStatus[]
 }
 
 export interface GitPostureLastCommit {
