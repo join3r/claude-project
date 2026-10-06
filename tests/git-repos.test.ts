@@ -114,3 +114,12 @@ describe('nested repo config that runs commands', () => {
     expect(fs.existsSync(marker)).toBe(false)
   })
 })
+
+describe('nestedRepoRunsFilters failure handling', () => {
+  it('fails closed when the config check itself errors', async () => {
+    const { nestedRepoRunsFilters } = await import('../src/main/ipc/git')
+    gitInit('broken')
+    fs.appendFileSync(path.join(root, 'broken', '.git', 'config'), '[unterminated\n')
+    expect(await nestedRepoRunsFilters(path.join(root, 'broken'))).toBe(true)
+  })
+})

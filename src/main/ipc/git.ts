@@ -70,6 +70,8 @@ const NESTED_READ_OPTS = ['-c', 'core.fsmonitor=false', '--no-optional-locks']
  * Whether a nested repo's own config (includes followed) defines filter
  * drivers that status/diff would run. The panel leaves such a repo unscanned.
  * Drivers from the user's global/system config (e.g. git-lfs) are fine.
+ * Fails closed: only exit 1 ("no match") clears the repo — an unreadable
+ * config or a git too old for `--show-scope` (< 2.26) counts as unsafe.
  */
 export async function nestedRepoRunsFilters(cwd: string): Promise<boolean> {
   try {
@@ -77,8 +79,8 @@ export async function nestedRepoRunsFilters(cwd: string): Promise<boolean> {
       'git', ['config', '--show-scope', '--get-regexp', '^filter\\..*\\.(clean|process)$'], { cwd }
     )
     return stdout.split('\n').some(line => line && !/^(global|system|command)\t/.test(line))
-  } catch {
-    return false // exit 1: no match
+  } catch (err) {
+    return (err as { code?: unknown }).code !== 1
   }
 }
 
@@ -251,7 +253,7 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
       if (status === 'skipped') {
         result.repos.push({
           path: repo, staged: [], unstaged: [], untracked: [],
-          skipped: 'Not scanned: this repo\'s own git config defines filter commands, which git would run.'
+          skipped: 'Not scanned: this repo\'s own git config defines filter commands that git would run (or its config could not be checked).'
         })
         return
       }
