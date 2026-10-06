@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, SquareTerminal, X } from 'lucide-react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUp, Square, SquareTerminal } from 'lucide-react'
 import {
   CHAT_EFFORT_LEVELS,
   CHAT_PERMISSION_MODES,
@@ -17,11 +17,7 @@ import ChipMenu from './ChipMenu'
 import UsageMeter from './UsageMeter'
 import { menuCls } from '../ui'
 import { onAgentInsert } from '../../agentLink/linkToAgent'
-
-interface Attachment extends ChatImage {
-  id: string
-  preview: string
-}
+import { AttachmentStrip, toChatImages, useImageAttachments } from './imageAttachments'
 
 interface Props {
   busy: boolean
@@ -50,7 +46,6 @@ interface Props {
   tabId?: string
 }
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'auto']
 
 type Suggest =
@@ -82,27 +77,13 @@ function rankFiles(files: string[], query: string): string[] {
   return scored.sort((a, b) => a.score - b.score).slice(0, 50).map((entry) => entry.file)
 }
 
-function readImage(file: File): Promise<Attachment | null> {
-  if (!file.type.startsWith('image/') || file.size > MAX_IMAGE_BYTES) return Promise.resolve(null)
-  return new Promise((resolve) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const url = String(reader.result ?? '')
-      const comma = url.indexOf(',')
-      if (comma < 0) return resolve(null)
-      resolve({ id: `${Date.now()}-${Math.random()}`, mediaType: file.type, data: url.slice(comma + 1), preview: url })
-    }
-    reader.onerror = () => resolve(null)
-    reader.readAsDataURL(file)
-  })
-}
-
 export default function Composer(props: Props): React.ReactElement {
   const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
   const [text, setText] = useState('')
   const textRef = useRef(text)
   textRef.current = text
-  const [images, setImages] = useState<Attachment[]>([])
+  const attachments = useImageAttachments()
+  const { images } = attachments
   const [suggest, setSuggest] = useState<Suggest | null>(null)
   const [highlight, setHighlight] = useState(0)
   const [files, setFiles] = useState<string[] | null>(null)
@@ -232,17 +213,11 @@ export default function Composer(props: Props): React.ReactElement {
       setSuggest(null)
       return
     }
-    onSend(trimmed, images.map(({ mediaType, data }) => ({ mediaType, data })))
+    onSend(trimmed, toChatImages(images))
     setText('')
-    setImages([])
+    attachments.clear()
     setSuggest(null)
   }
-
-  const addFiles = useCallback(async (list: FileList | File[]): Promise<void> => {
-    const read = await Promise.all(Array.from(list).map(readImage))
-    const ok = read.filter((a): a is Attachment => a !== null)
-    if (ok.length) setImages((prev) => [...prev, ...ok])
-  }, [])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (suggest && options.length > 0) {
@@ -290,12 +265,7 @@ export default function Composer(props: Props): React.ReactElement {
   return (
     <div
       className={`relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] transition-colors duration-(--motion-fast) ${bashMode ? 'border-accent' : 'border-border-strong focus-within:border-border-focus'}`}
-      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
-      onDrop={(e) => {
-        if (e.dataTransfer.files.length === 0) return
-        e.preventDefault()
-        void addFiles(e.dataTransfer.files)
-      }}
+      {...attachments.dropProps}
     >
       {suggest && options.length > 0 && (
         <div className={`absolute bottom-full mb-1.5 left-0 right-0 z-(--z-menu) max-h-64 overflow-auto ${menuCls}`}>
@@ -313,23 +283,7 @@ export default function Composer(props: Props): React.ReactElement {
           ))}
         </div>
       )}
-      {images.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
-          {images.map((image) => (
-            <div key={image.id} className="relative group">
-              <img src={image.preview} alt="" className="h-14 w-14 object-cover rounded-md border-[0.5px] border-border" />
-              <button
-                type="button"
-                title="Remove"
-                onClick={() => setImages((prev) => prev.filter((i) => i.id !== image.id))}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full border-0 bg-surface-3 text-text flex items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100"
-              >
-                <X size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <AttachmentStrip images={images} onRemove={attachments.remove} />
       <textarea
         ref={textareaRef}
         rows={1}
@@ -343,13 +297,7 @@ export default function Composer(props: Props): React.ReactElement {
         onSelect={(e) => refreshSuggest(e.currentTarget.value, e.currentTarget.selectionStart)}
         onBlur={() => setSuggest(null)}
         onKeyDown={onKeyDown}
-        onPaste={(e) => {
-          const pasted = Array.from(e.clipboardData.files).filter((file) => file.type.startsWith('image/'))
-          if (pasted.length > 0) {
-            e.preventDefault()
-            void addFiles(pasted)
-          }
-        }}
+        onPaste={attachments.onPaste}
         className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] min-h-[38px] max-h-60"
       />
       <div className="flex items-center gap-0.5 px-1.5 pb-1.5">

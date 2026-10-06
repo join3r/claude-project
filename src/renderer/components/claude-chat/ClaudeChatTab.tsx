@@ -136,7 +136,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
         if (first.mode) await window.api.chatSetMode(tabId, first.mode)
         if (first.model) await window.api.chatSetModel(tabId, first.model)
         if (first.effort) await window.api.chatSetEffort(tabId, first.effort)
-        await window.api.chatSend(tabId, first.text)
+        await window.api.chatSend(tabId, first.text, first.images)
       })().catch((err: unknown) => {
         setAttachError(err instanceof Error ? err.message : String(err))
       })

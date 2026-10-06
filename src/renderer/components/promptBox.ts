@@ -6,6 +6,7 @@
 
 import { NEW_TASK_NAME, PROMPT_BOX_AGENTS } from '../../shared/types'
 import type { AiTabType, AppConfig, Project, PromptBoxAgent } from '../../shared/types'
+import type { ChatImage } from '../../shared/claude-chat'
 import { taskNameFromPrompt } from '../../shared/task-name'
 import { workspaceBranchName } from '../../shared/branch-name'
 
@@ -27,6 +28,8 @@ export interface PendingPrompt {
   model?: string
   /** Claude chat only. */
   effort?: string
+  /** Claude chat only: images sent along with the text. */
+  images?: ChatImage[]
 }
 
 /** Only a task still carrying the placeholder name is renamed; a name someone typed stays. */

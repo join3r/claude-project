@@ -3,6 +3,7 @@ import { ArrowUp, GitBranch } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import type { Project, PromptBoxAgent, TabType, WorkspaceDraft } from '../../shared/types'
 import ChipMenu from './claude-chat/ChipMenu'
+import { AttachmentStrip, toChatImages, useImageAttachments } from './claude-chat/imageAttachments'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
 import {
   PROMPT_BOX_AGENT_LABEL,
@@ -46,6 +47,10 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const workspace = usePendingWorkspace(project, taskId, workspaceDraft)
   const busy = workspace.creating !== null
+  // Only the chat view takes images; switching away hides them rather than dropping them.
+  const takesImages = agent === 'claude-chat'
+  const attachments = useImageAttachments(takesImages && !busy)
+  const images = takesImages ? attachments.images : []
 
   // Landing on an empty task (+ Task, Cmd+N, switching to it) puts the caret here.
   useEffect(() => {
@@ -99,11 +104,13 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
       text,
       ...(takesMode && currentMode ? { mode: currentMode } : {}),
       ...(agent === 'claude-chat' && model ? { model } : {}),
-      ...(agent === 'claude-chat' && effort ? { effort } : {})
+      ...(agent === 'claude-chat' && effort ? { effort } : {}),
+      ...(images.length > 0 ? { images: toChatImages(images) } : {})
     })
     if (shouldNameTask(taskName)) renameTask(project.id, taskId, taskNameFromPrompt(text))
     updateConfig({ promptBoxAgent: agent, ...(takesMode ? { promptBoxMode: currentMode } : {}) })
     setDraft('')
+    attachments.clear()
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -123,7 +130,11 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
           <div className="text-md text-text">What should we work on?</div>
           <div className="text-sm text-text-subtle mt-0.5 font-mono truncate">{projectDir || project.ssh?.remoteDir || '~'}</div>
         </div>
-        <div className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)">
+        <div
+          className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)"
+          {...attachments.dropProps}
+        >
+          <AttachmentStrip images={images} onRemove={attachments.remove} />
           <textarea
             ref={textareaRef}
             rows={2}
@@ -133,6 +144,7 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
             placeholder={`Describe the task for ${PROMPT_BOX_AGENT_LABEL[agent]} — Enter to send, Shift+Enter for a new line`}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={attachments.onPaste}
             className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] min-h-[58px] max-h-60"
           />
           <div className="flex items-center gap-0.5 px-1.5 pb-1.5 flex-wrap">

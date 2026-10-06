@@ -227,6 +227,58 @@ describe('NewTaskModal', () => {
     }))
   })
 
+  describe('images', () => {
+    // "PNG" in base64, small enough to read back as-is.
+    const png = (): File => new File(['PNG'], 'shot.png', { type: 'image/png' })
+
+    async function pasteImage(): Promise<void> {
+      await act(async () => { fireEvent.paste(promptInput(), { clipboardData: { files: [png()] } }) })
+      await waitFor(() => expect(screen.getAllByLabelText('Remove image')).toHaveLength(1))
+    }
+
+    it('sends a pasted image to Claude with the first prompt', async () => {
+      renderModal()
+      await pasteImage()
+      await typePrompt('What is wrong here?')
+      await submit()
+      expect(onCreate).toHaveBeenCalledWith({
+        target: inProject('p1'),
+        start: { agent: 'claude-chat', prompt: { text: 'What is wrong here?', images: [{ mediaType: 'image/png', data: 'UE5H' }] } }
+      })
+    })
+
+    it('takes dropped images too, and lets one be removed', async () => {
+      renderModal()
+      const box = promptInput().parentElement as HTMLElement
+      await act(async () => { fireEvent.drop(box, { dataTransfer: { files: [png(), png()], types: ['Files'] } }) })
+      await waitFor(() => expect(screen.getAllByLabelText('Remove image')).toHaveLength(2))
+      await act(async () => { fireEvent.click(screen.getAllByLabelText('Remove image')[0]) })
+      expect(screen.getAllByLabelText('Remove image')).toHaveLength(1)
+    })
+
+    it('will not start on images alone', async () => {
+      renderModal()
+      await pasteImage()
+      expect(createButton().disabled).toBe(true)
+      expect(screen.getByText('Add a prompt to send the images with.')).toBeTruthy()
+      await typePrompt('Look')
+      expect(createButton().disabled).toBe(false)
+    })
+
+    it('ignores images for an agent that cannot take them', async () => {
+      renderModal()
+      await act(async () => { fireEvent.click(screen.getByTitle('Agent')) })
+      await act(async () => { fireEvent.click(screen.getByText('Codex')) })
+      await act(async () => { fireEvent.paste(promptInput(), { clipboardData: { files: [png()] } }) })
+      expect(screen.queryByLabelText('Remove image')).toBeNull()
+      await typePrompt('Port it')
+      await submit()
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+        start: { agent: 'codex', prompt: { text: 'Port it' } }
+      }))
+    })
+  })
+
   it('closes a chip menu on Escape without closing the dialog', async () => {
     renderModal()
     await act(async () => { fireEvent.click(screen.getByTitle('Agent')) })

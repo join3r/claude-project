@@ -5,6 +5,7 @@ import { dirBasename } from '../../shared/paths'
 import { Field, HelperText, menuItemCls } from './ui'
 import AddLocalProject from './AddLocalProject'
 import ChipMenu from './claude-chat/ChipMenu'
+import { AttachmentStrip, toChatImages, useImageAttachments } from './claude-chat/imageAttachments'
 import { defaultBaseBranch, isNewTaskDraftValid, isPendingWorkspaceDraft, matchProjects } from './newTask'
 import type { NewTaskSubmission, NewTaskTarget } from './newTask'
 import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickPromptAgent, workspaceBranchName } from './promptBox'
@@ -143,6 +144,12 @@ export default function NewTaskModal({
   // Without an agent to hand it to, there is no prompt — the task opens blank.
   const promptText = agent ? prompt.trim() : ''
   const busy = creating !== null
+  // Only the chat view takes images; switching away hides them rather than dropping them.
+  const takesImages = agent === 'claude-chat'
+  const attachments = useImageAttachments(takesImages && !busy)
+  const images = takesImages ? attachments.images : []
+  // Images go with a prompt: one alone would name the task and branch after nothing.
+  const imagesNeedPrompt = images.length > 0 && !promptText
 
   /** Point the composer somewhere else, dropping everything the old target loaded. */
   const selectTarget = (next: NewTaskTarget): void => {
@@ -267,7 +274,7 @@ export default function NewTaskModal({
   }, [workspaceOn, targetDir, project])
 
   const draft = { target, prompt: promptText, workspace: workspaceOn, baseBranch }
-  const valid = isNewTaskDraftValid(draft)
+  const valid = isNewTaskDraftValid(draft) && !imagesNeedPrompt
 
   /** The unwind is done — drop the dialog, unless the user already walked away. */
   const finishCancel = (): void => {
@@ -286,7 +293,8 @@ export default function NewTaskModal({
             text: promptText,
             ...(takesMode && mode ? { mode } : {}),
             ...(agent === 'claude-chat' && model ? { model } : {}),
-            ...(agent === 'claude-chat' && effort ? { effort } : {})
+            ...(agent === 'claude-chat' && effort ? { effort } : {}),
+            ...(images.length > 0 ? { images: toChatImages(images) } : {})
           }
         }
       : undefined
@@ -523,7 +531,11 @@ export default function NewTaskModal({
             </button>
           </header>
 
-          <div className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)">
+          <div
+            className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)"
+            {...attachments.dropProps}
+          >
+            <AttachmentStrip images={images} onRemove={attachments.remove} />
             <textarea
               ref={promptRef}
               rows={3}
@@ -535,6 +547,7 @@ export default function NewTaskModal({
               placeholder={placeholder}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={onPromptKeyDown}
+              onPaste={attachments.onPaste}
               className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] min-h-[82px] max-h-60 disabled:cursor-default"
             />
             <div className="flex items-end gap-1 px-1.5 pb-1.5">
@@ -600,12 +613,14 @@ export default function NewTaskModal({
             <HelperText><span className="text-danger">{error}</span></HelperText>
           ) : workspaceOn && !branchesLoading && branches.length === 0 ? (
             <HelperText>No branch to fork a workspace from. Is this a git repository with a commit?</HelperText>
+          ) : imagesNeedPrompt ? (
+            <HelperText>Add a prompt to send the images with.</HelperText>
           ) : !target ? (
             <HelperText>Tasks live in a project — add one, or point this task at a directory.</HelperText>
           ) : (
             <HelperText>
               {agent
-                ? 'The first prompt names the task. Send it empty to open the task without starting an agent.'
+                ? `The first prompt names the task.${takesImages ? ' Paste or drop images to send them with it.' : ''} Send it empty to open the task without starting an agent.`
                 : 'The task opens empty; add a terminal or browser tab from there.'}
             </HelperText>
           )}
