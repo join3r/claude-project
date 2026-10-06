@@ -583,6 +583,8 @@ export interface GitRepoStatus {
   staged: GitStatusEntry[]
   unstaged: GitStatusEntry[]
   untracked: GitStatusEntry[]
+  /** Set when the panel declined to run git in this repo, and why. */
+  skipped?: string
 }
 
 /**

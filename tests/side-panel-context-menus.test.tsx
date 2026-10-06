@@ -98,6 +98,16 @@ describe('git panel right-click menu', () => {
     expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', 'lib/x', ['lib/x/b.ts'])
   })
 
+  it('shows why a repo was skipped instead of a commit box', () => {
+    const skipped: GitStatusResult = {
+      staged: [], unstaged: [], untracked: [], summary: {} as GitStatusResult['summary'],
+      repos: [{ path: 'vendor/x', staged: [], unstaged: [], untracked: [], skipped: 'Not scanned: filters' }]
+    }
+    render(<GitStatus gitStatus={skipped} projectDir="/repo" onFileClick={vi.fn()} />)
+    expect(screen.getByText('Not scanned: filters')).toBeTruthy()
+    expect(screen.queryByPlaceholderText('Commit message…')).toBeNull()
+  })
+
   it('says so when the project holds no repo at all', () => {
     const none: GitStatusResult = { staged: [], unstaged: [], untracked: [], summary: {} as GitStatusResult['summary'], repos: [] }
     render(<GitStatus gitStatus={none} projectDir="/repo" onFileClick={vi.fn()} />)

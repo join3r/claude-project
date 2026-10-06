@@ -237,7 +237,10 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
           {changeCount > 0 && <span className="text-text-muted opacity-70">({changeCount})</span>}
         </div>
       )}
-      {!repoCollapsed && (<>
+      {!repoCollapsed && repo.skipped && (
+        <div className="px-3 py-2 text-sm text-text-muted">{repo.skipped}</div>
+      )}
+      {!repoCollapsed && !repo.skipped && (<>
       <div className="p-2 border-b border-hair flex flex-col gap-1.5">
         <div className="flex items-center gap-3 px-0.5">
           <LinkBtn onClick={handlePull} disabled={busy} title="Git Pull">{busy ? '…' : 'Pull'}</LinkBtn>

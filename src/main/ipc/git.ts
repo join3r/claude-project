@@ -53,22 +53,51 @@ export function parseLastCommit(stdout: string): GitPostureLastCommit | null {
   return sha ? { sha, subject: subject ?? '', author: author ?? '', isoDate: isoDate ?? '' } : null
 }
 
-async function hasHeadCommit(cwd: string): Promise<boolean> {
+/**
+ * Global options for git commands the panel runs on its own (the 2-second
+ * poll, diffs) inside a nested repo. Unlike the project root, which the user
+ * picked, a nested `.git` can be anything that landed in the folder — an
+ * unpacked archive, a vendored checkout — and its config must not get to run
+ * commands just because the git panel is open:
+ *  - `core.fsmonitor` names a command git runs on every status;
+ *  - without `--no-optional-locks`, status rewrites the index, which fires
+ *    the repo's `post-index-change` hook.
+ * Clean filters can't be switched off this way; see `nestedRepoRunsFilters`.
+ */
+const NESTED_READ_OPTS = ['-c', 'core.fsmonitor=false', '--no-optional-locks']
+
+/**
+ * Whether a nested repo's own config (includes followed) defines filter
+ * drivers that status/diff would run. The panel leaves such a repo unscanned.
+ * Drivers from the user's global/system config (e.g. git-lfs) are fine.
+ */
+export async function nestedRepoRunsFilters(cwd: string): Promise<boolean> {
   try {
-    await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], { cwd })
+    const { stdout } = await execFileAsync(
+      'git', ['config', '--show-scope', '--get-regexp', '^filter\\..*\\.(clean|process)$'], { cwd }
+    )
+    return stdout.split('\n').some(line => line && !/^(global|system|command)\t/.test(line))
+  } catch {
+    return false // exit 1: no match
+  }
+}
+
+async function hasHeadCommit(cwd: string, opts: string[]): Promise<boolean> {
+  try {
+    await execFileAsync('git', [...opts, 'rev-parse', '--verify', 'HEAD'], { cwd })
     return true
   } catch {
     return false
   }
 }
 
-async function readUntrackedSummary(cwd: string): Promise<GitDiffSummary> {
+async function readUntrackedSummary(cwd: string, opts: string[]): Promise<GitDiffSummary> {
   try {
     // Count lines via a shell pipeline instead of reading every untracked file
     // into Node.js — projects with hundreds of untracked files (e.g. vendored
     // dependencies) would otherwise cause 100% CPU on the 2-second poll.
     const script =
-      'git ls-files --others --exclude-standard -z | xargs -0 wc -l 2>/dev/null | tail -1'
+      `git ${opts.join(' ')} ls-files --others --exclude-standard -z | xargs -0 wc -l 2>/dev/null | tail -1`
     const file = process.platform === 'win32' ? findGitBashExe() : '/bin/sh'
     if (!file) return { added: 0, deleted: 0 }
     const args = process.platform === 'win32' ? ['-lc', script] : ['-c', script]
@@ -80,14 +109,19 @@ async function readUntrackedSummary(cwd: string): Promise<GitDiffSummary> {
   }
 }
 
-async function readGitDiffSummary(cwd: string): Promise<GitDiffSummary> {
-  const untrackedSummary = await readUntrackedSummary(cwd)
+async function readGitDiffSummary(cwd: string, nested: boolean): Promise<GitDiffSummary> {
+  const opts = nested ? NESTED_READ_OPTS : []
+  const untrackedSummary = await readUntrackedSummary(cwd, opts)
 
   try {
-    const diffArgs = await hasHeadCommit(cwd)
-      ? ['diff', '--numstat', 'HEAD', '--']
-      : ['diff', '--numstat', '--cached', '--']
-    const { stdout } = await execFileAsync('git', diffArgs, { cwd })
+    const diffArgs = await hasHeadCommit(cwd, opts)
+      ? ['diff', '--numstat', 'HEAD']
+      : ['diff', '--numstat', '--cached']
+    // `dirty` compares only the commit a submodule points at, so git doesn't
+    // run status inside a nested repo's submodules.
+    const { stdout } = await execFileAsync('git', [
+      ...opts, ...diffArgs, ...(nested ? ['--ignore-submodules=dirty'] : []), '--'
+    ], { cwd })
     const trackedSummary = parseNumstat(stdout)
     return {
       added: trackedSummary.added + untrackedSummary.added,
@@ -99,11 +133,12 @@ async function readGitDiffSummary(cwd: string): Promise<GitDiffSummary> {
 }
 
 /** One repo's status and line summary, or null when `cwd` is not inside a git repo. */
-async function readRepoStatus(cwd: string): Promise<(ReturnType<typeof parseGitStatusZ> & { summary: GitDiffSummary }) | null> {
+async function readRepoStatus(cwd: string, nested: boolean): Promise<(ReturnType<typeof parseGitStatusZ> & { summary: GitDiffSummary }) | null> {
+  const args = nested ? [...NESTED_READ_OPTS, ...GIT_STATUS_ARGS, '--ignore-submodules=dirty'] : GIT_STATUS_ARGS
   try {
     const [{ stdout }, summary] = await Promise.all([
-      execFileAsync('git', GIT_STATUS_ARGS, { cwd }),
-      readGitDiffSummary(cwd)
+      execFileAsync('git', args, { cwd }),
+      readGitDiffSummary(cwd, nested)
     ])
     return { ...parseGitStatusZ(stdout), summary }
   } catch {
@@ -205,10 +240,21 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     // The root is whatever repo git finds from the project folder (possibly
     // none); nested repos are the subfolders with their own `.git`.
     const repos = ['', ...nested]
-    const statuses = await Promise.all(repos.map(repo => readRepoStatus(path.join(cwd, ...repo.split('/')))))
+    const statuses = await Promise.all(repos.map(async (repo) => {
+      const dir = path.join(cwd, ...repo.split('/'))
+      if (repo && await nestedRepoRunsFilters(dir)) return 'skipped' as const
+      return readRepoStatus(dir, repo !== '')
+    }))
     statuses.forEach((status, i) => {
       if (!status) return
       const repo = repos[i]
+      if (status === 'skipped') {
+        result.repos.push({
+          path: repo, staged: [], unstaged: [], untracked: [],
+          skipped: 'Not scanned: this repo\'s own git config defines filter commands, which git would run.'
+        })
+        return
+      }
       const entry: GitRepoStatus = {
         path: repo,
         staged: toProjectEntries(repo, status.staged, nested),
@@ -234,7 +280,9 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
       const repoPath = toRepoPath(repo, relativeFilePath) ?? relativeFilePath
       // The trailing `--` keeps a path that starts with `-` from being read
       // as an option; the raw path is passed through untouched.
-      const { stdout } = await execFileAsync('git', ['show', `HEAD:${repoPath}`, '--'], { cwd })
+      if (repo && await nestedRepoRunsFilters(cwd)) return ''
+      const opts = repo ? [...NESTED_READ_OPTS, 'show', '--no-textconv'] : ['show']
+      const { stdout } = await execFileAsync('git', [...opts, `HEAD:${repoPath}`, '--'], { cwd })
       return stdout
     } catch {
       return ''

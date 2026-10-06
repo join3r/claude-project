@@ -82,3 +82,35 @@ describe('path mapping', () => {
       .toEqual([{ relativePath: 'lib/new.ts', origPath: 'lib/old.ts', status: 'R' }])
   })
 })
+
+describe('nested repo config that runs commands', () => {
+  it('flags filter drivers the repo defines itself, includes followed', async () => {
+    const { nestedRepoRunsFilters } = await import('../src/main/ipc/git')
+    gitInit('plain')
+    gitInit('direct')
+    gitInit('included')
+    const cwd = (rel: string) => path.join(root, rel)
+    execFileSync('git', ['config', 'filter.x.clean', 'touch pwned'], { cwd: cwd('direct') })
+    fs.writeFileSync(path.join(root, 'included', 'inc'), '[filter "y"]\n\tprocess = z\n')
+    execFileSync('git', ['config', 'include.path', '../inc'], { cwd: cwd('included') })
+    expect(await nestedRepoRunsFilters(cwd('plain'))).toBe(false)
+    expect(await nestedRepoRunsFilters(cwd('direct'))).toBe(true)
+    expect(await nestedRepoRunsFilters(cwd('included'))).toBe(true)
+  })
+
+  it("never runs a nested repo's core.fsmonitor", async () => {
+    gitInit('sub')
+    const marker = path.join(root, 'fsmonitor-ran')
+    execFileSync('git', ['config', 'core.fsmonitor', `touch '${marker}'; false`], { cwd: path.join(root, 'sub') })
+    fs.writeFileSync(path.join(root, 'sub', 'f.txt'), 'x\n')
+    const { registerGitHandlers } = await import('../src/main/ipc/git')
+    const handlers = new Map<string, (...args: unknown[]) => unknown>()
+    registerGitHandlers(
+      { handle: (channel: string, _schema: unknown, fn: (...args: unknown[]) => unknown) => { handlers.set(channel, fn) } } as never,
+      { resolveRoot: async () => root }
+    )
+    const status = await handlers.get('fb-git-status')!({}, root) as { untracked: { relativePath: string }[] }
+    expect(status.untracked.map(e => e.relativePath)).toEqual(['sub/f.txt'])
+    expect(fs.existsSync(marker)).toBe(false)
+  })
+})
