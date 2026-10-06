@@ -113,6 +113,23 @@ describe('reduceChat', () => {
     expect(state.items[3]).toMatchObject({ kind: 'tool', status: 'done' })
   })
 
+  it("drops hooks' success lines from slash command output, keeping failures", () => {
+    const hook = 'PostCompact [if [ -z "${HOME-}" ]; then printf \'{}\\n\'; fi] completed successfully: {}'
+    const stdout = `Compacted PreCompact [callback] completed successfully\n${hook}\nPostCompact [callback] completed successfully`
+    const state = reduceChat(emptyChatState(), {
+      t: 'history',
+      messages: [
+        { type: 'user', uuid: 'h1', message: { role: 'user', content: `<local-command-stdout>${stdout}</local-command-stdout>` }, parent_tool_use_id: null }
+      ]
+    })
+    expect(state.items).toEqual([expect.objectContaining({ kind: 'notice', text: 'Compacted' })])
+
+    const live = fold([
+      sdk({ type: 'system', subtype: 'local_command_output', uuid: 'o1', content: `${stdout}\nPostCompact [./check.sh] failed with exit code 2` })
+    ])
+    expect(live.items).toEqual([expect.objectContaining({ kind: 'notice', text: 'Compacted\nPostCompact [./check.sh] failed with exit code 2' })])
+  })
+
   it('counts a subagent\'s calls on its Agent row instead of listing them', () => {
     const state = fold([
       sdk({ type: 'assistant', message: { id: 'm', content: [{ type: 'tool_use', id: 'a1', name: 'Agent', input: { description: 'Find callers' } }] }, parent_tool_use_id: null }),

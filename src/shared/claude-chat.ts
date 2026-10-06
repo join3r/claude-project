@@ -349,6 +349,20 @@ export function bashContextBlocks(command: string, stdout: string, stderr: strin
     `<user-shell-exit>${exitCode === null ? 'killed' : exitCode}</user-shell-exit>`
   ].join('\n')]
 }
+/** `PostCompact [<hook command>] completed successfully: {}`, one per hook that ran. */
+const HOOK_OK_RE = /(?:^|\s)[A-Z][A-Za-z]+ \[.*\] completed successfully(?::.*)?$/u
+
+/**
+ * A slash command's output without its hooks' success lines: `/compact` appends
+ * one per Pre/PostCompact hook, its whole command line included. Failures stay.
+ */
+function withoutHookLines(text: string): string {
+  return text.split('\n')
+    .map((line) => line.replace(HOOK_OK_RE, ''))
+    .filter((line) => line.trim())
+    .join('\n')
+    .trim()
+}
 const META_TAG_RE = /^<(local-command-caveat|system-reminder|command-message|task-notification|bash-input|bash-stdout|bash-stderr)>/
 
 /**
@@ -385,7 +399,7 @@ function classifyUserText(text: string): UserTextEntry | null {
   }
   const stdout = /^<local-command-stdout>([\s\S]*?)<\/local-command-stdout>$/.exec(trimmed)
   if (stdout) {
-    const body = stdout[1].trim()
+    const body = withoutHookLines(stdout[1])
     return body ? { kind: 'notice', text: body } : null
   }
   if (META_TAG_RE.test(trimmed)) return null
@@ -899,7 +913,7 @@ function applySystemMessage(draft: Draft, state: ChatState, m: Json, history: bo
       return {}
     }
     case 'local_command_output': {
-      const text = str(m.content)?.trim()
+      const text = withoutHookLines(str(m.content) ?? '')
       if (text) draft.push({ kind: 'notice', id: draft.nextId(str(m.uuid)), text, tone: 'muted' })
       return {}
     }
