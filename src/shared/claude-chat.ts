@@ -1,4 +1,4 @@
-import { summarizeTool } from './agent-activity'
+import { firstLine, summarizeTool } from './agent-activity'
 
 /**
  * The Claude chat tab's model: what main streams to the windows and how both
@@ -846,6 +846,17 @@ function applyTaskMessage(draft: Draft, state: ChatState, m: Json, subtype: stri
   }
 }
 
+/**
+ * A finished background task's timeline line. A subagent's summary is its whole
+ * report (Claude reads it and answers), so a multi-line one becomes the task's
+ * name and outcome instead.
+ */
+function noticeLine(summary: string, task: ChatTask | undefined, status: unknown): string {
+  if (!summary.includes('\n')) return summary
+  const outcome = status === 'failed' ? 'failed' : status === 'stopped' ? 'stopped' : 'finished'
+  return task ? `${task.description} ${outcome}` : firstLine(summary) ?? summary
+}
+
 const TASK_SUBTYPES = new Set(['task_started', 'task_progress', 'task_updated', 'task_notification', 'background_tasks_changed'])
 
 function applySystemMessage(draft: Draft, state: ChatState, m: Json, history: boolean, at: number | undefined): Partial<ChatState> {
@@ -918,7 +929,7 @@ function applySystemMessage(draft: Draft, state: ChatState, m: Json, history: bo
       const quiet = task !== undefined && (task.nested === true || !task.background)
       if (summary && m.skip_transcript !== true && !quiet) {
         const tone = m.status === 'failed' ? 'warning' : 'muted'
-        draft.push({ kind: 'notice', id: draft.nextId(str(m.uuid)), text: summary, tone })
+        draft.push({ kind: 'notice', id: draft.nextId(str(m.uuid)), text: noticeLine(summary, task, m.status), tone })
       }
       return taskPatch
     }

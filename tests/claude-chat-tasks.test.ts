@@ -41,6 +41,22 @@ describe('chat tasks', () => {
     expect(state.items.some((item) => item.kind === 'notice' && item.text === 'Found it')).toBe(true)
   })
 
+  it("shows a background subagent's multi-line report as one line naming the task", () => {
+    const report = 'The API is reusable.\n\n## 1. Endpoints\n\n| Method | Path |\n|---|---|'
+    let state = fold([
+      agentCall('tu1'),
+      system('task_started', { task_id: 't1', tool_use_id: 'tu1', description: 'Map the API', task_type: 'local_agent', is_backgrounded: true }, 1000),
+      system('task_notification', { task_id: 't1', tool_use_id: 'tu1', status: 'completed', summary: report, output_file: '' }, 2000)
+    ])
+    const notices = (s: ChatState): string[] => s.items.flatMap((item) => item.kind === 'notice' ? [item.text] : [])
+    expect(notices(state)).toEqual(['Map the API finished'])
+    expect(state.tasks.t1.summary).toBe(report)
+
+    // A task it never saw start falls back to the report's first line.
+    state = fold([system('task_notification', { task_id: 't9', status: 'failed', summary: report, output_file: '' }, 3000)], state)
+    expect(notices(state)).toEqual(['Map the API finished', 'The API is reusable.'])
+  })
+
   it("keeps a subagent's own shells and foreground tasks out of the timeline and the task list", () => {
     // What the CLI sends when a background subagent runs a slow command without a description.
     const heredoc = "python3 - <<'EOF'\nprint(1)\nEOF"
