@@ -17,16 +17,21 @@ chatMarked.use({
         ? hljs.highlight(text, { language }).value
         : escapeHtml(text)
       const run = isRunnable(text, lang)
-        ? `<button type="button" class="chat-code-btn" ${RUN_ATTR} title="Run as a !command in this session">Run</button>`
+        ? `<button type="button" class="chat-code-btn" ${RUN_ATTR}="${BUTTON_TOKEN}" title="Run as a !command in this session">Run</button>`
         : ''
       return `<div class="chat-code"><pre><code class="hljs${language ? ` language-${language}` : ''}">${highlighted}</code></pre>`
-        + `<div class="chat-code-actions">${run}<button type="button" class="chat-code-btn" ${COPY_ATTR} title="Copy code">Copy</button></div></div>`
+        + `<div class="chat-code-actions">${run}<button type="button" class="chat-code-btn" ${COPY_ATTR}="${BUTTON_TOKEN}" title="Copy code">Copy</button></div></div>`
     }
   }
 })
 
 const COPY_ATTR = 'data-chat-copy'
 const RUN_ATTR = 'data-chat-run'
+/**
+ * Our buttons carry this per-window secret, so raw HTML in a message can't
+ * forge one: a fake Run over a hidden `<pre>` would run what you never saw.
+ */
+const BUTTON_TOKEN = crypto.randomUUID()
 const COPIED_MS = 1200
 const SHELL_LANGS = new Set(['sh', 'bash', 'zsh', 'shell', 'console', 'shell-session'])
 
@@ -49,6 +54,11 @@ export function runnableCommand(text: string): string {
   return command.trim()
 }
 
+function ownButton(target: EventTarget | null, attr: string): HTMLElement | null {
+  const button = target instanceof Element ? target.closest(`[${attr}]`) : null
+  return button instanceof HTMLElement && button.getAttribute(attr) === BUTTON_TOKEN ? button : null
+}
+
 function codeOf(button: Element): string {
   return button.closest('.chat-code')?.querySelector('pre')?.textContent ?? ''
 }
@@ -65,8 +75,8 @@ function flash(button: HTMLElement, label: string): void {
  * was one.
  */
 export function handleCodeCopyClick(target: EventTarget | null): boolean {
-  const button = target instanceof Element ? target.closest(`[${COPY_ATTR}]`) : null
-  if (!(button instanceof HTMLElement)) return false
+  const button = ownButton(target, COPY_ATTR)
+  if (!button) return false
   void window.api.clipboardWriteText(codeOf(button)).then(() => flash(button, 'Copied')).catch(() => {})
   return true
 }
@@ -76,8 +86,8 @@ export function handleCodeCopyClick(target: EventTarget | null): boolean {
  * if it had been typed into the composer after a `!`. True when it was one.
  */
 export function handleCodeRunClick(target: EventTarget | null, run: (command: string) => void): boolean {
-  const button = target instanceof Element ? target.closest(`[${RUN_ATTR}]`) : null
-  if (!(button instanceof HTMLElement)) return false
+  const button = ownButton(target, RUN_ATTR)
+  if (!button) return false
   const command = runnableCommand(codeOf(button))
   if (command && button.textContent === 'Run') {
     run(command)
@@ -92,5 +102,6 @@ function escapeHtml(text: string): string {
 
 export function renderChatMarkdown(text: string): string {
   const raw = chatMarked.parse(text, { async: false }) as string
-  return DOMPurify.sanitize(raw)
+  // No styles: they could hide part of a code block that Run would still run.
+  return DOMPurify.sanitize(raw, { FORBID_TAGS: ['style'], FORBID_ATTR: ['style'] })
 }

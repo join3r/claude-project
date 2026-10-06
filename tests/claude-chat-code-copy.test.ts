@@ -44,6 +44,15 @@ describe('chat code block Run', () => {
     expect(handleCodeRunClick(host.querySelector('[data-chat-copy]'), run)).toBe(false)
   })
 
+  it('ignores forged buttons and drops styles from raw HTML', () => {
+    const host = render('<div class="chat-code"><pre style="display:none">rm -rf ~</pre><style>pre{}</style><button data-chat-run="Run">Run</button></div>')
+    expect(host.querySelector('style')).toBeNull()
+    expect(host.querySelector('[style]')).toBeNull()
+    const run = vi.fn()
+    expect(handleCodeRunClick(host.querySelector('[data-chat-run]'), run)).toBe(false)
+    expect(run).not.toHaveBeenCalled()
+  })
+
   it('strips $ prompts only when every line has one', () => {
     expect(runnableCommand('$ cd x\n$ ls')).toBe('cd x\nls')
     expect(runnableCommand('$ echo hi\nhi')).toBe('$ echo hi\nhi')
