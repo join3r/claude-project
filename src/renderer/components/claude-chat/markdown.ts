@@ -16,14 +16,48 @@ chatMarked.use({
       const highlighted = language
         ? hljs.highlight(text, { language }).value
         : escapeHtml(text)
+      const run = isRunnable(text, lang)
+        ? `<button type="button" class="chat-code-btn" ${RUN_ATTR} title="Run as a !command in this session">Run</button>`
+        : ''
       return `<div class="chat-code"><pre><code class="hljs${language ? ` language-${language}` : ''}">${highlighted}</code></pre>`
-        + `<button type="button" class="chat-code-copy" ${COPY_ATTR} title="Copy code">Copy</button></div>`
+        + `<div class="chat-code-actions">${run}<button type="button" class="chat-code-btn" ${COPY_ATTR} title="Copy code">Copy</button></div></div>`
     }
   }
 })
 
 const COPY_ATTR = 'data-chat-copy'
+const RUN_ATTR = 'data-chat-run'
 const COPIED_MS = 1200
+const SHELL_LANGS = new Set(['sh', 'bash', 'zsh', 'shell', 'console', 'shell-session'])
+
+/** A shell block, or one Claude wrote as a `!command` for you to run. */
+function isRunnable(text: string, lang: string | undefined): boolean {
+  if (!runnableCommand(text)) return false
+  return text.trimStart().startsWith('!') || SHELL_LANGS.has((lang ?? '').trim().toLowerCase())
+}
+
+/**
+ * The command a block's Run sends: without a leading `!` (it is already bash
+ * mode) or `$ ` prompts when every line carries one.
+ */
+export function runnableCommand(text: string): string {
+  let command = text.trim().replace(/^!\s*/u, '')
+  const lines = command.split('\n')
+  if (lines.every((line) => !line.trim() || /^\$\s/u.test(line))) {
+    command = lines.map((line) => line.replace(/^\$\s+/u, '')).join('\n')
+  }
+  return command.trim()
+}
+
+function codeOf(button: Element): string {
+  return button.closest('.chat-code')?.querySelector('pre')?.textContent ?? ''
+}
+
+function flash(button: HTMLElement, label: string): void {
+  const idle = button.textContent
+  button.textContent = label
+  window.setTimeout(() => { button.textContent = idle }, COPIED_MS)
+}
 
 /**
  * A click on a code block's Copy button (the chat renders it as HTML, so one
@@ -33,11 +67,22 @@ const COPIED_MS = 1200
 export function handleCodeCopyClick(target: EventTarget | null): boolean {
   const button = target instanceof Element ? target.closest(`[${COPY_ATTR}]`) : null
   if (!(button instanceof HTMLElement)) return false
-  const code = button.parentElement?.querySelector('pre')?.textContent ?? ''
-  void window.api.clipboardWriteText(code).then(() => {
-    button.textContent = 'Copied'
-    window.setTimeout(() => { button.textContent = 'Copy' }, COPIED_MS)
-  }).catch(() => {})
+  void window.api.clipboardWriteText(codeOf(button)).then(() => flash(button, 'Copied')).catch(() => {})
+  return true
+}
+
+/**
+ * A click on a code block's Run button: hands the command to `run`, exactly as
+ * if it had been typed into the composer after a `!`. True when it was one.
+ */
+export function handleCodeRunClick(target: EventTarget | null, run: (command: string) => void): boolean {
+  const button = target instanceof Element ? target.closest(`[${RUN_ATTR}]`) : null
+  if (!(button instanceof HTMLElement)) return false
+  const command = runnableCommand(codeOf(button))
+  if (command && button.textContent === 'Run') {
+    run(command)
+    flash(button, 'Sent')
+  }
   return true
 }
 

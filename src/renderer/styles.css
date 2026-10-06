@@ -328,14 +328,17 @@
   .note-preview.chat-md pre { margin-bottom: 8px; padding: 8px 10px; background: var(--color-surface); border: 0.5px solid var(--color-border); }
   .note-preview.chat-md pre code { font-size: 12px; }
   .note-preview.chat-md .chat-code { position: relative; }
-  .chat-code-copy {
-    position: absolute; top: 4px; right: 4px; padding: 1px 6px; border-radius: 4px;
-    border: 0.5px solid var(--color-border); background: var(--color-surface-2);
-    color: var(--color-text-muted); font: inherit; font-size: 11px; cursor: pointer;
+  .chat-code-actions {
+    position: absolute; top: 4px; right: 4px; display: flex; gap: 4px;
     opacity: 0; transition: opacity var(--motion-fast);
   }
-  .chat-code:hover .chat-code-copy, .chat-code-copy:focus-visible { opacity: 1; }
-  .chat-code-copy:hover { color: var(--color-text); background: var(--color-surface-3); }
+  .chat-code-btn {
+    padding: 1px 6px; border-radius: 4px;
+    border: 0.5px solid var(--color-border); background: var(--color-surface-2);
+    color: var(--color-text-muted); font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .chat-code:hover .chat-code-actions, .chat-code-actions:focus-within { opacity: 1; }
+  .chat-code-btn:hover { color: var(--color-text); background: var(--color-surface-3); }
   .note-preview.chat-md code { font-size: 0.88em; padding: 1px 4px; }
   .note-preview.chat-md table { font-size: 12px; margin-bottom: 8px; }
   .note-preview.chat-md th, .note-preview.chat-md td { padding: 4px 8px; }

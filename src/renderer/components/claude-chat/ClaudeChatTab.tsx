@@ -20,7 +20,7 @@ import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
 import { takePendingPrompt } from '../promptBox'
 import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
 import { chatContextMenuAt } from './chatContextMenu'
-import { handleCodeCopyClick } from './markdown'
+import { handleCodeCopyClick, handleCodeRunClick } from './markdown'
 
 interface Props {
   tabId: string
@@ -316,7 +316,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
       className="absolute inset-0 flex-col bg-bg"
       style={{ display: visible ? 'flex' : 'none' }}
       onKeyDownCapture={() => noteAgentTabTyped(taskId, tabId)}
-      onClick={(e) => { if (handleCodeCopyClick(e.target)) e.preventDefault() }}
+      onClick={(e) => { if (handleCodeCopyClick(e.target) || handleCodeRunClick(e.target, runBash)) e.preventDefault() }}
       onContextMenu={openContextMenu}
     >
       <div className="flex-1 min-h-0 relative">
