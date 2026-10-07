@@ -103,7 +103,8 @@ struct RootView: View {
                 NavigationStack(path: $projectPath) {
                     DesktopView(scope: scope, selection: $taskSelection)
                         .navigationDestination(for: ProjectRef.self) { ref in
-                            ProjectView(ref: ref, selection: $taskSelection)
+                            ProjectView(ref: ref, selection: $taskSelection,
+                                        demoSheet: demoRoute == .newStream || demoRoute == .newTask ? demoRoute : nil)
                         }
                 }
             }
@@ -202,12 +203,14 @@ struct RootView: View {
         case .projects, .desktop:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first { sidebar = .desktop(first.id) }
-        case .project:
+        case .project, .newStream, .newTask:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first {
                 sidebar = .desktop(first.id)
+                let wanted = LaunchOptions.current.demoProject
                 for _ in 0..<50 {
-                    if let project = model.inboxes[first.id]?.projects.first {
+                    let projects = model.inboxes[first.id]?.projects ?? []
+                    if let project = projects.first(where: { $0.id == wanted }) ?? projects.first {
                         try? await Task.sleep(for: .milliseconds(300))
                         projectPath = [ProjectRef(desktopId: first.id, projectId: project.id)]
                         return

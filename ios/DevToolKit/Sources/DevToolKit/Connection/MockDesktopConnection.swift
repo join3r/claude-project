@@ -275,11 +275,18 @@ public actor MockDesktopConnection: DesktopConnection {
         }
     }
 
+    /// The mock's stand-in for a shell-command project: no worktrees (§8.13).
+    static let shellProjectId = "p-dotfiles"
+    static let noWorktrees = "This project runs a shell command, so it has no folder to make a worktree in"
+
     /// `branches.list`: `main`, then every worktree stream's branch, then any
     /// made with `stream.new`.
     private func branchList(projectId: String) throws -> BranchesListResult {
         guard let project = inbox.projects.first(where: { $0.id == projectId }) else {
             throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        if project.id == Self.shellProjectId {
+            throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: Self.noWorktrees)
         }
         var branches = ["main"]
         for branch in project.streams.compactMap(\.branch) where !branches.contains(branch) { branches.append(branch) }
@@ -289,12 +296,13 @@ public actor MockDesktopConnection: DesktopConnection {
     /// `stream.new`: an empty stream at the end of the project's list, with a
     /// branch when it asked for a worktree. The inbox with it goes out right away.
     private func addStream(_ params: StreamNewParams) throws -> String {
-        let branches = try branchList(projectId: params.projectId).branches
         guard let p = inbox.projects.firstIndex(where: { $0.id == params.projectId }) else {
             throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
         }
         var branch: String?
         if params.worktree {
+            // Also answers `unsupported` for the shell-command project.
+            let branches = try branchList(projectId: params.projectId).branches
             let name = params.branch ?? Self.branchSlug(params.name)
             guard !name.isEmpty else {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "The stream needs a branch name")
@@ -315,15 +323,9 @@ public actor MockDesktopConnection: DesktopConnection {
         return streamId
     }
 
-    /// Roughly the desktop's `branchSlug`: lower case, git-safe characters, no
-    /// separators at the ends.
+    /// The desktop's `branchSlug` (`StreamNaming.branchSlug`).
     static func branchSlug(_ name: String) -> String {
-        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789._/-")
-        var slug = ""
-        for ch in name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-            if allowed.contains(ch) { slug.append(ch) } else if slug.last != "-" { slug.append("-") }
-        }
-        return slug.trimmingCharacters(in: CharacterSet(charactersIn: "-._/"))
+        StreamNaming.branchSlug(name)
     }
 
     /// `task.new`: a task at the end of the stream (default: the one last
@@ -716,6 +718,7 @@ public enum MockInbox {
         let apiBugs = InboxStream(id: "s-api-bugs", name: "bugfixes")
         let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true)
         let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign")
+        let web240 = InboxStream(id: "s-web-240", name: "2.4.0", branch: "2.4.0")
         let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
         func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
                   eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil, snoozedUntil: Int64? = nil,
@@ -749,7 +752,7 @@ public enum MockInbox {
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),
                     ]),
                 ]),
-                InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin], tasks: [
+                InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin, web240], tasks: [
                     task("t-charts", "usage-charts", webMain, lastInteractedAt: ago(25), tabs: [
                         InboxTab(id: "tab-11", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Plan ready for review", topic: "Plan the settings page redesign"),
                         InboxTab(id: "tab-7", type: .terminal, title: "vite", status: .idle, since: ago(25)),

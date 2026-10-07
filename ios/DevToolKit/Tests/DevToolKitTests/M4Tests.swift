@@ -403,6 +403,11 @@ import Testing
         await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
             _ = try await mock.listBranches(projectId: "missing")
         }
+        // The shell-command stand-in: no worktrees, but a folder stream works.
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: MockDesktopConnection.noWorktrees)) {
+            _ = try await mock.listBranches(projectId: MockDesktopConnection.shellProjectId)
+        }
+        _ = try await mock.newStream(projectId: MockDesktopConnection.shellProjectId, name: "Notes", worktree: false)
         await mock.stop()
     }
 

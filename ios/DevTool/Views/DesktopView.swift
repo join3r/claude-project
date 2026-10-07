@@ -457,29 +457,6 @@ struct DesktopBanners: View {
     }
 }
 
-struct ProjectHeader: View {
-    let project: InboxProject
-    let desktopName: String?
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let emoji = project.emoji, !emoji.isEmpty {
-                Text(emoji)
-            }
-            Text(project.name)
-            if project.remote {
-                Image(systemName: "network")
-                    .accessibilityLabel("Remote")
-            }
-            if let desktopName {
-                Text("· \(desktopName)")
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .lineLimit(1)
-    }
-}
-
 /// A stream's name, with its branch when it has a worktree.
 struct StreamLabel: View {
     let stream: InboxStream

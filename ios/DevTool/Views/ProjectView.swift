@@ -7,9 +7,13 @@ struct ProjectView: View {
     @Environment(AppModel.self) private var model
     let ref: ProjectRef
     @Binding var selection: TaskRef?
+    /// Debug `-demoRoute newStream|newTask`: the sheet to open on appear.
+    var demoSheet: LaunchOptions.DemoRoute? = nil
     @State private var newTask: NewTaskTarget?
     @State private var newStream: NewStreamTarget?
     @State private var closing: CloseTaskRequest?
+    /// A stream just made from the New stream sheet: scrolled to once the inbox has it.
+    @State private var createdStream: String?
 
     var body: some View {
         if let inbox = model.inboxes[ref.desktopId], let project = inbox.projects.first(where: { $0.id == ref.projectId }) {
@@ -44,7 +48,14 @@ struct ProjectView: View {
                 NewTaskSheet(target: target)
             }
             .sheet(item: $newStream) { target in
-                NewStreamSheet(target: target)
+                NewStreamSheet(target: target, streams: project.streams) { createdStream = $0 }
+            }
+            .task {
+                switch demoSheet {
+                case .newStream: newStream = NewStreamTarget(desktopId: ref.desktopId, projectId: project.id)
+                case .newTask: newTask = NewTaskTarget(desktopId: ref.desktopId, projectId: project.id, streamId: project.streams.last?.id)
+                default: break
+                }
             }
             .closeTaskFlow($closing) { closed in
                 if selection == TaskRef(desktopId: closed.desktopId, taskId: closed.taskId) { selection = nil }
@@ -58,6 +69,21 @@ struct ProjectView: View {
     private var offline: Bool { model.isOffline(ref.desktopId) }
 
     private func list(_ project: InboxProject, inbox: Inbox, now: Date) -> some View {
+        ScrollViewReader { proxy in
+            streamList(project, inbox: inbox, now: now)
+                .onChange(of: createdStream.flatMap { id in project.streams.contains { $0.id == id } ? id : nil }) { _, id in
+                    guard let id else { return }
+                    withAnimation { proxy.scrollTo(Self.streamAnchor(id), anchor: .center) }
+                    createdStream = nil
+                }
+        }
+    }
+
+    /// The scroll target of a stream's section: its "No open tasks" row
+    /// (a new stream is empty).
+    private static func streamAnchor(_ streamId: String) -> String { "stream-empty-\(streamId)" }
+
+    private func streamList(_ project: InboxProject, inbox: Inbox, now: Date) -> some View {
         List(selection: $selection) {
             DesktopBanners(desktops: model.desktop(ref.desktopId).map { [$0] } ?? [])
             Section {
@@ -118,6 +144,7 @@ struct ProjectView: View {
             if tasks.isEmpty {
                 Text("No open tasks")
                     .foregroundStyle(.secondary)
+                    .id(Self.streamAnchor(stream.id))
             }
         } header: {
             streamHeader(stream, project: project, inbox: inbox, status: project.status(of: stream))

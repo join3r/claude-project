@@ -7,6 +7,9 @@ import Foundation
 ///   UI can be exercised and screenshotted without a relay.
 /// - `-demoRoute sidebar|desktop|project|task|taskStatus|pair|pairConfirm|pairWait|settings`
 ///   (Debug builds, with `-mockDesktop`): open a screen directly, for screenshots.
+/// - `-demoRoute project|newStream|newTask [-demoProject <projectId>]`: the first
+///   desktop's first project (or `-demoProject`), with the New stream sheet or
+///   (on its last stream) the New task sheet up.
 /// - `-demoRoute taskInfo [-demoTab <tabId>]`: as `chat`, with the task info sheet up.
 /// - `-demoRoute chat [-demoTab <tabId>]` (Debug builds): open a claude-chat tab
 ///   (the first one that needs attention when `-demoTab` is absent). Works
@@ -37,6 +40,10 @@ struct LaunchOptions: Sendable {
         case projects
         /// The first desktop's first project.
         case project
+        /// `project` with the New stream sheet up.
+        case newStream
+        /// `project` with the New task sheet up, on the project's last stream.
+        case newTask
         /// The first task of the first desktop.
         case task
         /// The first terminal agent's task: its status screen.
@@ -58,6 +65,7 @@ struct LaunchOptions: Sendable {
     var pairLink: String?
     var autoConfirmPairing = false
     var demoTab: String?
+    var demoProject: String?
     var demoToolDetail: String?
     var demoChatScript = false
     var demoMessage: String?
@@ -91,6 +99,7 @@ struct LaunchOptions: Sendable {
             return args[index + 1]
         }
         demoTab = value("-demoTab")
+        demoProject = value("-demoProject")
         demoToolDetail = value("-demoToolDetail")
         demoChatScript = args.contains("-demoChatScript")
         demoMessage = value("-demoMessage")
