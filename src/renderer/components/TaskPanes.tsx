@@ -11,6 +11,7 @@ import NoteTab from './NoteTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
+import { runsInTaskDir } from '../../shared/streams'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
 import type { Tab, AiTabType, Project, Task } from '../../shared/types'
@@ -196,7 +197,9 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
       ))}
       {bodies.map(({ tab, paneIndex, active }) => (
         <div
-          key={tab.id}
+          // A session tab mounts again (and spawns in the new folder) when the
+          // task moves to another worktree; see `useTasks.moveTask`.
+          key={runsInTaskDir(tab) ? `${tab.id}@${projectDir}` : tab.id}
           className="relative min-w-0 min-h-0 overflow-hidden"
           style={{ gridColumn: paneColumn(paneIndex), gridRow: bodyRow, display: active ? 'block' : 'none' }}
           data-tab-body={tab.id}

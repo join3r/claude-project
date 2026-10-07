@@ -12,14 +12,21 @@ import type { SidebarContextMenuState } from './SidebarParts'
 import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from '../../../shared/streams'
 
 /**
- * The local folder a project or task works in, for "Reveal in Finder": the task's
- * workspace worktree when it has one, else the project directory. Remote and
+ * The local folder a project, stream or task works in, for "Reveal in Finder":
+ * the stream's worktree when it has one, else the project directory. Remote and
  * shell-command projects have none on this machine.
  */
-export function revealFolder(projects: readonly Project[], projectId: string, taskId?: string): string | null {
+export function revealFolder(
+  projects: readonly Project[],
+  projectId: string,
+  taskId?: string,
+  streamId?: string
+): string | null {
   const project = projects.find(p => p.id === projectId)
   if (!project || isRemoteProject(project) || isShellCommandProject(project)) return null
-  const workspace = taskId ? taskWorkspace(project, taskId) : undefined
+  const workspace = taskId
+    ? taskWorkspace(project, taskId)
+    : streamId ? project.streams.find(stream => stream.id === streamId)?.workspace : undefined
   if (workspace?.worktreePath) return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
   return project.directory || null
 }
@@ -49,6 +56,7 @@ export default function SidebarContextMenu({
   findTask,
   handleToggleSettled,
   handleDeleteTask,
+  handleDeleteStream,
   beginEdit,
   isPinned,
   setDuplicateProjectId,
@@ -65,7 +73,9 @@ export default function SidebarContextMenu({
   findTask: (projectId: string, taskId: string) => Task | undefined
   handleToggleSettled: (projectId: string, taskId: string) => void
   handleDeleteTask: (projectId: string, taskId: string) => void
-  beginEdit: (id: string, name: string, projectId?: string) => void
+  handleDeleteStream: (projectId: string, streamId: string) => void
+  /** Rename inline; `streamId` opens that stream so the row is on screen. */
+  beginEdit: (id: string, name: string, projectId?: string, streamId?: string) => void
   isPinned: (item: PinnedItem) => boolean
   setDuplicateProjectId: (projectId: string) => void
   setProjectSettingsId: (projectId: string) => void
@@ -165,27 +175,36 @@ export default function SidebarContextMenu({
               )
             })()}
             <button className={menuItemCls} onClick={() => {
-                const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
-                const item = contextMenu.type === 'project'
-                  ? projects.find((p) => p.id === id)
-                  : findTaskInProject(projects.find((p) => p.id === contextMenu.projectId), id)
-                beginEdit(id, item?.name ?? '', contextMenu.type === 'task' ? contextMenu.projectId : undefined)
+                const project = projects.find((p) => p.id === contextMenu.projectId)
+                if (contextMenu.type === 'project') {
+                  beginEdit(contextMenu.projectId, project?.name ?? '')
+                } else if (contextMenu.type === 'stream') {
+                  const stream = project?.streams.find(s => s.id === contextMenu.streamId)
+                  beginEdit(contextMenu.streamId!, stream?.name ?? '', contextMenu.projectId)
+                } else {
+                  const task = findTaskInProject(project, contextMenu.taskId)
+                  const stream = findStreamOfTask(project, contextMenu.taskId)
+                  beginEdit(contextMenu.taskId!, task?.name ?? '', contextMenu.projectId, stream?.id)
+                }
                 setContextMenu(null)
               }}>Rename</button>
               {(() => {
-                const streamId = contextMenu.type === 'task'
-                  ? findStreamOfTask(projects.find(p => p.id === contextMenu.projectId), contextMenu.taskId)?.id ?? ''
-                  : ''
-                const item: PinnedItem = contextMenu.type === 'project'
-                  ? { type: 'project', projectId: contextMenu.projectId }
-                  : { type: 'task', projectId: contextMenu.projectId, streamId, taskId: contextMenu.taskId! }
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                let item: PinnedItem
+                if (contextMenu.type === 'project') {
+                  item = { type: 'project', projectId: contextMenu.projectId }
+                } else if (contextMenu.type === 'stream') {
+                  item = { type: 'stream', projectId: contextMenu.projectId, streamId: contextMenu.streamId! }
+                } else {
+                  const streamId = findStreamOfTask(project, contextMenu.taskId)?.id ?? ''
+                  item = { type: 'task', projectId: contextMenu.projectId, streamId, taskId: contextMenu.taskId! }
+                }
                 const pinned = isPinned(item)
-                const noun = contextMenu.type === 'project' ? 'project' : 'task'
                 return (
                   <button className={menuItemCls} onClick={() => {
                     togglePinnedItem(item)
                     setContextMenu(null)
-                  }}>{pinned ? `Unpin ${noun}` : `Pin ${noun}`}</button>
+                  }}>{pinned ? `Unpin ${contextMenu.type}` : `Pin ${contextMenu.type}`}</button>
                 )
               })()}
               {/* Promote the hidden project a "task in a directory" is filed under:
@@ -224,7 +243,7 @@ export default function SidebarContextMenu({
                 )
               })()}
               {(() => {
-                const folder = revealFolder(projects, contextMenu.projectId, contextMenu.type === 'task' ? contextMenu.taskId : undefined)
+                const folder = revealFolder(projects, contextMenu.projectId, contextMenu.taskId, contextMenu.streamId)
                 if (!folder) return null
                 return (
                   <button className={menuItemCls} onClick={() => {
@@ -235,10 +254,17 @@ export default function SidebarContextMenu({
                   }}>{revealInFolderLabel()}</button>
                 )
               })()}
+              {/* `main` can't be removed, only emptied. */}
+              {!(contextMenu.type === 'stream' && projects.find(p => p.id === contextMenu.projectId)
+                ?.streams.find(s => s.id === contextMenu.streamId)?.isMain) && (
               <button className={`${menuItemCls} text-danger`} onClick={() => {
                 setContextMenu(null)
                 if (contextMenu.type === 'task') {
                   void handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
+                  return
+                }
+                if (contextMenu.type === 'stream') {
+                  void handleDeleteStream(contextMenu.projectId, contextMenu.streamId!)
                   return
                 }
                 const project = projects.find(p => p.id === contextMenu.projectId)
@@ -246,6 +272,7 @@ export default function SidebarContextMenu({
                 if (!window.confirm(projectDeletePrompt(project))) return
                 void removeProject(project.id)
               }}>Delete…</button>
+              )}
               {contextMenu.type === 'project' && (() => {
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project) return null

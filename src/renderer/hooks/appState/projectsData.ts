@@ -11,7 +11,6 @@ import {
   addTaskToStream,
   findStreamOfTask,
   findTaskInProject,
-  projectTasks,
   mapTaskInProject,
   removeTaskFromProject,
   resolveMainTabId,
@@ -242,28 +241,83 @@ export function attachWorkspaceInData(
 }
 
 /**
- * Move a task within its stream, by positions in the project's flat task list
- * (`projectTasks`). TEMPORARY (step 5 adds dragging between streams): a drop
- * into another stream is ignored.
+ * Move a task to `toIndex` of stream `toStreamId` (counted without the task),
+ * within its stream or to another one. The stream it leaves stays even when
+ * emptied, so a worktree never goes away under a drag; its "last task" follows
+ * the task, and so does a pin of the task. Returns `data` itself for a no-op.
  */
-export function reorderTaskInData(data: ProjectsData, projectId: string, fromIndex: number, toIndex: number): ProjectsData {
-  return mapProject(data, projectId, project => {
-    const flat = projectTasks(project)
-    const moved = flat[fromIndex]
-    if (!moved) return project
-    const stream = findStreamOfTask(project, moved.id)
-    if (!stream) return project
-    const first = flat.indexOf(stream.tasks[0])
-    const localFrom = fromIndex - first
-    const localTo = toIndex - first
-    if (localTo < 0 || localTo >= stream.tasks.length || localFrom === localTo) return project
-    return {
-      ...project,
-      streams: project.streams.map(candidate => (
-        candidate === stream ? { ...candidate, tasks: reorderList(candidate.tasks, localFrom, localTo) } : candidate
-      ))
+export function moveTaskInData(
+  data: ProjectsData,
+  projectId: string,
+  taskId: string,
+  toStreamId: string,
+  toIndex: number
+): ProjectsData {
+  const project = data.projects.find(candidate => candidate.id === projectId)
+  const from = findStreamOfTask(project, taskId)
+  const to = project?.streams.find(stream => stream.id === toStreamId)
+  const task = findTaskInProject(project, taskId)
+  if (!project || !from || !to || !task) return data
+  const fromIndex = from.tasks.indexOf(task)
+  const targetTasks = to.tasks.filter(candidate => candidate.id !== taskId)
+  const index = Math.max(0, Math.min(toIndex, targetTasks.length))
+  if (from === to && index === fromIndex) return data
+  const wasLast = from.lastTaskId === taskId
+  const streams = project.streams.map(stream => {
+    if (stream === to) {
+      const tasks = [...targetTasks.slice(0, index), task, ...targetTasks.slice(index)]
+      return { ...stream, tasks, ...(wasLast && from !== to ? { lastTaskId: taskId } : {}) }
     }
+    if (stream === from) {
+      const { lastTaskId: _last, ...rest } = stream
+      return { ...(wasLast ? rest : stream), tasks: stream.tasks.filter(t => t.id !== taskId) }
+    }
+    return stream
   })
+  const next: Project = {
+    ...project,
+    streams,
+    ...(wasLast && project.lastStreamId === from.id ? { lastStreamId: to.id } : {})
+  }
+  return {
+    ...data,
+    projects: data.projects.map(candidate => (candidate === project ? next : candidate)),
+    pinnedItems: (data.pinnedItems ?? []).map(item => (
+      item.type === 'task' && item.projectId === projectId && item.taskId === taskId ? { ...item, streamId: to.id } : item
+    ))
+  }
+}
+
+/**
+ * Drop a whole stream with its tasks (never `main`), and the pins on it or its
+ * tasks. A hidden ad-hoc project left with no task goes in the same step.
+ */
+export function removeStreamFromData(data: ProjectsData, projectId: string, streamId: string): ProjectsData {
+  const project = data.projects.find(candidate => candidate.id === projectId)
+  const stream = project?.streams.find(candidate => candidate.id === streamId)
+  if (!project || !stream || stream.isMain) return data
+  const next: Project = { ...project, streams: project.streams.filter(candidate => candidate !== stream) }
+  if (project.lastStreamId === streamId) delete next.lastStreamId
+  const pinnedItems = (data.pinnedItems ?? []).filter(item => (
+    item.projectId !== projectId || item.type === 'project' || item.streamId !== streamId
+  ))
+  if (isSpentEphemeralProject(next)) {
+    return {
+      ...data,
+      projects: data.projects.filter(candidate => candidate !== project),
+      projectOrder: data.projectOrder.filter(id => id !== projectId),
+      pinnedItems: pinnedItems.filter(item => item.projectId !== projectId)
+    }
+  }
+  return { ...data, projects: data.projects.map(candidate => (candidate === project ? next : candidate)), pinnedItems }
+}
+
+/** Rename a stream. Its branch keeps its name. */
+export function renameStreamInData(data: ProjectsData, projectId: string, streamId: string, name: string): ProjectsData {
+  return mapProject(data, projectId, project => ({
+    ...project,
+    streams: project.streams.map(stream => (stream.id === streamId ? { ...stream, name } : stream))
+  }))
 }
 
 /**

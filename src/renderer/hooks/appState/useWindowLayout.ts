@@ -12,6 +12,8 @@ import {
 } from './viewState'
 import { findTaskInProject } from '../../../shared/streams'
 
+const EMPTY_EXPANSION: Record<string, boolean> = {}
+
 export interface WindowLayoutActions {
   selectedTagIds: string[]
   expandedProjectIds: string[]
@@ -19,6 +21,11 @@ export interface WindowLayoutActions {
   clearTagFilters: () => void
   toggleProjectExpansion: (projectId: string) => void
   setProjectExpanded: (projectId: string, expanded: boolean) => void
+  /** Streams opened or closed by hand in this window; see `WindowViewState.streamExpansion`. */
+  streamExpansion: Record<string, boolean>
+  setStreamExpanded: (streamId: string, expanded: boolean) => void
+  /** Forget every hand-set stream, so all follow the auto-collapse setting again. */
+  clearStreamExpansion: () => void
   /** A detached copy of this window's view state, for handing to a new window. */
   exportWindowViewState: () => WindowViewState
   fileBrowserOpen: boolean
@@ -56,6 +63,22 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
 
   const setProjectExpanded = useCallback((projectId: string, expanded: boolean) => {
     updateWindowViewState(prev => setProjectExpandedView(prev, projectId, expanded))
+  }, [updateWindowViewState])
+
+  const setStreamExpanded = useCallback((streamId: string, expanded: boolean) => {
+    updateWindowViewState(prev => (
+      prev.streamExpansion?.[streamId] === expanded
+        ? prev
+        : { ...prev, streamExpansion: { ...prev.streamExpansion, [streamId]: expanded } }
+    ))
+  }, [updateWindowViewState])
+
+  const clearStreamExpansion = useCallback(() => {
+    updateWindowViewState(prev => {
+      if (!prev.streamExpansion) return prev
+      const { streamExpansion: _cleared, ...rest } = prev
+      return rest
+    })
   }, [updateWindowViewState])
 
   const exportWindowViewState = useCallback(() => cloneWindowViewState(windowViewStateRef.current), [])
@@ -102,6 +125,9 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
     clearTagFilters,
     toggleProjectExpansion,
     setProjectExpanded,
+    streamExpansion: windowViewState.streamExpansion ?? EMPTY_EXPANSION,
+    setStreamExpanded,
+    clearStreamExpansion,
     exportWindowViewState,
     fileBrowserOpen: windowViewState.fileBrowserOpen,
     fileBrowserWidth: windowViewState.fileBrowserWidth,

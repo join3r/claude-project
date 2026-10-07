@@ -453,6 +453,7 @@ export class Storage {
         selectedTaskId: typeof value.selectedTaskId === 'string' ? value.selectedTaskId : null,
         selectedTagIds,
         expandedProjectIds,
+        ...(isRecord(value.streamExpansion) ? { streamExpansion: value.streamExpansion as Record<string, boolean> } : {}),
         taskStates,
         fileBrowserOpen: typeof value.fileBrowserOpen === 'boolean' ? value.fileBrowserOpen : false,
         fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,

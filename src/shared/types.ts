@@ -453,6 +453,10 @@ export interface AppConfig {
   defaultSidebarTab: SidebarTab
   /** Inbox: sink tasks whose agent is working to the bottom of their group. */
   inboxWorkingLast: boolean
+  /** Inbox rows as one list, or under a heading per stream. */
+  inboxLayout: 'flat' | 'grouped'
+  /** Sidebar: fold streams where no task needs you, runs or has news. */
+  autoCollapseQuietStreams: boolean
   /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
@@ -635,6 +639,11 @@ export interface WindowViewState {
   selectedTaskId: string | null
   selectedTagIds: string[]
   expandedProjectIds: string[]
+  /**
+   * Streams opened or closed by hand (chevron), by stream id. A stream not listed
+   * follows the auto-collapse setting.
+   */
+  streamExpansion?: Record<string, boolean>
   taskStates: Record<string, TaskViewState>
   fileBrowserOpen: boolean
   fileBrowserWidth: number
@@ -696,6 +705,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastTaskId: null,
   defaultSidebarTab: 'inbox',
   inboxWorkingLast: false,
+  inboxLayout: 'flat',
+  autoCollapseQuietStreams: true,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
   taskRecencyHighlight: {
@@ -756,6 +767,7 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     selectedTaskId: state.selectedTaskId,
     selectedTagIds: [...state.selectedTagIds],
     expandedProjectIds: [...state.expandedProjectIds],
+    ...(state.streamExpansion ? { streamExpansion: { ...state.streamExpansion } } : {}),
     taskStates: Object.fromEntries(
       Object.entries(state.taskStates).map(([taskId, taskState]) => [
         taskId,
@@ -845,6 +857,10 @@ export function reconcileWindowViewState(
   }
 
   const expandedProjectIds = (state.expandedProjectIds ?? []).filter(id => projectById.has(id))
+  const streamIds = new Set(projects.flatMap(project => project.streams.map(stream => stream.id)))
+  const streamExpansion = Object.fromEntries(
+    Object.entries(state.streamExpansion ?? {}).filter(([id, open]) => streamIds.has(id) && typeof open === 'boolean')
+  )
 
   const validTagIds = tagIds ?? new Set<string>()
   const selectedTagIds = (state.selectedTagIds ?? []).filter(id => validTagIds.has(id))
@@ -854,6 +870,7 @@ export function reconcileWindowViewState(
     selectedTaskId: selectedTask?.id ?? null,
     selectedTagIds,
     expandedProjectIds,
+    ...(Object.keys(streamExpansion).length > 0 ? { streamExpansion } : {}),
     taskStates,
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
@@ -892,6 +909,7 @@ export function buildWindowViewState(
     selectedTaskId,
     selectedTagIds: seed?.selectedTagIds ? [...seed.selectedTagIds] : [],
     expandedProjectIds,
+    ...(seed?.streamExpansion ? { streamExpansion: { ...seed.streamExpansion } } : {}),
     taskStates,
     fileBrowserOpen: seed?.fileBrowserOpen ?? false,
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,

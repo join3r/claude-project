@@ -1,12 +1,13 @@
 /**
- * Mouse-driven drag-and-drop for the sidebar: reordering projects and tasks in
- * the tree, and reordering the pinned list. Plain mousedown/mousemove rather
+ * Mouse-driven drag-and-drop for the sidebar: reordering projects, moving tasks
+ * within and between a project's streams, and reordering the pinned list. Plain mousedown/mousemove rather
  * than HTML5 DnD so a click that never passes the threshold stays a click.
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import type { PinnedItem } from '../../../shared/types'
 import { getReorderInsertIndex, getTaskDropIndex } from '../sidebarDrag'
 import type { DragState, DropTarget } from './SidebarParts'
+import { resolveTaskMove, taskDropSlot, type TreeRowLayout } from './streamTree'
 
 const DRAG_THRESHOLD = 5
 
@@ -14,7 +15,7 @@ export function useSidebarTreeDrag({
   editingId,
   projectOrder,
   treeProjectIds,
-  reorderTasks,
+  moveTask,
   reorderProjects
 }: {
   /** No drag starts while a row is being renamed. */
@@ -22,12 +23,15 @@ export function useSidebarTreeDrag({
   projectOrder: string[]
   /** The project ids the tree actually shows, in order. */
   treeProjectIds: string[]
-  reorderTasks: (projectId: string, fromIndex: number, toIndex: number) => void
+  /** A task dropped somewhere else: `toIndex` counts the target stream without the task. */
+  moveTask: (projectId: string, taskId: string, toStreamId: string, toIndex: number) => void
   reorderProjects: (fromIndex: number, toIndex: number) => void
 }): {
   dragState: DragState | null
   dropTarget: DropTarget
-  handleDragMouseDown: (e: React.MouseEvent, type: 'project' | 'task', id: string, index: number, projectId?: string) => void
+  handleDragMouseDown: (
+    e: React.MouseEvent, type: 'project' | 'task', id: string, index: number, projectId?: string, streamId?: string
+  ) => void
 } {
   const [dragState, setDragState] = useState<DragState | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
@@ -47,7 +51,8 @@ export function useSidebarTreeDrag({
     type: 'project' | 'task',
     id: string,
     index: number,
-    projectId?: string
+    projectId?: string,
+    streamId?: string
   ) => {
     if (e.button !== 0 || editingId) return
     const startY = e.clientY
@@ -58,7 +63,7 @@ export function useSidebarTreeDrag({
       if (!dragging) {
         if (Math.abs(ev.clientY - startY) + Math.abs(ev.clientX - startX) < DRAG_THRESHOLD) return
         dragging = true
-        const nextDragState: DragState = { type, id, index, projectId }
+        const nextDragState: DragState = { type, id, index, projectId, streamId }
         dragStateRef.current = nextDragState
         setDragState(nextDragState)
       }
@@ -67,23 +72,26 @@ export function useSidebarTreeDrag({
       if (!sidebarList) return
 
       if (type === 'task' && projectId) {
-        const items = sidebarList.querySelectorAll<HTMLElement>(
-          `.sidebar-project[data-project-id="${projectId}"] .task-item`
+        // Every stream and task row of this project, in screen order; a task
+        // stays in its project.
+        const rows = sidebarList.querySelectorAll<HTMLElement>(
+          `.sidebar-project[data-project-id="${projectId}"] [data-tree-row]`
         )
-        const bestIndex = getTaskDropIndex(
-          Array.from(items).map((item) => {
-            const rect = item.getBoundingClientRect()
+        const slot = taskDropSlot(
+          Array.from(rows).map((row): TreeRowLayout => {
+            const rect = row.getBoundingClientRect()
             return {
-              id: item.dataset.taskId ?? '',
-              index: Number(item.dataset.taskIndex ?? '-1'),
+              kind: row.dataset.treeRow === 'stream' ? 'stream' : 'task',
+              streamId: row.dataset.streamId ?? '',
+              index: Number(row.dataset.taskIndex ?? '-1'),
+              taskCount: Number(row.dataset.taskCount ?? '0'),
               top: rect.top,
               height: rect.height
             }
           }),
-          ev.clientY,
-          id
+          ev.clientY
         )
-        const nextDropTarget: DropTarget = { type: 'between-tasks', projectId, index: bestIndex }
+        const nextDropTarget: DropTarget = slot ? { type: 'task-slot', projectId, ...slot } : null
         dropTargetRef.current = nextDropTarget
         setDropTarget(nextDropTarget)
         return
@@ -125,11 +133,15 @@ export function useSidebarTreeDrag({
       const currentDropTarget = dropTargetRef.current
 
       if (currentDragState && currentDropTarget) {
-        if (currentDragState.type === 'task' && currentDragState.projectId && currentDropTarget.type === 'between-tasks') {
-          const toIndex = getReorderInsertIndex(currentDragState.index, currentDropTarget.index)
-          if (toIndex !== null) {
-            reorderTasks(currentDragState.projectId, currentDragState.index, toIndex)
-          }
+        if (
+          currentDragState.type === 'task' && currentDragState.projectId && currentDragState.streamId
+          && currentDropTarget.type === 'task-slot'
+        ) {
+          const move = resolveTaskMove(
+            { streamId: currentDragState.streamId, index: currentDragState.index },
+            currentDropTarget
+          )
+          if (move) moveTask(currentDragState.projectId, currentDragState.id, move.toStreamId, move.toIndex)
         } else if (currentDragState.type === 'project' && currentDropTarget.type === 'between-projects') {
           const fromIdx = projectOrder.indexOf(currentDragState.id)
           const orderDropIndex = currentDropTarget.index >= treeProjectIds.length
@@ -152,7 +164,7 @@ export function useSidebarTreeDrag({
 
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [editingId, projectOrder, treeProjectIds, reorderTasks, reorderProjects])
+  }, [editingId, projectOrder, treeProjectIds, moveTask, reorderProjects])
 
   return { dragState, dropTarget, handleDragMouseDown }
 }

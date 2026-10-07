@@ -166,6 +166,15 @@ export function mapTaskTabs(task: Task, fn: (tabs: Tab[]) => Tab[]): Task {
   return next
 }
 
+/**
+ * A tab whose session runs in the task's directory, so it starts again when the
+ * task moves to another worktree: agents and terminals, except a terminal opened
+ * on a folder of its own.
+ */
+export function runsInTaskDir(tab: Tab): boolean {
+  return isAgentTabType(tab.type) || (tab.type === 'terminal' && !tab.cwd)
+}
+
 /** A single pane holding `tabs`, or no pane at all when there are none. */
 export function singlePane(tabs: Tab[], activeTabId?: string): TaskPane[] {
   if (tabs.length === 0) return []

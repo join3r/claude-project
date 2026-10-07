@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { isEphemeralProject } from '../../../shared/types'
 import type { Tab, Task, WorkspaceConfig, WorkspaceDraft } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
-import { findTaskInProject, projectTasks, taskTabs, workspaceReleasedBy } from '../../../shared/streams'
+import { findTaskInProject, projectTasks, runsInTaskDir, taskTabs, workspaceReleasedBy } from '../../../shared/streams'
 import {
   addTaskInDirectoryData,
   appendTaskToProject,
@@ -12,7 +12,9 @@ import {
   makeTask,
   mapTask,
   removeTaskFromData,
-  reorderTaskInData,
+  moveTaskInData,
+  removeStreamFromData,
+  renameStreamInData,
   tabIdsOfTask
 } from './projectsData'
 import { removeTaskView, selectNewTaskView } from './viewState'
@@ -31,7 +33,20 @@ export interface TasksActions {
   attachWorkspace: (projectId: string, taskId: string, workspace: WorkspaceConfig) => void
   removeTask: (projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => Promise<void>
   renameTask: (projectId: string, taskId: string, name: string) => void
-  reorderTasks: (projectId: string, fromIndex: number, toIndex: number) => void
+  /**
+   * Move a task to `toIndex` of stream `toStreamId` (counted without the task).
+   * `restart` is for a move into another directory: its agent and terminals stop
+   * here and start again in the new one (asks first about unsaved editors).
+   * Resolves false when that question was cancelled.
+   */
+  moveTask: (projectId: string, taskId: string, toStreamId: string, toIndex: number, options?: { restart?: boolean }) => Promise<boolean>
+  /**
+   * Remove a stream (never `main`) and every task in it. The worktree is removed
+   * too unless `skipWorkspaceCleanup` (the caller already ran the pre-flight).
+   * Resolves false when nothing was removed (unsaved editors kept it).
+   */
+  removeStream: (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => Promise<boolean>
+  renameStream: (projectId: string, streamId: string, name: string) => void
   /**
    * The task a tab opened with no task selected (the project's Home page) lands in:
    * `taskId` when it is one of the project's tasks, else the `main` stream's task
@@ -162,8 +177,63 @@ export function useTasks(
     mutateProjects(prev => mapTask(prev, projectId, taskId, task => ({ ...task, name })))
   }, [mutateProjects])
 
-  const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
-    mutateProjects(prev => reorderTaskInData(prev, projectId, fromIndex, toIndex))
+  const moveTask = useCallback(async (
+    projectId: string,
+    taskId: string,
+    toStreamId: string,
+    toIndex: number,
+    options: { restart?: boolean } = {}
+  ) => {
+    const task = findTaskInProject(projectsRef.current.find(candidate => candidate.id === projectId), taskId)
+    if (!task) return false
+    if (options.restart) {
+      if (await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
+      // Ending the session here is the restart: the tab bodies are keyed on the
+      // task's directory (TaskPanes), so they mount again and spawn in the new one.
+      for (const tab of taskTabs(task).filter(runsInTaskDir)) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
+      }
+    }
+    mutateProjects(prev => moveTaskInData(prev, projectId, taskId, toStreamId, toIndex))
+    return true
+  }, [confirmDiscardDirty, mutateProjects])
+
+  const removeStream = useCallback(async (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    const stream = project?.streams.find(candidate => candidate.id === streamId)
+    if (!project || !stream || stream.isMain) return false
+    const tabIds = stream.tasks.flatMap(tabIdsOfTask)
+    if (await confirmDiscardDirty(tabIds) === 'cancel') return false
+    for (const tabId of tabIds) {
+      window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+      void window.api.scrollbackDelete(tabId)
+    }
+    const workspace = stream.workspace
+    if (workspace && !skipWorkspaceCleanup) {
+      void window.api.workspaceDelete(
+        {
+          projectDir: getProjectDir(project),
+          projectId: project.ssh ? projectId : undefined,
+          sshConfig: project.ssh,
+          worktreePath: workspace.worktreePath,
+          branchName: workspace.branchName,
+          baseBranch: workspace.baseBranch,
+          force: true
+        }
+      ).then(reportRefusedWorkspaceDelete).catch(() => {})
+    }
+    const ownerRetired = isEphemeralProject(project)
+      && !project.streams.some(candidate => candidate.id !== streamId && candidate.tasks.length > 0)
+    mutateProjects(prev => removeStreamFromData(prev, projectId, streamId))
+    updateWindowViewState(prev => stream.tasks.reduce(
+      (view, task) => removeTaskView(view, projectId, task.id, ownerRetired),
+      prev
+    ))
+    return true
+  }, [confirmDiscardDirty, mutateProjects, updateWindowViewState])
+
+  const renameStream = useCallback((projectId: string, streamId: string, name: string) => {
+    mutateProjects(prev => renameStreamInData(prev, projectId, streamId, name))
   }, [mutateProjects])
 
   const taskForTab = useCallback((projectId: string, taskId: string | null, makeTab: () => Tab, name: string) => {
@@ -179,5 +249,5 @@ export function useTasks(
     return null
   }, [addTask, switchToTask])
 
-  return { addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, setWorkspaceDraft, attachWorkspace, removeTask, renameTask, reorderTasks, taskForTab }
+  return { addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, setWorkspaceDraft, attachWorkspace, removeTask, renameTask, moveTask, removeStream, renameStream, taskForTab }
 }

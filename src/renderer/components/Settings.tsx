@@ -88,7 +88,7 @@ const tabs: Array<{ id: SettingsTab; label: string }> = [
 ]
 
 export default function Settings({ onClose }: Props): React.ReactElement {
-  const { config, projects, pinnedItems, updateConfig } = useApp()
+  const { config, projects, pinnedItems, updateConfig, clearStreamExpansion } = useApp()
   const localStatuses = useAllTabStatuses()
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -562,7 +562,34 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </SetBlock>
             </FormGroup>
 
+            <FormGroup>
+              <SetBlock label="Inbox layout">
+                <SegCtl
+                  options={[
+                    { value: 'flat', label: 'Flat' },
+                    { value: 'grouped', label: 'Grouped by stream' }
+                  ] as const}
+                  value={config.inboxLayout}
+                  onChange={(inboxLayout) => updateConfig({ inboxLayout })}
+                />
+              </SetBlock>
+            </FormGroup>
+
             <Group>
+              <GroupRow
+                label="Collapse quiet streams"
+                sub="Streams where no task needs you, runs or has news fold up. A chevron click overrides it."
+                trailing={
+                  <Switch
+                    checked={config.autoCollapseQuietStreams}
+                    onChange={(autoCollapseQuietStreams) => {
+                      // A fresh rule: hand-opened and hand-closed streams follow it again.
+                      updateConfig({ autoCollapseQuietStreams })
+                      clearStreamExpansion()
+                    }}
+                  />
+                }
+              />
               <GroupRow
                 label="Move working tasks to the end of the Inbox"
                 sub="Tasks whose agent is still running sink below the ones waiting on you."

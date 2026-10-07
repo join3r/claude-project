@@ -69,6 +69,8 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   lastTaskId: nullableStr,
   defaultSidebarTab: v.literal('projects', 'inbox'),
   inboxWorkingLast: bool,
+  inboxLayout: v.literal('flat', 'grouped'),
+  autoCollapseQuietStreams: bool,
   promptBoxAgent: v.literal('claude-chat', 'claude', 'codex', 'pi'),
   promptBoxMode: v.literal('', 'default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'),
   taskRecencyHighlight: v.object({

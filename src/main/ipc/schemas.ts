@@ -61,6 +61,7 @@ export const windowViewState: Validator<WindowViewState> = v.object({
   selectedTaskId: nullableStr,
   selectedTagIds: stringList,
   expandedProjectIds: stringList,
+  streamExpansion: v.optional(v.record(v.boolean())),
   taskStates: v.record(taskViewState),
   fileBrowserOpen: v.boolean(),
   fileBrowserWidth: v.number(),
