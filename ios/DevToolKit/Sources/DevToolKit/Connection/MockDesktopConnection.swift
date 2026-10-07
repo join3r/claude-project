@@ -770,6 +770,9 @@ public enum MockInbox {
                         InboxTab(id: "tab-12", type: .terminal, title: "tail -f api.log", status: .working, since: ago(50)),
                     ]),
                 ]),
+                // No open task: the desktop screen's Quiet projects.
+                InboxProject(id: "p-dotfiles", name: "dotfiles", streams: [InboxStream(id: "s-dot-main", name: "main", isMain: true)], tasks: []),
+                InboxProject(id: "p-blog", name: "blog", emoji: "📚", streams: [InboxStream(id: "s-blog-main", name: "main", isMain: true)], tasks: []),
             ],
             pinned: [
                 InboxPin(projectId: "p-web", streamId: webMain.id, taskId: "t-charts"),

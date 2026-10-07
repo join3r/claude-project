@@ -14,9 +14,13 @@ struct ChatScreen: View {
     /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
     @State private var viewportHeight: CGFloat = 0
 
+    /// Opens the task info sheet (the header and ⓘ).
+    private let onInfo: (() -> Void)?
+
     private static let bottomID = "chat-bottom"
 
-    init(route: ChatRoute, app: AppModel) {
+    init(route: ChatRoute, app: AppModel, onInfo: (() -> Void)? = nil) {
+        self.onInfo = onInfo
         _model = State(initialValue: ChatModel(route: route, dependencies: .init(
             connection: { [weak app] in app?.connection(for: route.desktopId) },
             loadCache: { [weak app] in app?.cachedChat(route) },
@@ -35,7 +39,11 @@ struct ChatScreen: View {
         content
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { titleView }
+                if let context, let onInfo {
+                    TaskNavigationHeader(project: context.project, task: context.task, detail: modeLabel, onInfo: onInfo)
+                } else {
+                    ToolbarItem(placement: .principal) { titleView }
+                }
             }
             .sheet(item: $detailItem) { item in
                 ItemDetailSheet(item: item) { try await model.detail(for: item.id) }
@@ -96,10 +104,20 @@ struct ChatScreen: View {
     private var subtitle: String? {
         var parts: [String] = []
         if let task = found?.task.name { parts.append(task) }
-        // The controls bar shows the mode when the desktop sends the pickers.
-        if let status = model.view?.status, status.settings == nil, let mode = status.permissionMode,
-           let label = Self.permissionModeLabel(mode) { parts.append(label) }
+        if let modeLabel { parts.append(modeLabel) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// The project and task the chat belongs to, for the project-first header.
+    private var context: (project: InboxProject, task: InboxTask)? {
+        guard let task = found?.task else { return nil }
+        return app.task(TaskRef(desktopId: route.desktopId, taskId: task.id))
+    }
+
+    /// The permission mode, when the controls bar doesn't show it (no pickers from the desktop).
+    private var modeLabel: String? {
+        guard let status = model.view?.status, status.settings == nil, let mode = status.permissionMode else { return nil }
+        return Self.permissionModeLabel(mode)
     }
 
     static func permissionModeLabel(_ mode: String) -> String? {

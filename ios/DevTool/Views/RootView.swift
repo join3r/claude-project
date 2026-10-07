@@ -14,13 +14,16 @@ struct RootView: View {
 
     @State private var sidebar: SidebarSelection?
     @State private var taskSelection: TaskRef?
-    /// Pushed on top of the task detail (a chat).
-    @State private var detailPath: [ChatRoute] = []
+    /// Projects pushed on a desktop's screen.
+    @State private var projectPath: [ProjectRef] = []
+    /// A chat a notification asked for; the task screen opens it when it is one of the task's.
+    @State private var openTab: ChatRoute?
+    /// `-demoRoute taskInfo`: the task screen opens with its info sheet up.
+    @State private var demoInfo = false
     @State private var preferredColumn: NavigationSplitViewColumn
     @State private var columnVisibility: NavigationSplitViewVisibility
     @State private var showSettings = false
     @State private var pairAfterSettings = false
-    @State private var demoNavigating = false
 
     init(demoRoute: LaunchOptions.DemoRoute?) {
         self.demoRoute = demoRoute
@@ -75,6 +78,7 @@ struct RootView: View {
         }
         .onChange(of: sidebar) { _, _ in
             if let ref = taskSelection, !scopeIds.contains(ref.desktopId) { taskSelection = nil }
+            projectPath = []
         }
         .task { await runDemoRoute() }
         // A tapped notification: now, or (cold launch) as soon as the view is up.
@@ -96,22 +100,27 @@ struct RootView: View {
             case .inbox:
                 InboxView(selection: $taskSelection)
             case let scope:
-                TaskListView(scope: scope, selection: $taskSelection)
-            }
-        } detail: {
-            NavigationStack(path: $detailPath) {
-                if let ref = taskSelection {
-                    TaskDetailView(ref: ref, onClosed: { taskSelection = nil })
-                        .navigationDestination(for: ChatRoute.self) { route in
-                            ChatScreen(route: route, app: model)
+                NavigationStack(path: $projectPath) {
+                    DesktopView(scope: scope, selection: $taskSelection)
+                        .navigationDestination(for: ProjectRef.self) { ref in
+                            ProjectView(ref: ref, selection: $taskSelection)
                         }
-                } else {
-                    ContentUnavailableView("Select a task", systemImage: "checklist", description: Text("Pick a task to see its tabs and what they are doing."))
                 }
             }
-        }
-        .onChange(of: taskSelection) { _, _ in
-            if !demoNavigating { detailPath = [] }
+        } detail: {
+            NavigationStack {
+                if let ref = taskSelection {
+                    TaskScreen(
+                        ref: ref,
+                        openTab: openTab?.desktopId == ref.desktopId ? openTab?.tabId : nil,
+                        showInfo: demoInfo,
+                        onClosed: { taskSelection = nil }
+                    )
+                    .id(ref)
+                } else {
+                    ContentUnavailableView("No task open", systemImage: "bubble.left.and.text.bubble.right", description: Text("Pick a task to open its conversation."))
+                }
+            }
         }
     }
 
@@ -163,25 +172,23 @@ struct RootView: View {
         guard model.desktop(route.desktopId) != nil else { return }
         showSettings = false
         if model.pairing != nil { model.dismissPairing() }
-        if detailPath.last == route { return }
         for _ in 0..<100 {
             if let found = model.tab(desktopId: route.desktopId, tabId: route.tabId) {
-                demoNavigating = true
-                // The Inbox (or All desktops) already lists the task; stay there.
-                if !scopeIds.contains(route.desktopId) { sidebar = .desktop(route.desktopId) }
-                let ref = TaskRef(desktopId: route.desktopId, taskId: found.task.id)
-                if taskSelection != ref {
-                    taskSelection = ref
-                    try? await Task.sleep(for: .milliseconds(350))
-                }
-                preferredColumn = .detail
-                detailPath = found.tab.type == .claudeChat ? [route] : []
-                demoNavigating = false
+                open(TaskRef(desktopId: route.desktopId, taskId: found.task.id), tab: route)
                 return
             }
             try? await Task.sleep(for: .milliseconds(100))
         }
         if !scopeIds.contains(route.desktopId) { sidebar = .desktop(route.desktopId) }
+    }
+
+    /// Shows a task's screen, on `tab` when it is one of its chats.
+    private func open(_ ref: TaskRef, tab: ChatRoute? = nil) {
+        // The Inbox (or All desktops) already lists the task; stay there.
+        if !scopeIds.contains(ref.desktopId) { sidebar = .desktop(ref.desktopId) }
+        openTab = tab
+        taskSelection = ref
+        preferredColumn = .detail
     }
 
     /// Debug-only shortcuts for screenshots (`-demoRoute`).
@@ -192,9 +199,22 @@ struct RootView: View {
             try? await Task.sleep(for: .milliseconds(600))
             columnVisibility = .all
             preferredColumn = .sidebar
-        case .projects:
+        case .projects, .desktop:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first { sidebar = .desktop(first.id) }
+        case .project:
+            try? await Task.sleep(for: .milliseconds(400))
+            if let first = model.desktops.first {
+                sidebar = .desktop(first.id)
+                for _ in 0..<50 {
+                    if let project = model.inboxes[first.id]?.projects.first {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        projectPath = [ProjectRef(desktopId: first.id, projectId: project.id)]
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
         case .pair:
             try? await Task.sleep(for: .milliseconds(400))
             model.presentPairing()
@@ -214,29 +234,29 @@ struct RootView: View {
         case .settings:
             try? await Task.sleep(for: .milliseconds(400))
             showSettings = true
-        case .chat:
+        case .chat, .taskInfo:
+            demoInfo = demoRoute == .taskInfo
             for _ in 0..<150 {
                 if let target = demoChatTarget() {
-                    demoNavigating = true
-                    sidebar = .desktop(target.desktopId)
-                    taskSelection = TaskRef(desktopId: target.desktopId, taskId: target.taskId)
-                    preferredColumn = .detail
-                    try? await Task.sleep(for: .milliseconds(350))
-                    detailPath = [ChatRoute(desktopId: target.desktopId, tabId: target.tabId)]
-                    demoNavigating = false
+                    open(TaskRef(desktopId: target.desktopId, taskId: target.taskId),
+                         tab: ChatRoute(desktopId: target.desktopId, tabId: target.tabId))
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(100))
             }
-        case .task:
+        case .task, .taskStatus:
             for attempt in 0..<50 {
                 let fallback = attempt == 49 ? model.inboxes.values.first : nil
-                if let inbox = model.inboxes[AppModel.mockOnlineId] ?? fallback,
-                   let task = inbox.projects.first?.tasks.first {
-                    sidebar = .desktop(inbox.desktop.id)
-                    taskSelection = TaskRef(desktopId: inbox.desktop.id, taskId: task.id)
-                    preferredColumn = .detail
-                    return
+                if let inbox = model.inboxes[AppModel.mockOnlineId] ?? fallback {
+                    let tasks = inbox.projects.flatMap(\.tasks)
+                    // `taskStatus`: the first terminal agent's task.
+                    let pick = demoRoute == .taskStatus
+                        ? tasks.first { $0.agentTab.map { $0.type.isAgent && $0.type != .claudeChat } ?? false }
+                        : tasks.first
+                    if let task = pick {
+                        open(TaskRef(desktopId: inbox.desktop.id, taskId: task.id))
+                        return
+                    }
                 }
                 try? await Task.sleep(for: .milliseconds(100))
             }

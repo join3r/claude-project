@@ -5,8 +5,9 @@ import Foundation
 /// - `-mockDesktop` (or env `DEVTOOL_MOCK_DESKTOP=1`): preload two mock paired
 ///   desktops (one online, one offline) and keep all state in memory, so the
 ///   UI can be exercised and screenshotted without a relay.
-/// - `-demoRoute sidebar|task|pair|pairConfirm|pairWait|settings` (Debug builds, with `-mockDesktop`):
-///   open a screen directly, for screenshots.
+/// - `-demoRoute sidebar|desktop|project|task|taskStatus|pair|pairConfirm|pairWait|settings`
+///   (Debug builds, with `-mockDesktop`): open a screen directly, for screenshots.
+/// - `-demoRoute taskInfo [-demoTab <tabId>]`: as `chat`, with the task info sheet up.
 /// - `-demoRoute chat [-demoTab <tabId>]` (Debug builds): open a claude-chat tab
 ///   (the first one that needs attention when `-demoTab` is absent). Works
 ///   against mock and real desktops. With `-demoToolDetail <itemId>` the item's
@@ -30,9 +31,18 @@ import Foundation
 struct LaunchOptions: Sendable {
     enum DemoRoute: String, Sendable {
         case sidebar
-        /// The first desktop's project list (streams and their tasks).
+        /// The first desktop's screen (Pinned, Active, Quiet projects).
+        case desktop
+        /// Same as `desktop` (its name before the project screen).
         case projects
+        /// The first desktop's first project.
+        case project
+        /// The first task of the first desktop.
         case task
+        /// The first terminal agent's task: its status screen.
+        case taskStatus
+        /// A claude-chat tab (as `chat`) with the task info sheet up.
+        case taskInfo
         case pair
         case settings
         /// Confirm step for a canned invite.

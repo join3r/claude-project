@@ -467,7 +467,7 @@ struct TaskRef: Hashable, Sendable {
     var taskId: String
 }
 
-/// A claude-chat tab opened from a task's detail.
+/// A claude-chat tab: the conversation a task opens on.
 struct ChatRoute: Hashable, Sendable {
     var desktopId: String
     var tabId: String
