@@ -1,12 +1,17 @@
 import React, { useEffect } from 'react'
 import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { menuCls, menuItemCls } from './menu'
+import { formatShortcutForApp } from '../../../shared/shortcut-label'
 
 export interface ContextMenuItem {
   label: string
   onSelect: () => void
   danger?: boolean
   disabled?: boolean
+  /** An accelerator (`CmdOrCtrl+T`), shown on the right as this platform writes it. */
+  shortcut?: string
+  /** A rule above this item, starting a new group. */
+  dividerBefore?: boolean
 }
 
 /**
@@ -37,19 +42,26 @@ export default function ContextMenu({ menu, items, onClose }: {
       />
       <div ref={position.ref} role="menu" className={`fixed z-(--z-menu) ${menuCls}`} style={position.style}>
         {items.map((item) => (
-          <button
-            key={item.label}
-            type="button"
-            role="menuitem"
-            disabled={item.disabled}
-            className={`${menuItemCls}${item.danger ? ' text-danger' : ''} disabled:opacity-50 disabled:cursor-default`}
-            onClick={() => {
-              onClose()
-              item.onSelect()
-            }}
-          >
-            {item.label}
-          </button>
+          <React.Fragment key={item.label}>
+            {item.dividerBefore && <div role="separator" className="border-t border-hair my-1" />}
+            <button
+              type="button"
+              role="menuitem"
+              disabled={item.disabled}
+              className={`${menuItemCls}${item.danger ? ' text-danger' : ''}${item.shortcut ? ' flex items-center gap-6' : ''} disabled:opacity-50 disabled:cursor-default`}
+              onClick={() => {
+                onClose()
+                item.onSelect()
+              }}
+            >
+              {item.shortcut ? (
+                <>
+                  <span className="flex-1">{item.label}</span>
+                  <span className="text-xs text-text-subtle">{formatShortcutForApp(item.shortcut)}</span>
+                </>
+              ) : item.label}
+            </button>
+          </React.Fragment>
         ))}
       </div>
     </>

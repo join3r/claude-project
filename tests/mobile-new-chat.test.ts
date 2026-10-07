@@ -47,4 +47,10 @@ describe('addChatTab (SPEC.md §8.2)', () => {
     expect(addChatTab(data({ hideFromMobile: true }), 't1')).toMatchObject({ ok: false, code: 'not-found' })
     expect(addChatTab(data({ shellCommand: { command: 'npm run dev' } }), 't1')).toMatchObject({ ok: false, code: 'unsupported' })
   })
+
+  it('refuses a task that already has an agent (one agent per task)', () => {
+    const once = addChatTab(data(), 't1', counter())
+    if (!once.ok) throw new Error('first chat refused')
+    expect(addChatTab(once.data, 't1', counter())).toMatchObject({ ok: false, code: 'unsupported' })
+  })
 })

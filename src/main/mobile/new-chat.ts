@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { CLAUDE_CHAT_LABEL, isShellCommandProject, type ProjectsData, type Tab } from '../../shared/types'
 import { AppErrorCode } from '../../../protocol/ts/index.ts'
-import { findTaskInProject, mapTaskInProject } from '../../shared/streams'
+import { canAddTabType, findTaskInProject, mapTaskInProject } from '../../shared/streams'
 import { addTabToPane } from '../../shared/panes'
 import { isVisibleOnMobile } from './inbox'
 
@@ -22,6 +22,9 @@ export function addChatTab(data: ProjectsData, taskId: string, ids: () => string
     if (!isVisibleOnMobile(project)) break
     // A shell-command project runs one command, not agents; its tab bar has no Claude button.
     if (isShellCommandProject(project)) return { ok: false, code: AppErrorCode.Unsupported, message: 'This project runs a shell command, not Claude' }
+    // One agent per task: `addTabToPane` would drop a second one, so say so instead.
+    // (Retired with `chat.new` in favour of `task.new`.)
+    if (!canAddTabType(task, 'claude-chat')) return { ok: false, code: AppErrorCode.Unsupported, message: 'This task already has an agent' }
     const tab: Tab = { id: ids(), type: 'claude-chat', title: CLAUDE_CHAT_LABEL, sessionId: ids() }
     const next: ProjectsData = {
       ...data,

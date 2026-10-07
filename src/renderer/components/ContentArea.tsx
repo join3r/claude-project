@@ -7,7 +7,7 @@ import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import { localProjectFolder } from '../../shared/external-editors'
 import TaskPanes from './TaskPanes'
-import NewTabButtons from './NewTabButtons'
+import NewTabMenu from './NewTabMenu'
 import { ProjectHome } from './ProjectHome'
 import { ArchivedView } from './ArchivedView'
 import { useArchivedView } from './archivedViewTarget'
@@ -438,7 +438,7 @@ export default function ContentArea(): React.ReactElement {
             />
           )}
           {selectedTask && !showsTabBars(selectedTask) && (
-            <NewTabButtons projectId={selectedProject.id} taskId={selectedTask.id} pane={0} />
+            <NewTabMenu projectId={selectedProject.id} taskId={selectedTask.id} pane={0} />
           )}
           {selectedTask && showsTabBars(selectedTask) && (
             <button

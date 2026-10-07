@@ -2,6 +2,8 @@
 type EventMap = {
   'open-settings': void
   'open-project-settings': void
+  /** The New Task composer, on the current project and stream (what ⌘N opens). */
+  'open-new-task': void
   'toggle-sidebar': void
   'toggle-file-browser': void
   'reload-window': void

@@ -2,10 +2,10 @@
 import { commandRegistry } from '../CommandRegistry'
 import type { AppCtx } from '../types'
 import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
-import { AI_TAB_TYPES, AI_TAB_META, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
+import { AI_TAB_TYPES, AI_TAB_META, NEW_TASK_NAME, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
-import { claudeTabType } from '../../components/newTaskTabs'
-import { findStreamOfTask, findTaskInProject, taskTabs } from '../../../shared/streams'
+import { claudeTabType, createTab } from '../../components/newTaskTabs'
+import { currentStreamId, findStreamOfTask, findTaskInProject, taskTabs } from '../../../shared/streams'
 
 function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
   const { selectedProjectId, selectedTaskId, projects, pinnedItems } = actions
@@ -91,27 +91,30 @@ commandRegistry.register({
   }
 })
 
+// One agent per task: a new agent is a new task, in the stream of the one in view.
 for (const aiType of AI_TAB_TYPES) {
   const meta = AI_TAB_META[aiType as AiTabType]
-  // Claude opens in the mode Settings picks (terminal or chat), like the tab-bar
-  // button, so its entry is named for neither.
+  // Claude opens in the mode Settings picks (terminal or chat), like the composer,
+  // so its entry is named for neither.
   const isClaude = aiType === 'claude'
   commandRegistry.register({
-    id: `cmd.new${aiType.charAt(0).toUpperCase()}${aiType.slice(1)}Tab`,
-    title: isClaude ? 'New Claude Tab' : `New ${meta.label} Tab`,
+    id: `cmd.new${aiType.charAt(0).toUpperCase()}${aiType.slice(1)}Task`,
+    title: isClaude ? 'New Claude Task' : `New ${meta.label} Task`,
     aliases: [meta.label.toLowerCase(), aiType, meta.command, ...(isClaude ? ['claude chat', 'claude code'] : [])],
     when: ctx => {
-      const { selectedProjectId, selectedTaskId, projects, config } = ctx.actions
-      if (!selectedProjectId || !selectedTaskId) return false
+      const { selectedProjectId, projects, config } = ctx.actions
+      if (!selectedProjectId) return false
       if (!config?.[ENABLE_FLAG[aiType as AiTabType]]) return false
       const project = projects.find(p => p.id === selectedProjectId)
       if (!project || isShellCommandProject(project)) return false
       return true
     },
     run: ctx => {
-      const { selectedProjectId, selectedTaskId, config } = ctx.actions
-      if (!selectedProjectId || !selectedTaskId) return
-      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
+      const { selectedProjectId, selectedTaskId, projects, config } = ctx.actions
+      const project = projects.find(p => p.id === selectedProjectId)
+      if (!project) return
+      const tab = createTab(claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
+      ctx.actions.addTask(project.id, NEW_TASK_NAME, [tab], currentStreamId(project, selectedTaskId))
     }
   })
 }

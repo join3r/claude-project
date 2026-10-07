@@ -3,7 +3,7 @@ import { isNotebookFile } from '../../../shared/notebook'
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, CLAUDE_CHAT_LABEL } from '../../../shared/types'
 import type { Tab, TabType } from '../../../shared/types'
-import { findTaskInProject, isMainTab, taskTabs } from '../../../shared/streams'
+import { canAddTabType, findTaskInProject, isMainTab, taskTabs } from '../../../shared/streams'
 import {
   addTabToPane,
   findTabLocation,
@@ -26,7 +26,8 @@ import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { findTask, insertTabAt, mapTask, patchTab, renameTabInData } from './projectsData'
 
 export interface TabsActions {
-  addTab: (projectId: string, taskId: string, pane: PaneRef, type: TabType, arg?: string | CreateTabOptions) => Tab
+  /** The new tab, or null when the task already has an agent and `type` is one (a second agent is a new task). */
+  addTab: (projectId: string, taskId: string, pane: PaneRef, type: TabType, arg?: string | CreateTabOptions) => Tab | null
   removeTab: (projectId: string, taskId: string, tabId: string) => Promise<void>
   renameTab: (projectId: string, taskId: string, tabId: string, title: string) => void
   /** Restore the most recently closed tab that still has a home; returns the pane it went to. */
@@ -80,10 +81,11 @@ export function useTabs(
     type: TabType,
     arg?: string | CreateTabOptions
   ) => {
+    const task = findTask(projectsRef.current, projectId, taskId)
+    if (task && !canAddTabType(task, type)) return null
     const options = typeof arg === 'string' ? { filePath: arg } : (arg ?? {})
     const tab = createTab(type, options)
     // Resolved once, up front, so a replayed updater lands the tab in the same column.
-    const task = findTask(projectsRef.current, projectId, taskId)
     const paneIndex = task ? resolvePaneRef(task, pane) : 0
 
     mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => addTabToPane(candidate, paneIndex, tab)))
@@ -125,7 +127,8 @@ export function useTabs(
     const { projectId, taskId, index, tab } = next.entry
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = findTaskInProject(project, taskId)
-    if (!project || !task) {
+    // A stray second agent tab (from before one agent per task) doesn't come back.
+    if (!project || !task || !canAddTabType(task, tab.type)) {
       cleanupClosedTabHistory([next.entry])
       return null
     }

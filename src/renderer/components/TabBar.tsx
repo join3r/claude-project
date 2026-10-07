@@ -8,7 +8,7 @@ import { resolveTabDropTarget } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { menuCls, menuItemCls } from './ui'
-import NewTabButtons from './NewTabButtons'
+import NewTabMenu from './NewTabMenu'
 
 interface Props {
   tabs: Tab[]
@@ -266,7 +266,7 @@ export default function TabBar({
           <div className="w-0.5 shrink-0 self-stretch bg-accent-400 shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent-400)_55%,transparent)]" />
         )}
       </div>
-      <NewTabButtons projectId={projectId} taskId={taskId} pane={paneIndex} className="px-1" />
+      <NewTabMenu projectId={projectId} taskId={taskId} pane={paneIndex} className="px-1" />
     </div>
     {tabMenu && (() => {
       const tab = tabs.find(t => t.id === tabMenu.tabId)

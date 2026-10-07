@@ -230,6 +230,7 @@ afterEach(() => {
   process.off('unhandledRejection', recordRejection)
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('closing an editor with unsaved changes', () => {
@@ -237,12 +238,16 @@ describe('closing an editor with unsaved changes', () => {
     ;(window as any).api.platform = 'win32'
     await mountApp()
     const close = `Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`
-    const terminal = `New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`
     const split = `Split right (${formatShortcutForApp('CmdOrCtrl+D')})`
     expect(close).not.toContain('⌘')
     expect(screen.getAllByTitle(close).length).toBeGreaterThan(0)
-    expect(screen.getAllByTitle(terminal).length).toBeGreaterThan(0)
     expect(screen.getByTitle(split)).toBeTruthy()
+    // The + menu lists Terminal with its shortcut.
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect(): void {} })
+    fireEvent.click(screen.getAllByTitle('New tab or task')[0])
+    const terminal = within(screen.getByRole('menu')).getByRole('menuitem', { name: /Terminal/ })
+    expect(terminal.textContent).toContain(formatShortcutForApp('CmdOrCtrl+T'))
+    expect(terminal.textContent).not.toContain('⌘')
   })
 
   it('prompts on ⌘W and leaves the tab and its buffer alone on Cancel', async () => {

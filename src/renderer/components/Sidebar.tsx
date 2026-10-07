@@ -269,6 +269,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   useEffect(() => {
+    return paletteEvents.on('open-new-task', () => setNewTaskOpen(true))
+  }, [])
+
+  useEffect(() => {
     return window.api.onMenuNewStream(() => {
       if (selectedProjectId) setNewStreamProjectId(selectedProjectId)
     })

@@ -4,7 +4,7 @@
  * move, resize) live in `panes.ts`.
  */
 import { isAgentTabType } from './types'
-import type { Project, Stream, Tab, Task, TaskPane, WorkspaceConfig } from './types'
+import type { Project, Stream, Tab, TabType, Task, TaskPane, WorkspaceConfig } from './types'
 import { joinWorkspaceDir, retargetPath } from './workspace-path'
 
 // --- Tasks across a project's streams ---------------------------------------
@@ -136,6 +136,15 @@ export function taskTabs(task: Task): Tab[] {
 /** The task's main tab (its agent or terminal) closes only with the task. */
 export function isMainTab(task: Task, tabId: string): boolean {
   return task.mainTabId === tabId
+}
+
+/**
+ * Whether `type` may join `task`: a task has one agent (Claude chat or a terminal
+ * agent), so an agent tab is refused when the task already holds one. A second
+ * agent is a new task.
+ */
+export function canAddTabType(task: Task, type: TabType): boolean {
+  return !isAgentTabType(type) || !taskTabs(task).some(tab => isAgentTabType(tab.type))
 }
 
 export function taskTabIds(task: Task): string[] {

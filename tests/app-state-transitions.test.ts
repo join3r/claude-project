@@ -198,8 +198,9 @@ describe('projectsData', () => {
     expect(leftIds(once)).toEqual(['a', 'z'])
     const twice = insertTabAt(once, 'p', 't', 0, 0, tab('z'))
     expect(leftIds(twice)).toEqual(['a', 'z'])
+    // `a` is the task's main tab, which stays first.
     const front = insertTabAt(d, 'p', 't', 0, -5, tab('z'))
-    expect(leftIds(front)).toEqual(['z', 'a'])
+    expect(leftIds(front)).toEqual(['a', 'z'])
   })
 
   it('includePendingTags folds in only referenced, not-yet-present tags', () => {
