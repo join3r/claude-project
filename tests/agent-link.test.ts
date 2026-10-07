@@ -88,11 +88,10 @@ describe('agentLinkPath', () => {
 describe('pickAgentTarget', () => {
   const tab = (id: string, type: Tab['type']): Tab => ({ id, type, title: id })
   const task = {
-    tabs: {
-      left: [tab('ed', 'editor'), tab('pi', 'pi'), tab('term', 'terminal')],
-      right: [tab('chat', 'claude-chat'), tab('codex', 'codex')]
-    },
-    activeTab: { left: 'ed', right: 'codex' }
+    panes: [
+      { tabs: [tab('ed', 'editor'), tab('pi', 'pi'), tab('term', 'terminal')], activeTabId: 'ed' },
+      { tabs: [tab('chat', 'claude-chat'), tab('codex', 'codex')], activeTabId: 'codex' }
+    ]
   }
 
   it('prefers the most recently used agent tab', () => {
@@ -108,11 +107,11 @@ describe('pickAgentTarget', () => {
   })
 
   it('falls back to the first agent tab, left pane first', () => {
-    expect(pickAgentTarget({ ...task, activeTab: { left: 'ed', right: null } })?.id).toBe('pi')
+    expect(pickAgentTarget({ panes: [task.panes[0], { ...task.panes[1], activeTabId: null }] })?.id).toBe('pi')
   })
 
   it('returns null when the task has no agent tab', () => {
-    expect(pickAgentTarget({ tabs: { left: [tab('ed', 'editor')], right: [tab('t', 'terminal')] } })).toBeNull()
+    expect(pickAgentTarget({ panes: [{ tabs: [tab('ed', 'editor')] }, { tabs: [tab('t', 'terminal')] }] })).toBeNull()
   })
 })
 

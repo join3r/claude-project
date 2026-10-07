@@ -9,24 +9,32 @@ import { menuCls, menuItemCls } from '../ui'
 import { revealInFolderLabel } from '../../utils/revealLabel'
 import { joinWorkspaceDir } from '../../../shared/workspace-path'
 import type { SidebarContextMenuState } from './SidebarParts'
+import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from '../../../shared/streams'
 
 /**
- * The local folder a project or task works in, for "Reveal in Finder": the task's
- * workspace worktree when it has one, else the project directory. Remote and
+ * The local folder a project, stream or task works in, for "Reveal in Finder":
+ * the stream's worktree when it has one, else the project directory. Remote and
  * shell-command projects have none on this machine.
  */
-export function revealFolder(projects: readonly Project[], projectId: string, taskId?: string): string | null {
+export function revealFolder(
+  projects: readonly Project[],
+  projectId: string,
+  taskId?: string,
+  streamId?: string
+): string | null {
   const project = projects.find(p => p.id === projectId)
   if (!project || isRemoteProject(project) || isShellCommandProject(project)) return null
-  const workspace = taskId ? project.tasks.find(t => t.id === taskId)?.workspace : undefined
+  const workspace = taskId
+    ? taskWorkspace(project, taskId)
+    : streamId ? project.streams.find(stream => stream.id === streamId)?.workspace : undefined
   if (workspace?.worktreePath) return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
   return project.directory || null
 }
 
 /** The confirmation for deleting a project, naming what goes with it. */
 export function projectDeletePrompt(project: Project): string {
-  const tasks = project.tasks.length
-  const workspaces = project.tasks.filter(t => t.workspace).length
+  const tasks = projectTasks(project).length
+  const workspaces = project.streams.filter(s => s.workspace).length
   const lines = [`Delete project "${project.name}"?`]
   if (tasks > 0) lines.push(`${tasks === 1 ? 'Its task closes' : `Its ${tasks} tasks close`}, with their tabs.`)
   if (workspaces > 0) lines.push(`${workspaces === 1 ? 'Its workspace worktree is' : `Its ${workspaces} workspace worktrees are`} removed from disk, even with uncommitted changes.`)
@@ -47,13 +55,14 @@ export default function SidebarContextMenu({
   setContextMenu,
   findTask,
   handleToggleSettled,
-  handleDeleteTask,
+  handleCloseTask,
+  handleCloseStream,
   beginEdit,
   isPinned,
   setDuplicateProjectId,
   setProjectSettingsId,
   onAddTask,
-  onAddWorkspace
+  onNewStream
 }: {
   contextMenu: SidebarContextMenuState | null
   snoozeSubmenu: boolean
@@ -63,13 +72,16 @@ export default function SidebarContextMenu({
   setContextMenu: (menu: null) => void
   findTask: (projectId: string, taskId: string) => Task | undefined
   handleToggleSettled: (projectId: string, taskId: string) => void
-  handleDeleteTask: (projectId: string, taskId: string) => void
-  beginEdit: (id: string, name: string, projectId?: string) => void
+  handleCloseTask: (projectId: string, taskId: string) => void | Promise<void>
+  handleCloseStream: (projectId: string, streamId: string) => void | Promise<void>
+  /** Rename inline; `streamId` opens that stream so the row is on screen. */
+  beginEdit: (id: string, name: string, projectId?: string, streamId?: string) => void
   isPinned: (item: PinnedItem) => boolean
   setDuplicateProjectId: (projectId: string) => void
   setProjectSettingsId: (projectId: string) => void
-  onAddTask: (projectId: string) => void
-  onAddWorkspace: (projectId: string) => void
+  /** A new task in `streamId`, or in the project's current stream. */
+  onAddTask: (projectId: string, streamId?: string) => void
+  onNewStream: (projectId: string) => void
 }): React.ReactElement {
   const {
     projects, togglePinnedItem, updateProject, setProjectExpanded, connectSsh, removeProject,
@@ -115,15 +127,21 @@ export default function SidebarContextMenu({
                     onAddTask(project.id)
                     closeContextMenu()
                   }}>New task</button>
-                  {!isShellCommandProject(project) && (
-                    <button className={menuItemCls} onClick={() => {
-                      onAddWorkspace(project.id)
-                      closeContextMenu()
-                    }}>New workspace</button>
-                  )}
+                  <button className={menuItemCls} onClick={() => {
+                    onNewStream(project.id)
+                    closeContextMenu()
+                  }}>New stream…</button>
                 </div>
               )
             })()}
+            {contextMenu.type === 'stream' && (
+              <div className="border-b border-hair pb-1 mb-1">
+                <button className={menuItemCls} onClick={() => {
+                  onAddTask(contextMenu.projectId, contextMenu.streamId)
+                  closeContextMenu()
+                }}>New task</button>
+              </div>
+            )}
             {contextMenu.type === 'task' && (() => {
               const task = findTask(contextMenu.projectId, contextMenu.taskId!)
               if (!task) return null
@@ -164,24 +182,36 @@ export default function SidebarContextMenu({
               )
             })()}
             <button className={menuItemCls} onClick={() => {
-                const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
-                const item = contextMenu.type === 'project'
-                  ? projects.find((p) => p.id === id)
-                  : projects.find((p) => p.id === contextMenu.projectId)?.tasks.find((t) => t.id === id)
-                beginEdit(id, item?.name ?? '', contextMenu.type === 'task' ? contextMenu.projectId : undefined)
+                const project = projects.find((p) => p.id === contextMenu.projectId)
+                if (contextMenu.type === 'project') {
+                  beginEdit(contextMenu.projectId, project?.name ?? '')
+                } else if (contextMenu.type === 'stream') {
+                  const stream = project?.streams.find(s => s.id === contextMenu.streamId)
+                  beginEdit(contextMenu.streamId!, stream?.name ?? '', contextMenu.projectId)
+                } else {
+                  const task = findTaskInProject(project, contextMenu.taskId)
+                  const stream = findStreamOfTask(project, contextMenu.taskId)
+                  beginEdit(contextMenu.taskId!, task?.name ?? '', contextMenu.projectId, stream?.id)
+                }
                 setContextMenu(null)
               }}>Rename</button>
               {(() => {
-                const item: PinnedItem = contextMenu.type === 'project'
-                  ? { type: 'project', projectId: contextMenu.projectId }
-                  : { type: 'task', projectId: contextMenu.projectId, taskId: contextMenu.taskId! }
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                let item: PinnedItem
+                if (contextMenu.type === 'project') {
+                  item = { type: 'project', projectId: contextMenu.projectId }
+                } else if (contextMenu.type === 'stream') {
+                  item = { type: 'stream', projectId: contextMenu.projectId, streamId: contextMenu.streamId! }
+                } else {
+                  const streamId = findStreamOfTask(project, contextMenu.taskId)?.id ?? ''
+                  item = { type: 'task', projectId: contextMenu.projectId, streamId, taskId: contextMenu.taskId! }
+                }
                 const pinned = isPinned(item)
-                const noun = contextMenu.type === 'project' ? 'project' : 'task'
                 return (
                   <button className={menuItemCls} onClick={() => {
                     togglePinnedItem(item)
                     setContextMenu(null)
-                  }}>{pinned ? `Unpin ${noun}` : `Pin ${noun}`}</button>
+                  }}>{pinned ? `Unpin ${contextMenu.type}` : `Pin ${contextMenu.type}`}</button>
                 )
               })()}
               {/* Promote the hidden project a "task in a directory" is filed under:
@@ -220,7 +250,7 @@ export default function SidebarContextMenu({
                 )
               })()}
               {(() => {
-                const folder = revealFolder(projects, contextMenu.projectId, contextMenu.type === 'task' ? contextMenu.taskId : undefined)
+                const folder = revealFolder(projects, contextMenu.projectId, contextMenu.taskId, contextMenu.streamId)
                 if (!folder) return null
                 return (
                   <button className={menuItemCls} onClick={() => {
@@ -231,17 +261,25 @@ export default function SidebarContextMenu({
                   }}>{revealInFolderLabel()}</button>
                 )
               })()}
+              {/* `main` can't be closed, only emptied. */}
+              {!(contextMenu.type === 'stream' && projects.find(p => p.id === contextMenu.projectId)
+                ?.streams.find(s => s.id === contextMenu.streamId)?.isMain) && (
               <button className={`${menuItemCls} text-danger`} onClick={() => {
                 setContextMenu(null)
                 if (contextMenu.type === 'task') {
-                  void handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
+                  void handleCloseTask(contextMenu.projectId, contextMenu.taskId!)
+                  return
+                }
+                if (contextMenu.type === 'stream') {
+                  void handleCloseStream(contextMenu.projectId, contextMenu.streamId!)
                   return
                 }
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project) return
                 if (!window.confirm(projectDeletePrompt(project))) return
                 void removeProject(project.id)
-              }}>Delete…</button>
+              }}>{contextMenu.type === 'project' ? 'Delete…' : contextMenu.type === 'task' ? 'Close task' : 'Close stream'}</button>
+              )}
               {contextMenu.type === 'project' && (() => {
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project) return null

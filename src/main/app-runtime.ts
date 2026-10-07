@@ -7,6 +7,7 @@ import { promisify } from 'util'
 import { Storage } from './storage'
 import { CONFIG_DIR } from './config-dir'
 import { ScrollbackStorage } from './scrollback-storage'
+import { ArchiveStorage } from './archive-storage'
 import { PtyManager } from './pty-manager'
 import { PtySessions } from './pty-sessions'
 import { HookServer } from './hook-server'
@@ -21,7 +22,6 @@ import { RevisionStore } from './revision-store'
 import { TabActivityRegistry } from './tab-activity-registry'
 import { SleepBlocker } from './sleep-blocker'
 import type { ActivityUpdate } from '../shared/agent-activity'
-import { runIdleCleanupSweep, type IdleCleanupEnvironment } from './idle-cleanup-sweep'
 import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from './task-teardown'
 import { PaletteFrecencyStorage } from './palette-frecency-storage'
 import { agentCommandOverride, resolveAgentCommand } from './resolve-agent-command'
@@ -34,11 +34,14 @@ import { registerWindowHandlers } from './ipc/window'
 import { registerSshHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/ssh'
 import { registerAgentHandlers } from './ipc/agents'
 import { registerTerminalHandlers } from './ipc/terminals'
-import { createWorkspace, listWorkspaceBranches, registerWorkspaceHandlers } from './ipc/workspaces'
+import { registerWorkspaceHandlers } from './ipc/workspaces'
+import { registerArchiveHandlers } from './ipc/archive'
+import { readLocalTranscript, readRemoteTranscript } from './claude-chat/transcript'
 import { registerFileBrowserHandlers } from './ipc/file-browser'
 import { registerGitHandlers } from './ipc/git'
 import { registerNotebookHandlers } from './ipc/notebooks'
 import { isRemoteProject, isShellCommandProject } from '../shared/types'
+import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../shared/archive'
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
@@ -65,7 +68,7 @@ import { ChatBridge } from './mobile/chat-bridge'
 import { nativeImageCodec } from './mobile/image-codec'
 import { PushEmitter } from './mobile/push-emitter'
 import { addChatTab } from './mobile/new-chat'
-import { addTaskWithChat, makeTaskWorkspace, newTaskProject } from './mobile/new-task'
+import { addTaskWithChat } from './mobile/new-task'
 import { closeTask, findClosableTab, removeTabFromData } from './mobile/close-task'
 import { setPinInData } from './mobile/pin'
 import { triageTaskInData } from './mobile/triage'
@@ -78,13 +81,11 @@ import {
   TAB_CLOSE_FEATURE,
   TASK_CLOSE_FEATURE,
   TASK_NEW_FEATURE,
-  TASK_TRIAGE_FEATURE,
-  TASK_WORKSPACE_FEATURE
+  TASK_TRIAGE_FEATURE
 } from '../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
-  CleanupActivity,
   PersistedWindowState,
   Project,
   ProjectsData,
@@ -92,10 +93,8 @@ import type {
   Tab,
   Task,
   TunnelConfig,
-  WorkspaceConfig,
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
-  WorkspaceTarget,
   WindowGeometry,
   WindowViewState,
   NotesRecord
@@ -114,8 +113,6 @@ const execFileAsync = promisify(execFile)
  * buffers are unsaved and which PTYs are alive are all safeguards main only
  * learns once the renderers have reported in.
  */
-const IDLE_CLEANUP_STARTUP_DELAY_MS = 15_000
-const IDLE_CLEANUP_INTERVAL_MS = 60 * 60_000
 const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
 
 function clone<T>(value: T): T {
@@ -136,6 +133,7 @@ function getWindowGeometry(window: BrowserWindow): WindowGeometry {
 export class AppRuntime {
   private readonly storage = new Storage(CONFIG_DIR)
   private readonly scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
+  private readonly archiveStorage = new ArchiveStorage(path.join(CONFIG_DIR, 'archive'))
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
@@ -173,9 +171,6 @@ export class AppRuntime {
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private startupWindowStates: PersistedWindowState[]
-  private idleCleanupTimer: NodeJS.Timeout | null = null
-  private idleCleanupScheduled = false
-  private idleCleanupRunning = false
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
     this.storage.backupProjectsOnStartup()
@@ -193,6 +188,7 @@ export class AppRuntime {
       persist: (data) => this.notesStorage.save(data),
       broadcast: (envelope) => this.broadcastToAllWindows('notes-updated', envelope)
     })
+    this.forgetArchivesOfVanishedProjects()
     this.config = this.storage.loadConfig()
     setPortableNodeDir(this.config.portableNodeDir)
     this.sleepBlocker = new SleepBlocker(
@@ -224,7 +220,7 @@ export class AppRuntime {
   }
 
   /**
-   * The one write path for canonical projects state from inside main (idle cleanup
+   * The one write path for canonical projects state from inside main (a phone's
    * and anything after it). Going through here is what bumps the revision and tells
    * the windows, so a main-side deletion cannot be resurrected by a stale renderer.
    */
@@ -351,7 +347,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_WORKSPACE_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE],
+        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -367,38 +363,12 @@ export class AppRuntime {
         this.commitProjects(added.data)
         return { ok: true, tabId: added.tabId }
       },
-      newTask: async (phoneId, { projectId, prompt, mode, workspace: wantsWorkspace }) => {
+      newTask: async (phoneId, { projectId, streamId, prompt, mode }) => {
         if (!this.config.enableClaude) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
         }
-        let workspace: WorkspaceConfig | undefined
-        if (wantsWorkspace) {
-          const target = newTaskProject(this.projectsStore.peek(), projectId)
-          if (!target.ok) return target
-          const made = await makeTaskWorkspace(target.project, prompt, {
-            listBranches: (project) => listWorkspaceBranches(this.workspaceGit(), this.workspaceTarget(project)),
-            create: async (project, name, baseBranch) => {
-              const created = await createWorkspace(this.workspaceGit(), { ...this.workspaceTarget(project), name, baseBranch })
-              return {
-                worktreePath: created.worktreePath,
-                branchName: created.branchName,
-                baseBranch,
-                relativeProjectPath: created.relativeProjectPath
-              }
-            }
-          })
-          if (!made.ok) return made
-          workspace = made.workspace
-        }
-        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, undefined, undefined, workspace)
-        if (!added.ok) {
-          // The project went away while git ran: leave no worktree behind for it.
-          const owner = workspace && this.projectsStore.peek().projects.find((p) => p.id === projectId)
-          if (owner && workspace) {
-            void this.deleteWorkspace({ ...this.workspaceTarget(owner), ...workspace, force: true }).catch(() => {})
-          }
-          return added
-        }
+        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId)
+        if (!added.ok) return added
         this.commitProjects(added.data)
         // The task exists from here on, so a failed start is logged rather than
         // reported: the phone opens the chat either way and sees its state there,
@@ -413,15 +383,12 @@ export class AppRuntime {
       closeTask: (params) => closeTask({
         peek: () => this.projectsStore.peek(),
         dirtyTabIds: () => this.getDirtyTabIds(),
-        checkWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
-        forceDeleteWorkspace: (project, task, keepBranch) => task.workspace
-          ? this.deleteWorkspace({ ...this.workspaceTarget(project), ...task.workspace, force: true, keepBranch })
-          : Promise.resolve({ status: 'ok' as const }),
-        removeTask: (project, task) => this.removeTaskFromMain(project, task)
+        statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+        removeTask: (project, task) => this.archiveTaskFromMain(project, task)
       }, params),
       closeTab: async (tabId) => {
         const found = findClosableTab(this.projectsStore.peek(), tabId)
-        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab' }
+        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab, or the task\'s main tab (it closes with the task)' }
         await this.removeTabFromMain(found.project, found.task, found.tab)
         return { ok: true }
       },
@@ -450,7 +417,6 @@ export class AppRuntime {
         : buildWindowViewState(this.projectsStore.peek().projects, this.config)
     })
     this.logDebug(`registerWindow windowId=${window.id}`)
-    this.scheduleIdleCleanup()
     const syncGeometry = () => {
       this.updateWindowGeometry(window.id)
     }
@@ -462,7 +428,7 @@ export class AppRuntime {
       this.logDebug(`windowClosed windowId=${window.id}`)
       this.windows.delete(window.id)
       // A closed window's unsaved buffers went with it; leaving them behind would
-      // protect their tasks from cleanup forever.
+      // block a phone's close of their tasks forever.
       this.dirtyTabsByWindow.delete(window.id)
       for (const [tabId, windowId] of this.statusReporters) {
         if (windowId !== window.id) continue
@@ -486,64 +452,6 @@ export class AppRuntime {
     this.quitting = true
   }
 
-  /**
-   * Idle-task cleanup runs here, not in a renderer. A window's picture of what is
-   * running is per-window by construction, so the window that happened to be asked
-   * could not see an agent working in another one and deleted it anyway (finding
-   * #7). Main receives every hook event, owns every PTY and knows every window's
-   * selection, so it is the only process that can answer "is this safe to delete?".
-   */
-  private scheduleIdleCleanup(): void {
-    if (this.idleCleanupScheduled) return
-    this.idleCleanupScheduled = true
-    setTimeout(() => void this.runIdleCleanup(), IDLE_CLEANUP_STARTUP_DELAY_MS)
-    this.idleCleanupTimer = setInterval(() => void this.runIdleCleanup(), IDLE_CLEANUP_INTERVAL_MS)
-  }
-
-  /** One sweep at a time: the hourly tick must not overlap a sweep still awaiting git. */
-  private async runIdleCleanup(): Promise<void> {
-    if (this.idleCleanupRunning) return
-    this.idleCleanupRunning = true
-    try {
-      await runIdleCleanupSweep(this.idleCleanupEnvironment())
-    } catch (err) {
-      this.logDebug(`idleCleanupFailed error=${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      this.idleCleanupRunning = false
-    }
-  }
-
-  private idleCleanupEnvironment(): IdleCleanupEnvironment {
-    return {
-      readProjects: () => {
-        const data = this.projectsStore.peek()
-        return { projects: data.projects, pinnedItems: data.pinnedItems ?? [] }
-      },
-      readConfig: () => this.config.idleTaskCleanup,
-      readActivity: () => this.getCleanupActivity(),
-      now: () => Date.now(),
-      backupProjects: () => this.storage.backupProjectsOnStartup(),
-      deleteWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
-      removeTask: (project, task) => this.removeTaskFromMain(project, task),
-      forgetWorkspace: (project, task) => this.forgetTaskWorkspace(project, task),
-      log: (message) => this.logDebug(message)
-    }
-  }
-
-  /** Tasks selected in any window — only this process sees all of them. */
-  private getOpenTaskIds(): string[] {
-    const ids = new Set<string>()
-    for (const state of this.windowStates.values()) {
-      if (state.viewState.selectedTaskId) ids.add(state.viewState.selectedTaskId)
-    }
-    return [...ids]
-  }
-
-  /** Tabs whose process is still running, including ones no window currently shows. */
-  private getLiveTabIds(): string[] {
-    return [...this.ptySessions.liveTabIds(), ...this.chatManager.liveTabIds()]
-  }
-
   private getDirtyTabIds(): string[] {
     const ids = new Set<string>()
     for (const tabIds of this.dirtyTabsByWindow.values()) {
@@ -552,60 +460,33 @@ export class AppRuntime {
     return [...ids]
   }
 
-  private async deleteTaskWorkspace(project: Project, task: Task) {
-    if (!task.workspace) return { status: 'ok' as const }
-    // No `force`: this both checks that the worktree is clean and the branch merged
-    // *and* performs the deletion when it is. Anything else leaves it untouched.
-    return this.deleteWorkspace({
-      ...this.workspaceTarget(project),
-      worktreePath: task.workspace.worktreePath,
-      branchName: task.workspace.branchName,
-      baseBranch: task.workspace.baseBranch
-    })
-  }
-
-  /** The worktree is gone but the task stayed: leave no record pointing at nothing. */
-  private forgetTaskWorkspace(project: Project, task: Task): void {
-    this.logDebug(`idleCleanupWorkspaceOrphaned project=${project.id} task=${task.id}`)
-    const data = this.projectsStore.peek()
-    this.commitProjects({
-      ...data,
-      projects: data.projects.map(candidate => candidate.id !== project.id ? candidate : {
-        ...candidate,
-        tasks: candidate.tasks.map(existing => {
-          if (existing.id !== task.id) return existing
-          const { workspace: _gone, ...rest } = existing
-          return rest
-        })
-      })
-    })
-  }
-
   /**
-   * Delete a task on main's own behalf, doing here every piece of teardown
-   * `useAppState.removeTask` does in a window — the PTYs (which outlive a hidden
-   * tab), the scrollback files, the hook injections and the activity entries.
-   * A renderer only tears down tabs it has mounted, so nothing here may be left
-   * to the broadcast; the broadcast covers only what is renderer-local (xterm
-   * instances, per-window status entries, view state).
+   * Archive a task on main's own behalf (a phone's `task.close`), doing here every
+   * piece of teardown a window does when it closes one — the PTYs (which outlive a
+   * hidden tab), the hook injections and the activity entries. The scrollback
+   * stays, for Reopen. A renderer only tears down tabs it has mounted, so nothing
+   * here may be left to the broadcast; the broadcast covers only what is
+   * renderer-local (xterm instances, per-window status entries, view state).
    */
-  private async removeTaskFromMain(project: Project, task: Task): Promise<void> {
-    const tabIds = await tearDownTaskTabs(project, task, this.teardownTargets())
+  private async archiveTaskFromMain(project: Project, task: Task): Promise<void> {
+    const entry = archivedTaskEntry(project, task.id, Date.now())
+    const tabIds = await tearDownTaskTabs(project, task, { ...this.teardownTargets(), deleteScrollback: () => {} })
 
     // Sent before the state commit, and on the same ordered channel: a window that
     // learns the task is gone first unmounts its tabs, and the components that own
     // the xterm instances and status entries would no longer be listening.
     this.broadcastToAllWindows('tasks-removed', { projectId: project.id, taskId: task.id, tabIds })
 
+    // The file first, then the data: a crash in between leaves the task in both
+    // (the archive view hides it), never in neither.
     const data = this.projectsStore.peek()
-    this.commitProjects({
-      ...data,
-      projects: data.projects.map(candidate =>
-        candidate.id === project.id
-          ? { ...candidate, tasks: candidate.tasks.filter(existing => existing.id !== task.id) }
-          : candidate
-      )
-    })
+    const next = archiveTasksInData(data, project.id, [task.id])
+    const retired = !next.projects.some(candidate => candidate.id === project.id)
+    if (entry && !retired) {
+      this.archiveStorage.update(project.id, archive => withArchivedTasks(archive, [entry]))
+      this.broadcastToAllWindows('archive-changed', project.id)
+    }
+    this.commitProjects(next)
 
     // Main's own copy of each window's selection is what gets persisted on quit,
     // so it has to forget the task too.
@@ -625,6 +506,27 @@ export class AppRuntime {
       })
     }
     this.persistWindowSession()
+  }
+
+  /**
+   * A project that leaves the data (deleted, or a spent hidden one swept away)
+   * takes its archive with it, and the scrollback of the archived tabs: its Done
+   * rows are unreachable from then on.
+   */
+  private forgetArchivesOfVanishedProjects(): void {
+    let before = this.projectsStore.peek().projects
+    this.projectsStore.subscribe((data) => {
+      const gone = vanishedProjectIds(before, data.projects)
+      before = data.projects
+      for (const projectId of gone) {
+        try {
+          for (const tabId of archivedTabIds(this.archiveStorage.load(projectId))) this.scrollbackStorage.delete(tabId)
+          this.archiveStorage.delete(projectId)
+        } catch (err) {
+          this.logDebug(`archiveForget projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    })
   }
 
   /** What a window does for the tabs it closes, done by main for tabs no window may be showing. */
@@ -648,7 +550,7 @@ export class AppRuntime {
 
   /**
    * Close one tab on main's own behalf (the phone's `tab.close`): the same teardown
-   * as {@link removeTaskFromMain}, for one tab, with the task left in place.
+   * as {@link archiveTaskFromMain}, for one tab (a closed tab's scrollback goes), with the task left in place.
    */
   private async removeTabFromMain(project: Project, task: Task, tab: Tab): Promise<void> {
     const tabIds = await tearDownTabs(project, task, [tab], this.teardownTargets())
@@ -657,29 +559,17 @@ export class AppRuntime {
     this.commitProjects(removeTabFromData(this.projectsStore.peek(), task.id, tab.id))
   }
 
-  /** Where a project's workspaces live, for the workspace helpers. */
-  private workspaceTarget(project: Project): WorkspaceTarget {
-    return {
-      projectDir: project.ssh ? project.ssh.remoteDir : project.directory,
-      projectId: project.ssh ? project.id : undefined,
-      sshConfig: project.ssh
-    }
-  }
-
-  private workspaceGit() {
-    return {
-      workspaceManager: this.workspaceManager,
-      remoteWorkspaceManager: this.remoteWorkspaceManager,
-      ensureSshConnected: (projectId: string, sshConfig: SshConfig) => this.ensureSshConnected(projectId, sshConfig),
-      socketPath: (projectId: string) => this.sshManager.getSocketPath(projectId)
-    }
+  /** Run a shell script on a remote project's host over its control socket; resolves its stdout. */
+  private async remoteExec(projectId: string, sshConfig: SshConfig, script: string): Promise<string> {
+    const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
+      '-S', this.sshManager.getSocketPath(projectId),
+      `${sshConfig.username}@${sshConfig.host}`,
+      script
+    ], { timeout: 30_000, maxBuffer: 512 * 1024 * 1024 })
+    return stdout
   }
 
   async shutdown(): Promise<void> {
-    if (this.idleCleanupTimer) {
-      clearInterval(this.idleCleanupTimer)
-      this.idleCleanupTimer = null
-    }
     this.persistWindowSession()
     this.mobileService?.stop()
     this.updates?.close()
@@ -751,7 +641,7 @@ export class AppRuntime {
    * One hook event, from a terminal tab's curl (hook server) or a chat tab's SDK
    * process (in-process). Each has two consumers: the windows, which draw the
    * status dot for the tabs they mount, and the activity registry, which is what
-   * idle cleanup and the sidebar's activity line read.
+   * the phone's inbox and the sidebar's activity line read.
    */
   private handleHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
     switch (endpoint) {
@@ -812,14 +702,7 @@ export class AppRuntime {
           : env.SHELL || '/bin/sh'
         return { file: shell, args: ['-c', command], cwd: config.cwd, env }
       },
-      remoteExec: async (projectId, sshConfig, script) => {
-        const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
-          '-S', this.sshManager.getSocketPath(projectId),
-          `${sshConfig.username}@${sshConfig.host}`,
-          script
-        ], { timeout: 30_000, maxBuffer: 512 * 1024 * 1024 })
-        return stdout
-      },
+      remoteExec: (projectId, sshConfig, script) => this.remoteExec(projectId, sshConfig, script),
       onHook: (tabId, body) => {
         const event = typeof body.hook_event_name === 'string' ? body.hook_event_name : ''
         this.handleHook(hookEndpointFor(event), tabId, body)
@@ -886,7 +769,7 @@ export class AppRuntime {
       notesStore: this.notesStore,
       paletteFrecency: this.paletteFrecencyStorage,
       getAgentActivity: () => this.activityRegistry.getActivitySnapshot(),
-      getCleanupActivity: () => this.getCleanupActivity(),
+      restartTabs: (windowId, tabIds) => this.restartTabs(windowId, tabIds),
       reportTabStatus: (windowId, tabId, status) => {
         this.statusReporters.set(tabId, windowId)
         this.activityRegistry.reported(tabId, status)
@@ -959,6 +842,19 @@ export class AppRuntime {
       deleteWorkspace: (request) => this.deleteWorkspace(request)
     })
 
+    registerArchiveHandlers(ipc, {
+      archive: this.archiveStorage,
+      broadcastChanged: (projectId) => this.broadcastToAllWindows('archive-changed', projectId),
+      deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
+      readTranscript: async (sessionId, cwd, projectId, sshConfig) => {
+        if (projectId && sshConfig) {
+          await this.ensureSshConnected(projectId, sshConfig)
+          return readRemoteTranscript(sessionId, (script) => this.remoteExec(projectId, sshConfig, script))
+        }
+        return readLocalTranscript(sessionId, cwd)
+      }
+    })
+
     registerFileBrowserHandlers(ipc, { resolveRoot })
     registerGitHandlers(ipc, { resolveRoot })
     registerNotebookHandlers(ipc, {
@@ -980,12 +876,18 @@ export class AppRuntime {
     return resolveAllowedDirectory(dir, allowedLocalRoots(this.projectsStore.peek().projects))
   }
 
-  private getCleanupActivity(): CleanupActivity {
-    return {
-      openTaskIds: this.getOpenTaskIds(),
-      statuses: this.activityRegistry.getSnapshot(),
-      liveTabIds: this.getLiveTabIds(),
-      dirtyTabIds: this.getDirtyTabIds()
+  /**
+   * End these tabs' processes (a PTY keeps its scrollback) and tell every window but
+   * `windowId`, which already let go of them, to drop its copy: each then mounts
+   * them again in the task's new directory and spawns there.
+   */
+  private restartTabs(windowId: number, tabIds: string[]): void {
+    for (const tabId of tabIds) {
+      if (this.ptySessions.has(tabId)) this.ptySessions.kill(tabId)
+      this.chatManager.close(tabId)
+    }
+    for (const [id, window] of this.windows) {
+      if (id !== windowId) safeWebContentsSend(window, 'tabs-restart', { tabIds })
     }
   }
 
@@ -997,7 +899,7 @@ export class AppRuntime {
     this.broadcastToAllWindows('config-updated', clone(this.config))
   }
 
-  /** Shared by the `workspace-delete` IPC and the idle sweep, which runs it with no `force`. */
+  /** Behind the `workspace-delete` IPC; without `force` it is the pre-flight. */
   private async deleteWorkspace(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> {
     if (request.sshConfig && request.projectId) {
       await this.ensureSshConnected(request.projectId, request.sshConfig)

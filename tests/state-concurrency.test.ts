@@ -10,6 +10,14 @@ import type {
   RevisionSaveResult,
   Task
 } from '../src/shared/types'
+import {
+  addTaskToStream,
+  findTaskInProject,
+  mapTaskInProject,
+  projectTasks,
+  removeTaskFromProject
+} from '../src/shared/streams'
+import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 
 /**
  * These tests wire the real main-side store to the real renderer-side sync clients
@@ -24,21 +32,13 @@ function clone<T>(value: T): T {
 }
 
 function task(id: string, name = id): Task {
-  return {
-    id,
-    name,
-    tabs: { left: [], right: [] },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
-    lastInteractedAt: 1_000
-  }
+  return fixtureTask({ id, name, lastInteractedAt: 1_000 })
 }
 
 function baselineProjects(): ProjectsData {
   return {
     projects: [
-      { id: 'p1', name: 'Project', directory: '/tmp/p1', tasks: [task('t-base')] }
+      fixtureProject({ id: 'p1', name: 'Project', directory: '/tmp/p1', tasks: [task('t-base')] })
     ],
     tags: [],
     projectOrder: ['p1'],
@@ -134,9 +134,9 @@ function addTask(projectId: string, next: Task): Updater<ProjectsData> {
   return (prev) => ({
     ...prev,
     projects: prev.projects.map(project =>
-      project.id !== projectId || project.tasks.some(t => t.id === next.id)
+      project.id !== projectId || findTaskInProject(project, next.id)
         ? project
-        : { ...project, tasks: [...project.tasks, next] }
+        : addTaskToStream(project, null, next)
     )
   })
 }
@@ -145,10 +145,7 @@ function renameTask(projectId: string, taskId: string, name: string): Updater<Pr
   return (prev) => ({
     ...prev,
     projects: prev.projects.map(project =>
-      project.id !== projectId ? project : {
-        ...project,
-        tasks: project.tasks.map(t => (t.id === taskId ? { ...t, name } : t))
-      }
+      project.id !== projectId ? project : mapTaskInProject(project, taskId, t => ({ ...t, name }))
     )
   })
 }
@@ -157,10 +154,7 @@ function removeTask(projectId: string, taskId: string): Updater<ProjectsData> {
   return (prev) => ({
     ...prev,
     projects: prev.projects.map(project =>
-      project.id !== projectId ? project : {
-        ...project,
-        tasks: project.tasks.filter(t => t.id !== taskId)
-      }
+      project.id !== projectId ? project : removeTaskFromProject(project, taskId)
     )
   })
 }
@@ -186,7 +180,7 @@ function deleteNote(projectId: string, noteId: string): Updater<NotesRecord> {
 }
 
 function taskNames(data: ProjectsData): string[] {
-  return data.projects[0].tasks.map(t => t.name)
+  return projectTasks(data.projects[0]).map(t => t.name)
 }
 
 describe('concurrent windows — projects and tasks (finding #5)', () => {
@@ -240,7 +234,7 @@ describe('concurrent windows — projects and tasks (finding #5)', () => {
     await w1.flush()
     await w2.flush()
 
-    const tasks = main.persisted.projects[0].tasks
+    const tasks = projectTasks(main.persisted.projects[0])
     expect(tasks).toHaveLength(2)
     expect(tasks.filter(t => t.id === 't-base')).toHaveLength(1)
     expect(tasks.find(t => t.id === 't-base')?.name).toBe('Renamed by one')
@@ -260,8 +254,8 @@ describe('concurrent windows — projects and tasks (finding #5)', () => {
     await w1.flush()
     await w2.flush()
 
-    expect(main.persisted.projects[0].tasks).toHaveLength(1)
-    expect(main.persisted.projects[0].tasks[0].name).toBe('From two')
+    expect(projectTasks(main.persisted.projects[0])).toHaveLength(1)
+    expect(projectTasks(main.persisted.projects[0])[0].name).toBe('From two')
     expect(main.store.getRevision()).toBe(2)
   })
 
@@ -279,8 +273,8 @@ describe('concurrent windows — projects and tasks (finding #5)', () => {
     await expect(w2.flush()).resolves.toBeUndefined()
 
     // Documented policy: the delete wins, the rebased edit is a no-op.
-    expect(main.persisted.projects[0].tasks).toHaveLength(0)
-    expect(w2.state.projects[0].tasks).toHaveLength(0)
+    expect(projectTasks(main.persisted.projects[0])).toHaveLength(0)
+    expect(projectTasks(w2.state.projects[0])).toHaveLength(0)
     expect(w2.errors).toEqual([])
   })
 
@@ -456,13 +450,13 @@ describe('RevisionStore', () => {
 
     expect(main.store.getRevision()).toBe(1)
     expect(seen).toEqual([1])
-    expect(main.persisted.projects[0].tasks).toHaveLength(0)
+    expect(projectTasks(main.persisted.projects[0])).toHaveLength(0)
   })
 
   it('hands out clones so a renderer cannot mutate canonical state through its copy', () => {
     const main = new FakeMain<ProjectsData>(baselineProjects(), normalizeProjects)
     const copy = main.store.get().data
-    copy.projects[0].tasks = []
-    expect(main.store.peek().projects[0].tasks).toHaveLength(1)
+    copy.projects[0].streams[0].tasks = []
+    expect(projectTasks(main.store.peek().projects[0])).toHaveLength(1)
   })
 })

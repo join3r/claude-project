@@ -39,16 +39,16 @@ describe('sanitizeConfigUpdate', () => {
       claudeCommand: ['rm', '-rf'],
       theme: 'neon',
       lastProjectId: 3,
-      idleTaskCleanup: { ...DEFAULT_CONFIG.idleTaskCleanup, byAge: { enabled: 'yes', days: 1 } },
+      taskRecencyHighlight: { ...DEFAULT_CONFIG.taskRecencyHighlight, enabled: 'yes' },
       externalEditors: { editors: [{ id: 'x', name: 'X', command: 5 }], defaultId: null },
       editorFontSize: 18,
       theme2: 'ignored'
     })
     expect(config).toEqual({ editorFontSize: 18 })
     expect(rejectedKeys.map(r => r.key).sort()).toEqual(
-      ['claudeCommand', 'externalEditors', 'fontSize', 'idleTaskCleanup', 'lastProjectId', 'theme']
+      ['claudeCommand', 'externalEditors', 'fontSize', 'lastProjectId', 'taskRecencyHighlight', 'theme']
     )
-    expect(rejectedKeys.find(r => r.key === 'idleTaskCleanup')!.reason).toMatch(/byAge.enabled/)
+    expect(rejectedKeys.find(r => r.key === 'taskRecencyHighlight')!.reason).toMatch(/enabled/)
   })
 
   it('leaves the stored value in place for a rejected key when merged', () => {

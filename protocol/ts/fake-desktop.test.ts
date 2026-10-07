@@ -5,6 +5,8 @@ import {
   DEVTOOL_NOISE_PROLOGUE,
   FrameKind,
   FramedTransport,
+  MIN_PROTOCOL_VERSION,
+  PROTOCOL_VERSION,
   b64uDecode,
   b64uEncode,
   createInitiator,
@@ -99,7 +101,7 @@ class Phone {
 
   hello(kind: 'pair' | 'resume', secret?: Uint8Array): PhoneHello {
     return {
-      v: 1, min: 1, app: 'ios/test', features: [], kind, deviceName: 'Test iPhone', ed: b64uEncode(this.ed.pub),
+      v: PROTOCOL_VERSION, min: MIN_PROTOCOL_VERSION, app: 'ios/test', features: [], kind, deviceName: 'Test iPhone', ed: b64uEncode(this.ed.pub),
       ...(secret ? { proof: b64uEncode(derivePairProof(secret)) } : {})
     }
   }

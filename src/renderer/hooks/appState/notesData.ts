@@ -6,6 +6,7 @@
  * dropped rather than resurrecting it.
  */
 import type { NotesRecord, ProjectNote, Project, ProjectsData, Tab } from '../../../shared/types'
+import { mapProjectTasks, mapTaskTabs, projectTasks, taskTabs } from '../../../shared/streams'
 
 export function addNoteToRecord(prev: NotesRecord, projectId: string, note: ProjectNote): NotesRecord {
   const existing = prev[projectId] ?? []
@@ -42,8 +43,8 @@ export function isNoteTab(tab: Tab, noteId: string): boolean {
 /** Every tab in the project that shows `noteId`. */
 export function noteTabIds(project: Project, noteId: string): string[] {
   const ids: string[] = []
-  for (const task of project.tasks) {
-    for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+  for (const task of projectTasks(project)) {
+    for (const tab of taskTabs(task)) {
       if (isNoteTab(tab, noteId)) ids.push(tab.id)
     }
   }
@@ -55,16 +56,11 @@ export function retitleNoteTabs(data: ProjectsData, projectId: string, noteId: s
   return {
     ...data,
     projects: data.projects.map(project =>
-      project.id !== projectId ? project : {
-        ...project,
-        tasks: project.tasks.map(task => ({
-          ...task,
-          tabs: {
-            left: task.tabs.left.map(tab => (isNoteTab(tab, noteId) ? { ...tab, title: name } : tab)),
-            right: task.tabs.right.map(tab => (isNoteTab(tab, noteId) ? { ...tab, title: name } : tab))
-          }
-        }))
-      }
+      project.id !== projectId ? project : mapProjectTasks(project, task => mapTaskTabs(task, tabs => (
+        tabs.some(tab => isNoteTab(tab, noteId))
+          ? tabs.map(tab => (isNoteTab(tab, noteId) ? { ...tab, title: name } : tab))
+          : tabs
+      )))
     )
   }
 }
@@ -73,16 +69,9 @@ export function removeNoteTabs(data: ProjectsData, projectId: string, noteId: st
   return {
     ...data,
     projects: data.projects.map(p =>
-      p.id !== projectId ? p : {
-        ...p,
-        tasks: p.tasks.map(task => ({
-          ...task,
-          tabs: {
-            left: task.tabs.left.filter(tab => !isNoteTab(tab, noteId)),
-            right: task.tabs.right.filter(tab => !isNoteTab(tab, noteId))
-          }
-        }))
-      }
+      p.id !== projectId ? p : mapProjectTasks(p, task => mapTaskTabs(task, tabs => (
+        tabs.some(tab => isNoteTab(tab, noteId)) ? tabs.filter(tab => !isNoteTab(tab, noteId)) : tabs
+      )))
     )
   }
 }

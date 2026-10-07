@@ -1,4 +1,5 @@
 import type { Project, Tab, Task } from '../shared/types'
+import { taskTabs, taskWorkspace } from '../shared/streams'
 import { joinWorkspaceDir } from '../shared/workspace-path'
 
 /** The per-tab teardown a window would normally do, as main has to do it. */
@@ -14,8 +15,9 @@ export interface TaskTeardownTargets {
 /** Where a task's tools run: the worktree for a workspace task, else the project dir. */
 export function taskDir(project: Project, task: Task): string {
   const base = project.ssh ? project.ssh.remoteDir : project.directory
-  if (!task.workspace) return base
-  return joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath)
+  const workspace = taskWorkspace(project, task.id)
+  if (!workspace) return base
+  return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
 }
 
 /**
@@ -32,7 +34,7 @@ export async function tearDownTaskTabs(
   task: Task,
   targets: TaskTeardownTargets
 ): Promise<string[]> {
-  return tearDownTabs(project, task, [...task.tabs.left, ...task.tabs.right], targets)
+  return tearDownTabs(project, task, taskTabs(task), targets)
 }
 
 /** {@link tearDownTaskTabs} for some of a task's tabs: one closed from the phone. */

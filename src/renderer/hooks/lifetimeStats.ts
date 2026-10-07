@@ -1,4 +1,5 @@
 import type { Project, ProjectNote } from '../../shared/types'
+import { projectTasks } from '../../shared/streams'
 
 export function backfillLifetimeStats(
   project: Project,
@@ -8,7 +9,7 @@ export function backfillLifetimeStats(
   return {
     ...project,
     lifetimeStats: {
-      tasksCreated: project.tasks.length,
+      tasksCreated: projectTasks(project).length,
       notesCreated: (notes[project.id] ?? []).length
     }
   }

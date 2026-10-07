@@ -62,6 +62,7 @@ import { formatShortcutForApp, shortcutPlatform } from '../../shared/shortcut-la
 import { agentLinkPath, agentLinkShortcut, formatAgentLink, selectionLines } from '../../shared/agent-link'
 import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
 import { paletteEvents } from '../palette/paletteEvents'
+import { findTaskInProject, taskTabs } from '../../shared/streams'
 
 interface Props {
   tabId: string
@@ -94,7 +95,7 @@ export default function NotebookTab({
   const dirtyBuffers = useDirtyBufferStore()
   const monacoConfig = config ?? DEFAULT_CONFIG
   const projectRecord = projects.find((item) => item.id === projectId)
-  const taskRecord = projectRecord?.tasks.find((t) => t.id === taskId)
+  const taskRecord = findTaskInProject(projectRecord, taskId)
   const projectConda: ProjectCondaSelection = {
     condaEnvName: projectRecord?.condaEnvName,
     condaEnvPrefix: projectRecord?.condaEnvPrefix
@@ -775,7 +776,7 @@ export default function NotebookTab({
               suspendEditors={suspendEditors}
               onFocus={() => setActiveCellId(cell.id)}
               onLinkToAgent={(kind, lines) => linkNotebook(kind, cell.id, lines)}
-              agentAvailable={!!taskRecord && [...taskRecord.tabs.left, ...taskRecord.tabs.right].some((t) => isAgentTabType(t.type))}
+              agentAvailable={!!taskRecord && taskTabs(taskRecord).some((t) => isAgentTabType(t.type))}
               onEditorChange={(ed) => {
                 if (ed) cellEditorRef.current = { cellId: cell.id, editor: ed }
                 else if (cellEditorRef.current?.cellId === cell.id) cellEditorRef.current = null

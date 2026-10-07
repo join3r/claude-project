@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
-import { NEW_TASK_NAME, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
-import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
+import { NEW_TASK_NAME, isEphemeralProject, isRemoteProject, isShellCommandProject, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import type { Task, Project, PinnedItem, Stream } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
@@ -12,7 +12,9 @@ import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
-import type { NewTaskSubmission } from './newTask'
+import NewStreamModal from './NewStreamModal'
+import { terminalTaskName, type NewTaskSubmission } from './newTask'
+import { setPendingCommand } from './terminalStartup'
 import { createTab } from './newTaskTabs'
 import { agentTakesMode, setPendingPrompt, taskNameFromPrompt } from './promptBox'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
@@ -25,30 +27,55 @@ import { paletteEvents } from '../palette/paletteEvents'
 import { fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import {
+  STREAM_ROW_PL,
   TASK_ROW_ML,
   TASK_ROW_PL,
   ProjectIconSlot,
   SidebarTabButton,
-  TaskStatusDot,
-  getProjectStatus,
+  StateDot,
   headerIconCls,
   type SidebarContextMenuState
 } from './sidebar/SidebarParts'
 import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
+import { confirmWorktreeRemoval, forceRemoveWorktree } from './sidebar/workspaceRemoval'
+import { streamCloseQuestion, taskCloseQuestion } from './sidebar/closeRules'
+import { useWorktreeChoice } from './sidebar/WorktreeChoiceDialog'
+import { ProjectDoneGroup, StreamDoneRow, type DoneRowActions } from './sidebar/DoneRows'
+import { closeArchivedView, getArchivedView } from './archivedViewTarget'
+import {
+  extraTabCount,
+  formatActivityAge,
+  isQuietStream,
+  isStreamExpanded,
+  rollUpState,
+  sidebarTaskState,
+  type SidebarTaskState
+} from './sidebar/streamTree'
+import { currentStreamId, findStreamOfTask, findTaskInProject, projectTasks, runsInTaskDir, taskTabs } from '../../shared/streams'
+
+/** A pin resolved against the data: its project, and the stream or task it names. */
+type ResolvedPin = { item: PinnedItem; key: string; project: Project; stream?: Stream; task?: Task }
+
+/** Where a stream's rows are drawn: the tree drags and drops, the pinned list doesn't. */
+type StreamPlace = 'tree' | 'pin'
+
+const inputCls = 'bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full'
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
   const {
     projects, tags, projectOrder,
     pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId, selectedTagIds,
-    switchToTask, selectProjectHome,
+    switchToTask, selectProjectHome, showArchived,
     addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
-    addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, removeTask, renameTask,
-    reorderProjects, reorderTasks, getProjectDir,
+    addTask, addTaskInDirectory, addStream, archiveTask, renameTask,
+    moveTask, archiveStream, renameStream, reopenTask, reopenStream, deleteArchived,
+    reorderProjects, getProjectDir,
     config, updateConfig,
     toggleTagFilter, clearTagFilters,
     expandedProjectIds, toggleProjectExpansion, setProjectExpanded,
+    streamExpansion, setStreamExpanded,
     effectiveTheme,
     sidebarWidth, setSidebarWidth,
     sidebarProjectsCollapsed, toggleSidebarProjectsCollapsed,
@@ -68,7 +95,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const [now, setNow] = useState(() => Date.now())
   const sortedByRecency = React.useMemo(
-    () => sortTasksByRecency(projects.flatMap(p => p.tasks.filter(t => !isHomeTask(t)))),
+    () => sortTasksByRecency(projects.flatMap(p => projectTasks(p))),
     [projects]
   )
 
@@ -77,28 +104,37 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   // Badge count is what makes the tab worth having: attention is visible without
   // leaving the tree. Snoozed tasks are deliberately excluded — that's the point.
   const inboxUnreadCount = React.useMemo(
-    () => projects.reduce((count, project) => count + project.tasks.filter(
-      task => !isHomeTask(task) && isUnread(task) && !isSnoozed(task, now) && !isSettled(task)
+    () => projects.reduce((count, project) => count + projectTasks(project).filter(
+      task => isUnread(task) && !isSnoozed(task, now) && !isSettled(task)
     ).length, 0),
     [projects, now]
   )
 
   useEffect(() => {
-    // The inbox needs the clock regardless of the recency-highlight setting: wait
-    // times and snooze expiry are both computed against `now`. It ticks faster than
-    // the highlight's 60s because "waiting 4m" reads as stale otherwise.
-    const timeHighlight = config?.taskRecencyHighlight?.enabled && config.taskRecencyHighlight.mode === 'time'
-    if (!inboxActive && !timeHighlight) return
+    // The inbox's wait times, snooze expiry and the tree's "4m" activity ages all
+    // read `now`. The inbox ticks faster because "waiting 4m" reads as stale otherwise.
     const id = window.setInterval(() => setNow(Date.now()), inboxActive ? 15_000 : 60_000)
     return () => window.clearInterval(id)
-  }, [config?.taskRecencyHighlight?.enabled, config?.taskRecencyHighlight?.mode, inboxActive])
+  }, [inboxActive])
+
+  const stateOf = useCallback(
+    (task: Task): SidebarTaskState => sidebarTaskState(task, allStatuses, now),
+    [allStatuses, now]
+  )
+  const autoCollapse = config?.autoCollapseQuietStreams ?? true
+  const isStreamOpen = useCallback((stream: Stream): boolean => isStreamExpanded({
+    override: streamExpansion[stream.id],
+    autoCollapse,
+    quiet: isQuietStream(stream, stateOf),
+    holdsSelection: stream.tasks.some(task => task.id === selectedTaskId)
+  }), [streamExpansion, autoCollapse, stateOf, selectedTaskId])
 
   const handleSelectTask = useCallback((projectId: string, task: Task) => {
     switchToTask(projectId, task.id)
     // Opening the task is the acknowledgement — clear attention on every tab, not
     // just the AI ones. A terminal's attention state otherwise never resets (it
     // only clears on a "ready"-shaped line), which would pin the row in Needs you.
-    const tabs = [...task.tabs.left, ...task.tabs.right]
+    const tabs = taskTabs(task)
     for (const tab of tabs) {
       if (tabStatusStore.getStatus(tab.id) === 'attention') {
         tabStatusStore.setStatus(tab.id, null)
@@ -126,6 +162,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  // The project the New stream dialog is open for.
+  const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
+  const worktreeChoice = useWorktreeChoice()
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const expandedProjects = new Set(expandedProjectIds)
@@ -167,16 +206,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     () => [...tags].sort((a, b) => a.name.localeCompare(b.name)),
     [tags]
   )
-  // Drop pins whose project/task no longer exists; storage prunes them on the next save.
+  // Drop pins whose project/stream/task no longer exists; storage prunes them on the next save.
   const resolvedPins = React.useMemo(() => {
-    const resolved: { item: PinnedItem; key: string; project: Project; task?: Task }[] = []
+    const resolved: ResolvedPin[] = []
     for (const item of pinnedItems ?? []) {
       const project = projectsById.get(item.projectId)
       if (!project) continue
       if (item.type === 'task') {
-        const task = project.tasks.find(t => t.id === item.taskId)
+        const task = findTaskInProject(project, item.taskId)
         if (!task) continue
         resolved.push({ item, key: pinnedItemKey(item), project, task })
+      } else if (item.type === 'stream') {
+        const stream = project.streams.find(candidate => candidate.id === item.streamId)
+        if (!stream) continue
+        resolved.push({ item, key: pinnedItemKey(item), project, stream })
       } else {
         resolved.push({ item, key: pinnedItemKey(item), project })
       }
@@ -226,6 +269,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   useEffect(() => {
+    return window.api.onMenuNewStream(() => {
+      if (selectedProjectId) setNewStreamProjectId(selectedProjectId)
+    })
+  }, [selectedProjectId])
+
+  useEffect(() => {
     return window.api.onMenuOpenSettings(() => {
       setSettingsOpen(true)
     })
@@ -258,13 +307,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
    * The inline rename input and the "+ Task" affordances only exist in the project
    * tree, so anything that starts an edit has to bring the tree back first —
    * otherwise the inbox swallows it and the action looks like it did nothing.
+   * A stream or task being renamed is opened so its row is on screen.
    */
-  const beginEdit = useCallback((id: string, name: string, projectId?: string) => {
+  const beginEdit = useCallback((id: string, name: string, projectId?: string, streamId?: string) => {
     setSidebarTab('projects')
     if (projectId) setProjectExpanded(projectId, true)
+    if (streamId) setStreamExpanded(streamId, true)
     setEditingId(id)
     setEditValue(name)
-  }, [setSidebarTab, setProjectExpanded])
+  }, [setSidebarTab, setProjectExpanded, setStreamExpanded])
 
   const handleAddProject = async () => {
     const dir = await window.api.pickDirectory()
@@ -277,13 +328,22 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     beginEdit(project.id, project.name)
   }
 
-  // No inline rename: the task opens on its prompt box, and the first prompt names it.
-  const handleAddTask = (projectId: string) => {
-    addTask(projectId, NEW_TASK_NAME)
+  /**
+   * An empty task in `streamId`, or in the project's current stream (the one this
+   * window is in, else the one last worked in, else `main`). No inline rename:
+   * the task opens on its prompt box, and the first prompt names it.
+   */
+  const handleAddTask = (projectId: string, streamId?: string) => {
+    const project = projects.find(p => p.id === projectId)
+    if (!project) return
+    const target = streamId ?? currentStreamId(project, selectedTaskId)
+    addTask(projectId, NEW_TASK_NAME, [], target)
+    setProjectExpanded(projectId, true)
+    if (target) setStreamExpanded(target, true)
   }
 
   const findTask = useCallback((projectId: string, taskId: string): Task | undefined =>
-    projects.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
+    findTaskInProject(projects.find(p => p.id === projectId), taskId)
   , [projects])
 
   /** The row's one-click gesture: settle if it isn't, put it back if it is. */
@@ -294,139 +354,194 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     else settleTask(projectId, taskId)
   }, [findTask, settleTask, unsettleTask])
 
-  // Like + Task, it opens on the prompt box; the worktree is made when the first
-  // prompt is sent, with the branch named after it.
-  const handleAddWorkspace = (projectId: string) => {
-    addPendingWorkspaceTask(projectId, NEW_TASK_NAME)
+  const handleNewStream = (projectId: string) => {
+    setNewStreamProjectId(projectId)
+  }
+
+  const handleStreamCreated = (projectId: string, name: string, workspace?: Parameters<typeof addStream>[2]) => {
+    const stream = addStream(projectId, name, workspace)
+    setNewStreamProjectId(null)
+    setSidebarTab('projects')
+    setProjectExpanded(projectId, true)
+    setStreamExpanded(stream.id, true)
   }
 
   /**
    * File what the composer asked for. A task that starts an agent is born with the
    * agent's tab already in it; the tab picks the prompt up on its first spawn.
    */
-  const handleComposedTask = ({ target, start, workspace, workspaceDraft }: NewTaskSubmission) => {
-    const tab = start ? createTab(start.agent) : null
-    const tabs = tab ? [tab] : []
-    const name = start ? taskNameFromPrompt(start.prompt.text) : NEW_TASK_NAME
-    if (tab && start) {
+  const handleComposedTask = ({ target, streamId, start, terminal }: NewTaskSubmission) => {
+    let tabs: ReturnType<typeof createTab>[] = []
+    let name = NEW_TASK_NAME
+    if (terminal) {
+      const tab = createTab('terminal')
+      if (terminal.command) setPendingCommand(tab.id, terminal.command)
+      tabs = [tab]
+      name = terminalTaskName(terminal.command)
+    } else if (start) {
+      const tab = createTab(start.agent)
       setPendingPrompt(tab.id, start.prompt)
       updateConfig({
         promptBoxAgent: start.agent,
         ...(agentTakesMode(start.agent) ? { promptBoxMode: start.prompt.mode ?? '' } : {})
       })
+      tabs = [tab]
+      name = taskNameFromPrompt(start.prompt.text)
     }
     if (target.kind === 'dir') {
-      addTaskInDirectory(target.directory, name, tabs, workspace, workspaceDraft)
+      addTaskInDirectory(target.directory, name, tabs)
     } else {
-      if (workspace) addWorkspaceTask(target.projectId, name, workspace, tabs)
-      else if (workspaceDraft) addPendingWorkspaceTask(target.projectId, name, workspaceDraft)
-      else addTask(target.projectId, name, tabs)
-      // The task is selected on create; expand its project so switching back
-      // to the tree doesn't hide the thing you just made.
+      addTask(target.projectId, name, tabs, streamId)
+      // The task is selected on create; expand its project and stream so switching
+      // back to the tree doesn't hide the thing you just made.
       setProjectExpanded(target.projectId, true)
+      if (streamId) setStreamExpanded(streamId, true)
     }
     setNewTaskOpen(false)
   }
 
-  const handleDeleteTask = async (projectId: string, taskId: string) => {
-    const project = projects.find(p => p.id === projectId)
-    const task = project?.tasks.find(t => t.id === taskId)
-    if (!task) return
-    // Asked before the workspace pre-flight below: for a clean, merged workspace
-    // that call already removes the worktree.
-    if (!window.confirm(task.workspace
-      ? `Delete task "${task.name}" and its workspace?\n\nThe worktree folder is removed from disk.`
-      : `Delete task "${task.name}"? Its tabs close.`)) return
+  const statusOf = useCallback((tabId: string) => tabStatusStore.getStatus(tabId), [tabStatusStore])
 
-    if (task?.workspace && project) {
-      let keepBranch = false
-      let result: WorkspaceDeleteResult
-      try {
-        result = await window.api.workspaceDelete(
-          {
-            projectDir: getProjectDir(project),
-            projectId: isRemoteProject(project) ? project.id : undefined,
-            sshConfig: project.ssh,
-            worktreePath: task.workspace.worktreePath,
-            branchName: task.workspace.branchName,
-            baseBranch: task.workspace.baseBranch
-          }
-        )
-      } catch (err) {
-        // A pre-flight that never ran is not permission to delete: ask, like 'check-failed'.
-        result = { status: 'check-failed', reason: err instanceof Error ? err.message : String(err) }
-      }
-
-      if (result.status === 'uncommitted') {
-        if (!window.confirm('This workspace has uncommitted changes that will be lost. Delete anyway?')) return
-      } else if (result.status === 'unmerged') {
-        if (!window.confirm(`Branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete workspace?`)) return
-        keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
-      } else if (result.status === 'uncommitted-and-unmerged') {
-        if (!window.confirm(`This workspace has uncommitted changes and branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete anyway?`)) return
-        keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
-      } else if (result.status === 'check-failed') {
-        const reason = result.reason || 'The safety checks did not complete.'
-        if (!window.confirm(`DevTool could not verify that workspace "${task.workspace.branchName}" is safe to delete.\n\n${reason}\n\nDelete anyway? Uncommitted or unmerged work may be lost.`)) return
-        // Merge state unknown, so keep the branch unless the user explicitly asks otherwise.
-        keepBranch = !window.confirm(`Also delete the branch "${task.workspace.branchName}"? Its merge state could not be verified.`)
-      }
-      // 'invalid-worktree' is reported after step 2 instead: killing the tabs below can free
-      // the worktree, and the forced pass is the one that decides whether anything is left.
-
-      // Step 1: Kill all tabs/PTYs first so no process holds the worktree cwd
-      for (const tab of [...task.tabs.left, ...task.tabs.right]) {
-        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
-        window.api.scrollbackDelete(tab.id)
-      }
-
-      // Step 2: Now safe to remove worktree and branch
-      try {
-        const forced = await window.api.workspaceDelete(
-          {
-            projectDir: getProjectDir(project),
-            projectId: isRemoteProject(project) ? project.id : undefined,
-            sshConfig: project.ssh,
-            worktreePath: task.workspace.worktreePath,
-            branchName: task.workspace.branchName,
-            baseBranch: task.workspace.baseBranch,
-            force: true,
-            keepBranch
-          }
-        )
-        if (forced.status !== 'ok') {
-          window.alert(forced.reason || `The workspace directory "${task.workspace.worktreePath}" could not be removed and was left on disk.`)
-        }
-      } catch {
-        // Worktree may already be cleaned up
-      }
-
-      // Step 3: Remove task from state (skip both tab cleanup and workspace cleanup — already done)
-      removeTask(projectId, taskId, true)
-      return
-    }
-
-    removeTask(projectId, taskId)
+  /**
+   * Run the stream-level worktree pre-flight, then `close` (which ends the tabs),
+   * then the forced removal. Resolves false when cancelled.
+   */
+  const closeWithWorktree = async (
+    project: Project,
+    stream: Stream,
+    close: () => Promise<boolean>
+  ): Promise<boolean> => {
+    const workspace = stream.workspace
+    if (!workspace) return close()
+    const answer = await confirmWorktreeRemoval(project, stream.name, workspace, worktreeChoice.ask)
+    if (!answer) return false
+    if (!await close()) return false
+    if (!answer.done) await forceRemoveWorktree(project, workspace, answer.keepBranch)
+    return true
   }
 
-  const handleRenameSubmit = (type: 'project' | 'task', projectId: string, taskId?: string) => {
+  /**
+   * Hover ✕ on a task row: the task is archived to its stream's `Done (N)`.
+   * Asks only when its agent is working (unsaved editors ask in `archiveTask`).
+   * Its stream stays, even emptied.
+   */
+  const handleCloseTask = async (projectId: string, taskId: string) => {
+    const project = projects.find(p => p.id === projectId)
+    const task = findTaskInProject(project, taskId)
+    if (!project || !task) return
+    const question = taskCloseQuestion(task, statusOf)
+    if (question && !window.confirm(question)) return
+    // The last task of a hidden ad-hoc project takes the project with it, and any
+    // worktree stream it still has: that gets the stream's pre-flight first.
+    const retiring = isEphemeralProject(project) && projectTasks(project).every(candidate => candidate.id === taskId)
+    const worktrees = retiring ? project.streams.filter(stream => stream.workspace) : []
+    if (worktrees.length === 0) {
+      void archiveTask(projectId, taskId)
+      return
+    }
+    const answers = []
+    for (const stream of worktrees) {
+      const answer = await confirmWorktreeRemoval(project, stream.name, stream.workspace!, worktreeChoice.ask)
+      if (!answer) return
+      answers.push({ stream, answer })
+    }
+    if (!await archiveTask(projectId, taskId)) return
+    for (const { stream, answer } of answers) {
+      if (!answer.done) await forceRemoveWorktree(project, stream.workspace!, answer.keepBranch)
+    }
+  }
+
+  /**
+   * Hover ✕ on a stream row (never `main`): the stream is archived with its
+   * tasks to the project's `Done` group. Asks when a task is working (unsaved
+   * editors ask in `archiveStream`); a worktree runs the pre-flight: clean and
+   * merged goes quietly, anything else asks keep branch / discard / cancel.
+   */
+  const handleCloseStream = async (projectId: string, streamId: string) => {
+    const project = projects.find(p => p.id === projectId)
+    const stream = project?.streams.find(candidate => candidate.id === streamId)
+    if (!project || !stream || stream.isMain) return
+    const question = streamCloseQuestion(stream, statusOf)
+    if (question && !window.confirm(question)) return
+    // Tabs close before the forced removal, so no process holds the worktree.
+    await closeWithWorktree(project, stream, () => archiveStream(projectId, streamId, true))
+  }
+
+  /** What the Done rows do: open read-only, reopen, delete for good (after a confirm). */
+  const doneActions: DoneRowActions = {
+    open: showArchived,
+    reopenTask: (projectId, taskId) => {
+      if (getArchivedView()?.id === taskId) closeArchivedView()
+      void reopenTask(projectId, taskId)
+    },
+    reopenStream: (projectId, streamId) => {
+      void reopenStream(projectId, streamId).then(({ notice }) => {
+        if (notice) window.alert(notice)
+      }).catch((err: unknown) => {
+        window.alert(`Couldn't reopen the stream: ${err instanceof Error ? err.message : String(err)}`)
+      })
+    },
+    deleteTask: (projectId, entry) => {
+      if (!window.confirm(`Delete "${entry.task.name}" permanently? It can't be reopened afterwards. The agent's own session files are kept.`)) return
+      if (getArchivedView()?.id === entry.task.id) closeArchivedView()
+      void deleteArchived(projectId, { tasks: [entry.task.id] })
+    },
+    deleteStream: (projectId, entry) => {
+      const count = entry.stream.tasks.length + entry.doneTasks.length
+      if (!window.confirm(`Delete stream "${entry.stream.name}" and its ${count} ${count === 1 ? 'task' : 'tasks'} permanently? It can't be reopened afterwards. Its branch and the agents' session files are kept.`)) return
+      if (getArchivedView()?.id === entry.stream.id) closeArchivedView()
+      void deleteArchived(projectId, { streams: [entry.stream.id] })
+    }
+  }
+
+  /**
+   * A task dropped into a place in the tree. Into a stream with another folder,
+   * it asks first: the task's agent and terminals start again over there.
+   */
+  const handleMoveTask = useCallback((projectId: string, taskId: string, toStreamId: string, toIndex: number) => {
+    const project = projects.find(p => p.id === projectId)
+    const from = project?.streams.find(stream => stream.tasks.some(task => task.id === taskId))
+    const to = project?.streams.find(stream => stream.id === toStreamId)
+    const task = findTaskInProject(project, taskId)
+    if (!project || !from || !to || !task) return
+    const folder = (stream: Stream) => stream.workspace?.worktreePath ?? null
+    const restart = from !== to && folder(from) !== folder(to)
+    if (restart) {
+      const where = to.workspace ? `the ${to.workspace.branchName} worktree` : 'the project folder'
+      const lines = [`Move "${task.name}" to ${to.name}?`, `It will work in ${where}.`]
+      if (taskTabs(task).some(runsInTaskDir)) lines.push('Its agent and terminals restart there.')
+      if (!window.confirm(lines.join('\n\n'))) return
+    }
+    void moveTask(projectId, taskId, toStreamId, toIndex, { restart })
+  }, [projects, moveTask])
+
+  const handleRenameSubmit = (type: 'project' | 'stream' | 'task', projectId: string, id?: string) => {
     if (!editValue.trim()) {
       setEditingId(null)
       return
     }
     if (type === 'project') {
       renameProject(projectId, editValue.trim())
-    } else if (taskId) {
-      renameTask(projectId, taskId, editValue.trim())
+    } else if (type === 'stream' && id) {
+      renameStream(projectId, id, editValue.trim())
+    } else if (id) {
+      renameTask(projectId, id, editValue.trim())
     }
     setEditingId(null)
   }
 
   const handleContextMenu = (
-    e: React.MouseEvent, type: 'project' | 'task', projectId: string, taskId?: string
+    e: React.MouseEvent, type: 'project' | 'stream' | 'task', projectId: string, id?: string
   ) => {
     e.preventDefault()
-    setContextMenu({ x: e.clientX, y: e.clientY, type, projectId, taskId })
+    e.stopPropagation()
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      type,
+      projectId,
+      ...(type === 'stream' ? { streamId: id } : type === 'task' ? { taskId: id } : {})
+    })
   }
 
   const handleTaskContextMenu = useCallback((e: React.MouseEvent, projectId: string, taskId: string) => {
@@ -435,7 +550,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   const { dragState, dropTarget, handleDragMouseDown } = useSidebarTreeDrag({
-    editingId, projectOrder, treeProjectIds, reorderTasks, reorderProjects
+    editingId, projectOrder, treeProjectIds, moveTask: handleMoveTask, reorderProjects
   })
 
   const [expandedPinnedProjectIds, setExpandedPinnedProjectIds] = useState<string[]>([])
@@ -444,11 +559,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       prev.includes(projectId) ? prev.filter(id => id !== projectId) : [...prev, projectId]
     )
   }, [])
+  // A pinned stream shows its tasks; its chevron folds them in the pinned list only.
+  const [collapsedPinnedStreamKeys, setCollapsedPinnedStreamKeys] = useState<string[]>([])
+  const togglePinnedStream = useCallback((key: string) => {
+    setCollapsedPinnedStreamKeys(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]))
+  }, [])
 
   const { pinDragIndex, pinDropIndex, handlePinMouseDown } = usePinnedDrag(resolvedPins, setPinnedOrder)
 
-  /** The "+ Task  + Workspace" row closing an expanded project, in the tree or under a pin. */
-  const renderAddTaskRow = (project: Project, indentCls: string = TASK_ROW_PL) => (
+  /** The "+ Task  + Stream" row closing an expanded project, in the tree or under a pin. */
+  const renderAddTaskRow = (project: Project, indentCls: string = STREAM_ROW_PL) => (
     <div className={`flex items-center gap-0.5 flex-wrap mx-1.5 ${indentCls} pr-2 py-0.5`}>
       <button
         className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
@@ -456,27 +576,185 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       >
         <Plus size={12} className="inline mr-0.5" /> Task
       </button>
-      {!isShellCommandProject(project) && (
-        <button
-          className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
-          onClick={() => handleAddWorkspace(project.id)}
-        >
-          <Plus size={12} className="inline mr-0.5" /> Workspace
-        </button>
-      )}
+      <button
+        className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
+        onClick={() => handleNewStream(project.id)}
+      >
+        <Plus size={12} className="inline mr-0.5" /> Stream
+      </button>
     </div>
   )
 
+  const dropLine = <div className={`h-0.5 bg-accent mr-2 rounded-sm ${TASK_ROW_ML}`} />
+
+  /**
+   * One task row: state dot, name, `+N` extra tabs, last activity (hover swaps
+   * it for ✕). In the tree it is also a drag handle.
+   */
+  const renderTaskRow = (project: Project, stream: Stream, task: Task, index: number, place: StreamPlace) => {
+    const isSelected = selectedTaskId === task.id
+    const opacity = !isSelected && config?.taskRecencyHighlight
+      ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
+      : 0
+    const recencyStyle = buildRecencyStyle(opacity, effectiveTheme)
+    const inTree = place === 'tree'
+    const isTaskDragging = inTree && dragState?.type === 'task' && dragState.id === task.id
+    const state = stateOf(task)
+    const extra = extraTabCount(task)
+    const age = state === 'working' ? 'working' : formatActivityAge(task, now)
+    return (
+      <div
+        key={task.id}
+        className={[
+          'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
+          TASK_ROW_PL,
+          inTree ? 'task-item' : '',
+          'transition-colors duration-(--motion-fast)',
+          isSelected ? 'bg-sel' : 'hover:bg-surface-3',
+          isTaskDragging ? 'opacity-40' : '',
+        ].join(' ')}
+        {...(inTree ? { 'data-tree-row': 'task' } : {})}
+        data-task-id={task.id}
+        data-stream-id={stream.id}
+        data-task-index={index}
+        title={editingId === task.id ? undefined : taskTooltip(task)}
+        style={recencyStyle}
+        onClick={() => handleSelectTask(project.id, task)}
+        onMouseDown={inTree ? (e) => handleDragMouseDown(e, 'task', task.id, index, project.id, stream.id) : undefined}
+        onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
+      >
+        <StateDot state={state} hollow />
+        {editingId === task.id ? (
+          <input
+            ref={editRef}
+            className={inputCls}
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={() => handleRenameSubmit('task', project.id, task.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleRenameSubmit('task', project.id, task.id)
+              if (e.key === 'Escape') setEditingId(null)
+            }}
+          />
+        ) : (
+          <>
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
+            {extra > 0 && (
+              <span className="text-2xs font-mono text-text-subtle shrink-0" title={extra === 1 ? '1 more tab' : `${extra} more tabs`}>+{extra}</span>
+            )}
+            <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+              {age && <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{age}</span>}
+              <RowActions>
+                <RowAction danger title="Close task" onClick={() => void handleCloseTask(project.id, task.id)}>
+                  <X size={13} />
+                </RowAction>
+              </RowActions>
+            </span>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  /** A stream's tasks, with the tree's drop line between them while a task is dragged. */
+  const renderStreamTasks = (project: Project, stream: Stream, place: StreamPlace) => {
+    const slot = place === 'tree' && dropTarget?.type === 'task-slot'
+      && dropTarget.projectId === project.id && dropTarget.streamId === stream.id && !dropTarget.onStreamRow
+      ? dropTarget
+      : null
+    return (
+      <>
+        {stream.tasks.map((task, index) => (
+          <React.Fragment key={task.id}>
+            {slot?.index === index && dropLine}
+            {renderTaskRow(project, stream, task, index, place)}
+          </React.Fragment>
+        ))}
+        {slot?.index === stream.tasks.length && dropLine}
+        <StreamDoneRow project={project} stream={stream} now={now} actions={doneActions} />
+      </>
+    )
+  }
+
+  /**
+   * A stream row (name, `⎇ branch` for a worktree, rolled-up state, task count
+   * when folded) and, when open, its tasks. The chevron or a click on the row
+   * opens and closes it.
+   */
+  const renderStream = (project: Project, stream: Stream) => {
+    const open = isStreamOpen(stream)
+    const rolled = rollUpState(stream.tasks.map(stateOf))
+    const isDropTarget = dropTarget?.type === 'task-slot' && dropTarget.projectId === project.id
+      && dropTarget.streamId === stream.id && dropTarget.onStreamRow
+    const removable = !stream.isMain
+    return (
+      <React.Fragment key={stream.id}>
+        <div
+          className={[
+            'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
+            STREAM_ROW_PL,
+            'transition-colors duration-(--motion-fast)',
+            isDropTarget ? 'bg-sel shadow-focus' : 'hover:bg-surface-3',
+          ].join(' ')}
+          data-tree-row="stream"
+          data-stream-id={stream.id}
+          data-task-count={stream.tasks.length}
+          title={stream.workspace ? `${stream.name} · ${stream.workspace.branchName}` : stream.name}
+          onClick={() => { if (editingId !== stream.id) setStreamExpanded(stream.id, !open) }}
+          onContextMenu={(e) => handleContextMenu(e, 'stream', project.id, stream.id)}
+        >
+          <ChevronRight size={12} className={`shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
+          {editingId === stream.id ? (
+            <input
+              ref={editRef}
+              className={inputCls}
+              value={editValue}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={() => handleRenameSubmit('stream', project.id, stream.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRenameSubmit('stream', project.id, stream.id)
+                if (e.key === 'Escape') setEditingId(null)
+              }}
+            />
+          ) : (
+            <>
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-text-muted">{stream.name}</span>
+              {stream.workspace && (
+                <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
+              )}
+              <span className="ml-auto flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+                <StateDot state={rolled} hideOnHover />
+                {!open && (
+                  <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>
+                )}
+                <RowActions>
+                  <RowAction title={`New task in ${stream.name}`} onClick={() => handleAddTask(project.id, stream.id)}>
+                    <Plus size={13} />
+                  </RowAction>
+                  {removable && (
+                    <RowAction danger title="Close stream" onClick={() => void handleCloseStream(project.id, stream.id)}>
+                      <X size={13} />
+                    </RowAction>
+                  )}
+                </RowActions>
+              </span>
+            </>
+          )}
+        </div>
+        {open && renderStreamTasks(project, stream, 'tree')}
+      </React.Fragment>
+    )
+  }
+
   const renderProject = (project: Project) => {
     const isExpanded = expandedProjects.has(project.id)
-    // Project home lives on the project row itself (it's filtered out of the
-    // visible task list), so the row needs the selection rail whenever the
-    // home task is active — even when the project is expanded.
+    // Project Home lives on the project row itself, so the row needs the
+    // selection rail whenever Home is showing — even when the project is expanded.
     const isHomeSelected = selectedProjectId === project.id
-      && project.tasks.some(t => t.id === selectedTaskId && isHomeTask(t))
+      && !projectTasks(project).some(t => t.id === selectedTaskId)
     const isProjectSelected = selectedProjectId === project.id && (!isExpanded || isHomeSelected)
     const isProjectDragging = dragState?.type === 'project' && dragState.id === project.id
-    const visibleTasks = project.tasks.filter(t => !isHomeTask(t))
     return (
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
@@ -498,7 +776,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         {editingId === project.id ? (
           <input
             ref={editRef}
-            className="bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
+            className={inputCls}
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onBlur={() => handleRenameSubmit('project', project.id)}
@@ -538,16 +816,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-1 ${dotClass}`} />
             })()}
             <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-              {!isExpanded && (() => {
-                const projectStatus = getProjectStatus(project.tasks.filter(t => !isHomeTask(t)), allStatuses)
-                if (!projectStatus) return null
-                const dotClass = projectStatus === 'working'
-                  ? 'bg-status-working status-pulse'
-                  : projectStatus === 'attention'
-                  ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
-                  : 'bg-status-exited'
-                return <span className={`w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden ${dotClass}`} />
-              })()}
+              {!isExpanded && <StateDot state={rollUpState(projectTasks(project).map(stateOf))} hideOnHover />}
               <RowActions>
                 <RowAction title="New task" onClick={() => handleAddTask(project.id)}>
                   <Plus size={13} />
@@ -563,74 +832,158 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {isExpanded && (
         <div className="pb-1">
-          {visibleTasks.map((task) => {
-            const projectTaskIndex = project.tasks.indexOf(task)
-            const isSelected = selectedTaskId === task.id
-            const opacity = !isSelected && config?.taskRecencyHighlight
-              ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
-              : 0
-            const recencyStyle = buildRecencyStyle(opacity, effectiveTheme)
-            const isTaskDragging = dragState?.type === 'task' && dragState.index === projectTaskIndex
-            return (
-              <React.Fragment key={task.id}>
-                {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === projectTaskIndex && (
-                  <div className={`h-0.5 bg-accent mr-2 rounded-sm ${TASK_ROW_ML}`} />
-                )}
-                <div
-                  className={[
-                    'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-text cursor-pointer',
-                    TASK_ROW_PL,
-                    'text-sm',
-                    'task-item',
-                    'transition-colors duration-(--motion-fast)',
-                    isSelected ? 'bg-sel' : 'hover:bg-surface-3',
-                    isTaskDragging ? 'opacity-40' : '',
-                  ].join(' ')}
-                  data-task-id={task.id}
-                  data-task-index={projectTaskIndex}
-                  title={editingId === task.id ? undefined : taskTooltip(task)}
-                  style={recencyStyle}
-                  onClick={() => handleSelectTask(project.id, task)}
-                  onMouseDown={(e) => handleDragMouseDown(e, 'task', task.id, projectTaskIndex, project.id)}
-                  onContextMenu={(e) => handleContextMenu(e, 'task', project.id, task.id)}
-                >
-                  {editingId === task.id ? (
-                    <input
-                      ref={editRef}
-                      className="bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={() => handleRenameSubmit('task', project.id, task.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRenameSubmit('task', project.id, task.id)
-                        if (e.key === 'Escape') setEditingId(null)
-                      }}
-                    />
-                  ) : (
-                    <>
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
-                      {isWorkspaceTask(task) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
-                      <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-                        <TaskStatusDot task={task} allStatuses={allStatuses} />
-                        <RowActions>
-                          <RowAction danger title="Delete task" onClick={() => handleDeleteTask(project.id, task.id)}>
-                            <X size={13} />
-                          </RowAction>
-                        </RowActions>
-                      </span>
-                    </>
-                  )}
-                </div>
-              </React.Fragment>
-            )
-          })}
-          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
-            <div className={`h-0.5 bg-accent mr-2 rounded-sm ${TASK_ROW_ML}`} />
-          )}
+          {project.streams.map(stream => renderStream(project, stream))}
+          <ProjectDoneGroup project={project} now={now} actions={doneActions} />
           {renderAddTaskRow(project)}
         </div>
       )}
     </div>
+    )
+  }
+
+  /** A pinned project unfolded: its streams, read-only (no drag), like the tree. */
+  const renderPinnedProjectStreams = (project: Project) => project.streams.map(stream => {
+    const open = isStreamOpen(stream)
+    const rolled = rollUpState(stream.tasks.map(stateOf))
+    return (
+      <React.Fragment key={stream.id}>
+        <div
+          className={`group flex items-center gap-2 mx-1.5 px-2.5 ${STREAM_ROW_PL} h-6 rounded-md text-sm text-text cursor-pointer hover:bg-surface-3 transition-colors duration-(--motion-fast)`}
+          onClick={() => setStreamExpanded(stream.id, !open)}
+          onContextMenu={(e) => handleContextMenu(e, 'stream', project.id, stream.id)}
+        >
+          <ChevronRight size={12} className={`shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-text-muted">{stream.name}</span>
+          {stream.workspace && (
+            <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
+          )}
+          <span className="ml-auto flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+            <StateDot state={rolled} hideOnHover />
+            {!open && <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>}
+            <RowActions>
+              <RowAction title={`New task in ${stream.name}`} onClick={() => handleAddTask(project.id, stream.id)}>
+                <Plus size={13} />
+              </RowAction>
+            </RowActions>
+          </span>
+        </div>
+        {open && renderStreamTasks(project, stream, 'pin')}
+      </React.Fragment>
+    )
+  })
+
+  const renderPin = (pin: ResolvedPin, index: number) => {
+    const { item, project, stream, task } = pin
+    const isProjectPin = item.type === 'project'
+    const isSelected = task
+      ? selectedTaskId === task.id
+      : stream
+        ? false
+        : selectedProjectId === project.id && !projectTasks(project).some(t => t.id === selectedTaskId)
+    const isDraggingPin = pinDragIndex === index
+    const isOpen = isProjectPin
+      ? expandedPinnedProjectIds.includes(project.id)
+      : !!stream && !collapsedPinnedStreamKeys.includes(pin.key)
+    const rolled = task
+      ? stateOf(task)
+      : rollUpState((stream ? stream.tasks : projectTasks(project)).map(stateOf))
+    const extra = task ? extraTabCount(task) : 0
+    const toggleOpen = () => {
+      if (isProjectPin) togglePinnedProjectExpansion(project.id)
+      else togglePinnedStream(pin.key)
+    }
+    return (
+      <React.Fragment key={pin.key}>
+        {pinDropIndex === index && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
+        <div
+          className={[
+            'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
+            'transition-colors duration-(--motion-fast)',
+            isSelected ? 'bg-sel' : 'hover:bg-surface-3',
+            isDraggingPin ? 'opacity-40' : '',
+          ].join(' ')}
+          data-pin-key={pin.key}
+          data-pin-index={index}
+          title={task ? taskTooltip(task) : stream?.workspace ? `${stream.name} · ${stream.workspace.branchName}` : undefined}
+          onClick={() => {
+            if (task) handleSelectTask(project.id, task)
+            else if (stream) toggleOpen()
+            else selectProjectHome(project.id)
+          }}
+          onMouseDown={(e) => handlePinMouseDown(e, pin.key, index)}
+          onContextMenu={(e) => handleContextMenu(
+            e,
+            item.type,
+            project.id,
+            task ? task.id : stream ? stream.id : undefined
+          )}
+        >
+          {task ? (
+            <span className="w-3 shrink-0" />
+          ) : (
+            <button
+              className="text-text-subtle hover:text-text bg-transparent border-0 cursor-pointer p-0 flex items-center shrink-0"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); toggleOpen() }}
+            >
+              <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isOpen ? 'rotate-90' : ''}`} />
+            </button>
+          )}
+          <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} />
+          {isProjectPin ? (
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{project.name}</span>
+          ) : (
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+              <span className="text-text-muted">{project.name}</span>
+              <span className="text-text-subtle mx-1">›</span>
+              {task ? task.name : <span className="font-mono">{stream!.name}</span>}
+            </span>
+          )}
+          {extra > 0 && <span className="text-2xs font-mono text-text-subtle shrink-0">+{extra}</span>}
+          {/* Pins are the one place a hidden ad-hoc project reaches the tree. */}
+          {isEphemeralProject(project) && (
+            <span
+              className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0"
+              title={project.directory}
+            >dir</span>
+          )}
+          <span className="ml-auto flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+            <StateDot state={rolled} hideOnHover />
+            {stream && !isOpen && (
+              <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>
+            )}
+            <RowActions>
+              {/* A task pin adds a sibling in its stream; a stream pin, a task in it. */}
+              {(() => {
+                const pinStream = stream ?? (task ? findStreamOfTask(project, task.id) : undefined)
+                return (
+                  <RowAction
+                    title={pinStream ? `New task in ${pinStream.name}` : 'New task'}
+                    onClick={() => handleAddTask(project.id, pinStream?.id)}
+                  >
+                    <Plus size={13} />
+                  </RowAction>
+                )
+              })()}
+              {isProjectPin && (
+                <RowAction title="New stream" onClick={() => handleNewStream(project.id)}>
+                  <GitBranch size={13} />
+                </RowAction>
+              )}
+              <RowAction title="Unpin" onClick={() => togglePinnedItem(item)}>
+                <X size={13} />
+              </RowAction>
+            </RowActions>
+          </span>
+        </div>
+        {isProjectPin && isOpen && (
+          <>
+            {renderPinnedProjectStreams(project)}
+            {renderAddTaskRow(project)}
+          </>
+        )}
+        {stream && isOpen && renderStreamTasks(project, stream, 'pin')}
+      </React.Fragment>
     )
   }
 
@@ -654,123 +1007,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         <div className="pb-1 [-webkit-app-region:no-drag]">
           <div className="px-3 pb-1 text-2xs font-bold uppercase tracking-[0.06em] text-text-muted">Pinned</div>
           <div className="sidebar-pinned-list">
-            {resolvedPins.map((pin, index) => {
-              const isProjectPin = pin.item.type === 'project'
-              const isSelected = isProjectPin
-                ? selectedProjectId === pin.project.id
-                  && pin.project.tasks.some(t => t.id === selectedTaskId && isHomeTask(t))
-                : selectedTaskId === pin.task!.id
-              const isDraggingPin = pinDragIndex === index
-              const isPinExpanded = isProjectPin && expandedPinnedProjectIds.includes(pin.project.id)
-              const pinnedProjectTasks = isProjectPin ? pin.project.tasks.filter(t => !isHomeTask(t)) : []
-              return (
-                <React.Fragment key={pin.key}>
-                  {pinDropIndex === index && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
-                  <div
-                    className={[
-                      'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
-                      'transition-colors duration-(--motion-fast)',
-                      isSelected ? 'bg-sel' : 'hover:bg-surface-3',
-                      isDraggingPin ? 'opacity-40' : '',
-                    ].join(' ')}
-                    data-pin-key={pin.key}
-                    data-pin-index={index}
-                    title={isProjectPin ? undefined : taskTooltip(pin.task!)}
-                    onClick={() => {
-                      if (isProjectPin) selectProjectHome(pin.project.id)
-                      else handleSelectTask(pin.project.id, pin.task!)
-                    }}
-                    onMouseDown={(e) => handlePinMouseDown(e, pin.key, index)}
-                    onContextMenu={(e) => handleContextMenu(
-                      e,
-                      isProjectPin ? 'project' : 'task',
-                      pin.project.id,
-                      isProjectPin ? undefined : pin.task!.id
-                    )}
-                  >
-                    {isProjectPin && (
-                      <button
-                        className="text-text-subtle hover:text-text bg-transparent border-0 cursor-pointer p-0 flex items-center shrink-0"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => { e.stopPropagation(); togglePinnedProjectExpansion(pin.project.id) }}
-                      >
-                        <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isPinExpanded ? 'rotate-90' : ''}`} />
-                      </button>
-                    )}
-                    <ProjectIconSlot project={pin.project} theme={effectiveTheme} metadata={iconMetadata} />
-                    {isProjectPin ? (
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{pin.project.name}</span>
-                    ) : (
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                        <span className="text-text-muted">{pin.project.name}</span>
-                        <span className="text-text-subtle mx-1">›</span>
-                        {pin.task!.name}
-                      </span>
-                    )}
-                    {!isProjectPin && isWorkspaceTask(pin.task!) && (
-                      <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">ws</span>
-                    )}
-                    {/* Pins are the one place a hidden ad-hoc project reaches the tree. */}
-                    {isEphemeralProject(pin.project) && (
-                      <span
-                        className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0"
-                        title={pin.project.directory}
-                      >dir</span>
-                    )}
-                    <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-                      {isProjectPin ? (() => {
-                        const projectStatus = getProjectStatus(pin.project.tasks.filter(t => !isHomeTask(t)), allStatuses)
-                        if (!projectStatus) return null
-                        const dotClass = projectStatus === 'working'
-                          ? 'bg-status-working status-pulse'
-                          : projectStatus === 'attention'
-                          ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
-                          : 'bg-status-exited'
-                        return <span className={`w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden ${dotClass}`} />
-                      })() : (
-                        <TaskStatusDot task={pin.task!} allStatuses={allStatuses} />
-                      )}
-                      <RowActions>
-                        {/* A task pin adds a sibling: the task's project is where its work lives. */}
-                        <RowAction title={isProjectPin ? 'New task' : `New task in ${pin.project.name}`} onClick={() => handleAddTask(pin.project.id)}>
-                          <Plus size={13} />
-                        </RowAction>
-                        {!isShellCommandProject(pin.project) && (
-                          <RowAction title={isProjectPin ? 'New workspace' : `New workspace in ${pin.project.name}`} onClick={() => handleAddWorkspace(pin.project.id)}>
-                            <GitBranch size={13} />
-                          </RowAction>
-                        )}
-                        <RowAction title="Unpin" onClick={() => togglePinnedItem(pin.item)}>
-                          <X size={13} />
-                        </RowAction>
-                      </RowActions>
-                    </span>
-                  </div>
-                  {isPinExpanded && pinnedProjectTasks.map(task => {
-                    const isTaskSelected = selectedTaskId === task.id
-                    return (
-                      <div
-                        key={task.id}
-                        className={[
-                          'group flex items-center gap-2 mx-1.5 px-2.5 pl-[40px] h-6 rounded-md text-sm text-text cursor-pointer',
-                          'transition-colors duration-(--motion-fast)',
-                          isTaskSelected ? 'bg-sel' : 'hover:bg-surface-3',
-                        ].join(' ')}
-                        onClick={() => handleSelectTask(pin.project.id, task)}
-                        onContextMenu={(e) => handleContextMenu(e, 'task', pin.project.id, task.id)}
-                      >
-                        <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
-                        {isWorkspaceTask(task) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
-                        <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-                          <TaskStatusDot task={task} allStatuses={allStatuses} />
-                        </span>
-                      </div>
-                    )
-                  })}
-                  {isPinExpanded && renderAddTaskRow(pin.project, 'pl-[40px]')}
-                </React.Fragment>
-              )
-            })}
+            {resolvedPins.map(renderPin)}
             {pinDropIndex === resolvedPins.length && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
           </div>
         </div>
@@ -889,12 +1126,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onSelectTask={handleSelectTask}
           onTaskContextMenu={handleTaskContextMenu}
           onSettle={handleToggleSettled}
+          onClose={(projectId, taskId) => void handleCloseTask(projectId, taskId)}
           onNewTask={() => setNewTaskOpen(true)}
           allStatuses={allStatuses}
           statusSince={statusSince}
           activities={agentActivities}
           now={now}
           workingLast={config?.inboxWorkingLast ?? false}
+          layout={config?.inboxLayout ?? 'flat'}
         />
       ) : (
       <div className="sidebar-list flex-1 overflow-y-auto py-1">
@@ -943,13 +1182,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         setContextMenu={setContextMenu}
         findTask={findTask}
         handleToggleSettled={handleToggleSettled}
-        handleDeleteTask={handleDeleteTask}
+        handleCloseTask={handleCloseTask}
+        handleCloseStream={handleCloseStream}
         beginEdit={beginEdit}
         isPinned={isPinned}
         setDuplicateProjectId={setDuplicateProjectId}
         setProjectSettingsId={setProjectSettingsId}
         onAddTask={handleAddTask}
-        onAddWorkspace={handleAddWorkspace}
+        onNewStream={handleNewStream}
       />
 
       <div className="px-3 py-2 border-t border-hair">
@@ -1052,10 +1292,25 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         )
       })()}
 
+      {newStreamProjectId && (() => {
+        const project = projects.find(p => p.id === newStreamProjectId)
+        if (!project) return null
+        return (
+          <NewStreamModal
+            project={project}
+            onCreate={(name, workspace) => handleStreamCreated(project.id, name, workspace)}
+            onClose={() => setNewStreamProjectId(null)}
+          />
+        )
+      })()}
+
+      {worktreeChoice.dialog}
+
       {newTaskOpen && config && (
         <NewTaskModal
           projects={orderedProjects}
           defaultProjectId={selectedProjectId}
+          selectedTaskId={selectedTaskId}
           getProjectDir={getProjectDir}
           config={config}
           allTags={tags}

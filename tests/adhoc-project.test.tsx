@@ -4,15 +4,15 @@ import React from 'react'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import {
   DEFAULT_CONFIG,
-  createHomeTask,
   isEphemeralProject,
-  isHomeTask,
   isSpentEphemeralProject,
   type Project,
   type ProjectsData
 } from '../src/shared/types'
 import { dirBasename } from '../src/shared/paths'
 import { useAppState } from '../src/renderer/hooks/useAppState'
+import { projectTasks } from '../src/shared/streams'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 // React import is required by the JSX runtime under vitest's default transform.
 void React
@@ -24,8 +24,7 @@ void React
  */
 
 function buildProjects(): Project[] {
-  const { task: home } = createHomeTask('p1')
-  return [{ id: 'p1', name: 'Project', directory: '/tmp/p1', tasks: [home] }]
+  return [fixtureProject({ id: 'p1', name: 'Project', directory: '/tmp/p1' })]
 }
 
 let saved: ProjectsData[]
@@ -53,13 +52,16 @@ beforeEach(() => {
     onNotesUpdated: vi.fn().mockReturnValue(() => {}),
     onTasksRemoved: vi.fn().mockReturnValue(() => {}),
     onTabsRemoved: vi.fn().mockReturnValue(() => {}),
+    onTabsRestart: vi.fn().mockReturnValue(() => {}),
     onConfigUpdated: vi.fn().mockReturnValue(() => {}),
     reportDirtyTabs: vi.fn().mockResolvedValue(undefined),
     sshStatus: vi.fn().mockResolvedValue('disconnected'),
     sshConnect: vi.fn().mockResolvedValue(undefined),
     sshDisconnect: vi.fn().mockResolvedValue(undefined),
     scrollbackDelete: vi.fn().mockResolvedValue(undefined),
-    workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' })
+    workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' }),
+    archiveAddTasks: vi.fn().mockImplementation((_projectId: string, entries: unknown[]) =>
+      Promise.resolve({ version: 1, tasks: entries, streams: [] }))
   }
 })
 
@@ -86,14 +88,11 @@ describe('dirBasename', () => {
 })
 
 describe('isSpentEphemeralProject', () => {
-  const home = createHomeTask('x').task
-  const real = { ...home, id: 't1', system: undefined }
-
-  it('only claims a hidden project with nothing but its home task', () => {
-    expect(isSpentEphemeralProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true, tasks: [home] })).toBe(true)
-    expect(isSpentEphemeralProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true, tasks: [home, real] })).toBe(false)
+  it('only claims a hidden project with no task left', () => {
+    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true }))).toBe(true)
+    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true, tasks: [{ id: 't1' }] }))).toBe(false)
     // An ordinary empty project is the user's to keep.
-    expect(isSpentEphemeralProject({ id: 'x', name: 'x', directory: '/d', tasks: [home] })).toBe(false)
+    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d' }))).toBe(false)
   })
 })
 
@@ -115,7 +114,7 @@ describe('addTaskInDirectory', () => {
     await waitFor(() => expect(saved.length).toBeGreaterThan(0))
     for (const snapshot of saved) {
       for (const p of snapshot.projects.filter(isEphemeralProject)) {
-        expect(p.tasks.some(t => !isHomeTask(t))).toBe(true)
+        expect(projectTasks(p).length).toBeGreaterThan(0)
       }
     }
   })
@@ -130,7 +129,7 @@ describe('addTaskInDirectory', () => {
     expect(result.current.projects.filter(isEphemeralProject)).toHaveLength(1)
     const project = adhoc(result.current)!
     expect(project.id).toBe(firstId)
-    expect(project.tasks.filter(t => !isHomeTask(t)).map(t => t.name)).toEqual(['First', 'Second'])
+    expect(projectTasks(project).map(t => t.name)).toEqual(['First', 'Second'])
   })
 
   it('gives a different directory its own hidden project', async () => {
@@ -141,37 +140,22 @@ describe('addTaskInDirectory', () => {
 
     expect(result.current.projects.filter(isEphemeralProject).map(p => p.name)).toEqual(['scratch', 'other'])
   })
-
-  it('carries a workspace through to the task', async () => {
-    const { result } = await mountState()
-
-    act(() => {
-      result.current.addTaskInDirectory('/tmp/scratch', 'Isolated', [], {
-        worktreePath: '/tmp/scratch/.worktrees/isolated',
-        branchName: 'isolated',
-        baseBranch: 'main',
-        relativeProjectPath: ''
-      })
-    })
-
-    const task = adhoc(result.current)!.tasks.find(t => !isHomeTask(t))!
-    expect(task.workspace?.branchName).toBe('isolated')
-  })
 })
 
-describe('removeTask on an ad-hoc project', () => {
-  it('retires the hidden project along with its last real task', async () => {
+describe('archiveTask on an ad-hoc project', () => {
+  it('retires the hidden project along with its last real task, writing no archive for it', async () => {
     const { result } = await mountState()
 
     act(() => { result.current.addTaskInDirectory('/tmp/scratch', 'Poke at it') })
     const project = adhoc(result.current)!
-    const taskId = project.tasks.find(t => !isHomeTask(t))!.id
+    const taskId = projectTasks(project)[0].id
 
-    await act(async () => { await result.current.removeTask(project.id, taskId) })
+    await act(async () => { await result.current.archiveTask(project.id, taskId) })
 
     expect(result.current.projects.filter(isEphemeralProject)).toHaveLength(0)
     expect(result.current.projectOrder).not.toContain(project.id)
     expect(result.current.selectedProjectId).toBeNull()
+    expect((window as any).api.archiveAddTasks).not.toHaveBeenCalled()
   })
 
   it('keeps it while another real task is still there', async () => {
@@ -180,22 +164,24 @@ describe('removeTask on an ad-hoc project', () => {
     act(() => { result.current.addTaskInDirectory('/tmp/scratch', 'First') })
     act(() => { result.current.addTaskInDirectory('/tmp/scratch', 'Second') })
     const project = adhoc(result.current)!
-    const firstId = project.tasks.find(t => t.name === 'First')!.id
+    const firstId = projectTasks(project).find(t => t.name === 'First')!.id
 
-    await act(async () => { await result.current.removeTask(project.id, firstId) })
+    await act(async () => { await result.current.archiveTask(project.id, firstId) })
 
     const still = adhoc(result.current)
     expect(still).toBeDefined()
-    expect(still!.tasks.filter(t => !isHomeTask(t)).map(t => t.name)).toEqual(['Second'])
+    expect(projectTasks(still).map(t => t.name)).toEqual(['Second'])
+    expect((window as any).api.archiveAddTasks).toHaveBeenCalledWith(project.id, [expect.objectContaining({ task: expect.objectContaining({ id: firstId }) })])
+    expect(still!.streams[0].archivedTaskCount).toBe(1)
   })
 
   it('leaves an ordinary project standing when its last task goes', async () => {
     const { result } = await mountState()
 
     act(() => { result.current.addTask('p1', 'Only task') })
-    const taskId = result.current.projects[0].tasks.find(t => !isHomeTask(t))!.id
+    const taskId = projectTasks(result.current.projects[0])[0].id
 
-    await act(async () => { await result.current.removeTask('p1', taskId) })
+    await act(async () => { await result.current.archiveTask('p1', taskId) })
 
     expect(result.current.projects.map(p => p.id)).toContain('p1')
   })

@@ -9,16 +9,17 @@ struct NewTaskTarget: Identifiable, Hashable {
     /// Picked up front by a project's own "New task" button; otherwise the
     /// sheet picks the last project a task went to.
     var project: NewTaskProject?
-    /// "New workspace" (§8.6): the task gets its own worktree and branch.
-    var workspace = false
+    /// Picked up front by a stream's own "New task"; otherwise the project's
+    /// most recently used stream.
+    var streamId: String?
 
-    var id: String { "\(desktopIds.joined(separator: ","))/\(project?.id ?? "")/\(workspace)" }
+    var id: String { "\(desktopIds.joined(separator: ","))/\(project?.id ?? "")/\(streamId ?? "")" }
 
-    /// One project's own "New task" or "New workspace" button.
-    init(desktopId: String, projectId: String, workspace: Bool) {
+    /// One project's (or stream's) own "New task" button.
+    init(desktopId: String, projectId: String, streamId: String? = nil) {
         desktopIds = [desktopId]
         project = NewTaskProject(desktopId: desktopId, projectId: projectId)
-        self.workspace = workspace
+        self.streamId = streamId
     }
 
     /// The toolbar's compose button: any project of these desktops.
@@ -82,10 +83,10 @@ struct NewTaskToolbarButton: View {
     }
 }
 
-/// "New task" and "New workspace" (§8.3, §8.4, §8.6): the project, the first
-/// prompt and a permission mode. The desktop names the task (and a
-/// workspace's branch) after the prompt and starts Claude on it; the chat
-/// opens as soon as the task shows up in the inbox.
+/// "New task" (§8.3, §8.4): the project, its stream, the first prompt and a
+/// permission mode. The stream defaults to the one the project was last used
+/// in. The desktop names the task after the prompt and starts Claude on it in
+/// the stream's folder; the chat opens as soon as the task shows up in the inbox.
 struct NewTaskSheet: View {
     static let lastProjectKey = "newTask.lastProject"
 
@@ -95,7 +96,8 @@ struct NewTaskSheet: View {
 
     @AppStorage(NewTaskSheet.lastProjectKey) private var lastProject = ""
     @State private var selection: NewTaskProject?
-    @State private var workspace: Bool
+    /// nil until a project is picked; then its default stream.
+    @State private var streamId: String?
     @State private var prompt = ""
     /// "" leaves Claude's own default mode.
     @State private var mode = ""
@@ -106,7 +108,7 @@ struct NewTaskSheet: View {
     init(target: NewTaskTarget) {
         self.target = target
         _selection = State(initialValue: target.project)
-        _workspace = State(initialValue: target.workspace)
+        _streamId = State(initialValue: target.streamId)
     }
 
     var body: some View {
@@ -119,11 +121,7 @@ struct NewTaskSheet: View {
                         .focused($focused)
                         .disabled(sending)
                 } footer: {
-                    if workspaceOn {
-                        Text("The task and a new branch are named after the prompt's first line. Claude works in its own worktree, forked from main or master.")
-                    } else {
-                        Text("The task is named after the prompt's first line.")
-                    }
+                    Text("The task is named after the prompt's first line.")
                 }
                 Section {
                     Picker("Project", selection: $selection) {
@@ -139,9 +137,16 @@ struct NewTaskSheet: View {
                     }
                     .pickerStyle(.navigationLink)
                     .disabled(sending)
-                    if canWorkspace {
-                        Toggle("New workspace", isOn: $workspace)
-                            .disabled(sending)
+                    let streams = selectedProject?.streams ?? []
+                    if streams.count > 1 {
+                        Picker("Stream", selection: $streamId) {
+                            ForEach(streams) { stream in
+                                StreamLabel(stream: stream)
+                                    .tag(Optional(stream.id))
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+                        .disabled(sending)
                     }
                     Picker("Mode", selection: $mode) {
                         Text("Default").tag("")
@@ -153,6 +158,8 @@ struct NewTaskSheet: View {
                 } footer: {
                     if let selection, model.isOffline(selection.desktopId) {
                         Text("\(model.desktop(selection.desktopId)?.name ?? "This desktop") is offline.")
+                    } else if let stream = selectedStream, stream.branch != nil {
+                        Text("Claude works in the \(stream.name) worktree.")
                     }
                 }
                 if let error {
@@ -161,7 +168,7 @@ struct NewTaskSheet: View {
                     }
                 }
             }
-            .navigationTitle(workspaceOn ? "New workspace" : "New task")
+            .navigationTitle("New task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -180,7 +187,12 @@ struct NewTaskSheet: View {
             .interactiveDismissDisabled(sending)
             .onAppear {
                 if selection == nil { selection = defaultProject(desktops) }
+                if streamId == nil || selectedStream == nil { streamId = selectedProject?.defaultStream?.id }
                 focused = true
+            }
+            .onChange(of: selection) {
+                // Another project: its own most recently used stream.
+                streamId = selectedProject?.defaultStream?.id
             }
         }
     }
@@ -202,12 +214,14 @@ struct NewTaskSheet: View {
         return listed.first { !model.isOffline($0.desktopId) } ?? listed.first
     }
 
-    private var canWorkspace: Bool {
-        guard let selection else { return false }
-        return model.supports(DesktopFeature.taskWorkspace, on: selection.desktopId)
+    private var selectedProject: InboxProject? {
+        guard let selection else { return nil }
+        return model.inboxes[selection.desktopId]?.projects.first { $0.id == selection.projectId }
     }
 
-    private var workspaceOn: Bool { workspace && canWorkspace }
+    private var selectedStream: InboxStream? {
+        selectedProject?.streams.first { $0.id == streamId }
+    }
     private var trimmed: String { prompt.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var offline: Bool { selection.map { model.isOffline($0.desktopId) } ?? true }
 
@@ -216,9 +230,10 @@ struct NewTaskSheet: View {
         sending = true
         error = nil
         do {
+            // A stream that has gone since the picker was filled: let the desktop pick.
             let route = try await model.newTask(
-                desktopId: selection.desktopId, projectId: selection.projectId, prompt: trimmed,
-                mode: mode.isEmpty ? nil : mode, workspace: workspaceOn
+                desktopId: selection.desktopId, projectId: selection.projectId, streamId: selectedStream?.id,
+                prompt: trimmed, mode: mode.isEmpty ? nil : mode
             )
             lastProject = selection.id
             dismiss()

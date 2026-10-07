@@ -6,10 +6,11 @@ import {
   type Project,
   type WindowViewState
 } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 describe('window view state', () => {
   const projects: Project[] = [
-    {
+    fixtureProject({
       id: 'project-1',
       name: 'Project 1',
       directory: '/tmp/project-1',
@@ -22,12 +23,10 @@ describe('window view state', () => {
             left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
             right: [{ id: 'right-1', type: 'browser', title: 'Browser', url: 'https://example.com' }]
           },
-          activeTab: { left: 'left-1', right: 'right-1' },
-          splitOpen: true,
-          splitRatio: 0.6
+          activeTab: { left: 'left-1', right: 'right-1' }
         }
       ]
-    }
+    })
   ]
 
   it('builds an initial window view state from stored selection', () => {
@@ -47,22 +46,15 @@ describe('window view state', () => {
     const state = buildWindowViewState(projects, DEFAULT_CONFIG, {
       selectedProjectId: 'project-1',
       selectedTaskId: 'task-1',
-      taskStates: {
-        'task-1': {
-          activeTab: { left: 'left-1', right: null },
-          splitOpen: false,
-          splitRatio: 0.5
-        }
-      }
+      taskStates: { 'task-1': { fileBrowserOpen: true, fileBrowserActiveTab: 'git' } }
     })
 
     expect(state.selectedProjectId).toBe('project-1')
     expect(state.selectedTaskId).toBe('task-1')
-    expect(state.taskStates['task-1'].splitOpen).toBe(false)
-    expect(state.taskStates['task-1'].activeTab.right).toBeNull()
+    expect(state.taskStates['task-1']).toEqual({ fileBrowserOpen: true, fileBrowserActiveTab: 'git' })
   })
 
-  it('reconciles stale task state against shared projects', () => {
+  it('drops the pane fields older builds kept per window, and states of deleted tasks', () => {
     const state = {
       selectedProjectId: 'project-1',
       selectedTaskId: 'task-1',
@@ -72,73 +64,17 @@ describe('window view state', () => {
         'task-1': {
           activeTab: { left: 'missing-tab', right: 'right-1' },
           splitOpen: true,
-          splitRatio: 0.75
+          splitRatio: 0.75,
+          fileBrowserOpen: false
         },
-        'deleted-task': {
-          activeTab: { left: 'x', right: null },
-          splitOpen: false,
-          splitRatio: 0.5
-        }
+        'deleted-task': { fileBrowserOpen: true }
       }
     } as unknown as WindowViewState
 
     const next = reconcileWindowViewState(state, projects)
 
-    expect(next.taskStates['task-1'].activeTab.left).toBe('left-1')
-    expect(next.taskStates['task-1'].activeTab.right).toBe('right-1')
+    expect(next.taskStates['task-1']).toEqual({ fileBrowserOpen: false })
     expect(next.taskStates['deleted-task']).toBeUndefined()
-  })
-
-  it('fills in default task state for tasks missing from the persisted seed', () => {
-    const nextProjects: Project[] = [
-      {
-        id: 'project-1',
-        name: 'Project 1',
-        directory: '/tmp/project-1',
-        tasks: [
-          {
-            id: 'task-1',
-            name: 'Task 1',
-            tabs: {
-              left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
-              right: []
-            },
-            activeTab: { left: 'left-1', right: null },
-            splitOpen: false,
-            splitRatio: 0.5
-          },
-          {
-            id: 'task-2',
-            name: 'Task 2',
-            tabs: {
-              left: [{ id: 'left-2', type: 'terminal', title: 'Terminal' }],
-              right: [{ id: 'right-2', type: 'browser', title: 'Browser', url: 'https://example.com' }]
-            },
-            activeTab: { left: 'left-2', right: 'right-2' },
-            splitOpen: true,
-            splitRatio: 0.7
-          }
-        ]
-      }
-    ]
-
-    const state = buildWindowViewState(nextProjects, DEFAULT_CONFIG, {
-      selectedProjectId: 'project-1',
-      selectedTaskId: 'task-1',
-      taskStates: {
-        'task-1': {
-          activeTab: { left: 'left-1', right: null },
-          splitOpen: false,
-          splitRatio: 0.5
-        }
-      }
-    })
-
-    expect(state.taskStates['task-2']).toEqual({
-      activeTab: { left: 'left-2', right: 'right-2' },
-      splitOpen: true,
-      splitRatio: 0.7
-    })
   })
 
   it('seeds expandedProjectIds from the resolved selection when seed has none', () => {

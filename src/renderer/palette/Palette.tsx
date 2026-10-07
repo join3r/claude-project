@@ -20,6 +20,7 @@ import type { PaletteEntity, ScoredResult, Prefix, EntityKind } from './types'
 import { localProjectFolder } from '../../shared/external-editors'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
+import { findTaskInProject } from '../../shared/streams'
 
 type FooterPrefix = Prefix | '*'
 
@@ -157,7 +158,7 @@ export function Palette(): React.ReactElement | null {
       if (cmdId.startsWith('open-ide:')) {
         const editorId = cmdId.slice('open-ide:'.length)
         const project = actions.projects.find(p => p.id === actions.selectedProjectId)
-        const task = project?.tasks.find(t => t.id === actions.selectedTaskId)
+        const task = findTaskInProject(project, actions.selectedTaskId)
         const folder = localProjectFolder(project, task ?? null)
         if (folder) void openWorkspaceInIde(editorId, folder)
       } else {
@@ -171,16 +172,16 @@ export function Palette(): React.ReactElement | null {
       const [, projectId, taskId] = id.split(':')
       actions.switchToTask(projectId, taskId)
     } else if (e.kind === 'tab') {
-      const [, projectId, taskId, pane, tabId] = id.split(':')
+      const [, projectId, taskId, tabId] = id.split(':')
       actions.switchToTask(projectId, taskId)
-      actions.setActiveTab(projectId, taskId, pane as 'left' | 'right', tabId)
+      actions.setActiveTab(projectId, taskId, tabId)
     } else if (e.kind === 'note') {
       const [, projectId, noteId] = id.split(':')
       // The selected task only means something inside the selected project;
       // for a note from another project let the app resolve that project's
       // own landing task.
       const taskId = projectId === actions.selectedProjectId ? actions.selectedTaskId : null
-      actions.openOrFocusNoteTab(projectId, taskId, 'left', noteId)
+      actions.openOrFocusNoteTab(projectId, taskId, 'focused', noteId)
     }
     setOpen(false)
   }, [results, actions])

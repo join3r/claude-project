@@ -3,6 +3,7 @@ import {
   normalizeRelayUrl,
   type MobileConfig,
   type MobileConnectionState,
+  type MobileIncompatiblePhone,
   type MobilePairedDevice,
   type MobilePairingInvite,
   type MobilePendingRequest,
@@ -101,6 +102,11 @@ export interface ChannelHooks {
    * message 2 says. Called synchronously, before message 2 is written.
    */
   onHello(hello: VerifiedHello): HandshakeResult
+  /**
+   * Message 1 named a protocol version this desktop can't speak (§4.3); message 2
+   * answers `incompatible`. `update` is the side that is too old.
+   */
+  onIncompatible?(info: { update: 'phone' | 'desktop'; deviceName?: string }): void
   /** Message 2 went out; transport messages may flow (for `ok` and `pending`). */
   onEstablished(result: HandshakeResult): void
   /** A decrypted, parsed app message (SPEC.md §4.4). Unknown types never reach here. */
@@ -277,6 +283,8 @@ export class MobileService {
   /** Bumped by every start/cancel so a slow `createInvite` cannot resurrect a cancelled one. */
   private inviteGeneration = 0
   private pending: PendingRequest | null = null
+  /** Phones whose last handshake was refused for its version, by phone ID (SPEC.md §4.3). */
+  private readonly incompatible = new Map<string, MobileIncompatiblePhone>()
   private pendingTimer: unknown = null
   private acceptedWhileAway: AcceptedWhileAway | null = null
   private inboxTimer: unknown = null
@@ -319,8 +327,16 @@ export class MobileService {
     const config = this.deps.getConfig()
     const pairings = this.deps.pairings.list()
     const devices: MobilePairedDevice[] = pairings
-      .map((p) => ({ id: p.id, name: p.name, pairedAt: p.pairedAt, lastSeen: p.lastSeen, online: this.online.has(p.id), push: !!p.push }))
+      .map((p) => {
+        const outdated = this.incompatible.get(p.id)?.update
+        return { id: p.id, name: p.name, pairedAt: p.pairedAt, lastSeen: p.lastSeen, online: this.online.has(p.id), push: !!p.push, ...(outdated ? { outdated } : {}) }
+      })
       .sort((a, b) => a.pairedAt - b.pairedAt)
+    // A pairing attempt from an app too old (or too new) for this desktop.
+    const unpaired = [...this.incompatible.entries()]
+      .filter(([id]) => !this.deps.pairings.get(id))
+      .map(([, phone]) => phone)
+      .sort((a, b) => b.at - a.at)[0]
     return {
       enabled: config.enabled,
       relayUrl: config.relayUrl,
@@ -335,7 +351,8 @@ export class MobileService {
             online: this.online.has(this.pending.phoneId) || this.sessions.has(this.pending.phoneId)
           }
         : null,
-      devices
+      devices,
+      ...(unpaired ? { incompatible: unpaired } : {})
     }
   }
 
@@ -450,6 +467,7 @@ export class MobileService {
       if (session.role === 'paired') session.channel.send({ t: 'evt', e: 'pairing', status: 'revoked' })
       this.dropSession(phoneId)
     }
+    this.incompatible.delete(phoneId)
     const removed = this.deps.pairings.remove(phoneId)
     if (!removed) throw new MobileError('No such paired device')
     // Kept until the relay has it: a phone the relay still routes could keep talking.
@@ -676,7 +694,16 @@ export class MobileService {
       sendFrame: (data) => {
         this.transport?.send({ t: 'frame', to: phoneId, data: b64uEncode(data) })
       },
+      onIncompatible: ({ update }) => {
+        // The hello's own deviceName is unauthenticated; only a paired phone's stored name is shown.
+        const name = this.deps.pairings.get(phoneId)?.name ?? 'A phone'
+        this.incompatible.set(phoneId, { name, update, at: this.timers.now() })
+        this.log(`handshake phone=${phoneId} result=incompatible update=${update}`)
+        this.emitState()
+      },
       onHello: (hello) => {
+        // Its version is fine now (it updated, or this desktop did).
+        if (this.incompatible.delete(phoneId)) this.emitState()
         // A new handshake on an existing channel starts a new session.
         session.seq = 0
         session.lastInboxKey = null

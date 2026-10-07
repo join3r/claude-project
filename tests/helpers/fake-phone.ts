@@ -2,6 +2,8 @@ import {
   DEVTOOL_NOISE_PROLOGUE,
   FrameKind,
   FramedTransport,
+  MIN_PROTOCOL_VERSION,
+  PROTOCOL_VERSION,
   b64uDecode,
   createInitiator,
   decodeEnvelope,
@@ -47,7 +49,7 @@ export class FakePhone {
 
   hello(kind: 'pair' | 'resume', secret?: Uint8Array): PhoneHello {
     return {
-      v: 1, min: 1, app: 'ios/test', features: [], kind, deviceName: this.name, ed: b64uEncode(this.ed.pub),
+      v: PROTOCOL_VERSION, min: MIN_PROTOCOL_VERSION, app: 'ios/test', features: [], kind, deviceName: this.name, ed: b64uEncode(this.ed.pub),
       ...(kind === 'pair' && secret ? { proof: b64uEncode(derivePairProof(secret)) } : {})
     }
   }

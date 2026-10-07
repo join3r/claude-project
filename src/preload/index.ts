@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppConfig,
-  CleanupActivity,
   CommitHistoryResult,
   DirectoryEntry,
   GitOperationResult,
@@ -22,8 +21,11 @@ import type {
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
   WorkspaceListBranchesRequest,
+  WorkspaceRestoreRequest,
+  WorkspaceRestoreResult,
   WindowViewState
 } from '../shared/types'
+import type { ArchivedStream, ArchivedTask, ProjectArchive } from '../shared/archive'
 import type { CondaListResult } from '../shared/conda'
 import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 import type { AgentActivity } from '../shared/agent-activity'
@@ -46,12 +48,19 @@ const api = {
     return () => ipcRenderer.removeListener('projects-updated', handler)
   },
 
-  // Idle task cleanup runs entirely in main — a window only reports what main
+  // A phone's task close runs entirely in main — a window only reports what main
   // cannot see (its unsaved buffers) and reacts to what main removed.
   reportDirtyTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('report-dirty-tabs', tabIds),
   /** Status of a tab main has no hooks for (Codex, shells), for the phone's inbox. */
   reportTabStatus: (tabId: string, status: TabStatusValue): Promise<void> => ipcRenderer.invoke('report-tab-status', tabId, status),
-  getCleanupActivity: (): Promise<CleanupActivity> => ipcRenderer.invoke('get-cleanup-activity'),
+  /** This window moved a task to another directory: end these tabs' processes everywhere. */
+  restartTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('tabs-restart', tabIds),
+  /** Another window moved a task: drop these tabs, which mount again in the new directory. */
+  onTabsRestart: (callback: (event: { tabIds: string[] }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: { tabIds: string[] }) => callback(payload)
+    ipcRenderer.on('tabs-restart', handler)
+    return () => ipcRenderer.removeListener('tabs-restart', handler)
+  },
   onTasksRemoved: (callback: (removal: TaskRemoval) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, removal: TaskRemoval) => callback(removal)
     ipcRenderer.on('tasks-removed', handler)
@@ -177,6 +186,19 @@ const api = {
     ipcRenderer.invoke('codex-read-session', cwd, afterTs, projectId, sshConfig),
 
   // Claude session existence check (before spawning with --resume)
+  /**
+   * Before a task moves from `fromDir` to `toDir`: copy its Claude/Pi sessions into
+   * the new directory's session folder, and say which of `dirs` exist there.
+   */
+  taskMovePrepare: (
+    fromDir: string,
+    toDir: string,
+    sessions: Array<{ kind: 'claude' | 'pi'; sessionId: string }>,
+    dirs: string[],
+    projectId?: string,
+    sshConfig?: SshConfig
+  ): Promise<{ dirsExist: boolean[] }> =>
+    ipcRenderer.invoke('task-move-prepare', fromDir, toDir, sessions, dirs, projectId, sshConfig),
   claudeSessionExists: (cwd: string, sessionId: string, projectId?: string, sshConfig?: SshConfig): Promise<boolean> =>
     ipcRenderer.invoke('claude-session-exists', cwd, sessionId, projectId, sshConfig),
 
@@ -290,6 +312,11 @@ const api = {
     ipcRenderer.on('menu-reload-tab', handler)
     return () => ipcRenderer.removeListener('menu-reload-tab', handler)
   },
+  onMenuNewStream: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-new-stream', handler)
+    return () => ipcRenderer.removeListener('menu-new-stream', handler)
+  },
   onMenuNewTask: (callback: () => void): (() => void) => {
     const handler = () => callback()
     ipcRenderer.on('menu-new-task', handler)
@@ -387,6 +414,28 @@ const api = {
   }> => ipcRenderer.invoke('workspace-create', request),
   workspaceDelete: (request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> =>
     ipcRenderer.invoke('workspace-delete', request),
+  /** An archived stream's worktree back from its branch (`branch-missing` when it was discarded). */
+  workspaceRestore: (request: WorkspaceRestoreRequest): Promise<WorkspaceRestoreResult> =>
+    ipcRenderer.invoke('workspace-restore', request),
+
+  // Archive: `<config dir>/archive/<projectId>.json`. Each change resolves to the archive as it now is.
+  archiveLoad: (projectId: string): Promise<ProjectArchive> => ipcRenderer.invoke('archive-load', projectId),
+  archiveAddTasks: (projectId: string, entries: ArchivedTask[]): Promise<ProjectArchive> =>
+    ipcRenderer.invoke('archive-add-tasks', projectId, entries),
+  archiveAddStream: (projectId: string, entry: ArchivedStream): Promise<ProjectArchive> =>
+    ipcRenderer.invoke('archive-add-stream', projectId, entry),
+  archiveRemove: (projectId: string, ids: { tasks?: string[]; streams?: string[] }): Promise<ProjectArchive> =>
+    ipcRenderer.invoke('archive-remove', projectId, ids),
+  /** Scrollback of archived tabs deleted for good. */
+  archiveDeleteTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('archive-delete-tabs', tabIds),
+  /** A Claude session's messages (the SDK's), for an archived task's read-only view. */
+  archiveTranscript: (sessionId: string, cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<unknown[]> =>
+    ipcRenderer.invoke('archive-transcript', sessionId, cwd, projectId, sshConfig),
+  onArchiveChanged: (callback: (projectId: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, projectId: string) => callback(projectId)
+    ipcRenderer.on('archive-changed', handler)
+    return () => ipcRenderer.removeListener('archive-changed', handler)
+  },
 
   // Native notebooks. One jupyter_client helper per tab, local conda env only.
   notebookKernelStart: (

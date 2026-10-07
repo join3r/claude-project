@@ -17,7 +17,8 @@ import {
 import type { MobilePairing, MobilePushRegistration } from '../src/main/mobile/pairings-store'
 import { b64uEncode, deviceId, type PhoneHello } from '../protocol/ts/index.ts'
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig, type MobileState } from '../src/shared/mobile'
-import { createHomeTask, type ProjectsData, type TabStatusValue } from '../src/shared/types'
+import type { ProjectsData, TabStatusValue } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 // ---- fakes -------------------------------------------------------------------
 
@@ -135,7 +136,7 @@ function hello(
   remoteStatic: Uint8Array = keys.xBytes
 ): VerifiedHello {
   return {
-    hello: { v: 1, min: 1, app: 'ios/0.1.0', features: [], kind: 'resume', deviceName: 'Test iPhone', ed: keys.ed, ...extra },
+    hello: { v: 2, min: 2, app: 'ios/0.2.0', features: [], kind: 'resume', deviceName: 'Test iPhone', ed: keys.ed, ...extra },
     remoteStatic
   }
 }
@@ -144,13 +145,13 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
-    projects: [{
+    projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/x',
-      tasks: [createHomeTask('p1').task, {
-        id: 't1', name: 'fix', tabs: { left: [{ id: 'tab1', type: 'claude', title: 'Claude' }], right: [] },
-        activeTab: { left: 'tab1', right: null }, splitOpen: false, splitRatio: 0.5
+      tasks: [{
+        id: 't1', name: 'fix', tabs: { left: [{ id: 'tab1', type: 'claude', title: 'Claude' }] },
+        activeTab: { left: 'tab1' }
       }]
-    }],
+    })],
     tags: [], projectOrder: ['p1'], pinnedItems: []
   }
   const statuses: Record<string, TabStatusValue> = {}
@@ -224,6 +225,22 @@ function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?
 }
 
 // ---- tests -------------------------------------------------------------------
+
+describe('MobileService version refusals (SPEC.md §4.3)', () => {
+  it('flags a paired phone on an old app until it handshakes again, and an unpaired one trying to pair', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onIncompatible?.({ update: 'phone', deviceName: 'ignored' })
+    expect(env.service.getState().devices[0]).toMatchObject({ name: 'Phone', outdated: 'phone' })
+    expect(env.service.getState().incompatible).toBeUndefined()
+    env.channel.handshake(hello(env.keys))
+    expect(env.service.getState().devices[0].outdated).toBeUndefined()
+
+    const stranger = env.frameFrom(phoneKeys(2).id)
+    stranger.hooks.onIncompatible?.({ update: 'phone', deviceName: "Old iPhone" })
+    expect(env.service.getState().incompatible).toMatchObject({ name: 'A phone', update: 'phone' })
+    expect(env.states.at(-1)?.incompatible?.name).toBe('A phone')
+  })
+})
 
 describe('MobileService state', () => {
   it('stays disabled and connects nowhere while Mobile is off', () => {
@@ -639,20 +656,20 @@ describe('MobileService task.close and tab.close (SPEC.md §8.7, §8.8)', () => 
     const env = pairedSetup({
       closeTask: async (params) => {
         calls.push(params)
-        return params.discardWorkspace
+        return params.stopWorking
           ? { ok: true, result: { closed: true } }
-          : { ok: true, result: { closed: false, blocker: 'unmerged', branch: 'fix', baseBranch: 'main' } }
+          : { ok: true, result: { closed: false, blocker: 'working' } }
       }
     })
     env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.close', params: { taskId: 't1' } })
     await new Promise((resolve) => setImmediate(resolve))
-    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { closed: false, blocker: 'unmerged', branch: 'fix', baseBranch: 'main' } })
-    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'task.close', params: { taskId: 't1', discardWorkspace: true, keepBranch: true } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { closed: false, blocker: 'working' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'task.close', params: { taskId: 't1', stopWorking: true, discardUnsaved: true } })
     await new Promise((resolve) => setImmediate(resolve))
     expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: true, result: { closed: true } })
     env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'task.close', params: {} })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
-    expect(calls).toEqual([{ taskId: 't1' }, { taskId: 't1', discardWorkspace: true, keepBranch: true }])
+    expect(calls).toEqual([{ taskId: 't1' }, { taskId: 't1', stopWorking: true, discardUnsaved: true }])
   })
 
   it('closes a tab, passing errors through', async () => {

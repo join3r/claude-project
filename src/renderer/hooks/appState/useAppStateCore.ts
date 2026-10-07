@@ -2,11 +2,9 @@ import { useState, useEffect, useCallback, useRef, type Dispatch, type MutableRe
 import {
   buildWindowViewState,
   createDefaultWindowViewState,
-  ensureHomeTasks,
-  pruneUnusedTags,
-  reconcileTaskViewState
+  pruneUnusedTags
 } from '../../../shared/types'
-import type { AppConfig, NotesRecord, Project, ProjectsData, Task, TaskViewState, WindowViewState } from '../../../shared/types'
+import type { AppConfig, NotesRecord, Project, ProjectsData, WindowViewState } from '../../../shared/types'
 import { applyQueuedStateUpdates, type StateUpdater } from '../stateHydration'
 import { RevisionSyncClient } from '../revisionSync'
 import { backfillLifetimeStats } from '../lifetimeStats'
@@ -51,7 +49,6 @@ export interface AppStateCore {
   mutateProjects: MutateProjects
   mutateNotes: MutateNotes
   updateWindowViewState: UpdateWindowViewState
-  getTaskViewStateForTask: (task: Task) => TaskViewState
   updateConfig: (updates: Partial<AppConfig>) => void
 
   stateSyncError: string | null
@@ -178,10 +175,6 @@ export function useAppStateCore(): AppStateCore {
     })
   }, [])
 
-  const getTaskViewStateForTask = useCallback((task: Task): TaskViewState => {
-    return reconcileTaskViewState(task, windowViewStateRef.current.taskStates[task.id])
-  }, [])
-
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
     const updater: StateUpdater<AppConfig> = (prev) => ({ ...prev, ...updates })
     if (!configLoadedRef.current) {
@@ -211,11 +204,10 @@ export function useAppStateCore(): AppStateCore {
       const projectsWithLifetime = hydratedProjectsData.projects.map(p =>
         backfillLifetimeStats(p, loadedNotes)
       )
-      const { projects: migratedProjects } = ensureHomeTasks(projectsWithLifetime)
-      const finalProjectsData = { ...hydratedProjectsData, projects: migratedProjects }
+      const finalProjectsData = { ...hydratedProjectsData, projects: projectsWithLifetime }
 
       const hydratedWindowViewState = buildWindowViewState(
-        migratedProjects,
+        projectsWithLifetime,
         hydratedConfig,
         loadedWindowViewState,
         finalProjectsData.tags
@@ -312,7 +304,6 @@ export function useAppStateCore(): AppStateCore {
     mutateProjects,
     mutateNotes,
     updateWindowViewState,
-    getTaskViewStateForTask,
     updateConfig,
     stateSyncError,
     dismissStateSyncError

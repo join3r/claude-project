@@ -1,7 +1,7 @@
 import DevToolKit
 import SwiftUI
 
-/// Projects → tasks for one desktop, or all desktops merged.
+/// Projects → streams → tasks for one desktop, or all desktops merged.
 struct TaskListView: View {
     @Environment(AppModel.self) private var model
     let scope: SidebarSelection
@@ -53,6 +53,8 @@ struct TaskListView: View {
                         switch pin {
                         case .task(let task, let project):
                             taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: true)
+                        case .stream(let stream, let project):
+                            pinnedStream(stream, project: project, desktop: desktop, inbox: inbox)
                         case .project(let project):
                             pinnedProject(project, desktop: desktop, inbox: inbox)
                         }
@@ -63,36 +65,27 @@ struct TaskListView: View {
             }
             ForEach(inbox.projects) { project in
                 Section {
-                    ForEach(sortedTasks(project)) { task in
-                        taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: false)
-                    }
+                    projectTasks(project, desktop: desktop, inbox: inbox)
                     if project.tasks.isEmpty {
                         Text("No tasks").foregroundStyle(.secondary)
                     }
                     if model.supports(DesktopFeature.taskNew, on: desktop.id) {
                         Button {
-                            newTask = NewTaskTarget(desktopId: desktop.id, projectId: project.id, workspace: false)
+                            newTask = NewTaskTarget(desktopId: desktop.id, projectId: project.id)
                         } label: {
                             Label("New task", systemImage: "plus")
                         }
                         .disabled(offline)
-                        if model.supports(DesktopFeature.taskWorkspace, on: desktop.id) {
-                            Button {
-                                newTask = NewTaskTarget(desktopId: desktop.id, projectId: project.id, workspace: true)
-                            } label: {
-                                Label("New workspace", systemImage: "arrow.triangle.branch")
-                            }
-                            .disabled(offline)
-                        }
                     }
                 } header: {
                     HStack {
                         ProjectHeader(project: project, desktopName: showDesktop ? desktop.name : nil)
                         Spacer(minLength: 8)
                         if canPin(desktop) {
-                            let pinned = inbox.isPinned(projectId: project.id)
+                            let pin = InboxPin.project(project)
+                            let pinned = inbox.isPinned(pin)
                             Button {
-                                togglePin(InboxPin(projectId: project.id), pinned: pinned, desktop: desktop)
+                                togglePin(pin, pinned: pinned, desktop: desktop)
                             } label: {
                                 Image(systemName: pinned ? "pin.fill" : "pin")
                                     .foregroundStyle(pinned ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
@@ -120,11 +113,85 @@ struct TaskListView: View {
         }
     }
 
+    /// A project's tasks grouped by stream (§8.3), each group under a stream
+    /// header row. A project with nothing outside `main` lists its tasks
+    /// without one.
+    @ViewBuilder
+    private func projectTasks(_ project: InboxProject, desktop: DesktopRecord, inbox: Inbox) -> some View {
+        let groups = project.streamGroups
+        let headers = groups.count > 1 || groups.contains { !$0.stream.isMain && !$0.stream.name.isEmpty }
+        ForEach(groups, id: \.stream.id) { group in
+            if headers && !group.stream.name.isEmpty {
+                streamHeader(group.stream, project: project, desktop: desktop, inbox: inbox)
+            }
+            ForEach(sorted(group.tasks)) { task in
+                taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: false)
+            }
+        }
+    }
+
+    /// A stream's header row inside its project: name and branch, with Pin
+    /// and New task here.
+    private func streamHeader(_ stream: InboxStream, project: InboxProject, desktop: DesktopRecord, inbox: Inbox) -> some View {
+        let offline = model.isOffline(desktop.id)
+        let pin = InboxPin.stream(stream, in: project)
+        let pinned = inbox.isPinned(pin)
+        return HStack(spacing: 6) {
+            StreamLabel(stream: stream)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if pinned {
+                Image(systemName: "pin.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Pinned")
+            }
+            Spacer(minLength: 0)
+        }
+        .listRowSeparator(.hidden, edges: .top)
+        .opacity(offline ? 0.55 : 1)
+        .accessibilityAddTraits(.isHeader)
+        .swipeActions(edge: .leading) {
+            if canPin(desktop) && !offline {
+                Button {
+                    togglePin(pin, pinned: pinned, desktop: desktop)
+                } label: {
+                    Label(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.slash" : "pin")
+                }
+                .tint(.orange)
+            }
+        }
+        .contextMenu {
+            streamMenu(stream, project: project, desktop: desktop, pin: pin, pinned: pinned)
+        }
+    }
+
+    @ViewBuilder
+    private func streamMenu(_ stream: InboxStream, project: InboxProject, desktop: DesktopRecord, pin: InboxPin, pinned: Bool) -> some View {
+        let offline = model.isOffline(desktop.id)
+        if model.supports(DesktopFeature.taskNew, on: desktop.id) {
+            Button {
+                newTask = NewTaskTarget(desktopId: desktop.id, projectId: project.id, streamId: stream.id)
+            } label: {
+                Label("New task in \(stream.name)", systemImage: "plus")
+            }
+            .disabled(offline)
+        }
+        if canPin(desktop) {
+            Button {
+                togglePin(pin, pinned: pinned, desktop: desktop)
+            } label: {
+                Label(pinned ? "Unpin stream" : "Pin stream", systemImage: pinned ? "pin.slash" : "pin")
+            }
+            .disabled(offline)
+        }
+    }
+
     /// A task row: selects the task, swipes to pin or close it.
     private func taskRow(_ task: InboxTask, project: InboxProject, desktop: DesktopRecord, inbox: Inbox, showProject: Bool) -> some View {
         let offline = model.isOffline(desktop.id)
-        let pin = InboxPin(projectId: project.id, taskId: task.id)
-        let pinned = inbox.isPinned(projectId: project.id, taskId: task.id)
+        let pin = InboxPin.task(task, in: project)
+        let pinned = inbox.isPinned(pin)
         return TaskRow(task: task, project: showProject ? project : nil)
             .tag(TaskRef(desktopId: desktop.id, taskId: task.id))
             .opacity(offline ? 0.55 : 1)
@@ -162,14 +229,50 @@ struct TaskListView: View {
             }
     }
 
+    /// A pinned stream (`Project › Stream`), opened in place to its tasks as
+    /// the desktop's Pinned list does.
+    private func pinnedStream(_ stream: InboxStream, project: InboxProject, desktop: DesktopRecord, inbox: Inbox) -> some View {
+        let offline = model.isOffline(desktop.id)
+        let pin = InboxPin.stream(stream, in: project)
+        let tasks = sorted(project.tasks(in: stream))
+        return DisclosureGroup {
+            ForEach(tasks) { task in
+                taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: false)
+            }
+            if tasks.isEmpty {
+                Text("No tasks").foregroundStyle(.secondary)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                ProjectHeader(project: project, desktopName: nil)
+                    .layoutPriority(-1)
+                Text("›").foregroundStyle(.tertiary)
+                StreamLabel(stream: stream)
+            }
+            .lineLimit(1)
+            .opacity(offline ? 0.55 : 1)
+        }
+        .swipeActions(edge: .leading) {
+            if canPin(desktop) && !offline {
+                Button {
+                    togglePin(pin, pinned: true, desktop: desktop)
+                } label: {
+                    Label("Unpin", systemImage: "pin.slash")
+                }
+                .tint(.orange)
+            }
+        }
+        .contextMenu {
+            streamMenu(stream, project: project, desktop: desktop, pin: pin, pinned: true)
+        }
+    }
+
     /// A pinned project, opened in place to its tasks as the desktop's Pinned list does.
     private func pinnedProject(_ project: InboxProject, desktop: DesktopRecord, inbox: Inbox) -> some View {
         let offline = model.isOffline(desktop.id)
-        let pin = InboxPin(projectId: project.id)
+        let pin = InboxPin.project(project)
         return DisclosureGroup {
-            ForEach(sortedTasks(project)) { task in
-                taskRow(task, project: project, desktop: desktop, inbox: inbox, showProject: false)
-            }
+            projectTasks(project, desktop: desktop, inbox: inbox)
             if project.tasks.isEmpty {
                 Text("No tasks").foregroundStyle(.secondary)
             }
@@ -223,10 +326,10 @@ struct TaskListView: View {
     }
 
     /// Tasks that need you first (newest attention first), then by last interaction.
-    private func sortedTasks(_ project: InboxProject) -> [InboxTask] {
-        project.tasks.sorted { a, b in
-            let aAttention = a.summaryStatus == .attention
-            let bAttention = b.summaryStatus == .attention
+    private func sorted(_ tasks: [InboxTask]) -> [InboxTask] {
+        tasks.sorted { a, b in
+            let aAttention = a.status == .attention
+            let bAttention = b.status == .attention
             if aAttention != bAttention { return aAttention }
             if a.sortTimestamp != b.sortTimestamp { return a.sortTimestamp > b.sortTimestamp }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
@@ -302,9 +405,41 @@ struct ProjectHeader: View {
     }
 }
 
+/// A stream's name, with its branch when it has a worktree.
+struct StreamLabel: View {
+    let stream: InboxStream
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(stream.name)
+            if let branch = stream.branch {
+                // A branch named like its stream (the default) shows as the icon only.
+                Label(branch, systemImage: "arrow.triangle.branch")
+                    .labelStyle(StreamBranchLabelStyle(iconOnly: branch == stream.name))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Branch \(branch)")
+            }
+        }
+        .lineLimit(1)
+    }
+}
+
+private struct StreamBranchLabelStyle: LabelStyle {
+    let iconOnly: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.icon
+            if !iconOnly { configuration.title }
+        }
+    }
+}
+
 struct TaskRow: View {
     let task: InboxTask
-    /// Set where the row is out of its project's section (the Pinned list).
+    /// Set where the row is out of its project's section (the Pinned list):
+    /// it then shows `Project · Stream`.
     var project: InboxProject? = nil
 
     var body: some View {
@@ -313,39 +448,31 @@ struct TaskRow: View {
                 HStack(spacing: 6) {
                     if task.unread { UnreadDot() }
                     Text(task.name)
-                        .font(.body.weight(task.summaryStatus == .attention || task.unread ? .semibold : .regular))
+                        .font(.body.weight(task.status == .attention || task.unread ? .semibold : .regular))
                         .lineLimit(1)
                 }
-                if let branch = task.branch {
-                    Label(branch, systemImage: "arrow.triangle.branch")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .labelStyle(.titleAndIcon)
-                        .lineLimit(1)
-                        .accessibilityLabel("Branch \(branch)")
-                }
-                Text(project.map { "\(projectLabel($0)) · \(subtitle)" } ?? subtitle)
+                Text(project.map { "\(place($0)) · \(subtitle)" } ?? subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            StatusBadge(status: task.summaryStatus, hideIdle: true)
+            StatusBadge(status: task.status, hideIdle: true)
         }
         .padding(.vertical, 2)
         .alignmentGuide(.listRowSeparatorLeading) { d in d[.leading] }
     }
 
-    private func projectLabel(_ project: InboxProject) -> String {
-        if let emoji = project.emoji, !emoji.isEmpty { return "\(emoji) \(project.name)" }
-        return project.name
+    /// `Project · Stream`.
+    private func place(_ project: InboxProject) -> String {
+        let name = project.emoji.map { $0.isEmpty ? project.name : "\($0) \(project.name)" } ?? project.name
+        return task.streamName.isEmpty ? name : "\(name) · \(task.streamName)"
     }
 
-    /// The activity of the most relevant tab, else a tab count and recency.
+    /// What the task is doing, else a tab count and recency.
     private var subtitle: String {
-        let lead = task.tabs.max { $0.status.priority < $1.status.priority }
-        if let lead, lead.status != .idle, let activity = lead.activity, !activity.isEmpty {
-            return "\(lead.title): \(activity)"
+        if task.status != .idle, let activity = InboxClock.activity(task) {
+            return activity
         }
         let tabs = task.tabs.count == 1 ? "1 tab" : "\(task.tabs.count) tabs"
         guard let last = task.lastInteractedAt else { return tabs }

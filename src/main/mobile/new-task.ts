@@ -1,15 +1,18 @@
 import { randomUUID } from 'crypto'
-import { CLAUDE_CHAT_LABEL, isShellCommandProject, type Project, type ProjectsData, type Tab, type Task, type WorkspaceConfig } from '../../shared/types'
-import { defaultBaseBranch, workspaceBranchName } from '../../shared/branch-name'
+import { CLAUDE_CHAT_LABEL, createMainStream, isShellCommandProject, type Project, type ProjectsData, type Tab, type Task } from '../../shared/types'
 import { taskNameFromPrompt } from '../../shared/task-name'
 import { AppErrorCode } from '../../../protocol/ts/index.ts'
+import { addTaskToStream, currentStreamId, resolveMainTabId, singlePane, withLastTask } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 
 /**
- * `task.new` (SPEC.md §8.4): a new task at the end of a project, named after the
- * first prompt, with one Claude chat tab in its left pane. Main commits it itself,
- * like `chat.new`, so no window has to be open and none of them switches to it;
- * sending the prompt is the caller's next step.
+ * `task.new` (SPEC.md §8.4): a new task at the end of one of a project's streams
+ * (the phone's pick, else the stream the project was last used in, else `main`),
+ * named after the first prompt, with one Claude chat tab in its only pane. The
+ * stream becomes the project's most recently used one, so the phone's next New
+ * task defaults to it. Main commits it itself, like `chat.new`, so no window has
+ * to be open and none of them switches to it; sending the prompt is the caller's
+ * next step.
  */
 
 export type NewTaskResult =
@@ -32,79 +35,38 @@ export function addTaskWithChat(
   data: ProjectsData,
   projectId: string,
   prompt: string,
+  streamId?: string,
   ids: () => string = randomUUID,
-  now: number = Date.now(),
-  workspace?: WorkspaceConfig
+  now: number = Date.now()
 ): NewTaskResult {
   const found = newTaskProject(data, projectId)
   if (!found.ok) return found
   const { project } = found
+  if (streamId !== undefined && !project.streams.some((stream) => stream.id === streamId)) {
+    return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
+  }
   const tab: Tab = { id: ids(), type: 'claude-chat', title: CLAUDE_CHAT_LABEL, sessionId: ids() }
+  const mainTabId = resolveMainTabId([tab])
   const task: Task = {
     id: ids(),
     name: taskNameFromPrompt(prompt),
-    tabs: { left: [tab], right: [] },
-    activeTab: { left: tab.id, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
-    lastInteractedAt: now,
-    ...(workspace ? { workspace } : {})
+    panes: singlePane([tab]),
+    ...(mainTabId ? { mainTabId } : {}),
+    lastInteractedAt: now
   }
+  const target = streamId ?? currentStreamId(project)
+  const withTask: Project = withLastTask(
+    target
+      ? addTaskToStream(project, target, task)
+      : { ...project, streams: [createMainStream(project.id, [task]), ...project.streams] },
+    task.id
+  )
   const stats = project.lifetimeStats ?? { tasksCreated: 0, notesCreated: 0 }
   const next: ProjectsData = {
     ...data,
     projects: data.projects.map((p) =>
-      p !== project
-        ? p
-        : { ...p, tasks: [...(p.tasks ?? []), task], lifetimeStats: { ...stats, tasksCreated: stats.tasksCreated + 1 } }
+      p !== project ? p : { ...withTask, lifetimeStats: { ...stats, tasksCreated: stats.tasksCreated + 1 } }
     )
   }
   return { ok: true, data: next, taskId: task.id, tabId: tab.id }
-}
-
-/** Git for {@link makeTaskWorkspace}: the IPC's helpers in production. */
-export interface WorkspaceGit {
-  listBranches(project: Project): Promise<string[]>
-  create(project: Project, name: string, baseBranch: string): Promise<WorkspaceConfig>
-}
-
-const WORKSPACE_ATTEMPTS = 3
-
-/**
- * `task.new` with `workspace` (SPEC.md §8.6): what + Workspace does on the desktop's
- * first prompt — a worktree on a new branch named after the prompt, forked from
- * main, else master, else the first branch. A branch made since the listing steps
- * to the next free name, as in the prompt box.
- */
-export async function makeTaskWorkspace(
-  project: Project,
-  prompt: string,
-  git: WorkspaceGit
-): Promise<{ ok: true; workspace: WorkspaceConfig } | { ok: false; code: string; message: string }> {
-  let branches: string[]
-  try {
-    branches = await git.listBranches(project)
-  } catch (err) {
-    return { ok: false, code: AppErrorCode.Unsupported, message: `Could not list branches. Is this a git repository? ${errorText(err)}` }
-  }
-  const baseBranch = defaultBaseBranch(branches)
-  if (!baseBranch) return { ok: false, code: AppErrorCode.Unsupported, message: 'This repository has no branch to start a workspace from' }
-  const taken = [...branches]
-  for (let attempt = 1; ; attempt++) {
-    const name = workspaceBranchName(prompt, taken)
-    try {
-      return { ok: true, workspace: await git.create(project, name, baseBranch) }
-    } catch (err) {
-      const message = errorText(err)
-      if (attempt < WORKSPACE_ATTEMPTS && /already exists/i.test(message)) {
-        taken.push(name)
-        continue
-      }
-      return { ok: false, code: AppErrorCode.Internal, message }
-    }
-  }
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }

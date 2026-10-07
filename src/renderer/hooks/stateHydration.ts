@@ -1,4 +1,5 @@
 import type { AppConfig, Project, ProjectsData } from '../../shared/types'
+import { findTaskInProject, projectLastTaskId, withLastTask } from '../../shared/streams'
 
 export type StateUpdater<T> = (prev: T) => T
 
@@ -25,8 +26,8 @@ export function resolveInitialSelection(
     return { projectId: currentProjectId, taskId: currentTaskId }
   }
 
-  const candidateTaskId = config.lastTaskId ?? project.lastTaskId ?? null
-  const taskId = currentTaskId === null && candidateTaskId && project.tasks.some((task) => task.id === candidateTaskId)
+  const candidateTaskId = config.lastTaskId ?? projectLastTaskId(project) ?? null
+  const taskId = currentTaskId === null && candidateTaskId && findTaskInProject(project, candidateTaskId)
     ? candidateTaskId
     : currentTaskId
 
@@ -52,7 +53,8 @@ export function persistSelectionState(
   }
 
   const project = projectsData.projects.find((candidate) => candidate.id === selectedProjectId)
-  if (!project || !project.tasks.some((task) => task.id === selectedTaskId) || project.lastTaskId === selectedTaskId) {
+  const remembered = project ? withLastTask(project, selectedTaskId) : project
+  if (!project || remembered === project) {
     return { projectsData, config: nextConfig }
   }
 
@@ -62,7 +64,7 @@ export function persistSelectionState(
       ...projectsData,
       projects: projectsData.projects.map((candidate) => (
         candidate.id === selectedProjectId
-          ? { ...candidate, lastTaskId: selectedTaskId }
+          ? remembered!
           : candidate
       ))
     }

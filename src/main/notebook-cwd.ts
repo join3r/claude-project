@@ -5,10 +5,10 @@ type PathApi = typeof path.win32 | typeof path.posix
 
 export { NOTEBOOK_ERROR_CWD }
 
-/** Project folder plus each task worktree root. Kernel spawn may sit in any of these. */
+/** Project folder plus each stream's worktree root. Kernel spawn may sit in any of these. */
 export function notebookAllowedCwdRoots(project: {
   directory?: string
-  tasks?: Array<{ workspace?: { worktreePath?: string } }>
+  streams?: Array<{ workspace?: { worktreePath?: string } }>
 }): string[] {
   const roots: string[] = []
   const seen = new Set<string>()
@@ -21,8 +21,8 @@ export function notebookAllowedCwdRoots(project: {
     roots.push(trimmed)
   }
   add(project.directory)
-  for (const task of project.tasks ?? []) {
-    add(task.workspace?.worktreePath)
+  for (const stream of project.streams ?? []) {
+    add(stream.workspace?.worktreePath)
   }
   return roots
 }

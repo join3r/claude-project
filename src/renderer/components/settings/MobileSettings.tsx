@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { MobileConnectionState, MobileState } from '../../../shared/mobile'
+import type { MobileConnectionState, MobileState, MobileUpdateSide } from '../../../shared/mobile'
 import { isUnencryptedRemoteRelay, isValidRelayUrl, normalizeRelayUrl, UNENCRYPTED_RELAY_WARNING } from '../../../shared/mobile'
 import { Field, FormGroup, Group, GroupRow, GrpHead, HelperText, InlineConfirm, LinkBtn, SetBlock, Switch } from '../ui'
 import {
@@ -27,6 +27,13 @@ function connectionDot(connection: MobileConnectionState): string {
     case 'offline': return 'bg-ssh-disconnected'
     default: return 'bg-status-exited'
   }
+}
+
+/** What to do when a phone and this desktop speak different protocol versions. */
+function updateAdvice(update: MobileUpdateSide): string {
+  return update === 'phone'
+    ? 'Update DevTool on your iPhone. This desktop no longer talks to its version.'
+    : 'This phone needs a newer DevTool on this computer. Update DevTool here.'
 }
 
 function errorMessage(err: unknown): string {
@@ -188,6 +195,13 @@ export default function MobileSettings(): React.ReactElement {
           )}
         </div>
       </FormGroup>
+      {state.incompatible && (
+        <HelperText>
+          <span className="text-warn">
+            {state.incompatible.name}: {updateAdvice(state.incompatible.update)}
+          </span>
+        </HelperText>
+      )}
       {actionError && <HelperText><span className="text-danger">{actionError}</span></HelperText>}
 
       <GrpHead>Paired phones</GrpHead>
@@ -200,7 +214,9 @@ export default function MobileSettings(): React.ReactElement {
               key={device.id}
               icon={<span className={`w-1.5 h-1.5 rounded-full ${device.online ? 'bg-ssh-connected' : 'bg-status-exited'}`} />}
               label={device.name}
-              sub={`${device.online ? 'Online' : formatLastSeen(device.lastSeen, now)}${device.push ? ' · Notifications on' : ''}`}
+              sub={device.outdated
+                ? <span className="text-warn">{updateAdvice(device.outdated)}</span>
+                : `${device.online ? 'Online' : formatLastSeen(device.lastSeen, now)}${device.push ? ' · Notifications on' : ''}`}
               trailing={
                 <InlineConfirm
                   trigger="Revoke"

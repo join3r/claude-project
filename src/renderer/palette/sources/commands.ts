@@ -2,9 +2,10 @@
 import { commandRegistry } from '../CommandRegistry'
 import type { AppCtx } from '../types'
 import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
-import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
+import { AI_TAB_TYPES, AI_TAB_META, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
 import { claudeTabType } from '../../components/newTaskTabs'
+import { findStreamOfTask, findTaskInProject, taskTabs } from '../../../shared/streams'
 
 function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
   const { selectedProjectId, selectedTaskId, projects, pinnedItems } = actions
@@ -12,9 +13,10 @@ function currentPinTargets(actions: any): { project: PinnedItem | null; task: Pi
   const isPinned = (item: PinnedItem) => keys.has(pinnedItemKey(item))
   const project = projects.find((p: any) => p.id === selectedProjectId)
   const projectTarget: PinnedItem | null = project ? { type: 'project', projectId: project.id } : null
-  const task = project?.tasks.find((t: any) => t.id === selectedTaskId)
-  const taskTarget: PinnedItem | null = task && !isHomeTask(task)
-    ? { type: 'task', projectId: project.id, taskId: task.id }
+  const task = findTaskInProject(project, selectedTaskId)
+  const stream = findStreamOfTask(project, selectedTaskId)
+  const taskTarget: PinnedItem | null = task && stream
+    ? { type: 'task', projectId: project.id, streamId: stream.id, taskId: task.id }
     : null
   return { project: projectTarget, task: taskTarget, isPinned }
 }
@@ -61,7 +63,7 @@ commandRegistry.register({
   run: ctx => {
     const { selectedProjectId, selectedTaskId } = ctx.actions
     if (!selectedProjectId || !selectedTaskId) return
-    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'terminal')
+    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', 'terminal')
   }
 })
 
@@ -73,7 +75,7 @@ commandRegistry.register({
   run: ctx => {
     const { selectedProjectId, selectedTaskId } = ctx.actions
     if (!selectedProjectId || !selectedTaskId) return
-    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'editor')
+    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', 'editor')
   }
 })
 
@@ -85,7 +87,7 @@ commandRegistry.register({
   run: ctx => {
     const { selectedProjectId, selectedTaskId } = ctx.actions
     if (!selectedProjectId || !selectedTaskId) return
-    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'browser')
+    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', 'browser')
   }
 })
 
@@ -109,7 +111,7 @@ for (const aiType of AI_TAB_TYPES) {
     run: ctx => {
       const { selectedProjectId, selectedTaskId, config } = ctx.actions
       if (!selectedProjectId || !selectedTaskId) return
-      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
+      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
     }
   })
 }
@@ -129,9 +131,9 @@ commandRegistry.register({
 // the shortcut. The tab that had focus when the palette opened answers.
 function selectedTaskHasFileTab(actions: Pick<AppCtx['actions'], 'projects' | 'selectedProjectId' | 'selectedTaskId'>): boolean {
   const project = actions.projects?.find(p => p.id === actions.selectedProjectId)
-  const task = project?.tasks.find(t => t.id === actions.selectedTaskId)
+  const task = findTaskInProject(project, actions.selectedTaskId)
   if (!task) return false
-  return [...task.tabs.left, ...task.tabs.right].some(t => t.type === 'editor' || t.type === 'notebook')
+  return taskTabs(task).some(t => t.type === 'editor' || t.type === 'notebook')
 }
 
 function emitLinkToAgent(kind: 'selection' | 'file'): void {

@@ -1,6 +1,6 @@
 # DevTool mobile protocol
 
-This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.md), §1–§6. If this file and SPEC.md disagree, SPEC.md wins. Fix whichever one is wrong in the same change.
+This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.md), §1–§9. If this file and SPEC.md disagree, SPEC.md wins. Fix whichever one is wrong in the same change.
 
 ## Layers
 
@@ -9,12 +9,13 @@ This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.m
 3. **Relay (§3).** A WebSocket at `<relay>/v1` that carries JSON text frames. Each client answers an Ed25519 challenge, and then the relay routes opaque `frame.data` between authorized (or pending) desktop/phone pairs. Nothing is queued.
 4. **Channel (§4).** `frame.data` is `[kind] || body`, where the kind is 1 (Noise message 1), 2 (Noise message 2), 3 (transport) or 4 (reset). The protocol is `Noise_IK_25519_AESGCM_SHA256` with prologue `devtool-mobile-v1`, and the phone is the initiator. The cipher is AES-256-GCM, not ChaChaPoly, because Electron's BoringSSL-based Node `crypto` has no chacha20-poly1305. AESGCM nonces use a big-endian counter. The handshake payloads carry versions and the pair/resume decision. Transport messages carry JSON app messages (`req`/`res`/`evt`), M1 has `inbox.get`, the `inbox` event and the `pairing` event.
 5. **Chat (§6, M2).** Transport plaintext over 60000 bytes is split into fragments (`0x01 id i n chunk`, reassembled up to 4 MiB). The phone opens one Claude chat tab at a time (`chat.open`) and gets a windowed `ChatView`, then `evt chat` diffs (upserts, removes, the full prompt list), throttled to 4/s. `chat.send`, `chat.answer`, `chat.interrupt`, `chat.earlier` and `chat.detail` act on it.
+6. **Version 2: streams (§9).** The inbox carries the desktop's Project › Stream › Task model: projects list `streams`, tasks name their stream and carry one `status`, pins may be streams, `task.new` takes a `streamId`, and `task.close` archives. Version 1 peers get `incompatible`.
 
 ## Files
 
 | path | what |
 |---|---|
-| `SPEC.md` | The normative wire spec (§1–§5) |
+| `SPEC.md` | The normative wire spec (§1–§9) |
 | `ts/` | Dependency-free TypeScript (`node:crypto` and `node:buffer` only). Import everything from `ts/index.ts`. |
 | `ts/noise.ts` | Noise IK: `CipherState`, `SymmetricState`, `HandshakeState`, `createInitiator`/`createResponder`, and `NoiseTransport` after `split()` |
 | `ts/keys.ts`, `ts/derive.ts`, `ts/encoding.ts` | Keys from raw bytes, X25519/Ed25519, device IDs, HKDF derivations, b64u/hex |

@@ -6,8 +6,7 @@ import {
   setPendingPrompt,
   shouldNameTask,
   takePendingPrompt,
-  taskNameFromPrompt,
-  workspaceBranchName
+  taskNameFromPrompt
 } from '../src/renderer/components/promptBox'
 
 const allOn = { enableClaude: true, enableCodex: true, enablePi: true }
@@ -78,25 +77,5 @@ describe('pending prompts', () => {
     setPendingPrompt('t1', { text: 'hello' })
     expect(takePendingPrompt('t1')).toEqual({ text: 'hello' })
     expect(takePendingPrompt('t1')).toBeUndefined()
-  })
-})
-
-describe('workspaceBranchName', () => {
-  it('derives a git-safe branch from the first line', () => {
-    expect(workspaceBranchName('Fix the relay reconnect\nand add a test', [])).toBe('fix-the-relay-reconnect')
-  })
-
-  it('cuts long prompts at a word boundary', () => {
-    const name = workspaceBranchName('Refactor the mobile relay reconnect loop so it backs off exponentially', [])
-    expect(name.length).toBeLessThanOrEqual(40)
-    expect(name).toBe('refactor-the-mobile-relay-reconnect-loop')
-  })
-
-  it('falls back to task when nothing git-safe is left', () => {
-    expect(workspaceBranchName('???', [])).toBe('task')
-  })
-
-  it('steps past branches that already exist', () => {
-    expect(workspaceBranchName('fix it', ['fix-it', 'fix-it-2'])).toBe('fix-it-3')
   })
 })

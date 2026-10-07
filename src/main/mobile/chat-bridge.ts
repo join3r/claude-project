@@ -8,7 +8,8 @@ import {
   canAlwaysAllow
 } from '../../shared/chat-prompts'
 import { chatTabConfig, type ChatTabConfigShape } from '../../shared/chat-tab-config'
-import { isHomeTask, type Project, type ProjectsData, type Tab, type Task } from '../../shared/types'
+import type { Project, ProjectsData, Tab, Task } from '../../shared/types'
+import { projectTasks, taskTabs } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 import {
   chatDetail,
@@ -342,9 +343,8 @@ export class ChatBridge {
   private resolve(tabId: string): ResolvedTab | null {
     for (const project of this.deps.projects.peek().projects) {
       if (!isVisibleOnMobile(project)) continue
-      for (const task of project.tasks ?? []) {
-        if (isHomeTask(task)) continue
-        const tab = [...(task.tabs?.left ?? []), ...(task.tabs?.right ?? [])].find((t) => t.id === tabId)
+      for (const task of projectTasks(project)) {
+        const tab = taskTabs(task).find((t) => t.id === tabId)
         if (!tab) continue
         // A chat tab without a session id has never been mounted; a window gives it one.
         if (tab.type !== 'claude-chat' || !tab.sessionId) return null

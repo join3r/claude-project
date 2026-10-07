@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://devtool.awantech.sk/schema/mobile/v1/app-message.schema.json",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v2/app-message.schema.json",
   "title": "App message",
   "description": "One UTF-8 JSON message inside a Noise transport frame, SPEC.md §4.4. Receivers ignore unknown fields and ignore messages with an unknown t (or evt with an unknown e); a req with an unknown op is answered with ok:false, code unsupported.",
   "oneOf": [

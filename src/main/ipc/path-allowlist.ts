@@ -9,7 +9,7 @@ import { resolveSafeProjectPath } from '../project-fs-path'
  * renderer. `resolveSafeProjectPath` only confines paths relative to that
  * directory, so on its own it confines to whatever root the caller picked.
  * This module pins the root itself: it must be (inside) a local project's
- * directory or one of its tasks' workspace worktrees, compared after symlinks
+ * directory or one of its streams' workspace worktrees, compared after symlinks
  * are resolved.
  */
 
@@ -33,8 +33,8 @@ export function allowedLocalRoots(projects: readonly Project[]): string[] {
     // Remote projects' paths live on another machine; nothing local is reachable through them.
     if (project.ssh) continue
     if (typeof project.directory === 'string' && project.directory) roots.add(project.directory)
-    for (const task of Array.isArray(project.tasks) ? project.tasks : []) {
-      const workspace = task.workspace
+    for (const stream of Array.isArray(project.streams) ? project.streams : []) {
+      const workspace = stream.workspace
       if (!workspace || typeof workspace.worktreePath !== 'string' || !workspace.worktreePath) continue
       roots.add(workspace.worktreePath)
       roots.add(joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath))

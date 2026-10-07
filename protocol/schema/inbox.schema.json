@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://devtool.awantech.sk/schema/mobile/v1/inbox.schema.json",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v2/inbox.schema.json",
   "title": "Inbox",
   "description": "Full inbox snapshot, desktop → phone (SPEC.md §4.4). Describes what a sender must produce. Receivers also ignore unknown fields, treat null optional fields as absent, and show an unknown tab status as idle.",
   "type": "object",
@@ -26,26 +26,45 @@
       "required": ["projectId"],
       "properties": {
         "projectId": { "type": "string" },
-        "taskId": { "type": "string", "description": "Set when the pin is a task of the project rather than the project itself." }
+        "streamId": { "type": "string", "description": "Set when the pin is a stream of the project, and on a task pin (the task's stream)." },
+        "taskId": { "type": "string", "description": "Set when the pin is a task of the project rather than the project or a stream." }
       }
     },
+    "stream": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "main": { "const": true, "description": "The project's default stream (its folder); exactly one per project." },
+        "branch": { "type": "string", "description": "Present on a worktree stream: the git branch of its worktree (SPEC.md §4.4)." }
+      }
+    },
+    "status": { "enum": ["working", "attention", "exited", "idle"] },
     "project": {
       "type": "object",
-      "required": ["id", "name", "remote", "tasks"],
+      "required": ["id", "name", "remote", "streams", "tasks"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
         "emoji": { "type": "string" },
         "remote": { "type": "boolean" },
-        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" } }
+        "streams": { "type": "array", "items": { "$ref": "#/$defs/stream" }, "description": "Open streams in sidebar order, main first." },
+        "lastStreamId": { "type": "string", "description": "The stream the project was last used in." },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" }, "description": "Open tasks, stream by stream." }
       }
     },
     "task": {
       "type": "object",
-      "required": ["id", "name", "tabs"],
+      "required": ["id", "name", "streamId", "streamName", "status", "tabs"],
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
+        "streamId": { "type": "string" },
+        "streamName": { "type": "string" },
+        "status": { "$ref": "#/$defs/status", "description": "The task's one status: the strongest of its main tab's and agent tabs' (SPEC.md §4.4)." },
+        "since": { "$ref": "#/$defs/unixMs" },
+        "activity": { "type": "string" },
         "lastInteractedAt": { "$ref": "#/$defs/unixMs" },
         "attentionAt": { "$ref": "#/$defs/unixMs" },
         "eventAt": { "$ref": "#/$defs/unixMs", "description": "The task's last event: a hook notification or stop, a terminal bell, a process exit (SPEC.md §4.4)." },
@@ -53,7 +72,6 @@
         "settledAt": { "$ref": "#/$defs/unixMs", "description": "Present while the task is settled (SPEC.md §4.4)." },
         "snoozedUntil": { "$ref": "#/$defs/unixMs", "description": "Present while a timed snooze hasn't passed at generatedAt (SPEC.md §4.4)." },
         "snoozeUntilAttention": { "const": true, "description": "Present while the task is snoozed until it needs the user (SPEC.md §4.4)." },
-        "branch": { "type": "string", "description": "Present on a workspace task: the git branch of its worktree (SPEC.md §4.4)." },
         "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
       }
     },
@@ -67,7 +85,7 @@
           "type": "string"
         },
         "title": { "type": "string" },
-        "status": { "enum": ["working", "attention", "exited", "idle"] },
+        "status": { "$ref": "#/$defs/status" },
         "since": { "$ref": "#/$defs/unixMs" },
         "activity": { "type": "string", "description": "Short label derived from AgentActivity, e.g. \"Running Bash\"." }
       }

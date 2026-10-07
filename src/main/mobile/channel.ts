@@ -112,9 +112,13 @@ class NoisePhoneChannel implements PhoneChannel {
     let result: HandshakeResult
     try {
       const negotiation = negotiateVersion({ v: PROTOCOL_VERSION, min: MIN_PROTOCOL_VERSION }, parseHelloVersion(payload))
-      result = negotiation.ok
-        ? this.hooks.onHello({ hello: parsePhoneHello(payload), remoteStatic: responder.remoteStatic! })
-        : 'incompatible'
+      if (negotiation.ok) {
+        result = this.hooks.onHello({ hello: parsePhoneHello(payload), remoteStatic: responder.remoteStatic! })
+      } else {
+        // `remote`: the phone runs an older app ("Update DevTool on your iPhone").
+        this.hooks.onIncompatible?.({ update: negotiation.update === 'remote' ? 'phone' : 'desktop', deviceName: helloDeviceName(payload) })
+        result = 'incompatible'
+      }
     } catch (err) {
       if (!(err instanceof ProtocolError)) throw err
       this.options.log(`mobileChannel phone=${this.phoneId} bad hello: ${err.message}`)
@@ -172,6 +176,17 @@ class NoisePhoneChannel implements PhoneChannel {
 
   private sendEnvelope(kind: FrameKind, body?: Uint8Array): void {
     this.hooks.sendFrame(encodeEnvelope(kind, body))
+  }
+}
+
+/** The phone's name from a hello this desktop can't otherwise parse (another version's shape). */
+function helloDeviceName(payload: Uint8Array): string | undefined {
+  try {
+    const value: unknown = JSON.parse(new TextDecoder().decode(payload))
+    const name = typeof value === 'object' && value !== null ? (value as { deviceName?: unknown }).deviceName : undefined
+    return typeof name === 'string' && name.length > 0 ? name.slice(0, 100) : undefined
+  } catch {
+    return undefined
   }
 }
 

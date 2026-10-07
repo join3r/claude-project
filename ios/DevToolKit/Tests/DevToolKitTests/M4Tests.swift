@@ -150,8 +150,8 @@ import Testing
         }
     }
 
-    @Test func blockersThatRiskTheBranchAskAboutIt() {
-        #expect(TaskCloseBlocker.allCases.filter(\.asksAboutBranch) == [.unmerged, .uncommittedAndUnmerged, .checkFailed])
+    @Test func blockersAreTheDesktopsQuestions() {
+        #expect(TaskCloseBlocker.allCases == [.working, .unsaved])
     }
 }
 
@@ -201,10 +201,10 @@ import Testing
         await connection.stop()
     }
 
-    @Test func workspaceAndCloseOpsWhenListed() async throws {
+    @Test func streamAndCloseOpsWhenListed() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
-        let features = [DesktopFeature.taskNew, DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose]
+        let features = [DesktopFeature.taskNew, DesktopFeature.taskClose, DesktopFeature.tabClose]
         desktop.features = features
         desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
         let connection = rig.factory.connection(for: rig.record(for: desktop))
@@ -213,15 +213,15 @@ import Testing
         try await events.waitFor { $0 == .features(Set(features)) }
         try await events.waitFor(RelayConnectionTests.isInbox)
 
-        _ = try await connection.newTask(projectId: "p", prompt: "Fix the login", workspace: true)
-        #expect(desktop.requests.last?.params == .object(["projectId": "p", "prompt": "Fix the login", "workspace": true]))
+        _ = try await connection.newTask(projectId: "p", streamId: "s-050", prompt: "Fix the login")
+        #expect(desktop.requests.last?.params == .object(["projectId": "p", "streamId": "s-050", "prompt": "Fix the login"]))
 
         let blocked = try await connection.closeTask(TaskCloseParams(taskId: "t"))
-        #expect(blocked == .blocked(.unmerged, branch: "fix", baseBranch: "main", message: nil))
+        #expect(blocked == .blocked(.working))
         #expect(desktop.requests.last?.params == .object(["taskId": "t"]))
-        let closed = try await connection.closeTask(TaskCloseParams(taskId: "t", discardWorkspace: true, keepBranch: true))
-        #expect(closed == .closed(warning: nil))
-        #expect(desktop.requests.last?.params == .object(["taskId": "t", "discardWorkspace": true, "keepBranch": true]))
+        let closed = try await connection.closeTask(TaskCloseParams(taskId: "t", stopWorking: true, discardUnsaved: true))
+        #expect(closed == .closed)
+        #expect(desktop.requests.last?.params == .object(["taskId": "t", "stopWorking": true, "discardUnsaved": true]))
 
         try await connection.closeTab(tabId: "tab-chat")
         #expect(desktop.requests.last?.op == TaskOp.closeTab)
@@ -338,7 +338,7 @@ import Testing
         await mock.start()
         try await events.waitFor { $0 == .features([
             DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
-            DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+            DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
@@ -364,8 +364,11 @@ import Testing
         let result = try await mock.newTask(projectId: "p-api", prompt: "Add rate limiting\nto the login route", mode: "plan")
         try await events.waitFor { event in
             guard case .inbox(let inbox) = event else { return false }
-            let task = inbox.projects.first { $0.id == "p-api" }?.tasks.last
-            return task?.id == result.taskId && task?.name == "Add rate limiting" && task?.tabs.first?.id == result.tabId
+            // No stream named: the one last used (0.5.0), after its last task.
+            let project = inbox.projects.first { $0.id == "p-api" }
+            let task = project?.tasks.first { $0.id == result.taskId }
+            return task?.name == "Add rate limiting" && task?.tabs.first?.id == result.tabId
+                && task?.streamId == "s-api-050" && project?.tasks(in: project!.streams[1]).last?.id == result.taskId
         }
         let opened = try await mock.openChat(tabId: result.tabId)
         guard case .user(let text, _, _, _)? = opened.view.items.first?.content else {
@@ -376,28 +379,34 @@ import Testing
         await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
             _ = try await mock.newTask(projectId: "missing", prompt: "Go")
         }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")) {
+            _ = try await mock.newTask(projectId: "p-api", streamId: "archived", prompt: "Go")
+        }
+        // A named stream becomes the project's last used one.
+        let bug = try await mock.newTask(projectId: "p-api", streamId: "s-api-bugs", prompt: "Fix flake")
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event else { return false }
+            let project = inbox.projects.first { $0.id == "p-api" }
+            return project?.lastStreamId == "s-api-bugs" && project?.tasks.last?.id == bug.taskId
+        }
         await mock.stop()
     }
 }
 
-/// `MockDesktopConnection`'s workspaces and closing (§8.6–§8.8).
+/// `MockDesktopConnection`'s closing (§8.7, §8.8).
 @Suite struct MockCloseTests {
-    @Test func workspaceTaskAsksBeforeItCloses() async throws {
+    @Test func workingTaskAsksBeforeItArchives() async throws {
         let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
         let events = EventRecorder(mock)
         await mock.start()
         try await events.waitFor(RelayConnectionTests.isInbox)
-        let result = try await mock.newTask(projectId: "p-api", prompt: "Fix the login redirect", workspace: true)
+        // rate-limiter's Claude Code tab is working.
+        let blocked = try await mock.closeTask(TaskCloseParams(taskId: "t-rate"))
+        #expect(blocked == .blocked(.working))
+        #expect(try await mock.closeTask(TaskCloseParams(taskId: "t-rate", stopWorking: true)) == .closed)
         try await events.waitFor { event in
             guard case .inbox(let inbox) = event else { return false }
-            return inbox.projects.flatMap(\.tasks).first { $0.id == result.taskId }?.branch == "fix-the-login-redirect"
-        }
-        let blocked = try await mock.closeTask(TaskCloseParams(taskId: result.taskId))
-        #expect(blocked == .blocked(.unmerged, branch: "fix-the-login-redirect", baseBranch: "main", message: nil))
-        #expect(try await mock.closeTask(TaskCloseParams(taskId: result.taskId, discardWorkspace: true)) == .closed(warning: nil))
-        try await events.waitFor { event in
-            guard case .inbox(let inbox) = event else { return false }
-            return !inbox.projects.flatMap(\.tasks).contains { $0.id == result.taskId }
+            return !inbox.projects.flatMap(\.tasks).contains { $0.id == "t-rate" }
         }
         await mock.stop()
     }

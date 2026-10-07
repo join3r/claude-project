@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  MIN_PROTOCOL_VERSION,
+  PROTOCOL_VERSION,
   DEVTOOL_NOISE_PROLOGUE,
   FrameKind,
   RELAY_PATH,
@@ -97,7 +99,7 @@ class Phone {
   async handshake(desktopId: string, desktopX: Uint8Array, kind: 'pair' | 'resume', secret?: Uint8Array): Promise<DesktopHello> {
     const hs = createInitiator({ prologue: new TextEncoder().encode(DEVTOOL_NOISE_PROLOGUE), s: this.device.x, rs: desktopX })
     const payload: PhoneHello = {
-      v: 1, min: 1, app: 'ios/it', features: [], kind, deviceName: 'IT iPhone', ed: b64uEncode(this.device.ed.pub),
+      v: PROTOCOL_VERSION, min: MIN_PROTOCOL_VERSION, app: 'ios/it', features: [], kind, deviceName: 'IT iPhone', ed: b64uEncode(this.device.ed.pub),
       ...(secret ? { proof: b64uEncode(derivePairProof(secret)) } : {})
     }
     this.client.frame(desktopId, b64uEncode(encodeEnvelope(FrameKind.Handshake1, hs.writeMessage(encodeJson(payload)))))

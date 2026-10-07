@@ -1,22 +1,19 @@
 import { describe, it, expect } from 'vitest'
 import { backfillLifetimeStats, incrementLifetimeStat } from '../src/renderer/hooks/lifetimeStats'
 import type { Project } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 function makeProject(id: string, taskCount: number, lifetime?: { tasksCreated: number; notesCreated: number }): Project {
-  return {
+  return fixtureProject({
     id,
-    name: id,
-    directory: `/tmp/${id}`,
+    // Tasks across streams all count: one of them sits in a worktree stream of its own.
     tasks: Array.from({ length: taskCount }, (_, i) => ({
       id: `${id}-t${i}`,
       name: `t${i}`,
-      tabs: { left: [], right: [] },
-      activeTab: { left: null, right: null },
-      splitOpen: false,
-      splitRatio: 0.5
+      ...(i === 0 ? { workspace: { worktreePath: '/tmp/wt', branchName: 'b', baseBranch: 'main', relativeProjectPath: '' } } : {})
     })),
     lifetimeStats: lifetime
-  }
+  })
 }
 
 describe('backfillLifetimeStats', () => {

@@ -219,34 +219,52 @@ function appMessages(): unknown {
     projects: [
       {
         id: 'p1', name: 'api-server', emoji: '🚀', remote: false,
+        streams: [
+          { id: 's-main', name: 'main', main: true },
+          { id: 's-050', name: '0.5.0', branch: '0.5.0' },
+          { id: 's-bugs', name: 'bugfixes' }
+        ],
+        lastStreamId: 's-050',
         tasks: [{
-          id: 't1', name: 'fix-auth', lastInteractedAt: 1790000000000, attentionAt: 1790000000000,
+          id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main',
+          status: 'working', since: 1790000000000, activity: 'Running Bash',
+          lastInteractedAt: 1790000000000, attentionAt: 1790000000000,
           eventAt: 1790000000000, unread: true,
           tabs: [
             { id: 'tab1', type: 'claude-chat', title: 'Claude', status: 'working', since: 1790000000000, activity: 'Running Bash' },
             { id: 'tab2', type: 'terminal', title: 'zsh', status: 'idle' }
           ]
         }, {
-          id: 't2', name: 'Fix the login redirect', settledAt: 1789990000000, branch: 'fix-the-login-redirect',
+          id: 't2', name: 'Fix the login redirect', streamId: 's-050', streamName: '0.5.0', status: 'idle',
+          settledAt: 1789990000000,
           tabs: [{ id: 'tab3', type: 'claude-chat', title: 'Claude', status: 'idle' }]
         }, {
-          id: 't3', name: 'bump-deps', snoozedUntil: 1790003600000, tabs: []
+          id: 't3', name: 'bump-deps', streamId: 's-050', streamName: '0.5.0', status: 'exited', since: 1789990000000,
+          snoozedUntil: 1790003600000, tabs: []
         }, {
-          id: 't4', name: 'flaky-e2e', snoozeUntilAttention: true, tabs: []
+          id: 't4', name: 'Terminal', streamId: 's-main', streamName: 'main', status: 'attention',
+          snoozeUntilAttention: true,
+          tabs: [{ id: 'tab4', type: 'terminal', title: 'zsh', status: 'attention' }]
         }]
       },
-      { id: 'p2', name: 'remote-box', remote: true, tasks: [] }
+      { id: 'p2', name: 'remote-box', remote: true, streams: [{ id: 's-main-2', name: 'main', main: true }], tasks: [] }
     ],
-    pinned: [{ projectId: 'p1', taskId: 't2' }, { projectId: 'p2' }]
+    pinned: [
+      { projectId: 'p1', streamId: 's-050', taskId: 't2' },
+      { projectId: 'p1', streamId: 's-bugs' },
+      { projectId: 'p2' }
+    ]
   }
   const withExtras = {
     desktop: { id: inbox.desktop.id, name: 'join3r-mbp', color: 'blue' },
     generatedAt: 1790000000000,
     layout: 'grid',
     projects: [{
-      id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true,
+      id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true, lastStreamId: null,
+      streams: [{ id: 's-main', name: 'main', main: 'yes', branch: null, color: 'green' }],
       tasks: [{
-        id: 't1', name: 'fix-auth', notes: 'x', attentionAt: null, branch: null,
+        id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'thinking', since: null,
+        activity: null, notes: 'x', attentionAt: null, branch: null,
         unread: false, settledAt: null, snoozeUntilAttention: 'yes',
         tabs: [
           { id: 'tab1', type: 'gemini', title: 'Gemini', status: 'thinking', since: 5, badge: 3 },
@@ -254,15 +272,16 @@ function appMessages(): unknown {
         ]
       }]
     }],
-    pinned: [{ projectId: 'p1', taskId: null, color: 'red' }]
+    pinned: [{ projectId: 'p1', streamId: null, taskId: null, color: 'red' }]
   }
   const withExtrasExpected = {
     desktop: { id: inbox.desktop.id, name: 'join3r-mbp' },
     generatedAt: 1790000000000,
     projects: [{
       id: 'p1', name: 'api-server', remote: false,
+      streams: [{ id: 's-main', name: 'main' }],
       tasks: [{
-        id: 't1', name: 'fix-auth',
+        id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'idle',
         tabs: [
           { id: 'tab1', type: 'gemini', title: 'Gemini', status: 'idle', since: 5 },
           { id: 'tab2', type: 'pi', title: 'Pi', status: 'attention' }
@@ -271,9 +290,9 @@ function appMessages(): unknown {
     }],
     pinned: [{ projectId: 'p1' }]
   }
-  const phonePair = { v: 1, min: 1, app: 'ios/0.1.0', features: [], kind: 'pair', proof, deviceName: "Vladimir's iPhone", ed: phoneEd }
-  const phoneResume = { v: 1, min: 1, app: 'ios/0.1.0', features: ['x'], kind: 'resume', deviceName: 'iPad', ed: phoneEd }
-  const desktopOk = { v: 1, min: 1, app: 'devtool/0.3.2', features: [], desktopName: 'join3r-mbp', result: 'ok' }
+  const phonePair = { v: 2, min: 2, app: 'ios/0.2.0', features: [], kind: 'pair', proof, deviceName: "Vladimir's iPhone", ed: phoneEd }
+  const phoneResume = { v: 2, min: 2, app: 'ios/0.2.0', features: ['x'], kind: 'resume', deviceName: 'iPad', ed: phoneEd }
+  const desktopOk = { v: 2, min: 2, app: 'devtool/0.3.2', features: [], desktopName: 'join3r-mbp', result: 'ok' }
 
   const sample = (json: unknown, parse: (s: string) => unknown): { json: string; expected: unknown } => {
     const s = typeof json === 'string' ? json : text(json)
@@ -308,13 +327,16 @@ function appMessages(): unknown {
         text({ ...phonePair, proof: undefined }),
         text({ ...phonePair, kind: 'bond' }),
         text({ ...phonePair, ed: 'short' }),
-        text({ ...phonePair, v: 1, min: 2 })
+        text({ ...phonePair, v: 2, min: 3 })
       ],
       desktopHello: [text({ ...desktopOk, result: 'maybe' }), text({ ...desktopOk, desktopName: 7 })],
       appMessages: [
         text({ t: 'req', op: 'inbox.get' }),
         text({ t: 'res', id: 1, ok: 'yes' }),
         text({ t: 'evt', e: 'inbox', seq: 1, inbox: { projects: [] } }),
+        // A version 1 project: no streams, tasks without a stream or status.
+        text({ t: 'evt', e: 'inbox', seq: 1, inbox: { desktop: inbox.desktop, generatedAt: 1, projects: [{ id: 'p', name: 'p', remote: false, tasks: [] }] } }),
+        text({ t: 'evt', e: 'inbox', seq: 1, inbox: { desktop: inbox.desktop, generatedAt: 1, projects: [{ id: 'p', name: 'p', remote: false, streams: [], tasks: [{ id: 't', name: 't', tabs: [] }] }] } }),
         text({ t: 'evt', e: 'pairing', status: 'maybe' }),
         '[1,2,3]',
         'not json'
@@ -325,7 +347,11 @@ function appMessages(): unknown {
       [{ v: 2, min: 1 }, { v: 1, min: 1 }],
       [{ v: 1, min: 1 }, { v: 3, min: 2 }],
       [{ v: 3, min: 3 }, { v: 2, min: 1 }],
-      [{ v: 1, min: 1 }, { v: 3, min: 3 }]
+      [{ v: 1, min: 1 }, { v: 3, min: 3 }],
+      // Version 2 is a hard cutover: a v1 peer must update, whichever side it is.
+      [{ v: 2, min: 2 }, { v: 1, min: 1 }],
+      [{ v: 1, min: 1 }, { v: 2, min: 2 }],
+      [{ v: 2, min: 2 }, { v: 2, min: 2 }]
     ].map(([local, remote]) => ({ local, remote, result: negotiateVersion(local, remote) }))
   }
 }
@@ -599,15 +625,14 @@ function chatMessages(): unknown {
         results: [text({}), text({ tabId: null }), '[]']
       }
     },
-    // §8.4: `task.new` names a project and carries the first prompt.
+    // §8.4: `task.new` names a project (and optionally a stream) and carries the first prompt.
     taskNew: {
       params: [
         text({ projectId: 'p1', prompt: 'Fix the login redirect' }),
-        text({ projectId: 'p1', prompt: 'Plan the refactor', mode: 'plan' }),
-        text({ projectId: 'p1', prompt: 'Go', mode: null, extra: true }),
-        // §8.6: a workspace task; anything but `true` is no workspace.
-        text({ projectId: 'p1', prompt: 'Fix the login redirect', workspace: true }),
-        text({ projectId: 'p1', prompt: 'Go', workspace: 'yes' })
+        text({ projectId: 'p1', streamId: 's-050', prompt: 'Plan the refactor', mode: 'plan' }),
+        text({ projectId: 'p1', streamId: null, prompt: 'Go', mode: null, extra: true }),
+        // Version 1's `workspace` is gone: it is ignored like any unknown field.
+        text({ projectId: 'p1', prompt: 'Go', workspace: true })
       ].map((json) => ({ json, expected: parseTaskNewParams(JSON.parse(json)) })),
       results: [text({ taskId: 'task-new', tabId: 'tab-new' }), text({ taskId: 'task-new', tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseTaskNewResult(JSON.parse(json)) })),
       invalid: {
@@ -616,29 +641,28 @@ function chatMessages(): unknown {
           text({ projectId: 'p1' }),
           text({ projectId: 'p1', prompt: '   ' }),
           text({ projectId: 'p1', prompt: 'Go', mode: 'yolo' }),
+          text({ projectId: 'p1', streamId: 7, prompt: 'Go' }),
           'null'
         ],
         results: [text({ tabId: 'tab-new' }), text({ taskId: 'task-new' }), '[]']
       }
     },
-    // §8.7: `task.close` reports what would be lost until the phone discards it.
+    // §8.7: `task.close` archives a task, reporting a working agent or unsaved edits until the phone confirms.
     taskClose: {
       params: [
         text({ taskId: 't1' }),
-        text({ taskId: 't1', discardUnsaved: true, discardWorkspace: true, keepBranch: true }),
-        text({ taskId: 't1', discardWorkspace: 1, keepBranch: null, extra: true })
+        text({ taskId: 't1', stopWorking: true, discardUnsaved: true }),
+        text({ taskId: 't1', stopWorking: 1, discardUnsaved: null, discardWorkspace: true, extra: true })
       ].map((json) => ({ json, expected: parseTaskCloseParams(JSON.parse(json)) })),
       results: [
         text({ closed: true }),
-        text({ closed: true, warning: 'The worktree could not be removed.' }),
-        text({ closed: false, blocker: 'unsaved' }),
-        text({ closed: false, blocker: 'unmerged', branch: 'fix-login', baseBranch: 'main' }),
-        text({ closed: false, blocker: 'check-failed', branch: 'fix-login', message: 'git failed', extra: 1 }),
-        text({ closed: false, blocker: 'stash-pending', branch: 'fix-login' })
+        text({ closed: true, warning: 'ignored' }),
+        text({ closed: false, blocker: 'working' }),
+        text({ closed: false, blocker: 'unsaved', extra: 1 })
       ].map((json) => ({ json, expected: parseTaskCloseResult(JSON.parse(json)) })),
       invalid: {
         params: [text({}), text({ taskId: 7 }), 'null'],
-        results: [text({}), text({ closed: false }), text({ closed: 'yes' }), '[]']
+        results: [text({}), text({ closed: false }), text({ closed: 'yes' }), text({ closed: false, blocker: 'unmerged' }), '[]']
       }
     },
     // §8.8: `tab.close` names a tab; its result is `{}`.
@@ -646,14 +670,15 @@ function chatMessages(): unknown {
       params: [text({ tabId: 'tab2' }), text({ tabId: 'tab2', extra: true })].map((json) => ({ json, expected: parseTabCloseParams(JSON.parse(json)) })),
       invalid: { params: [text({}), text({ tabId: null }), 'null'] }
     },
-    // §8.10: `pin.set` pins or unpins a project, or a task with `taskId`; its result is `{}`.
+    // §8.10: `pin.set` pins or unpins a project, a stream with `streamId`, or a task with `taskId`; its result is `{}`.
     pinSet: {
       params: [
         text({ projectId: 'p1', pinned: true }),
-        text({ projectId: 'p1', taskId: 't2', pinned: false }),
-        text({ projectId: 'p1', taskId: null, pinned: true, extra: 1 })
+        text({ projectId: 'p1', streamId: 's-050', pinned: true }),
+        text({ projectId: 'p1', streamId: 's-050', taskId: 't2', pinned: false }),
+        text({ projectId: 'p1', streamId: null, taskId: null, pinned: true, extra: 1 })
       ].map((json) => ({ json, expected: parsePinSetParams(JSON.parse(json)) })),
-      invalid: { params: [text({ pinned: true }), text({ projectId: 'p1' }), text({ projectId: 'p1', pinned: 'yes' }), text({ projectId: 'p1', taskId: 7, pinned: true }), 'null'] }
+      invalid: { params: [text({ pinned: true }), text({ projectId: 'p1' }), text({ projectId: 'p1', pinned: 'yes' }), text({ projectId: 'p1', taskId: 7, pinned: true }), text({ projectId: 'p1', streamId: 7, pinned: true }), 'null'] }
     },
     // §8.11: `task.triage` marks a task read or unread, settles, snoozes or undoes either; its result is `{}`.
     taskTriage: {

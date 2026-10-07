@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { PushEmitter } from '../src/main/mobile/push-emitter'
 import type { MobilePushRegistration } from '../src/main/mobile/pairings-store'
 import type { PushOutcome } from '../src/main/mobile/mobile-service'
-import { createHomeTask, type ProjectsData } from '../src/shared/types'
+import type { ProjectsData } from '../src/shared/types'
 import type { ChatPrompt } from '../src/shared/claude-chat'
 import { b64uDecode, b64uEncode, openPushPayload, type PushPayload } from '../protocol/ts/index.ts'
 import { FakeChats } from './helpers/fake-chats'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 const DESKTOP = 'd'.repeat(32)
 
@@ -15,16 +16,16 @@ function registration(seed: number, kinds: MobilePushRegistration['kinds']): Mob
 
 function projects(hide = false): ProjectsData {
   return {
-    projects: [{
-      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hide,
-      tasks: [createHomeTask('p1').task, {
+    projects: [fixtureProject({
+      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hide || undefined,
+      tasks: [{
         id: 't1', name: 'fix-auth',
-        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 's' }, { id: 'tab-term', type: 'terminal', title: 'zsh' }], right: [] },
-        activeTab: { left: 'tab-chat', right: null }, splitOpen: false, splitRatio: 0.5
+        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 's' }, { id: 'tab-term', type: 'terminal', title: 'zsh' }] },
+        activeTab: { left: 'tab-chat' }
       }]
-    }],
+    })],
     tags: [], projectOrder: ['p1'], pinnedItems: []
-  } as ProjectsData
+  }
 }
 
 const bash: ChatPrompt = { id: 'pr1', kind: 'permission', toolName: 'Bash', input: { command: 'npm test' } }
@@ -120,6 +121,14 @@ describe('PushEmitter (SPEC.md §7.6)', () => {
     chats.update('tab-chat', (s) => ({ ...s, busy: true }))
     chats.update('tab-chat', (s) => ({ ...s, busy: false, items: [{ kind: 'user', id: 'u', text: 'go', images: 0 }] }))
     expect(sent.map((p) => [p.phoneId, p.payload.body])).toEqual([['phone-b', 'Finished']])
+  })
+
+  it('names a stream other than main in the title', () => {
+    const project = data.projects[0]
+    const [task] = project.streams[0].tasks
+    data = { ...data, projects: [{ ...project, streams: [{ ...project.streams[0], tasks: [] }, { id: 's-050', name: '0.5.0', tasks: [task] }] }] }
+    chats.update('tab-chat', (s) => ({ ...s, pending: [bash] }))
+    expect(sent[0].payload.title).toBe('api · 0.5.0 / fix-auth')
   })
 
   it('stops watching on stop()', () => {

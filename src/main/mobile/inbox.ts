@@ -1,20 +1,21 @@
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
-import { isSettled, isSnoozed, isUnread } from '../../shared/inbox-state'
+import { isSettled, isSnoozed, isUnread, statusTabs, taskStatus } from '../../shared/inbox-state'
 import {
-  isHomeTask,
-  pinnedItemKey,
   isSpentEphemeralProject,
   type Project,
   type ProjectsData,
+  type Stream,
   type Tab,
   type TabStatusValue,
   type Task
 } from '../../shared/types'
+import { findStreamOfTask, taskTabs } from '../../shared/streams'
 import { INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
 import type {
   Inbox as MobileInbox,
   InboxPin as MobileInboxPin,
   InboxProject as MobileInboxProject,
+  InboxStream as MobileInboxStream,
   InboxTab as MobileInboxTab,
   InboxTask as MobileInboxTask
 } from '../../../protocol/ts/index.ts'
@@ -62,7 +63,7 @@ function buildTab(tab: Tab & { type: MobileTabType }, lookup: InboxTabLookup): M
  * same predicates, so the phone groups it the way the window does. A snooze wins over
  * a settle, as in `partitionInbox`.
  */
-function addTriage(out: MobileInboxTask, task: Task, now: number): void {
+function addTriage(out: Omit<MobileInboxTask, 'tabs'>, task: Task, now: number): void {
   const inbox = task.inbox
   if (!inbox) return
   if (inbox.eventAt !== undefined) out.eventAt = inbox.eventAt
@@ -75,15 +76,53 @@ function addTriage(out: MobileInboxTask, task: Task, now: number): void {
   }
 }
 
-function buildTask(task: Task, lookup: InboxTabLookup, now: number): MobileInboxTask {
-  const tabs = [...(task.tabs?.left ?? []), ...(task.tabs?.right ?? [])]
-    .filter(isMobileTab)
-    .map((tab) => buildTab(tab, lookup))
-  const out: MobileInboxTask = { id: task.id, name: task.name, tabs }
+/**
+ * The task's one status (SPEC.md §4.4), from its status tabs only (main tab and
+ * agent tabs, `statusTabs`), as the desktop Inbox and sidebar read it: an extra
+ * terminal's bell lights only its own tab. `since` is the oldest change into that
+ * status, `activity` the label of the first tab in it that has one.
+ */
+function taskStatusFields(task: Task, lookup: InboxTabLookup): Pick<MobileInboxTask, 'status' | 'since' | 'activity'> {
+  const tabs = statusTabs(task)
+  const statuses: Record<string, TabStatusValue> = {}
+  for (const tab of tabs) statuses[tab.id] = lookup.statusOf(tab.id)
+  const status = taskStatus(task, statuses)
+  const out: Pick<MobileInboxTask, 'status' | 'since' | 'activity'> = { status: status ?? 'idle' }
+  if (!status) return out
+  const inStatus = tabs.filter((tab) => statuses[tab.id] === status)
+  const sinces = inStatus.map((tab) => lookup.sinceOf(tab.id)).filter((since): since is number => since !== null)
+  if (sinces.length > 0) out.since = Math.min(...sinces)
+  for (const tab of inStatus) {
+    const label = shortLabel(describeActivity(lookup.activityOf(tab.id) ?? undefined, status))
+    if (label) {
+      out.activity = label
+      break
+    }
+  }
+  return out
+}
+
+function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: number): MobileInboxTask {
+  const out: Omit<MobileInboxTask, 'tabs'> = {
+    id: task.id,
+    name: task.name,
+    streamId: stream.id,
+    streamName: stream.name,
+    ...taskStatusFields(task, lookup)
+  }
   if (task.lastInteractedAt !== undefined) out.lastInteractedAt = task.lastInteractedAt
   if (task.inbox?.attentionAt !== undefined) out.attentionAt = task.inbox.attentionAt
   addTriage(out, task, now)
-  if (task.workspace) out.branch = task.workspace.branchName
+  const tabs = taskTabs(task)
+    .filter(isMobileTab)
+    .map((tab) => buildTab(tab, lookup))
+  return { ...out, tabs }
+}
+
+function buildStream(stream: Stream): MobileInboxStream {
+  const out: MobileInboxStream = { id: stream.id, name: stream.name }
+  if (stream.isMain) out.main = true
+  if (stream.workspace) out.branch = stream.workspace.branchName
   return out
 }
 
@@ -92,15 +131,21 @@ export function isVisibleOnMobile(project: Project): boolean {
   return !project.hideFromMobile && !isSpentEphemeralProject(project)
 }
 
+/**
+ * Archived streams and tasks live outside `project.streams` (`archive/<id>.json`),
+ * so only open ones are ever sent.
+ */
 function buildProject(project: Project, lookup: InboxTabLookup, now: number): MobileInboxProject {
-  const out: MobileInboxProject = {
+  const lastStream = project.streams.find((stream) => stream.id === project.lastStreamId)
+  return {
     id: project.id,
     name: project.name,
+    ...(project.emoji ? { emoji: project.emoji } : {}),
     remote: !!project.ssh,
-    tasks: (project.tasks ?? []).filter((task) => !isHomeTask(task)).map((task) => buildTask(task, lookup, now))
+    streams: project.streams.map(buildStream),
+    ...(lastStream ? { lastStreamId: lastStream.id } : {}),
+    tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now)))
   }
-  if (project.emoji) out.emoji = project.emoji
-  return out
 }
 
 /** Projects in `projectOrder`, then any the order does not mention (it should mention all). */
@@ -122,7 +167,8 @@ function orderedProjects(data: ProjectsData): Project[] {
 
 /**
  * The sidebar's Pinned list, in its order, cut to what the phone sees: a pin whose
- * project is hidden or spent, or whose task is gone or a home task, is left out.
+ * project is hidden or spent, or whose stream or task is gone (archived too), is
+ * left out. A task pin names the stream that holds the task now.
  */
 function buildPinned(data: ProjectsData, visible: readonly Project[]): MobileInboxPin[] {
   const byId = new Map(visible.map((project) => [project.id, project]))
@@ -131,14 +177,24 @@ function buildPinned(data: ProjectsData, visible: readonly Project[]): MobileInb
   for (const item of data.pinnedItems ?? []) {
     const project = byId.get(item.projectId)
     if (!project) continue
-    if (item.type === 'task') {
-      const task = (project.tasks ?? []).find((t) => t.id === item.taskId)
-      if (!task || isHomeTask(task)) continue
+    let pin: MobileInboxPin
+    let key: string
+    if (item.type === 'project') {
+      pin = { projectId: project.id }
+      key = `project:${project.id}`
+    } else if (item.type === 'stream') {
+      if (!project.streams.some((stream) => stream.id === item.streamId)) continue
+      pin = { projectId: project.id, streamId: item.streamId }
+      key = `stream:${project.id}:${item.streamId}`
+    } else {
+      const stream = findStreamOfTask(project, item.taskId)
+      if (!stream) continue
+      pin = { projectId: project.id, streamId: stream.id, taskId: item.taskId }
+      key = `task:${project.id}:${item.taskId}`
     }
-    const key = pinnedItemKey(item)
     if (seen.has(key)) continue
     seen.add(key)
-    out.push(item.type === 'task' ? { projectId: item.projectId, taskId: item.taskId } : { projectId: item.projectId })
+    out.push(pin)
   }
   return out
 }

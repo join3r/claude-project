@@ -13,10 +13,7 @@ function makeTask(id: string, lastInteractedAt?: number): Task {
   return {
     id,
     name: id,
-    tabs: { left: [], right: [] },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
+    panes: [],
     ...(lastInteractedAt !== undefined ? { lastInteractedAt } : {})
   }
 }

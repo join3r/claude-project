@@ -1,8 +1,9 @@
-import { isHomeTask, type Project, type ProjectsData, type Task } from '../../shared/types'
+import type { Project, ProjectsData, Stream, Task } from '../../shared/types'
 import type { ChatEvent, ChatItem, ChatPrompt, ChatState } from '../../shared/claude-chat'
 import { promptQuestions } from '../../shared/chat-prompts'
 import { summarizeTool } from '../../shared/agent-activity'
 import { b64uDecode, sealPushPayload, type PushPayload, type PushPayloadKind } from '../../../protocol/ts/index.ts'
+import { taskTabs } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 import type { MobilePushRegistration } from './pairings-store'
 import type { PushOutcome } from './mobile-service'
@@ -128,20 +129,26 @@ export class PushEmitter {
     })
   }
 
-  /** "project / task" for a chat tab on mobile, or null when it isn't one (hidden, gone). */
+  /**
+   * "project / task" for a chat tab on mobile ("project · stream / task" outside
+   * `main`), or null when it isn't one (hidden, gone, archived).
+   */
   private place(tabId: string): string | null {
     const found = findChatTab(this.deps.projects.peek(), tabId)
-    return found ? `${found.project.name} / ${found.task.name}` : null
+    if (!found) return null
+    const where = found.stream.isMain ? found.project.name : `${found.project.name} · ${found.stream.name}`
+    return `${where} / ${found.task.name}`
   }
 }
 
-function findChatTab(data: ProjectsData, tabId: string): { project: Project; task: Task } | null {
+function findChatTab(data: ProjectsData, tabId: string): { project: Project; stream: Stream; task: Task } | null {
   for (const project of data.projects) {
     if (!isVisibleOnMobile(project)) continue
-    for (const task of project.tasks ?? []) {
-      if (isHomeTask(task)) continue
-      const tab = [...(task.tabs?.left ?? []), ...(task.tabs?.right ?? [])].find((t) => t.id === tabId)
-      if (tab) return tab.type === 'claude-chat' ? { project, task } : null
+    for (const stream of project.streams) {
+      for (const task of stream.tasks) {
+        const tab = taskTabs(task).find((t) => t.id === tabId)
+        if (tab) return tab.type === 'claude-chat' ? { project, stream, task } : null
+      }
     }
   }
   return null

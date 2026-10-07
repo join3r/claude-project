@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { taskWorkspace } from '../../shared/streams'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
 import FileTree, { type FileTreeHandle } from './FileTree'
@@ -10,6 +11,9 @@ import GitStatus from './GitStatus'
 import NotesList from './NotesList'
 import { agentLinkPath, formatAgentLink } from '../../shared/agent-link'
 import { useLinkToAgent } from '../agentLink/linkToAgent'
+import { createTab } from './newTaskTabs'
+import { isNotebookFile } from '../../shared/notebook'
+import { dirBasename } from '../../shared/paths'
 
 export default function FileBrowserPanel(): React.ReactElement | null {
   const {
@@ -25,14 +29,16 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     config,
     openOrFocusDiffTab,
     openOrFocusEditorTab,
-    addTab
+    addTab,
+    taskForTab
   } = useApp()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const fileTreeRef = useRef<FileTreeHandle>(null)
   const [filterQuery, setFilterQuery] = useState('')
 
-  const effectiveDir = selectedTask?.workspace
-    ? joinWorkspaceDir(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
+  const selectedWorkspace = taskWorkspace(selectedProject, selectedTask?.id)
+  const effectiveDir = selectedWorkspace
+    ? joinWorkspaceDir(selectedWorkspace.worktreePath, selectedWorkspace.relativeProjectPath)
     : selectedProject?.directory ?? ''
 
   const isLocalProject = !!selectedProject
@@ -46,7 +52,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     setFilterQuery('')
   }, [selectedProject?.id])
 
-  const focusedPane = 'left' as const
+  const focusedPane = 'focused' as const
 
   const handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -78,25 +84,30 @@ export default function FileBrowserPanel(): React.ReactElement | null {
 
   const handleFileClick = useCallback(
     (filePath: string) => {
-      if (!selectedProjectId || !selectedTaskId) return
-      openOrFocusEditorTab(selectedProjectId, selectedTaskId, focusedPane, filePath)
+      if (!selectedProjectId) return
+      // From the Home page (no task) the file opens in a `main` task.
+      const type = isNotebookFile(filePath) ? 'notebook' : 'editor'
+      const taskId = taskForTab(selectedProjectId, selectedTaskId, () => createTab(type, { filePath }), dirBasename(filePath))
+      if (taskId) openOrFocusEditorTab(selectedProjectId, taskId, focusedPane, filePath)
     },
-    [selectedProjectId, selectedTaskId, openOrFocusEditorTab]
+    [selectedProjectId, selectedTaskId, openOrFocusEditorTab, taskForTab]
   )
 
   const handleGitFileClick = useCallback(
     (filePath: string) => {
-      if (!selectedProjectId || !selectedTaskId) return
-      openOrFocusDiffTab(selectedProjectId, selectedTaskId, focusedPane, filePath)
+      if (!selectedProjectId) return
+      const taskId = taskForTab(selectedProjectId, selectedTaskId, () => createTab('diff', { filePath }), dirBasename(filePath))
+      if (taskId) openOrFocusDiffTab(selectedProjectId, taskId, focusedPane, filePath)
     },
-    [selectedProjectId, selectedTaskId, openOrFocusDiffTab]
+    [selectedProjectId, selectedTaskId, openOrFocusDiffTab, taskForTab]
   )
 
   const handleRevealInTerminal = useCallback((relativeDir: string) => {
-    if (!selectedProjectId || !selectedTaskId) return
+    if (!selectedProjectId) return
     const cwd = joinWorkspaceDir(effectiveDir, relativeDir || undefined)
-    addTab(selectedProjectId, selectedTaskId, focusedPane, 'terminal', { cwd })
-  }, [addTab, effectiveDir, selectedProjectId, selectedTaskId])
+    const taskId = taskForTab(selectedProjectId, selectedTaskId, () => createTab('terminal', { cwd }), 'Terminal')
+    if (taskId) addTab(selectedProjectId, taskId, focusedPane, 'terminal', { cwd })
+  }, [addTab, effectiveDir, selectedProjectId, selectedTaskId, taskForTab])
 
   if (!fileBrowserOpen || !selectedProject) return null
 

@@ -13,7 +13,7 @@ import { ChatBridge } from '../src/main/mobile/chat-bridge'
 import { PushEmitter } from '../src/main/mobile/push-emitter'
 import { TabActivityRegistry } from '../src/main/tab-activity-registry'
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig } from '../src/shared/mobile'
-import { createHomeTask, type ProjectsData } from '../src/shared/types'
+import type { ProjectsData } from '../src/shared/types'
 import type { ChatPrompt } from '../src/shared/claude-chat'
 import { b64uEncode, openPushPayload, signPushRegister, type PushPayload } from '../protocol/ts/index.ts'
 import { startRelayServer, type RelayServer } from '../relay/src/server.ts'
@@ -22,6 +22,7 @@ import { createPushGateway } from '../relay/src/push/gateway.ts'
 import type { ApnsRequest, ApnsSender } from '../relay/src/push/apns.ts'
 import { RelayPhone, waitFor } from './helpers/relay-phone'
 import { FakeChats } from './helpers/fake-chats'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 /**
  * Push end to end (SPEC.md §7): the phone registers with a real relay acting as the
@@ -37,14 +38,14 @@ const encryptor: SecretEncryptor = {
 }
 
 const PROJECTS: ProjectsData = {
-  projects: [{
+  projects: [fixtureProject({
     id: 'p1', name: 'api-server', directory: '/src/api',
-    tasks: [createHomeTask('p1').task, {
+    tasks: [{
       id: 't1', name: 'fix-auth',
-      tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 'sess-e2e' }], right: [] },
-      activeTab: { left: 'tab-chat', right: null }, splitOpen: false, splitRatio: 0.5
+      tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 'sess-e2e' }] },
+      activeTab: { left: 'tab-chat' }
     }]
-  }],
+  })],
   tags: [],
   projectOrder: ['p1'],
   pinnedItems: []

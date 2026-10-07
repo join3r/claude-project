@@ -2,13 +2,17 @@ import { useCallback } from 'react'
 import type { AppStateCore } from './useAppStateCore'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { selectProjectHomeView, selectProjectView, switchToTaskView } from './viewState'
+import { closeArchivedView, openArchivedView, type ArchivedViewTarget } from '../../components/archivedViewTarget'
 
 export interface SelectionActions {
   /** Select a project (restoring its last task), or clear the selection with `null`. */
   setSelectedProjectId: (id: string | null) => void
+  /** Open the project's Home page (the project with no task selected). */
   selectProjectHome: (projectId: string) => void
   setSelectedTaskId: (id: string | null) => void
   switchToTask: (projectId: string, taskId: string) => void
+  /** Show an archived task or stream read-only (the project selected, no task). */
+  showArchived: (target: ArchivedViewTarget) => void
 }
 
 /** Which project and task this window is looking at. Landing on a remote project connects it. */
@@ -31,20 +35,18 @@ export function useSelection(
 
   const selectProjectHome = useCallback((projectId: string) => {
     const project = projectsRef.current.find(p => p.id === projectId) ?? null
-    const homeTask = project?.tasks.find(t => t.system === 'home') ?? null
-    if (!project || !homeTask) {
-      selectProject(projectId)
-      return
-    }
-    updateWindowViewState(prev => selectProjectHomeView(prev, projectId, homeTask))
+    if (!project) return
+    closeArchivedView()
+    updateWindowViewState(prev => selectProjectHomeView(prev, projectId))
     ensureRemoteConnected(projectId, project, connectSsh)
-  }, [connectSsh, selectProject, updateWindowViewState])
+  }, [connectSsh, updateWindowViewState])
 
   const selectTask = useCallback((id: string | null) => {
     updateWindowViewState(prev => ({ ...prev, selectedTaskId: id }))
   }, [updateWindowViewState])
 
   const switchToTask = useCallback((projectId: string, taskId: string) => {
+    closeArchivedView()
     updateWindowViewState(prev => switchToTaskView(prev, projectId, taskId))
 
     markTaskVisited(projectId, taskId)
@@ -53,7 +55,13 @@ export function useSelection(
     ensureRemoteConnected(projectId, project, connectSsh)
   }, [connectSsh, updateWindowViewState, markTaskVisited])
 
+  const showArchived = useCallback((target: ArchivedViewTarget) => {
+    openArchivedView(target)
+    updateWindowViewState(prev => ({ ...prev, selectedProjectId: target.projectId, selectedTaskId: null }))
+  }, [updateWindowViewState])
+
   return {
+    showArchived,
     setSelectedProjectId: selectProject,
     selectProjectHome,
     setSelectedTaskId: selectTask,

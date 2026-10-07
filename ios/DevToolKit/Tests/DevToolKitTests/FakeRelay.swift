@@ -60,7 +60,7 @@ actor FakeRelay: WebSocketConnector {
         let name: String
         var online = true
         var autoAccept = true
-        var reply: (v: Int, min: Int) = (1, 1)
+        var reply: (v: Int, min: Int) = (AppProtocol.version, AppProtocol.minVersion)
         var lastSeen: Int64 = 1_790_000_000_000
         var pairProof: Data?
         let secret = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
@@ -204,10 +204,8 @@ actor FakeRelay: WebSocketConnector {
                         return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
                     }
                     taskCloseParams.append(parsed)
-                    // "t" is a workspace with an unmerged branch until it is discarded.
-                    let result: TaskCloseResult = parsed.discardWorkspace
-                        ? .closed(warning: nil)
-                        : .blocked(.unmerged, branch: "fix", baseBranch: "main", message: nil)
+                    // "t" has a working agent until the phone says to stop it.
+                    let result: TaskCloseResult = parsed.stopWorking ? .closed : .blocked(.working)
                     return app(.resOk(id: id, result: result.json), to: from)
                 }
                 if op == TaskOp.setPin {

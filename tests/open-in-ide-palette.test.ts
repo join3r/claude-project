@@ -2,20 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { openInIdeToEntities } from '../src/renderer/palette/sources/openInIde'
 import { DEFAULT_CONFIG, type Project } from '../src/shared/types'
 import type { AppActions } from '../src/renderer/hooks/useAppState'
+import { fixtureProject } from './helpers/streams-fixtures'
 
-const project: Project = {
+const project: Project = fixtureProject({
   id: 'p1',
   name: 'Demo',
   directory: 'C:\\Repos\\demo',
-  tasks: [{
-    id: 't1',
-    name: 'Main',
-    tabs: { left: [], right: [] },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }]
-}
+  tasks: [{ id: 't1', name: 'Main' }]
+})
 
 function actions(patch: Partial<AppActions> = {}): AppActions {
   return {

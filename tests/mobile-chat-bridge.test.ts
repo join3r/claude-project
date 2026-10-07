@@ -1,29 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBridge, CHAT_EVENT_INTERVAL_MS, type ChatPhone } from '../src/main/mobile/chat-bridge'
-import { createHomeTask, type ProjectsData, type Tab } from '../src/shared/types'
+import type { ProjectsData, Tab, WorkspaceConfig } from '../src/shared/types'
 import type { ChatItem, ChatPrompt, ChatState } from '../src/shared/claude-chat'
 import type { AppMessage, ChatParams, ChatViewEvent } from '../protocol/ts/index.ts'
 import { FakeChats } from './helpers/fake-chats'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 const chatTab: Tab = { id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 'sess-1' }
 
 function projects(overrides: { hide?: boolean; tabs?: Tab[] } = {}): ProjectsData {
   return {
-    projects: [{
-      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: overrides.hide, aiToolArgs: { claude: '--verbose  --x' },
+    projects: [fixtureProject({
+      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: overrides.hide || undefined, aiToolArgs: { claude: '--verbose  --x' },
       tasks: [
-        { ...createHomeTask('p1').task, tabs: { left: [{ id: 'tab-home-chat', type: 'claude-chat', title: 'Home', sessionId: 's' }], right: [] } },
         {
-          id: 't1', name: 'fix', workspace: { worktreePath: '/wt/fix', relativeProjectPath: 'pkg' },
-          tabs: { left: overrides.tabs ?? [chatTab, { id: 'tab-term', type: 'terminal', title: 'zsh' }, { id: 'tab-new', type: 'claude-chat', title: 'New' }], right: [] },
-          activeTab: { left: 'tab-chat', right: null }, splitOpen: false, splitRatio: 0.5
+          id: 't1', name: 'fix', workspace: { worktreePath: '/wt/fix', relativeProjectPath: 'pkg' } as WorkspaceConfig,
+          tabs: { left: overrides.tabs ?? [chatTab, { id: 'tab-term', type: 'terminal', title: 'zsh' }, { id: 'tab-new', type: 'claude-chat', title: 'New' }] },
+          activeTab: { left: 'tab-chat' }
         }
       ]
-    }],
+    })],
     tags: [],
     projectOrder: ['p1'],
     pinnedItems: []
-  } as ProjectsData
+  }
 }
 
 function text(id: string, value: string, streaming = false): ChatItem {
@@ -81,8 +81,8 @@ describe('ChatBridge', () => {
     return who.messages.filter((m): m is ChatViewEvent => m.t === 'evt' && m.e === 'chat')
   }
 
-  it('answers not-found for unknown, hidden, home, non-chat and never-mounted tabs', async () => {
-    for (const tabId of ['nope', 'tab-term', 'tab-home-chat', 'tab-new']) {
+  it('answers not-found for unknown, hidden, non-chat and never-mounted tabs', async () => {
+    for (const tabId of ['nope', 'tab-term', 'tab-new']) {
       expect(await req('chat.open', { tabId })).toMatchObject({ ok: false, error: { code: 'not-found' } })
     }
     data = projects({ hide: true })

@@ -32,8 +32,9 @@ export interface ChatNewParams { taskId: string }
 export interface ChatNewResult { tabId: string }
 
 /**
- * `task.new` (SPEC.md §8.4): a new task in a project, with one claude-chat tab that
- * starts on `prompt`. Like `chat.new` it names no tab, so it has parsers of its own.
+ * `task.new` (SPEC.md §8.4): a new task in one of a project's streams (absent: the
+ * stream the project was last used in), with one claude-chat tab that starts on
+ * `prompt`. Like `chat.new` it names no tab, so it has parsers of its own.
  */
 export const TASK_NEW_OP = 'task.new'
 /** The handshake feature (§8.1) a desktop lists when it answers `task.new`. */
@@ -42,28 +43,23 @@ export const TASK_NEW_FEATURE = 'task.new'
 export const TASK_NEW_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const
 export type TaskNewMode = (typeof TASK_NEW_MODES)[number]
 
-export interface TaskNewParams { projectId: string; prompt: string; mode?: TaskNewMode; workspace?: boolean }
+export interface TaskNewParams { projectId: string; streamId?: string; prompt: string; mode?: TaskNewMode }
 export interface TaskNewResult { taskId: string; tabId: string }
 
-/** The handshake feature (§8.1) a desktop lists when `task.new` takes `workspace: true` (§8.6). */
-export const TASK_WORKSPACE_FEATURE = 'task.workspace'
-
 /**
- * `task.close` (SPEC.md §8.7): delete a task, and its worktree when it is a
- * workspace. Work that would be lost is reported instead, until the phone resends
- * with the matching `discard*` flag.
+ * `task.close` (SPEC.md §8.7): archive a task to its stream's Done row, as the
+ * desktop sidebar's Close task does. A working agent or unsaved editor is reported
+ * instead, until the phone resends with the matching flag.
  */
 export const TASK_CLOSE_OP = 'task.close'
 /** The handshake feature (§8.1) a desktop lists when it answers `task.close`. */
 export const TASK_CLOSE_FEATURE = 'task.close'
-/** Why `task.close` left a task open (§8.7). */
-export const TASK_CLOSE_BLOCKERS = ['unsaved', 'uncommitted', 'unmerged', 'uncommitted-and-unmerged', 'check-failed'] as const
+/** Why `task.close` left a task open (§8.7), in the order the desktop checks. */
+export const TASK_CLOSE_BLOCKERS = ['working', 'unsaved'] as const
 export type TaskCloseBlocker = (typeof TASK_CLOSE_BLOCKERS)[number]
 
-export interface TaskCloseParams { taskId: string; discardUnsaved?: boolean; discardWorkspace?: boolean; keepBranch?: boolean }
-export type TaskCloseResult =
-  | { closed: true; warning?: string }
-  | { closed: false; blocker: TaskCloseBlocker; branch?: string; baseBranch?: string; message?: string }
+export interface TaskCloseParams { taskId: string; stopWorking?: boolean; discardUnsaved?: boolean }
+export type TaskCloseResult = { closed: true } | { closed: false; blocker: TaskCloseBlocker }
 
 /** `tab.close` (SPEC.md §8.8): close one agent or terminal tab of a task. */
 export const TAB_CLOSE_OP = 'tab.close'
@@ -73,14 +69,14 @@ export const TAB_CLOSE_FEATURE = 'tab.close'
 export interface TabCloseParams { tabId: string }
 
 /**
- * `pin.set` (SPEC.md §8.10): pin or unpin a project, or a task when `taskId` is
- * set, in the desktop sidebar's Pinned list.
+ * `pin.set` (SPEC.md §8.10): pin or unpin a project, a stream when `streamId` is
+ * set, or a task when `taskId` is set, in the desktop sidebar's Pinned list.
  */
 export const PIN_SET_OP = 'pin.set'
 /** The handshake feature (§8.1) a desktop lists when it answers `pin.set` and sends `pinned`. */
 export const PIN_FEATURE = 'pin'
 
-export interface PinSetParams { projectId: string; taskId?: string; pinned: boolean }
+export interface PinSetParams { projectId: string; streamId?: string; taskId?: string; pinned: boolean }
 
 /**
  * `task.triage` (SPEC.md §8.11): the desktop inbox's Mark read, Mark unread, Settle,
@@ -639,12 +635,13 @@ export function parseTaskNewParams(params: unknown): TaskNewParams {
   if (prompt.length > ChatLimits.send) fail(`prompt over ${ChatLimits.send} characters`)
   if (!prompt.trim()) fail('prompt is empty')
   const out: TaskNewParams = { projectId, prompt }
+  const streamId = optStr(o, 'streamId')
+  if (streamId !== undefined) out.streamId = streamId
   const mode = optStr(o, 'mode')
   if (mode !== undefined) {
     if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
     out.mode = mode as TaskNewMode
   }
-  if (flag(o, 'workspace')) out.workspace = true
   return out
 }
 
@@ -652,30 +649,18 @@ export function parseTaskNewParams(params: unknown): TaskNewParams {
 export function parseTaskCloseParams(params: unknown): TaskCloseParams {
   const o = obj(params, 'params')
   const out: TaskCloseParams = { taskId: str(o, 'taskId') }
+  if (flag(o, 'stopWorking')) out.stopWorking = true
   if (flag(o, 'discardUnsaved')) out.discardUnsaved = true
-  if (flag(o, 'discardWorkspace')) out.discardWorkspace = true
-  if (flag(o, 'keepBranch')) out.keepBranch = true
   return out
 }
 
-/**
- * `task.close` result (the phone's side). A blocker this build doesn't know reads as
- * `check-failed`, which the phone words generically.
- */
+/** `task.close` result (the phone's side). A blocker outside {@link TASK_CLOSE_BLOCKERS} throws. */
 export function parseTaskCloseResult(value: unknown): TaskCloseResult {
   const o = obj(value, 'result')
-  if (bool(o, 'closed')) {
-    const warning = optStr(o, 'warning')
-    return warning === undefined ? { closed: true } : { closed: true, warning }
-  }
-  const out: TaskCloseResult = { closed: false, blocker: soft<TaskCloseBlocker>(o, 'blocker', TASK_CLOSE_BLOCKERS, 'check-failed') }
-  const branch = optStr(o, 'branch')
-  if (branch !== undefined) out.branch = branch
-  const baseBranch = optStr(o, 'baseBranch')
-  if (baseBranch !== undefined) out.baseBranch = baseBranch
-  const message = optStr(o, 'message')
-  if (message !== undefined) out.message = message
-  return out
+  if (bool(o, 'closed')) return { closed: true }
+  const blocker = str(o, 'blocker')
+  if (!(TASK_CLOSE_BLOCKERS as readonly string[]).includes(blocker)) fail(`unknown blocker ${blocker}`)
+  return { closed: false, blocker: blocker as TaskCloseBlocker }
 }
 
 /** `tab.close` params (the desktop's side). */
@@ -687,6 +672,8 @@ export function parseTabCloseParams(params: unknown): TabCloseParams {
 export function parsePinSetParams(params: unknown): PinSetParams {
   const o = obj(params, 'params')
   const out: PinSetParams = { projectId: str(o, 'projectId'), pinned: bool(o, 'pinned') }
+  const streamId = optStr(o, 'streamId')
+  if (streamId !== undefined) out.streamId = streamId
   const taskId = optStr(o, 'taskId')
   if (taskId !== undefined) out.taskId = taskId
   return out

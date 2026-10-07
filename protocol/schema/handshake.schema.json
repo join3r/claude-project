@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://devtool.awantech.sk/schema/mobile/v1/handshake.schema.json",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v2/handshake.schema.json",
   "title": "Noise handshake payloads",
   "description": "UTF-8 JSON payloads of Noise message 1 (phoneHello) and message 2 (desktopHello), SPEC.md §4.3. Unknown fields are ignored.",
   "oneOf": [{ "$ref": "#/$defs/phoneHello" }, { "$ref": "#/$defs/desktopHello" }],

@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { createHomeTask, DEFAULT_CONFIG, type Project, type Task } from '../src/shared/types'
+import { DEFAULT_CONFIG, type Project, type Tab } from '../src/shared/types'
+import { findTaskInProject, projectTasks } from '../src/shared/streams'
+import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { formatShortcutForApp } from '../src/shared/shortcut-label'
 
 // React import is required by the JSX runtime under vitest's default transform.
@@ -66,7 +68,7 @@ vi.mock('@monaco-editor/react', async () => {
   return { default: MockEditor }
 })
 
-// The home task's tab is irrelevant here and drags in git/stat plumbing.
+// The project Home page is irrelevant here and drags in git/stat plumbing.
 vi.mock('../src/renderer/components/ProjectHome', () => ({
   ProjectHome: () => null
 }))
@@ -82,24 +84,18 @@ const DISK: Record<string, string> = {
   'src/b.txt': 'contents of b\n'
 }
 
-function editorTab(id: string, filePath: string): Task['tabs']['left'][number] {
+function editorTab(id: string, filePath: string): Tab {
   return { id, type: 'editor', title: filePath.split('/').pop()!, filePath }
 }
 
 function buildProjects(): Project[] {
-  const { task: home } = createHomeTask('p1')
-  const task: Task = {
+  const task = fixtureTask({
     id: 't1',
     name: 'Task One',
-    tabs: {
-      left: [editorTab('tab-a', 'src/a.txt'), editorTab('tab-b', 'src/b.txt')],
-      right: []
-    },
-    activeTab: { left: 'tab-a', right: null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }
-  return [{ id: 'p1', name: 'Project One', directory: '/project', tasks: [home, task] }]
+    tabs: { left: [editorTab('tab-a', 'src/a.txt'), editorTab('tab-b', 'src/b.txt')] },
+    activeTab: { left: 'tab-a' }
+  })
+  return [fixtureProject({ id: 'p1', name: 'Project One', directory: '/project', tasks: [task] })]
 }
 
 let app: AppActions
@@ -135,7 +131,8 @@ async function type(index: number, value: string): Promise<void> {
 }
 
 function tabsOf(taskId: string) {
-  return app.projects.find(p => p.id === 'p1')?.tasks.find(t => t.id === taskId)?.tabs.left ?? []
+  const task = findTaskInProject(app.projects.find(p => p.id === 'p1'), taskId)
+  return task?.panes[0]?.tabs ?? []
 }
 
 function dialog(): HTMLElement | null {
@@ -172,9 +169,9 @@ async function mountApp(): Promise<void> {
 
 /** Reveal the second editor so both tabs hold a live buffer, then re-select the first. */
 async function revealBothEditors(): Promise<void> {
-  await act(async () => { app.setActiveTab('p1', 't1', 'left', 'tab-b') })
+  await act(async () => { app.setActiveTab('p1', 't1', 'tab-b') })
   await waitFor(() => expect(editors()).toHaveLength(2))
-  await act(async () => { app.setActiveTab('p1', 't1', 'left', 'tab-a') })
+  await act(async () => { app.setActiveTab('p1', 't1', 'tab-a') })
   await flush()
 }
 
@@ -200,6 +197,7 @@ beforeEach(() => {
     onNotesUpdated: vi.fn().mockReturnValue(() => {}),
     onTasksRemoved: vi.fn().mockReturnValue(() => {}),
     onTabsRemoved: vi.fn().mockReturnValue(() => {}),
+    onTabsRestart: vi.fn().mockReturnValue(() => {}),
     reportDirtyTabs: vi.fn().mockResolvedValue(undefined),
     onConfigUpdated: vi.fn().mockReturnValue(() => {}),
     onSshStatusChanged: vi.fn().mockReturnValue(() => {}),
@@ -240,7 +238,7 @@ describe('closing an editor with unsaved changes', () => {
     await mountApp()
     const close = `Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`
     const terminal = `New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`
-    const split = `Open right pane (${formatShortcutForApp('CmdOrCtrl+D')})`
+    const split = `Split right (${formatShortcutForApp('CmdOrCtrl+D')})`
     expect(close).not.toContain('⌘')
     expect(screen.getAllByTitle(close).length).toBeGreaterThan(0)
     expect(screen.getAllByTitle(terminal).length).toBeGreaterThan(0)
@@ -351,7 +349,7 @@ describe('closing an editor with unsaved changes', () => {
     await type(1, 'unsaved b')
 
     await act(async () => {
-      void app.removeTask('p1', 't1')
+      void app.archiveTask('p1', 't1')
       await new Promise(resolve => setTimeout(resolve, 0))
     })
 
@@ -361,7 +359,7 @@ describe('closing an editor with unsaved changes', () => {
 
     await click('Cancel')
 
-    expect(app.projects[0].tasks.map(t => t.id)).toContain('t1')
+    expect(projectTasks(app.projects[0]).map(t => t.id)).toContain('t1')
     expect(tabsOf('t1').map(t => t.id)).toEqual(['tab-a', 'tab-b'])
     expect((window as any).api.fbWriteFile).not.toHaveBeenCalled()
     expect((window as any).api.workspaceDelete).not.toHaveBeenCalled()

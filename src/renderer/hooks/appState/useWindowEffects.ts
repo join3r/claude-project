@@ -13,6 +13,7 @@ import type { AppStateCore, UpdateWindowViewState } from './useAppStateCore'
 import { forgetRemovedTaskView, sidebarForTask } from './viewState'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { buildWindowTitle } from './windowTitle'
+import { findTaskInProject } from '../../../shared/streams'
 
 export function useNativeTheme(): 'dark' | 'light' {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -24,21 +25,17 @@ export function useNativeTheme(): 'dark' | 'light' {
 }
 
 /**
- * Main deleted a task by itself (idle cleanup). The state change arrives as a
- * normal projects broadcast; this is the part of `removeTask` that is local to
+ * Main archived a task by itself (a phone closed it). The state change arrives as
+ * a normal projects broadcast; this is the part of `archiveTask` that is local to
  * a window — the xterm instances and per-tab status entries hanging off the
- * tabs, and this window's own view state.
+ * tabs, and this window's own view state. The scrollback stays, for Reopen
+ * (disposing a live xterm writes its buffer back, which is what we want here).
  */
 export function useTasksRemovedListener(updateWindowViewState: UpdateWindowViewState): void {
   useEffect(() => {
     return window.api.onTasksRemoved(({ taskId, tabIds }) => {
       for (const tabId of tabIds) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-      }
-      // Disposing a live xterm writes its buffer back synchronously, which would
-      // put back the scrollback file main just deleted.
-      for (const tabId of tabIds) {
-        void window.api.scrollbackDelete(tabId)
       }
       updateWindowViewState(prev => forgetRemovedTaskView(prev, taskId))
     })
@@ -57,6 +54,22 @@ export function useTabsRemovedListener(): void {
       }
       for (const tabId of tabIds) {
         void window.api.scrollbackDelete(tabId)
+      }
+    })
+  }, [])
+}
+
+/**
+ * Another window moved a task to another directory and ended its agents and
+ * terminals there. Drop this window's copies (the xterm, the status entries)
+ * before the projects broadcast arrives: then the tab bodies, keyed on the
+ * task's directory, mount again and spawn in the new one. Scrollback stays.
+ */
+export function useTabsRestartListener(): void {
+  useEffect(() => {
+    return window.api.onTabsRestart(({ tabIds }) => {
+      for (const tabId of tabIds) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
       }
     })
   }, [])
@@ -139,8 +152,8 @@ export function useSelectionSync(core: AppStateCore, windowFocused: boolean, con
       return
     }
     if (lastSyncedSidebarTaskIdRef.current === taskId) return
-    const project = projects.find(p => p.tasks.some(t => t.id === taskId))
-    const task = project?.tasks.find(t => t.id === taskId) ?? null
+    const project = projects.find(p => !!findTaskInProject(p, taskId))
+    const task = findTaskInProject(project, taskId) ?? null
     if (!task) return
     lastSyncedSidebarTaskIdRef.current = taskId
 
@@ -156,10 +169,6 @@ export function useSelectionSync(core: AppStateCore, windowFocused: boolean, con
 
 export function useWindowTitle(selectedProject: Project | null, selectedTask: Task | null): void {
   useEffect(() => {
-    document.title = buildWindowTitle(
-      selectedProject?.name ?? null,
-      selectedTask?.name ?? null,
-      selectedTask?.system === 'home'
-    )
-  }, [selectedProject?.name, selectedTask?.name, selectedTask?.system])
+    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
+  }, [selectedProject?.name, selectedTask?.name])
 }

@@ -11,9 +11,13 @@ import { PushOp } from './push.ts'
  * tab types or statuses don't break an older phone.
  */
 
-/** The version this build speaks (N) and the oldest it still accepts (the desktop keeps N−1). */
-export const PROTOCOL_VERSION = 1
-export const MIN_PROTOCOL_VERSION = 1
+/**
+ * The version this build speaks (N) and the oldest it still accepts. Version 2 (streams,
+ * SPEC.md §9) is a hard cutover: neither side accepts 1, so an older peer gets
+ * `incompatible` and is told which side to update.
+ */
+export const PROTOCOL_VERSION = 2
+export const MIN_PROTOCOL_VERSION = 2
 
 export type PairKind = 'pair' | 'resume'
 export type HandshakeResult = 'ok' | 'pending' | 'rejected' | 'incompatible' | 'unknown-device'
@@ -60,6 +64,15 @@ export interface InboxTab {
 export interface InboxTask {
   id: string
   name: string
+  /** The stream holding the task, and its name, for the `Project · Stream` line (§4.4). */
+  streamId: string
+  streamName: string
+  /** The task's one status: the strongest of its main tab and agent tabs (§4.4). */
+  status: InboxTabStatus
+  /** When `status` began. */
+  since?: number
+  /** Short label of what the agent is doing, from the tab that sets `status`. */
+  activity?: string
   lastInteractedAt?: number
   attentionAt?: number
   /** The task's last event (a hook notification or stop, a bell, an exit), for "last activity" (§4.4). */
@@ -72,9 +85,17 @@ export interface InboxTask {
   snoozedUntil?: number
   /** Present while the task is snoozed until it needs the user (§4.4). */
   snoozeUntilAttention?: true
-  /** Present on a workspace task: the branch its worktree is on (§4.4). */
-  branch?: string
   tabs: InboxTab[]
+}
+
+/** A line of work in a project (§4.4); archived streams are never sent. */
+export interface InboxStream {
+  id: string
+  name: string
+  /** The project's default stream (project folder, can't be closed). */
+  main?: true
+  /** Present on a worktree stream: the branch its worktree is on. */
+  branch?: string
 }
 
 export interface InboxProject {
@@ -82,12 +103,21 @@ export interface InboxProject {
   name: string
   emoji?: string
   remote: boolean
+  /** The project's open streams in sidebar order, `main` first, empty ones included. */
+  streams: InboxStream[]
+  /** The stream the project was last used in (the phone's default for New task). */
+  lastStreamId?: string
+  /** Every open task, stream by stream. */
   tasks: InboxTask[]
 }
 
-/** One entry of the desktop's Pinned list (§4.4): a project, or a task when `taskId` is set. */
+/**
+ * One entry of the desktop's Pinned list (§4.4): a project, a stream when
+ * `streamId` is set, or a task when `taskId` is set (with its `streamId`).
+ */
 export interface InboxPin {
   projectId: string
+  streamId?: string
   taskId?: string
 }
 
@@ -296,13 +326,11 @@ export function parseDesktopHello(input: string | Uint8Array): DesktopHello {
 
 function parseTab(value: unknown): InboxTab {
   const o = obj(value, 'tab')
-  const status = str(o, 'status')
   const tab: InboxTab = {
     id: str(o, 'id'),
     type: str(o, 'type'),
     title: str(o, 'title'),
-    // A status this build doesn't know is shown as idle rather than dropping the tab.
-    status: STATUSES.includes(status) ? (status as InboxTabStatus) : 'idle'
+    status: parseStatus(o)
   }
   const since = optInt(o, 'since')
   if (since !== undefined) tab.since = since
@@ -311,9 +339,26 @@ function parseTab(value: unknown): InboxTab {
   return tab
 }
 
+function parseStatus(o: Obj): InboxTabStatus {
+  const status = str(o, 'status')
+  // A status this build doesn't know is shown as idle rather than dropping the row.
+  return STATUSES.includes(status) ? (status as InboxTabStatus) : 'idle'
+}
+
 function parseTask(value: unknown): InboxTask {
   const o = obj(value, 'task')
-  const task: InboxTask = { id: str(o, 'id'), name: str(o, 'name'), tabs: arr(o, 'tabs').map(parseTab) }
+  const task: InboxTask = {
+    id: str(o, 'id'),
+    name: str(o, 'name'),
+    streamId: str(o, 'streamId'),
+    streamName: str(o, 'streamName'),
+    status: parseStatus(o),
+    tabs: arr(o, 'tabs').map(parseTab)
+  }
+  const since = optInt(o, 'since')
+  if (since !== undefined) task.since = since
+  const activity = optStr(o, 'activity')
+  if (activity !== undefined) task.activity = activity
   const lastInteractedAt = optInt(o, 'lastInteractedAt')
   if (lastInteractedAt !== undefined) task.lastInteractedAt = lastInteractedAt
   const attentionAt = optInt(o, 'attentionAt')
@@ -326,9 +371,16 @@ function parseTask(value: unknown): InboxTask {
   const snoozedUntil = optInt(o, 'snoozedUntil')
   if (snoozedUntil !== undefined) task.snoozedUntil = snoozedUntil
   if (o.snoozeUntilAttention === true) task.snoozeUntilAttention = true
-  const branch = optStr(o, 'branch')
-  if (branch !== undefined) task.branch = branch
   return task
+}
+
+function parseStream(value: unknown): InboxStream {
+  const o = obj(value, 'stream')
+  const stream: InboxStream = { id: str(o, 'id'), name: str(o, 'name') }
+  if (o.main === true) stream.main = true
+  const branch = optStr(o, 'branch')
+  if (branch !== undefined) stream.branch = branch
+  return stream
 }
 
 function parseProject(value: unknown): InboxProject {
@@ -337,16 +389,21 @@ function parseProject(value: unknown): InboxProject {
     id: str(o, 'id'),
     name: str(o, 'name'),
     remote: o.remote === true,
+    streams: arr(o, 'streams').map(parseStream),
     tasks: arr(o, 'tasks').map(parseTask)
   }
   const emoji = optStr(o, 'emoji')
   if (emoji !== undefined) project.emoji = emoji
+  const lastStreamId = optStr(o, 'lastStreamId')
+  if (lastStreamId !== undefined) project.lastStreamId = lastStreamId
   return project
 }
 
 function parsePin(value: unknown): InboxPin {
   const o = obj(value, 'pin')
   const pin: InboxPin = { projectId: str(o, 'projectId') }
+  const streamId = optStr(o, 'streamId')
+  if (streamId !== undefined) pin.streamId = streamId
   const taskId = optStr(o, 'taskId')
   if (taskId !== undefined) pin.taskId = taskId
   return pin

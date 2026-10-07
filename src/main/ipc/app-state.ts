@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import type { AppConfig, CleanupActivity, NotesRecord, ProjectsData, TabStatusValue } from '../../shared/types'
+import type { AppConfig, NotesRecord, ProjectsData, TabStatusValue } from '../../shared/types'
 import type { AgentActivity } from '../../shared/agent-activity'
 import type { RevisionStore } from '../revision-store'
 import type { PaletteFrecencyStorage } from '../palette-frecency-storage'
@@ -13,10 +13,14 @@ export interface AppStateDeps {
   notesStore: RevisionStore<NotesRecord>
   paletteFrecency: PaletteFrecencyStorage
   getAgentActivity: () => Record<string, AgentActivity>
-  getCleanupActivity: () => CleanupActivity
   setDirtyTabs: (windowId: number, tabIds: string[]) => void
   /** A window's status for a tab without hooks (see `TabActivityRegistry.reported`). */
   reportTabStatus: (windowId: number, tabId: string, status: TabStatusValue) => void
+  /**
+   * A window moved a task to another directory: end these tabs' processes and tell
+   * every other window, so each restarts them in the new directory.
+   */
+  restartTabs: (windowId: number, tabIds: string[]) => void
   backupProjects: () => boolean
   getConfig: () => AppConfig
   /** Merge a validated partial config, persist it and tell every window. */
@@ -28,24 +32,27 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-/** Shared persisted state: projects, notes, config, palette frecency and idle-cleanup inputs. */
+/** Shared persisted state: projects, notes, config, palette frecency, and what main must know of each window. */
 export function registerAppStateHandlers(ipc: IpcRegistrar, deps: AppStateDeps): void {
   ipc.handle('load-projects', [], () => deps.projectsStore.get())
   ipc.handle('save-projects', [revisionSave(projectsData)], (_event, payload) =>
     deps.projectsStore.save(payload.baseRevision, payload.data))
 
-  // Everything the sweep exempts a task for, as the settings preview needs to show
-  // it: what is on screen in any window, what main has heard from the hooks, what
-  // still has a process, and what has an unsaved buffer open.
   ipc.handle('get-agent-activity', [], () => deps.getAgentActivity())
-  ipc.handle('get-cleanup-activity', [], () => deps.getCleanupActivity())
 
-  // Windows publish their unsaved editors: a background sweep has nobody to show a
-  // Save/Discard dialog to, so a dirty buffer keeps its task out of the sweep.
+  // Windows publish their unsaved editors: a phone closing a task has nobody to show
+  // a Save/Discard dialog to, so a dirty buffer comes back to it as a blocker.
   ipc.handle('report-dirty-tabs', [v.array(v.string())], (event, tabIds) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     if (!window) return undefined
     deps.setDirtyTabs(window.id, tabIds)
+    return undefined
+  })
+
+  ipc.handle('tabs-restart', [v.array(v.string({ max: 200 }), { max: 500 })], (event, tabIds) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return undefined
+    deps.restartTabs(window.id, tabIds)
     return undefined
   })
 

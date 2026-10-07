@@ -15,6 +15,7 @@ import {
   useSelectionSync,
   useTasksRemovedListener,
   useTabsRemovedListener,
+  useTabsRestartListener,
   useWindowFocused,
   useWindowTitle
 } from './appState/useWindowEffects'
@@ -27,6 +28,7 @@ import { useTabs, type TabsActions } from './appState/useTabs'
 import { useNotes, type NotesActions } from './appState/useNotes'
 import { useWindowLayout, type WindowLayoutActions } from './appState/useWindowLayout'
 import { useZoom, type ZoomActions } from './appState/useZoom'
+import { findTaskInProject } from '../../shared/streams'
 
 export { buildWindowTitle } from './appState/windowTitle'
 export type { DirtyClosePrompt, DirtyCloseChoice } from './appState/useDirtyClosePrompt'
@@ -69,6 +71,7 @@ export function useAppState(): AppActions {
   const dirty = useDirtyClosePrompt()
   useTasksRemovedListener(core.updateWindowViewState)
   useTabsRemovedListener()
+  useTabsRestartListener()
   const windowFocused = useWindowFocused()
   usePersistence(core)
   const connectSsh = useConnectSsh()
@@ -81,12 +84,12 @@ export function useAppState(): AppActions {
     confirmDiscardDirty: dirty.confirmDiscardDirty,
     selectProject: selection.setSelectedProjectId
   })
-  const tasks = useTasks(core, { confirmDiscardDirty: dirty.confirmDiscardDirty })
+  const tasks = useTasks(core, { confirmDiscardDirty: dirty.confirmDiscardDirty, switchToTask: selection.switchToTask })
   const tabs = useTabs(core, { connectSsh, confirmDiscardDirty: dirty.confirmDiscardDirty })
   const notes = useNotes(core, {
     addTab: tabs.addTab,
     setActiveTab: tabs.setActiveTab,
-    switchToTask: selection.switchToTask
+    taskForTab: tasks.taskForTab
   })
   const layout = useWindowLayout(core)
   const { config, projectsData, windowViewState } = core
@@ -96,7 +99,7 @@ export function useAppState(): AppActions {
   const selectedProjectId = windowViewState.selectedProjectId
   const selectedTaskId = windowViewState.selectedTaskId
   const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null
-  const selectedTask = selectedProject?.tasks.find(task => task.id === selectedTaskId) ?? null
+  const selectedTask = findTaskInProject(selectedProject, selectedTaskId) ?? null
 
   const effectiveTheme = config?.theme === 'system' || !config ? theme : config.theme
   const effectiveTerminalTheme = config?.terminalTheme === 'system' || !config ? theme : config.terminalTheme

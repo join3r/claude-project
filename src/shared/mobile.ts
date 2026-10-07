@@ -99,6 +99,17 @@ export interface MobilePendingRequest {
   online: boolean
 }
 
+/** The side that has to update before a phone and this desktop can talk (SPEC.md §4.3). */
+export type MobileUpdateSide = 'phone' | 'desktop'
+
+/** A phone whose last handshake was refused for its protocol version. */
+export interface MobileIncompatiblePhone {
+  name: string
+  update: MobileUpdateSide
+  /** Epoch ms. */
+  at: number
+}
+
 export interface MobilePairedDevice {
   id: string
   name: string
@@ -108,6 +119,8 @@ export interface MobilePairedDevice {
   online: boolean
   /** The phone registered for push notifications (SPEC.md §7.4). */
   push: boolean
+  /** Its last handshake was refused for its protocol version: who has to update. */
+  outdated?: MobileUpdateSide
 }
 
 /** A live QR code. `exp` is unix **seconds**, as in the pairing URI. */
@@ -124,4 +137,6 @@ export interface MobileState {
   invite: MobilePairingInvite | null
   pending: MobilePendingRequest | null
   devices: MobilePairedDevice[]
+  /** The latest unpaired phone refused for its protocol version (a pairing attempt from an old app). */
+  incompatible?: MobileIncompatiblePhone
 }

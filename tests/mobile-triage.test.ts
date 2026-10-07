@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { triageTaskInData } from '../src/main/mobile/triage'
-import { createHomeTask, type Project, type ProjectsData, type Task, type TaskInboxState } from '../src/shared/types'
+import { type Project, type ProjectsData, type TaskInboxState } from '../src/shared/types'
+import { findTaskInProject } from '../src/shared/streams'
+import { fixtureProject, type FixtureTask } from './helpers/streams-fixtures'
 
 const NOW = 1_790_000_000_000
 
-function task(id: string, inbox?: TaskInboxState): Task {
-  return { id, name: id, tabs: { left: [], right: [] }, activeTab: { left: null, right: null }, splitOpen: false, splitRatio: 0.5, inbox }
+function task(id: string, inbox?: TaskInboxState): FixtureTask {
+  return { id, inbox }
 }
 
-function project(id: string, tasks: Task[], extra: Partial<Project> = {}): Project {
-  return { id, name: id, directory: `/src/${id}`, tasks: [createHomeTask(id).task, ...tasks], ...extra }
+function project(id: string, tasks: FixtureTask[], extra: Partial<Project> = {}): Project {
+  return fixtureProject({ id, directory: `/src/${id}`, tasks, ...extra })
 }
 
 function data(inbox?: TaskInboxState): ProjectsData {
@@ -19,7 +21,7 @@ function data(inbox?: TaskInboxState): ProjectsData {
 
 function inboxOf(result: ReturnType<typeof triageTaskInData>): TaskInboxState | undefined {
   if (!result.ok) throw new Error(result.code)
-  return result.data.projects[0].tasks.find(t => t.id === 't1')?.inbox
+  return findTaskInProject(result.data.projects[0], 't1')?.inbox
 }
 
 describe('triageTaskInData (SPEC.md §8.11)', () => {
@@ -66,7 +68,7 @@ describe('triageTaskInData (SPEC.md §8.11)', () => {
     const start = data({ eventAt: 10 })
     const result = triageTaskInData(start, { taskId: 't1', action: 'settle' }, NOW)
     if (!result.ok) throw new Error(result.code)
-    expect(result.data.projects[0].tasks[2]).toBe(start.projects[0].tasks[2])
+    expect(findTaskInProject(result.data.projects[0], 't2')).toBe(findTaskInProject(start.projects[0], 't2'))
     expect(result.data.projects[1]).toBe(start.projects[1])
   })
 
@@ -74,7 +76,5 @@ describe('triageTaskInData (SPEC.md §8.11)', () => {
     const start = data()
     expect(triageTaskInData(start, { taskId: 'nope', action: 'read' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
     expect(triageTaskInData(start, { taskId: 'h1', action: 'settle' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
-    const home = start.projects[0].tasks[0].id
-    expect(triageTaskInData(start, { taskId: home, action: 'settle' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
   })
 })

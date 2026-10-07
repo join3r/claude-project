@@ -197,7 +197,7 @@ public actor MockDesktopConnection: DesktopConnection {
             } catch {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
-            let result = try addTask(projectId: parsed.projectId, prompt: parsed.prompt, workspace: parsed.workspace)
+            let result = try addTask(projectId: parsed.projectId, streamId: parsed.streamId, prompt: parsed.prompt)
             startReply(tabId: result.tabId, text: parsed.prompt)
             return result.json
         case TaskOp.close:
@@ -291,11 +291,16 @@ public actor MockDesktopConnection: DesktopConnection {
         throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
     }
 
-    /// `task.new`: a task at the end of the project, named after the prompt's
-    /// first line, with one claude-chat tab.
-    private func addTask(projectId: String, prompt: String, workspace: Bool) throws -> TaskNewResult {
+    /// `task.new`: a task at the end of the stream (default: the one last
+    /// used), named after the prompt's first line, with one claude-chat tab.
+    private func addTask(projectId: String, streamId: String?, prompt: String) throws -> TaskNewResult {
         guard let p = inbox.projects.firstIndex(where: { $0.id == projectId }) else {
             throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        let project = inbox.projects[p]
+        let target = streamId.map { id in project.streams.first { $0.id == id } } ?? project.defaultStream
+        guard let stream = target else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")
         }
         newChatCount += 1
         let tabId = "tab-new-\(newChatCount)", taskId = "task-new-\(newChatCount)"
@@ -303,41 +308,38 @@ public actor MockDesktopConnection: DesktopConnection {
         let firstLine = prompt.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
         let name = firstLine.count > 50 ? String(firstLine.prefix(49)) + "…" : firstLine
         let tab = InboxTab(id: tabId, type: .claudeChat, title: "Claude", status: .idle, since: now)
-        let branch = workspace ? Self.branchName(prompt) : nil
-        inbox.projects[p].tasks.append(InboxTask(id: taskId, name: name, lastInteractedAt: now, branch: branch, tabs: [tab]))
+        let task = InboxTask(id: taskId, name: name, streamId: stream.id, streamName: stream.name, lastInteractedAt: now, tabs: [tab])
+        // Stream by stream, as the desktop sends them: after the stream's last task.
+        let insertAt = (project.tasks.lastIndex { $0.streamId == stream.id }).map { $0 + 1 }
+            ?? project.tasks.firstIndex { task in
+                (project.streams.firstIndex { $0.id == task.streamId } ?? .max) > (project.streams.firstIndex { $0.id == stream.id } ?? .max)
+            } ?? project.tasks.count
+        inbox.projects[p].tasks.insert(task, at: insertAt)
+        inbox.projects[p].lastStreamId = stream.id
         inbox.generatedAt = now
         chats[tabId] = MockChatTranscript(title: "Claude", status: MockChatTranscript.freshStatus(), items: [], prompts: [], details: [:])
         continuation.yield(.inbox(inbox))
         return TaskNewResult(taskId: taskId, tabId: tabId)
     }
 
-    /// Roughly the desktop's branch rule (§8.6), enough for the demo.
-    private static func branchName(_ prompt: String) -> String {
-        let slug = prompt.lowercased()
-            .map { $0.isLetter || $0.isNumber ? String($0) : "-" }
-            .joined()
-            .split(separator: "-")
-            .joined(separator: "-")
-        return slug.isEmpty ? "task" : String(slug.prefix(40))
-    }
-
-    /// `task.close`: a workspace task reports its branch as unmerged until the
-    /// phone discards it, so the demo shows the second confirmation.
+    /// `task.close`: archives the task. A working task reports `.working`
+    /// until the phone confirms, so the demo shows the second confirmation.
     private func removeTask(_ params: TaskCloseParams) throws -> TaskCloseResult {
         for p in inbox.projects.indices {
             guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == params.taskId }) else { continue }
             let task = inbox.projects[p].tasks[t]
-            if let branch = task.branch, !params.discardWorkspace {
-                return .blocked(.unmerged, branch: branch, baseBranch: "main", message: nil)
+            if task.status == .working, !params.stopWorking {
+                return .blocked(.working)
             }
             for tab in task.tabs {
                 scripts[tab.id]?.cancel()
                 chats[tab.id] = nil
             }
             inbox.projects[p].tasks.remove(at: t)
+            inbox.pinned.removeAll { $0.taskId == task.id }
             inbox.generatedAt = Date().unixMilliseconds
             continuation.yield(.inbox(inbox))
-            return .closed(warning: nil)
+            return .closed
         }
         throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
     }
@@ -347,6 +349,7 @@ public actor MockDesktopConnection: DesktopConnection {
         for p in inbox.projects.indices {
             for t in inbox.projects[p].tasks.indices where inbox.projects[p].tasks[t].tabs.contains(where: { $0.id == tabId }) {
                 inbox.projects[p].tasks[t].tabs.removeAll { $0.id == tabId }
+                inbox.projects[p].tasks[t].status = Self.status(of: inbox.projects[p].tasks[t])
                 scripts[tabId]?.cancel()
                 chats[tabId] = nil
                 inbox.generatedAt = Date().unixMilliseconds
@@ -357,14 +360,27 @@ public actor MockDesktopConnection: DesktopConnection {
         throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such tab")
     }
 
-    /// `pin.set`: appends or removes the pin, as the desktop sidebar does.
+    /// `pin.set`: appends or removes the pin, as the desktop sidebar does. A
+    /// task pin names the stream holding the task.
     private func setPin(_ params: PinSetParams) throws {
-        guard let project = inbox.projects.first(where: { $0.id == params.pin.projectId }),
-              params.pin.taskId.map({ id in project.tasks.contains { $0.id == id } }) ?? true
-        else { throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project or task") }
-        let isPinned = inbox.pinned.contains(params.pin)
+        guard let project = inbox.projects.first(where: { $0.id == params.pin.projectId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        var pin = InboxPin(projectId: project.id)
+        if let taskId = params.pin.taskId {
+            guard let task = project.tasks.first(where: { $0.id == taskId }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
+            }
+            pin = .task(task, in: project)
+        } else if let streamId = params.pin.streamId {
+            guard let stream = project.streams.first(where: { $0.id == streamId }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")
+            }
+            pin = .stream(stream, in: project)
+        }
+        let isPinned = inbox.isPinned(pin)
         guard isPinned != params.pinned else { return }
-        if params.pinned { inbox.pinned.append(params.pin) } else { inbox.pinned.removeAll { $0 == params.pin } }
+        if params.pinned { inbox.pinned.append(pin) } else { inbox.pinned.removeAll { $0.key == pin.key } }
         inbox.generatedAt = Date().unixMilliseconds
         continuation.yield(.inbox(inbox))
     }
@@ -552,7 +568,7 @@ public actor MockDesktopConnection: DesktopConnection {
 
         continuation.yield(.features([
             DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
-            DesktopFeature.taskWorkspace, DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+            DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
         ]))
         set(.online)
@@ -605,9 +621,25 @@ public actor MockDesktopConnection: DesktopConnection {
         }
         tab.since = now
         task.tabs[b] = tab
-        task.attentionAt = task.tabs.contains { $0.status == .attention } ? (task.attentionAt ?? now) : nil
+        task.status = Self.status(of: task)
+        let statusTab = Self.statusTabs(of: task).first { $0.status == task.status }
+        task.since = statusTab?.since
+        task.activity = statusTab?.activity
+        task.attentionAt = task.status == .attention ? (task.attentionAt ?? now) : nil
         inbox.projects[p].tasks[t] = task
         inbox.generatedAt = now
+    }
+
+    /// The desktop's status tabs: agent tabs, else the first terminal (a
+    /// terminal task's main tab). The mock has no main tab of its own.
+    static func statusTabs(of task: InboxTask) -> [InboxTab] {
+        let agents = task.tabs.filter { $0.type != .terminal }
+        return agents.isEmpty ? Array(task.tabs.prefix(1)) : agents
+    }
+
+    /// The task's one status, as the desktop's `taskStatus` reads it (§4.4).
+    static func status(of task: InboxTask) -> TabStatus {
+        statusTabs(of: task).map(\.status).max { $0.priority < $1.priority } ?? .idle
     }
 }
 
@@ -643,41 +675,71 @@ public enum MockInbox {
         let t = now.unixMilliseconds
         func ago(_ minutes: Double) -> Int64 { t - Int64(minutes * 60_000) }
 
+        let apiMain = InboxStream(id: "s-api-main", name: "main", isMain: true)
+        let api050 = InboxStream(id: "s-api-050", name: "0.5.0", branch: "0.5.0")
+        let apiBugs = InboxStream(id: "s-api-bugs", name: "bugfixes")
+        let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true)
+        let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign")
+        let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
+        func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
+                  eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil, snoozedUntil: Int64? = nil,
+                  tabs: [InboxTab]) -> InboxTask {
+            var task = InboxTask(id: id, name: name, streamId: stream.id, streamName: stream.name,
+                                 lastInteractedAt: lastInteractedAt, attentionAt: attentionAt, eventAt: eventAt, unread: unread,
+                                 settledAt: settledAt, snoozedUntil: snoozedUntil, tabs: tabs)
+            task.status = MockDesktopConnection.status(of: task)
+            let statusTab = MockDesktopConnection.statusTabs(of: task).first { $0.status == task.status }
+            task.since = statusTab?.since
+            task.activity = statusTab?.activity
+            return task
+        }
+
         return Inbox(
             desktop: InboxDesktop(id: desktopId, name: desktopName),
             generatedAt: t,
             projects: [
-                InboxProject(id: "p-api", name: "api-server", emoji: "🚀", tasks: [
-                    InboxTask(id: "t-auth", name: "fix-auth", lastInteractedAt: ago(3), attentionAt: ago(1), eventAt: ago(1), unread: true, tabs: [
+                InboxProject(id: "p-api", name: "api-server", emoji: "🚀", streams: [apiMain, api050, apiBugs], lastStreamId: api050.id, tasks: [
+                    task("t-docs", "openapi-docs", apiMain, lastInteractedAt: ago(180), eventAt: ago(170), settledAt: ago(160), tabs: [
+                        InboxTab(id: "tab-5", type: .terminal, title: "npm run docs", status: .exited, since: ago(170)),
+                    ]),
+                    task("t-auth", "fix-auth", api050, lastInteractedAt: ago(3), attentionAt: ago(1), eventAt: ago(1), unread: true, tabs: [
                         InboxTab(id: "tab-1", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Wants to run npm test"),
                         InboxTab(id: "tab-2", type: .terminal, title: "zsh", status: .idle, since: ago(40)),
                     ]),
-                    InboxTask(id: "t-rate", name: "rate-limiter", lastInteractedAt: ago(12), eventAt: ago(6), unread: true, tabs: [
+                    task("t-rate", "rate-limiter", api050, lastInteractedAt: ago(12), eventAt: ago(6), unread: true, tabs: [
                         InboxTab(id: "tab-3", type: .claude, title: "Claude Code", status: .working, since: ago(4), activity: "Running Bash"),
+                    ]),
+                    task("t-flaky", "flaky-login-test", apiBugs, lastInteractedAt: ago(30), eventAt: ago(30), tabs: [
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),
                     ]),
-                    InboxTask(id: "t-docs", name: "openapi-docs", lastInteractedAt: ago(180), eventAt: ago(170), settledAt: ago(160), tabs: [
-                        InboxTab(id: "tab-5", type: .terminal, title: "npm run docs", status: .exited, since: ago(170)),
-                    ]),
                 ]),
-                InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", tasks: [
-                    InboxTask(id: "t-charts", name: "usage-charts", lastInteractedAt: ago(25), tabs: [
+                InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin], tasks: [
+                    task("t-charts", "usage-charts", webMain, lastInteractedAt: ago(25), tabs: [
                         InboxTab(id: "tab-11", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Plan ready for review"),
-                        InboxTab(id: "tab-6", type: .pi, title: "Pi", status: .working, since: ago(2), activity: "Reading files"),
                         InboxTab(id: "tab-7", type: .terminal, title: "vite", status: .idle, since: ago(25)),
                     ]),
-                    InboxTask(id: "t-login", name: "login-redesign", lastInteractedAt: ago(60 * 26), snoozedUntil: t + 3 * 3_600_000, tabs: [
+                    task("t-pi", "chart-colors", webMain, lastInteractedAt: ago(20), tabs: [
+                        InboxTab(id: "tab-6", type: .pi, title: "Pi", status: .working, since: ago(2), activity: "Reading files"),
+                    ]),
+                    task("t-login", "login-redesign", webLogin, lastInteractedAt: ago(60 * 26), snoozedUntil: t + 3 * 3_600_000, tabs: [
                         InboxTab(id: "tab-8", type: .claudeChat, title: "Claude", status: .idle, since: ago(60 * 26)),
                     ]),
                 ]),
-                InboxProject(id: "p-infra", name: "infra", emoji: "🛠️", remote: true, tasks: [
-                    InboxTask(id: "t-k8s", name: "k8s-upgrade", lastInteractedAt: ago(90), eventAt: ago(15), tabs: [
+                InboxProject(id: "p-infra", name: "infra", emoji: "🛠️", remote: true, streams: [infraMain], tasks: [
+                    task("t-k8s", "k8s-upgrade", infraMain, lastInteractedAt: ago(90), eventAt: ago(15), tabs: [
                         InboxTab(id: "tab-9", type: .claude, title: "Claude Code", status: .idle, since: ago(90)),
                         InboxTab(id: "tab-10", type: .terminal, title: "ssh prod-1", status: .working, since: ago(15), activity: "kubectl rollout"),
                     ]),
+                    task("t-tail", "Terminal", infraMain, lastInteractedAt: ago(50), tabs: [
+                        InboxTab(id: "tab-12", type: .terminal, title: "tail -f api.log", status: .working, since: ago(50)),
+                    ]),
                 ]),
             ],
-            pinned: [InboxPin(projectId: "p-web", taskId: "t-charts"), InboxPin(projectId: "p-infra")]
+            pinned: [
+                InboxPin(projectId: "p-web", streamId: webMain.id, taskId: "t-charts"),
+                InboxPin(projectId: "p-api", streamId: api050.id),
+                InboxPin(projectId: "p-infra"),
+            ]
         )
     }
 }

@@ -192,6 +192,9 @@ struct RootView: View {
             try? await Task.sleep(for: .milliseconds(600))
             columnVisibility = .all
             preferredColumn = .sidebar
+        case .projects:
+            try? await Task.sleep(for: .milliseconds(400))
+            if let first = model.desktops.first { sidebar = .desktop(first.id) }
         case .pair:
             try? await Task.sleep(for: .milliseconds(400))
             model.presentPairing()

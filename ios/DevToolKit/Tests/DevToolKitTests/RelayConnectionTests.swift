@@ -217,12 +217,25 @@ import Testing
         let rig = Rig()
         let desktop = await rig.desktop()
         desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
-        desktop.reply = (3, 2)
+        desktop.reply = (4, 3)
         let connection = rig.factory.connection(for: rig.record(for: desktop))
         let events = EventRecorder(connection)
         await connection.start()
-        // The phone (v1) is the older side: "Update the app".
+        // The phone (v2) is the older side: "Update the app".
         try await events.waitFor(Self.isState(.incompatible(updateDesktop: false)))
+        await connection.stop()
+    }
+
+    /// Version 2 (streams) is a hard cutover: a version 1 desktop is refused.
+    @Test func incompatibleVersion1Desktop() async throws {
+        let rig = Rig()
+        let desktop = await rig.desktop()
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        desktop.reply = (1, 1)
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor(Self.isState(.incompatible(updateDesktop: true)))
         await connection.stop()
     }
 

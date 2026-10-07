@@ -2,9 +2,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
 import { render, fireEvent, screen, act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { DEFAULT_CONFIG, createHomeTask, type Project, type ProjectNote, type Task } from '../src/shared/types'
+import { DEFAULT_CONFIG, type Project, type ProjectNote, type Task } from '../src/shared/types'
 import { resolveLandingTaskId } from '../src/renderer/hooks/taskNavigation'
 import { useAppState } from '../src/renderer/hooks/useAppState'
+import { findTaskInProject, withLastTask } from '../src/shared/streams'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 // React import is required by the JSX runtime under vitest's default transform.
 void React
@@ -17,14 +19,7 @@ vi.mock('../src/renderer/context/AppContext', () => ({
 import { Palette } from '../src/renderer/palette/Palette'
 
 function task(id: string, name: string): Task {
-  return {
-    id,
-    name,
-    tabs: { left: [], right: [] },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }
+  return { id, name, panes: [] }
 }
 
 function note(id: string, name: string): ProjectNote {
@@ -32,23 +27,19 @@ function note(id: string, name: string): ProjectNote {
 }
 
 function buildProjects(): Project[] {
-  const { task: homeA } = createHomeTask('proj-a')
-  const { task: homeB } = createHomeTask('proj-b')
   return [
-    {
+    withLastTask(fixtureProject({
       id: 'proj-a',
       name: 'Project A',
       directory: '/tmp/a',
-      tasks: [homeA, task('task-a1', 'Task A1')],
-      lastTaskId: 'task-a1'
-    },
-    {
+      tasks: [task('task-a1', 'Task A1')]
+    }), 'task-a1'),
+    withLastTask(fixtureProject({
       id: 'proj-b',
       name: 'Project B',
       directory: '/tmp/b',
-      tasks: [homeB, task('task-b1', 'Task B1')],
-      lastTaskId: 'task-b1'
-    }
+      tasks: [task('task-b1', 'Task B1')]
+    }), 'task-b1')
   ]
 }
 
@@ -70,11 +61,13 @@ describe('resolveLandingTaskId', () => {
     expect(resolveLandingTaskId(projectB, 'deleted-task')).toBe('task-b1')
   })
 
-  it('falls back to the home task when lastTaskId is stale', () => {
+  it('falls back to the first task of main when lastTaskId is stale', () => {
     const [, projectB] = buildProjects()
-    const withoutLast: Project = { ...projectB, lastTaskId: 'gone' }
-    const homeId = projectB.tasks.find(t => t.system === 'home')!.id
-    expect(resolveLandingTaskId(withoutLast, 'task-a1')).toBe(homeId)
+    const withoutLast: Project = {
+      ...projectB,
+      streams: projectB.streams.map(stream => (stream.id === projectB.lastStreamId ? { ...stream, lastTaskId: 'gone' } : stream))
+    }
+    expect(resolveLandingTaskId(withoutLast, 'task-a1')).toBe('task-b1')
   })
 
   it('returns null for a missing project', () => {
@@ -123,13 +116,13 @@ describe('Palette note selection', () => {
     // The row is labelled with its owning project (title text is split by match highlighting).
     expect(screen.getByText('Project B')).toBeTruthy()
     await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }) })
-    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-b', null, 'left', 'note-b')
+    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-b', null, 'focused', 'note-b')
   })
 
   it('still passes the selected task id for a note in the current project', async () => {
     const input = await openPaletteAndSearch('#Alpha')
     await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }) })
-    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-a', 'task-a1', 'left', 'note-a')
+    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-a', 'task-a1', 'focused', 'note-a')
   })
 })
 
@@ -153,6 +146,7 @@ describe('openOrFocusNoteTab navigation', () => {
       onNotesUpdated: vi.fn().mockReturnValue(() => {}),
       onTasksRemoved: vi.fn().mockReturnValue(() => {}),
       onTabsRemoved: vi.fn().mockReturnValue(() => {}),
+      onTabsRestart: vi.fn().mockReturnValue(() => {}),
       reportDirtyTabs: vi.fn().mockResolvedValue(undefined),
       onConfigUpdated: vi.fn().mockReturnValue(() => {}),
       sshStatus: vi.fn().mockResolvedValue('disconnected'),
@@ -174,9 +168,13 @@ describe('openOrFocusNoteTab navigation', () => {
     return hook
   }
 
+  function activeTabOf(state: ReturnType<typeof useAppState>, projectId: string, taskId: string) {
+    return findTaskInProject(state.projects.find(p => p.id === projectId), taskId)?.panes[0]?.activeTabId
+  }
+
   function noteTabsFor(state: ReturnType<typeof useAppState>, projectId: string, taskId: string) {
-    const target = state.projects.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
-    return (target?.tabs.left ?? []).filter(tab => tab.type === 'note')
+    const target = findTaskInProject(state.projects.find(p => p.id === projectId), taskId)
+    return (target?.panes[0]?.tabs ?? []).filter(tab => tab.type === 'note')
   }
 
   it('switches to the target project and opens a cross-project note', async () => {
@@ -186,14 +184,14 @@ describe('openOrFocusNoteTab navigation', () => {
     expect(result.current.selectedProjectId).toBe('proj-a')
 
     // The palette passes null here; a stale foreign id must be tolerated too.
-    act(() => { result.current.openOrFocusNoteTab('proj-b', null, 'left', 'note-b') })
+    act(() => { result.current.openOrFocusNoteTab('proj-b', null, 'focused', 'note-b') })
 
     expect(result.current.selectedProjectId).toBe('proj-b')
     expect(result.current.selectedTaskId).toBe('task-b1')
     const tabs = noteTabsFor(result.current, 'proj-b', 'task-b1')
     expect(tabs).toHaveLength(1)
     expect(tabs[0].noteId).toBe('note-b')
-    expect(result.current.exportWindowViewState().taskStates['task-b1'].activeTab.left).toBe(tabs[0].id)
+    expect(activeTabOf(result.current, 'proj-b', 'task-b1')).toBe(tabs[0].id)
     // Project A is untouched.
     expect(noteTabsFor(result.current, 'proj-a', 'task-a1')).toHaveLength(0)
   })
@@ -202,7 +200,7 @@ describe('openOrFocusNoteTab navigation', () => {
     const { result } = await mountState()
 
     act(() => { result.current.switchToTask('proj-a', 'task-a1') })
-    act(() => { result.current.openOrFocusNoteTab('proj-b', 'task-a1', 'left', 'note-b') })
+    act(() => { result.current.openOrFocusNoteTab('proj-b', 'task-a1', 'focused', 'note-b') })
 
     expect(result.current.selectedProjectId).toBe('proj-b')
     expect(result.current.selectedTaskId).toBe('task-b1')
@@ -213,7 +211,7 @@ describe('openOrFocusNoteTab navigation', () => {
     const { result } = await mountState()
 
     act(() => { result.current.switchToTask('proj-a', 'task-a1') })
-    act(() => { result.current.openOrFocusNoteTab('proj-a', 'deleted-task', 'left', 'note-a') })
+    act(() => { result.current.openOrFocusNoteTab('proj-a', 'deleted-task', 'focused', 'note-a') })
 
     expect(result.current.selectedProjectId).toBe('proj-a')
     expect(result.current.selectedTaskId).toBe('task-a1')
@@ -226,20 +224,20 @@ describe('openOrFocusNoteTab navigation', () => {
     const { result } = await mountState()
 
     act(() => { result.current.switchToTask('proj-a', 'task-a1') })
-    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'left', 'note-a') })
+    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'focused', 'note-a') })
 
     const tabs = noteTabsFor(result.current, 'proj-a', 'task-a1')
     expect(tabs).toHaveLength(1)
     const tabId = tabs[0].id
 
     // Move focus elsewhere, then re-open: the existing tab is focused, not cloned.
-    act(() => { result.current.addTab('proj-a', 'task-a1', 'left', 'terminal') })
-    expect(result.current.exportWindowViewState().taskStates['task-a1'].activeTab.left).not.toBe(tabId)
+    act(() => { result.current.addTab('proj-a', 'task-a1', 'focused', 'terminal') })
+    expect(activeTabOf(result.current, 'proj-a', 'task-a1')).not.toBe(tabId)
 
-    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'left', 'note-a') })
+    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'focused', 'note-a') })
     expect(result.current.selectedProjectId).toBe('proj-a')
     expect(result.current.selectedTaskId).toBe('task-a1')
     expect(noteTabsFor(result.current, 'proj-a', 'task-a1')).toHaveLength(1)
-    expect(result.current.exportWindowViewState().taskStates['task-a1'].activeTab.left).toBe(tabId)
+    expect(activeTabOf(result.current, 'proj-a', 'task-a1')).toBe(tabId)
   })
 })

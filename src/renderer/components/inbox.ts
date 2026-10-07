@@ -1,14 +1,24 @@
-import type { Project, Task } from '../../shared/types'
+import type { Project, Stream, Task } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
-import { inboxState, isSettled, isSnoozed, isUnread, isYourTurn, lastActivityAt, taskStatus } from '../../shared/inbox-state'
+import {
+  inboxState,
+  isSettled,
+  isSnoozed,
+  isStatusTab,
+  isUnread,
+  isYourTurn,
+  lastActivityAt,
+  statusTabs,
+  taskStatus
+} from '../../shared/inbox-state'
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
 
 // The triage predicates themselves moved to shared/inbox-state.ts when idle
 // cleanup moved into main — both processes must answer them identically. They
 // are re-exported here because this module is the inbox's façade.
-export { inboxState, isSettled, isSnoozed, isUnread, isYourTurn, lastActivityAt, taskStatus }
+export { inboxState, isSettled, isSnoozed, isStatusTab, isUnread, isYourTurn, lastActivityAt, statusTabs, taskStatus }
 
-/** Oldest `since` stamp across the task's AI tabs — how long it has been waiting. */
+/** Oldest `since` stamp across the task's status tabs — how long it has been waiting. */
 export function taskStatusSince(
   task: Task,
   allStatuses: Record<string, TabStatusValue>,
@@ -16,7 +26,7 @@ export function taskStatusSince(
 ): number | null {
   const status = taskStatus(task, allStatuses)
   if (!status) return null
-  const stamps = [...task.tabs.left, ...task.tabs.right]
+  const stamps = statusTabs(task)
     .filter((tab) => allStatuses[tab.id] === status)
     .map((tab) => statusSince[tab.id])
     .filter((stamp): stamp is number => typeof stamp === 'number')
@@ -34,9 +44,10 @@ export interface TaskActivitySummary {
 const STATUS_RANK: Record<string, number> = { attention: 3, working: 2, exited: 1 }
 
 /**
- * The activity of the task's most relevant agent tab: the one that needs you, else
- * the one working, else whichever reported last. Tasks with several Claude tabs
- * show one line, so it has to be the line you would act on.
+ * The activity of the task's most relevant status tab: the one that needs you,
+ * else the one working, else whichever reported last. A task is one agent, but
+ * an extra agent tab opened beside it still reports, so pick the line you would
+ * act on.
  */
 export function taskActivity(
   task: Task,
@@ -44,7 +55,7 @@ export function taskActivity(
   activities: Record<string, AgentActivity>
 ): TaskActivitySummary {
   let best: { activity: AgentActivity; status: TabStatusValue; rank: number } | null = null
-  for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+  for (const tab of statusTabs(task)) {
     const activity = activities[tab.id]
     if (!activity) continue
     const status = allStatuses[tab.id] ?? null
@@ -64,9 +75,14 @@ export function taskActivity(
   return { line: describeActivity(activity, status), tooltip: tooltip || undefined }
 }
 
-export interface InboxEntry {
+/** A task with where it lives, as the Inbox lists it. */
+export interface InboxSource {
   task: Task
   project: Project
+  stream: Stream
+}
+
+export interface InboxEntry extends InboxSource {
   status: TabStatusValue
   /** When the current status began — null when unknown (e.g. after a restart). */
   since: number | null
@@ -87,7 +103,7 @@ export interface InboxPartition {
  * snoozed task stays hidden even if it was settled earlier.
  */
 export function partitionInbox(
-  entries: { task: Task; project: Project }[],
+  entries: readonly InboxSource[],
   allStatuses: Record<string, TabStatusValue>,
   statusSince: Record<string, number>,
   now: number,
@@ -98,11 +114,12 @@ export function partitionInbox(
   const settled: InboxEntry[] = []
   const snoozed: InboxEntry[] = []
 
-  for (const { task, project } of entries) {
+  for (const { task, project, stream } of entries) {
     const status = taskStatus(task, allStatuses)
     const entry: InboxEntry = {
       task,
       project,
+      stream,
       status,
       since: taskStatusSince(task, allStatuses, statusSince),
       unread: isUnread(task),
@@ -126,6 +143,52 @@ export function partitionInbox(
   snoozed.sort((a, b) => wakeAt(a.task) - wakeAt(b.task))
 
   return { needsYou, active, settled, snoozed }
+}
+
+/**
+ * Every task of `projects` with its project and stream, in sidebar order.
+ * Archived tasks live in `archive/<projectId>.json`, outside `streams`, so they
+ * never get here.
+ */
+export function inboxSources(projects: readonly Project[]): InboxSource[] {
+  const sources: InboxSource[] = []
+  for (const project of projects) {
+    for (const stream of project.streams) {
+      for (const task of stream.tasks) sources.push({ task, project, stream })
+    }
+  }
+  return sources
+}
+
+/** The row's second line: `Project · Stream`. */
+export function inboxLocation(entry: { project: Project; stream: Stream }): string {
+  return `${entry.project.name} · ${entry.stream.name}`
+}
+
+export interface InboxStreamGroup {
+  project: Project
+  stream: Stream
+  entries: InboxEntry[]
+}
+
+/**
+ * The live rows (needs you, then the rest) gathered by stream for the grouped
+ * Inbox layout. A group sits where its most urgent row would sit in the flat
+ * list, and keeps that list's order inside, so grouping never buries a task
+ * that needs you under a busier stream.
+ */
+export function groupInboxByStream(entries: readonly InboxEntry[]): InboxStreamGroup[] {
+  const groups = new Map<string, InboxStreamGroup>()
+  for (const entry of entries) {
+    const key = `${entry.project.id}\u0000${entry.stream.id}`
+    let group = groups.get(key)
+    if (!group) {
+      group = { project: entry.project, stream: entry.stream, entries: [] }
+      groups.set(key, group)
+    }
+    group.entries.push(entry)
+  }
+  return [...groups.values()]
 }
 
 /** Sort key for the snoozed group; "until it needs me" has no clock, so it sorts last. */

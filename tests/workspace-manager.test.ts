@@ -340,4 +340,44 @@ describe('WorkspaceManager', () => {
       // which is unchanged behaviour; the point of the case is that the directory still goes.)
     })
   })
+
+  describe('restore (reopening an archived stream)', () => {
+    it('checks the kept branch out again at the old path, with its commits', async () => {
+      const created = await manager.create(repoDir, 'rel-1', 'master')
+      fs.writeFileSync(path.join(created.worktreePath, 'work.txt'), 'kept')
+      execFileSync('git', ['-C', created.worktreePath, 'add', '.'])
+      execFileSync('git', ['-C', created.worktreePath, 'commit', '-m', 'work'])
+      await manager.delete({ projectDir: repoDir, ...created, baseBranch: 'master', force: true, keepBranch: true })
+      expect(fs.existsSync(created.worktreePath)).toBe(false)
+
+      const restored = await manager.restore(repoDir, created.worktreePath, 'rel-1')
+
+      expect(restored).toEqual({ status: 'ok', worktreePath: created.worktreePath, branchName: 'rel-1', relativeProjectPath: '' })
+      expect(fs.readFileSync(path.join(created.worktreePath, 'work.txt'), 'utf8')).toBe('kept')
+    })
+
+    it('reuses a worktree that is still there', async () => {
+      const created = await manager.create(repoDir, 'still-here', 'master')
+      const restored = await manager.restore(repoDir, created.worktreePath, 'still-here')
+      expect(restored).toMatchObject({ status: 'ok', worktreePath: created.worktreePath })
+    })
+
+    it('reports a discarded branch as branch-missing and creates nothing', async () => {
+      const created = await manager.create(repoDir, 'gone', 'master')
+      await manager.delete({ projectDir: repoDir, ...created, baseBranch: 'master', force: true })
+
+      const restored = await manager.restore(repoDir, created.worktreePath, 'gone')
+
+      expect(restored).toEqual({ status: 'branch-missing' })
+      expect(fs.existsSync(created.worktreePath)).toBe(false)
+    })
+
+    it('keeps the project folder inside the repository', async () => {
+      const sub = path.join(repoDir, 'apps', 'web')
+      fs.mkdirSync(sub, { recursive: true })
+      execFileSync('git', ['-C', repoDir, 'branch', 'nested'])
+      const restored = await manager.restore(sub, path.join(repoDir, '.worktrees', 'nested'), 'nested')
+      expect(restored).toMatchObject({ status: 'ok', relativeProjectPath: 'apps/web' })
+    })
+  })
 })

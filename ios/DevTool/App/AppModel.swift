@@ -101,7 +101,7 @@ final class AppModel {
 
         func attentionCount(for desktopId: String) -> Int {
         inboxes[desktopId]?.projects.reduce(0) { sum, project in
-            sum + project.tasks.filter { $0.summaryStatus == .attention }.count
+            sum + project.tasks.filter { $0.status == .attention }.count
         } ?? 0
     }
 
@@ -142,16 +142,16 @@ final class AppModel {
         return ChatRoute(desktopId: ref.desktopId, tabId: tabId)
     }
 
-    /// `task.new` (§8.4): a new task in the project whose Claude chat starts on
-    /// `prompt`, and the route to that chat. The task shows up with the next inbox.
-    /// With `workspace` (§8.6) the task gets its own worktree and branch first.
-    func newTask(desktopId: String, projectId: String, prompt: String, mode: String?, workspace: Bool = false) async throws -> ChatRoute {
+    /// `task.new` (§8.4): a new task in the project's stream `streamId` (nil:
+    /// the one last used) whose Claude chat starts on `prompt`, and the route
+    /// to that chat. The task shows up with the next inbox.
+    func newTask(desktopId: String, projectId: String, streamId: String?, prompt: String, mode: String?) async throws -> ChatRoute {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
-        let result = try await connection.newTask(projectId: projectId, prompt: prompt, mode: mode, workspace: workspace)
+        let result = try await connection.newTask(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode)
         return ChatRoute(desktopId: desktopId, tabId: result.tabId)
     }
 
-    /// `task.close` (§8.7). The task leaves with the next inbox.
+    /// `task.close` (§8.7): archives the task. It leaves with the next inbox.
     func closeTask(desktopId: String, _ params: TaskCloseParams) async throws -> TaskCloseResult {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
         return try await connection.closeTask(params)
@@ -180,8 +180,8 @@ final class AppModel {
     }
 
     private func applyPin(_ pin: InboxPin, pinned: Bool, desktopId: String) {
-        guard var inbox = inboxes[desktopId], inbox.pinned.contains(pin) != pinned else { return }
-        if pinned { inbox.pinned.append(pin) } else { inbox.pinned.removeAll { $0 == pin } }
+        guard var inbox = inboxes[desktopId], inbox.isPinned(pin) != pinned else { return }
+        if pinned { inbox.pinned.append(pin) } else { inbox.pinned.removeAll { $0.key == pin.key } }
         inboxes[desktopId] = inbox
     }
 

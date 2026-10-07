@@ -1,49 +1,33 @@
 /** Small presentational pieces and status helpers shared by the sidebar tree. */
 import React, { useState } from 'react'
-import { isAgentTabType } from '../../../shared/types'
-import type { Project, Task } from '../../../shared/types'
-import type { TabStatusValue } from '../../context/TabStatusContext'
+import type { Project } from '../../../shared/types'
 import { dashboardIconUrl, type DashboardIconsMetadata } from '../dashboardIcons'
+import type { SidebarTaskState, TaskDropSlot } from './streamTree'
 
 export type SidebarContextMenuState = {
-  x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
+  x: number; y: number; type: 'project' | 'stream' | 'task'; projectId: string; streamId?: string; taskId?: string
 }
 
 export type DragState = {
   type: 'project' | 'task'
   id: string
+  /** A project's place in `projectOrder`; a task's place in its stream. */
   index: number
   projectId?: string
+  streamId?: string
 }
 
 export type DropTarget =
   | { type: 'between-projects'; index: number }
-  | { type: 'between-tasks'; projectId: string; index: number }
+  | ({ type: 'task-slot'; projectId: string } & TaskDropSlot)
   | null
-
-export function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const aiTabIds = [...task.tabs.left, ...task.tabs.right]
-    .filter((t) => isAgentTabType(t.type))
-    .map((t) => t.id)
-  if (aiTabIds.length === 0) return null
-  const statuses = aiTabIds.map((id) => allStatuses[id]).filter(Boolean)
-  if (statuses.includes('attention')) return 'attention'
-  if (statuses.includes('working')) return 'working'
-  if (statuses.includes('exited')) return 'exited'
-  return null
-}
-
-export function getProjectStatus(tasks: Task[], allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const statuses = tasks.map((t) => getTaskStatus(t, allStatuses)).filter(Boolean)
-  if (statuses.includes('attention')) return 'attention'
-  if (statuses.includes('working')) return 'working'
-  if (statuses.includes('exited')) return 'exited'
-  return null
-}
 
 /** Rows carry mx-1.5 (6px); project name starts 64px from the sidebar edge:
     6 (mx) + 10 (px-2.5) + 12 (chevron) + 8 (gap) + 20 (icon) + 8 (gap).
-    Task rows indent to it with pl (inside mx), drop indicators with ml (no mx). */
+    A stream row's chevron sits under the project icon, so its name lines up
+    with the project name; a task row's dot sits there too, its name one step in.
+    Rows indent with pl (inside mx), drop indicators with ml (no mx). */
+export const STREAM_ROW_PL = 'pl-[38px]'
 export const TASK_ROW_PL = 'pl-[58px]'
 export const TASK_ROW_ML = 'ml-[64px]'
 
@@ -134,13 +118,36 @@ export function SidebarTabButton({
   )
 }
 
-export function TaskStatusDot({ task, allStatuses }: { task: Task; allStatuses: Record<string, TabStatusValue> }): React.ReactElement | null {
-  const status = getTaskStatus(task, allStatuses)
-  if (!status) return null
-  const dotClass = status === 'working'
-    ? 'bg-status-working status-pulse'
-    : status === 'attention'
-    ? 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]'
-    : 'bg-status-exited'
-  return <span className={`w-1.5 h-1.5 rounded-full shrink-0 group-hover:hidden ${dotClass}`} />
+const STATE_DOT_CLS: Record<Exclude<SidebarTaskState, null>, string> = {
+  attention: 'bg-status-attention shadow-[0_0_3px_var(--color-status-attention)]',
+  working: 'bg-status-working status-pulse',
+  unread: 'bg-info',
+  exited: 'bg-status-exited'
+}
+
+const STATE_LABEL: Record<Exclude<SidebarTaskState, null>, string> = {
+  attention: 'Needs you',
+  working: 'Working',
+  unread: 'Unread',
+  exited: 'Exited'
+}
+
+/**
+ * A task's state dot, or a stream's / project's rolled-up one. `hollow` draws a
+ * quiet task as a ring so the row's dot column stays aligned; `hideOnHover`
+ * makes room for the row's hover actions.
+ */
+export function StateDot({ state, hollow, hideOnHover }: {
+  state: SidebarTaskState
+  hollow?: boolean
+  hideOnHover?: boolean
+}): React.ReactElement | null {
+  if (!state && !hollow) return null
+  const cls = state ? STATE_DOT_CLS[state] : 'border border-border-strong'
+  return (
+    <span
+      className={`w-1.5 h-1.5 rounded-full shrink-0 ${cls} ${hideOnHover ? 'group-hover:hidden' : ''}`}
+      title={state ? STATE_LABEL[state] : undefined}
+    />
+  )
 }

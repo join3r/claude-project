@@ -1,26 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
-import { isHomeTab, isRenamableTab, isShellCommandProject } from '../../shared/types'
+import { isRenamableTab } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { useMenuPosition } from '../hooks/useMenuPosition'
-import { getTabDropIndex } from './tabDrag'
+import { resolveTabDropTarget } from './tabDrag'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { menuCls, menuItemCls } from './ui'
-import { MessageSquare } from 'lucide-react'
+import NewTabButtons from './NewTabButtons'
 
 interface Props {
   tabs: Tab[]
   activeTabId: string | null
-  pane: 'left' | 'right'
+  /** This pane's column in the task's row. */
+  paneIndex: number
   projectId: string
   taskId: string
+  /** The task's agent (or terminal) tab: no close button, closes with the task. */
+  mainTabId?: string
+  /** Whether this pane has the task's focus: Cmd+digit addresses its tabs. */
+  focused: boolean
+  style?: React.CSSProperties
   tabDragState: TabDragState | null
   tabDropTarget: TabDropTarget | null
   onTabDragStateChange: (dragState: TabDragState | null) => void
   onTabDropTargetChange: (dropTarget: TabDropTarget | null) => void
-  onTabDragComplete?: (pane: 'left' | 'right') => void
 }
 
 const DRAG_THRESHOLD = 5
@@ -48,78 +53,21 @@ function TabStatusIndicator({ tabId }: { tabId: string }): React.ReactElement | 
   return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stateClasses}`} />
 }
 
-function getDropPane(value: string | undefined): 'left' | 'right' | null {
-  if (value === 'left' || value === 'right') return value
-  return null
-}
-
-function resolveTabDropTarget(projectId: string, taskId: string, cursorX: number, cursorY: number, draggedTabId: string): TabDropTarget | null {
-  const tabLists = document.querySelectorAll<HTMLElement>(
-    `.tab-list[data-project-id="${projectId}"][data-task-id="${taskId}"]`
-  )
-
-  for (const tabList of tabLists) {
-    const rect = tabList.getBoundingClientRect()
-    if (rect.width === 0 || rect.height === 0) continue
-    if (cursorX < rect.left || cursorX > rect.right || cursorY < rect.top || cursorY > rect.bottom) continue
-
-    const targetPane = getDropPane(tabList.dataset.pane)
-    if (!targetPane) continue
-
-    const items = Array.from(tabList.querySelectorAll<HTMLElement>('.tab')).map((item) => {
-      const itemRect = item.getBoundingClientRect()
-      return {
-        id: item.dataset.tabId ?? '',
-        index: Number(item.dataset.tabIndex ?? '-1'),
-        left: itemRect.left,
-        width: itemRect.width
-      }
-    })
-
-    return {
-      pane: targetPane,
-      index: getTabDropIndex(items, cursorX, draggedTabId)
-    }
-  }
-
-  const panes = document.querySelectorAll<HTMLElement>(
-    `.pane[data-project-id="${projectId}"][data-task-id="${taskId}"]`
-  )
-
-  for (const paneElement of panes) {
-    const rect = paneElement.getBoundingClientRect()
-    if (rect.width === 0 || rect.height === 0) continue
-    if (cursorX < rect.left || cursorX > rect.right || cursorY < rect.top || cursorY > rect.bottom) continue
-
-    const targetPane = getDropPane(paneElement.dataset.pane)
-    if (!targetPane) continue
-
-    const paneTabs = paneElement.querySelectorAll('.tab')
-    if (paneTabs.length === 0) {
-      return {
-        pane: targetPane,
-        index: 0
-      }
-    }
-  }
-
-  return null
-}
-
 export default function TabBar({
   tabs,
   activeTabId,
-  pane,
+  paneIndex,
   projectId,
   taskId,
+  mainTabId,
+  focused,
+  style,
   tabDragState,
   tabDropTarget,
   onTabDragStateChange,
-  onTabDropTargetChange,
-  onTabDragComplete
+  onTabDropTargetChange
 }: Props): React.ReactElement {
-  const { selectedProject, addTab, removeTab, setActiveTab, moveTab, config, renameTab, convertClaudeTab } = useApp()
-  const claudeChatDefault = config?.claudeDefaultView === 'chat'
+  const { selectedProject, removeTab, setActiveTab, moveTab, splitTabRight, renameTab, convertClaudeTab } = useApp()
   const suppressClickRef = useRef(false)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const tabMenuPos = useMenuPosition<HTMLDivElement>(tabMenu)
@@ -140,7 +88,7 @@ export default function TabBar({
 
   const commitRename = (tabId: string) => {
     const trimmed = renameValue.trim()
-    if (trimmed) renameTab(projectId, taskId, pane, tabId, trimmed)
+    if (trimmed) renameTab(projectId, taskId, tabId, trimmed)
     setRenamingTabId(null)
     setRenameValue('')
   }
@@ -165,14 +113,11 @@ export default function TabBar({
       renameInputRef.current.select()
     }
   }, [renamingTabId])
-  if (!selectedProject) return <div className="tab-bar flex items-stretch h-(--ctl-h-lg) bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]" />
+  if (!selectedProject) return <div className="tab-bar flex items-stretch h-(--ctl-h-lg) bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]" style={style} data-pane-index={paneIndex} />
 
   const isTabDragActive = tabDragState?.projectId === projectId && tabDragState.taskId === taskId
-  const isDropTargetPane = isTabDragActive && tabDropTarget?.pane === pane
-
-  const handleAdd = (type: TabType) => {
-    addTab(projectId, taskId, pane, type)
-  }
+  const isDropTargetPane = isTabDragActive && tabDropTarget?.kind === 'tab' && !tabDropTarget.inBody && tabDropTarget.pane === paneIndex
+  const dropIndex = isDropTargetPane && tabDropTarget?.kind === 'tab' ? tabDropTarget.index : null
 
   const handleTabMouseDown = (event: React.MouseEvent, tabId: string, index: number) => {
     if (event.button !== 0) return
@@ -186,7 +131,7 @@ export default function TabBar({
       projectId,
       taskId,
       tabId,
-      fromPane: pane,
+      fromPane: paneIndex,
       fromIndex: index
     }
 
@@ -212,8 +157,8 @@ export default function TabBar({
       document.body.style.cursor = ''
 
       if (dragging && latestDropTarget) {
-        moveTab(projectId, taskId, pane, tabId, latestDropTarget.pane, latestDropTarget.index)
-        onTabDragComplete?.(latestDropTarget.pane)
+        const { inBody: _inBody, ...target } = latestDropTarget
+        moveTab(projectId, taskId, tabId, target)
       }
 
       if (dragging) {
@@ -231,7 +176,11 @@ export default function TabBar({
 
   return (
     <>
-    <div className="tab-bar flex items-stretch h-(--ctl-h-lg) bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]">
+    <div
+      className="tab-bar flex items-stretch min-w-0 h-(--ctl-h-lg) bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]"
+      style={style}
+      data-pane-index={paneIndex}
+    >
       <div
         className={[
           'tab-list',
@@ -240,11 +189,11 @@ export default function TabBar({
         ].join(' ')}
         data-project-id={projectId}
         data-task-id={taskId}
-        data-pane={pane}
+        data-pane-index={paneIndex}
       >
         {tabs.map((tab, index) => (
           <React.Fragment key={tab.id}>
-            {isDropTargetPane && tabDropTarget?.index === index && (
+            {dropIndex === index && (
               <div className="w-0.5 shrink-0 self-stretch bg-accent shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent)_55%,transparent)]" />
             )}
             <div
@@ -260,20 +209,17 @@ export default function TabBar({
               data-active={tab.id === activeTabId ? 'true' : undefined}
               onClick={() => {
                 if (suppressClickRef.current) return
-                setActiveTab(projectId, taskId, pane, tab.id)
+                setActiveTab(projectId, taskId, tab.id)
               }}
               onMouseDown={(event) => handleTabMouseDown(event, tab.id, index)}
               onContextMenu={(e) => {
                 e.preventDefault()
-                if (isHomeTab(tab)) return
                 setTabMenu({ tabId: tab.id, x: e.clientX, y: e.clientY })
               }}
             >
-              {index < 9 && (
+              {focused && index < 9 && (
                 <span className="text-2xs text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.meta-held_&]:visible">
-                  {pane === 'left'
-                    ? formatShortcutForApp(`CmdOrCtrl+${index + 1}`)
-                    : formatShortcutForApp(`CmdOrCtrl+Shift+${index + 1}`)}
+                  {formatShortcutForApp(`CmdOrCtrl+${index + 1}`)}
                 </span>
               )}
               <span className="text-xs shrink-0">{tabIcon(tab.type)}</span>
@@ -300,13 +246,13 @@ export default function TabBar({
               ) : (
                 <span className="overflow-hidden text-ellipsis">{tab.title}</span>
               )}
-              {!isHomeTab(tab) && (
+              {tab.id !== mainTabId && (
                 <button
                   className="bg-transparent border-0 text-text-muted cursor-pointer text-md px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)"
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation()
-                    void removeTab(projectId, taskId, pane, tab.id)
+                    void removeTab(projectId, taskId, tab.id)
                   }}
                   title={`Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`}
                 >
@@ -316,38 +262,11 @@ export default function TabBar({
             </div>
           </React.Fragment>
         ))}
-        {isDropTargetPane && tabDropTarget?.index === tabs.length && (
+        {dropIndex === tabs.length && (
           <div className="w-0.5 shrink-0 self-stretch bg-accent-400 shadow-[0_0_6px_color-mix(in_srgb,var(--color-accent-400)_55%,transparent)]" />
         )}
       </div>
-      <div className="flex px-1 gap-0.5 [-webkit-app-region:no-drag]">
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('terminal')} title={`New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`}>
-          &gt;_
-        </button>
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('browser')} title="New browser">
-          &#9673;
-        </button>
-        {config?.enableClaude && selectedProject && !isShellCommandProject(selectedProject) && (
-          <>
-            <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd(claudeChatDefault ? 'claude-chat' : 'claude')} title={claudeChatDefault ? 'New Claude chat' : 'New Claude Code'}>
-              &#10022;
-            </button>
-            <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast) inline-flex items-center" onClick={() => handleAdd(claudeChatDefault ? 'claude' : 'claude-chat')} title={claudeChatDefault ? 'New Claude Code (terminal)' : 'New Claude chat'}>
-              {claudeChatDefault ? <span>&gt;&#10022;</span> : <MessageSquare size={12} strokeWidth={2} />}
-            </button>
-          </>
-        )}
-        {config?.enableCodex && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('codex')} title="New Codex">
-            &#9707;
-          </button>
-        )}
-        {config?.enablePi && selectedProject && !isShellCommandProject(selectedProject) && (
-          <button className="bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md text-xs font-mono hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => handleAdd('pi')} title="New Pi">
-            &#960;
-          </button>
-        )}
-      </div>
+      <NewTabButtons projectId={projectId} taskId={taskId} pane={paneIndex} className="px-1" />
     </div>
     {tabMenu && (() => {
       const tab = tabs.find(t => t.id === tabMenu.tabId)
@@ -378,18 +297,27 @@ export default function TabBar({
                 type="button"
                 className={menuItemCls}
                 onClick={() => {
-                  convertClaudeTab(projectId, taskId, pane, tab.id, tab.type === 'claude' ? 'claude-chat' : 'claude')
+                  convertClaudeTab(projectId, taskId, tab.id, tab.type === 'claude' ? 'claude-chat' : 'claude')
                   close()
                 }}
               >
                 {tab.type === 'claude' ? 'Open as chat' : 'Open in terminal'}
               </button>
             )}
-            {!isHomeTab(tab) && (
+            {tabs.length > 1 && (
               <button
                 type="button"
                 className={menuItemCls}
-                onClick={() => { void removeTab(projectId, taskId, pane, tab.id); close() }}
+                onClick={() => { splitTabRight(projectId, taskId, tab.id); close() }}
+              >
+                Split right
+              </button>
+            )}
+            {tab.id !== mainTabId && (
+              <button
+                type="button"
+                className={menuItemCls}
+                onClick={() => { void removeTab(projectId, taskId, tab.id); close() }}
               >
                 Close tab
               </button>

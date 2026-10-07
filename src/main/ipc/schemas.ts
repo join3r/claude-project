@@ -6,7 +6,8 @@ import type {
   WindowViewState,
   WorkspaceCreateRequest,
   WorkspaceDeleteRequest,
-  WorkspaceListBranchesRequest
+  WorkspaceListBranchesRequest,
+  WorkspaceRestoreRequest
 } from '../../shared/types'
 import type { ChatImage, ChatPromptResponse } from '../../shared/claude-chat'
 import type { ChatTabConfig } from '../claude-chat/chat-manager'
@@ -52,9 +53,6 @@ export const tunnelConfig: Validator<TunnelConfig> = v.object({
 const nullableStr = v.nullable(v.string())
 
 const taskViewState = v.object({
-  activeTab: v.object({ left: nullableStr, right: nullableStr }),
-  splitOpen: v.boolean(),
-  splitRatio: v.number(),
   fileBrowserOpen: v.optional(v.boolean()),
   fileBrowserActiveTab: v.optional(v.literal('files', 'git', 'notes'))
 }, 'passthrough')
@@ -64,6 +62,7 @@ export const windowViewState: Validator<WindowViewState> = v.object({
   selectedTaskId: nullableStr,
   selectedTagIds: stringList,
   expandedProjectIds: stringList,
+  streamExpansion: v.optional(v.record(v.boolean())),
   taskStates: v.record(taskViewState),
   fileBrowserOpen: v.boolean(),
   fileBrowserWidth: v.number(),
@@ -80,19 +79,23 @@ const workspaceConfig = v.object({
   relativeProjectPath: v.optional(v.string())
 }, 'passthrough')
 
+const taskShape = v.object({ id: v.string({ nonEmpty: true }) }, 'passthrough')
+
 /**
  * Structural check only: `Storage.normalizeProjectsData` does the semantic
  * clean-up on commit. The fields checked are the ones main itself reads —
  * in particular directories and worktree paths, which feed the file-browser
- * allow-list.
+ * allow-list. Windows only ever hold the Project › Stream › Task shape (storage
+ * migrates older files on load), so that is the only one a save may carry.
  */
 const projectShape = v.object({
   id: v.string({ nonEmpty: true }),
   directory: v.optional(v.string()),
   ssh: v.optional(v.plainObject()),
-  tasks: v.array(v.object({
+  streams: v.array(v.object({
     id: v.string({ nonEmpty: true }),
-    workspace: v.optional(workspaceConfig)
+    workspace: v.optional(workspaceConfig),
+    tasks: v.array(taskShape)
   }, 'passthrough'))
 }, 'passthrough')
 
@@ -141,6 +144,33 @@ export const workspaceDeleteRequest = v.object({
   force: v.optional(v.boolean()),
   keepBranch: v.optional(v.boolean())
 }) as Validator<WorkspaceDeleteRequest>
+
+export const workspaceRestoreRequest = v.object({
+  ...workspaceTarget,
+  worktreePath: v.string({ nonEmpty: true }),
+  branchName: v.string({ nonEmpty: true })
+}) as Validator<WorkspaceRestoreRequest>
+
+/** An archived task or stream, as a window builds it: checked for shape, kept whole. */
+export const archivedTaskEntry = v.object({
+  task: taskShape,
+  streamId: v.string({ nonEmpty: true }),
+  streamName: v.string(),
+  dir: v.string(),
+  archivedAt: v.number()
+}, 'passthrough')
+
+export const archivedStreamEntry = v.object({
+  stream: v.object({
+    id: v.string({ nonEmpty: true }),
+    name: v.string(),
+    workspace: v.optional(workspaceConfig),
+    tasks: v.array(taskShape)
+  }, 'passthrough'),
+  doneTasks: v.array(archivedTaskEntry),
+  dir: v.string(),
+  archivedAt: v.number()
+}, 'passthrough')
 
 export const chatTabConfig = v.object({
   cwd: v.string(),

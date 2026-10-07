@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs'
-import type { WorkspaceDeleteResult } from '../shared/types'
+import type { WorkspaceDeleteResult, WorkspaceRestoreResult } from '../shared/types'
 
 const execFileAsync = promisify(execFile)
 
@@ -76,6 +76,36 @@ export class WorkspaceManager {
       branchName: name,
       relativeProjectPath: rel.split(path.sep).join('/')
     }
+  }
+
+  /**
+   * The worktree of an archived stream, back from its branch: `git worktree add
+   * <path> <branch>` (no `-b`). A worktree still registered at `worktreePath` is
+   * reused as is. `branch-missing` when the branch is gone (discarded on close).
+   */
+  async restore(projectDir: string, worktreePath: string, branchName: string): Promise<WorkspaceRestoreResult> {
+    const repoRoot = await this.getRepoRoot(projectDir)
+    const rel = path.relative(repoRoot, canonicalFilePath(projectDir)).split(path.sep).join('/')
+    const registered = await this.listWorktreePaths(repoRoot)
+    const target = realpathOrSelf(worktreePath)
+    if (fs.existsSync(worktreePath) && registered.some(entry => realpathOrSelf(entry) === target)) {
+      return { status: 'ok', worktreePath: canonicalFilePath(worktreePath), branchName, relativeProjectPath: rel }
+    }
+    try {
+      await execFileAsync('git', ['-C', repoRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { timeout: 5000 })
+    } catch {
+      return { status: 'branch-missing' }
+    }
+    const dest = fs.existsSync(worktreePath) ? path.join(repoRoot, '.worktrees', branchName) : worktreePath
+    if (fs.existsSync(dest)) throw new Error(`Cannot restore the worktree: "${dest}" already exists`)
+    // Metadata of a worktree whose folder is gone would block the add.
+    await execFileAsync('git', ['-C', repoRoot, 'worktree', 'prune'], { timeout: 5000 }).catch(() => {})
+    try {
+      await execFileAsync('git', ['-C', repoRoot, 'worktree', 'add', dest, branchName], { timeout: 10000 })
+    } catch (err) {
+      throw new Error(`Failed to restore the worktree: ${errorText(err)}`, { cause: err })
+    }
+    return { status: 'ok', worktreePath: canonicalFilePath(dest), branchName, relativeProjectPath: rel }
   }
 
   /** Absolute paths of every worktree git currently has registered for this repo. */

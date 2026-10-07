@@ -137,10 +137,20 @@ export function cannedInbox(desktop: { id: string; name: string }, tick: number,
         name: 'api-server',
         emoji: '🚀',
         remote: false,
+        streams: [
+          { id: 'stream-api-main', name: 'main', main: true },
+          { id: 'stream-api-050', name: '0.5.0', branch: '0.5.0' }
+        ],
+        lastStreamId: 'stream-api-main',
         tasks: [
           {
             id: 'task-auth',
             name: 'fix-auth',
+            streamId: 'stream-api-main',
+            streamName: 'main',
+            status,
+            since: tickStart,
+            ...(status === 'working' ? { activity: ACTIVITIES[tick % ACTIVITIES.length] } : {}),
             lastInteractedAt: tickStart,
             ...(status === 'attention' ? { attentionAt: tickStart } : {}),
             tabs: [
@@ -158,6 +168,10 @@ export function cannedInbox(desktop: { id: string; name: string }, tick: number,
           {
             id: 'task-docs',
             name: 'update-docs',
+            streamId: 'stream-api-050',
+            streamName: '0.5.0',
+            status: 'exited',
+            since: 1790000000000,
             lastInteractedAt: 1790000000000,
             tabs: [{ id: 'tab-pi', type: 'pi', title: 'Pi', status: 'exited', since: 1790000000000 }]
           }
@@ -167,10 +181,15 @@ export function cannedInbox(desktop: { id: string; name: string }, tick: number,
         id: 'proj-box',
         name: 'build-box',
         remote: true,
+        streams: [{ id: 'stream-box-main', name: 'main', main: true }],
         tasks: [
           {
             id: 'task-ci',
             name: 'ci-flake',
+            streamId: 'stream-box-main',
+            streamName: 'main',
+            status: tick % 2 === 0 ? 'working' : 'idle',
+            ...(tick % 2 === 0 ? { activity: 'Watching CI' } : {}),
             tabs: [{ id: 'tab-codex', type: 'codex', title: 'Codex', status: tick % 2 === 0 ? 'working' : 'idle', activity: 'Watching CI' }]
           }
         ]

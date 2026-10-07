@@ -21,6 +21,8 @@ import {
   type WindowViewState
 } from '../shared/types'
 import { normalizeMobileConfig } from '../shared/mobile'
+import { migratePinnedItems, migrateProjects } from '../shared/streams-migration'
+import { projectTasks } from '../shared/streams'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -82,13 +84,13 @@ function renameWithRetry(from: string, to: string): void {
   }
 }
 
-type JsonReadResult =
+export type JsonReadResult =
   | { kind: 'missing' }
   | { kind: 'ok'; raw: string; data: Record<string, unknown> }
   | { kind: 'corrupt'; error: unknown }
 
 /** Missing is a normal first run; anything else that fails is a file we must not overwrite blindly. */
-function readJsonRecord(file: string): JsonReadResult {
+export function readJsonRecord(file: string): JsonReadResult {
   let raw: string
   try {
     raw = fs.readFileSync(file, 'utf-8')
@@ -112,7 +114,7 @@ function fileStamp(): string {
 }
 
 /** Rename a bad file out of the way so nothing later overwrites it. Returns the new path, or null. */
-function quarantine(file: string): string | null {
+export function quarantine(file: string): string | null {
   const dest = `${file}.corrupt-${fileStamp()}`
   try {
     fs.renameSync(file, dest)
@@ -152,8 +154,7 @@ export class Storage {
   }
 
   /**
-   * Rotating snapshot of projects.json — recovery net if another instance clobbers it,
-   * and the only thing standing behind a silent idle-cleanup deletion.
+   * Rotating snapshot of projects.json — recovery net if another instance clobbers it.
    *
    * Returns whether a snapshot now exists on disk. Callers that merely want a safety
    * net (startup) ignore it; a caller that is about to delete the user's tasks must
@@ -211,9 +212,9 @@ export class Storage {
     }
     try {
       const parsed = result.data
-      // Retired keys: the folder tree's collapse state, and the new-task auto-open
-      // setting the empty task's prompt box replaced.
-      const { collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, ...rest } = parsed
+      // Retired keys: the folder tree's collapse state, the new-task auto-open
+      // setting the empty task's prompt box replaced, and idle task cleanup.
+      const { collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, idleTaskCleanup: _idle, ...rest } = parsed
       const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
       config.windowsTerminal = coerceWindowsTerminal(config.windowsTerminal)
       const savedEditors = (rest.externalEditors && typeof rest.externalEditors === 'object')
@@ -282,10 +283,13 @@ export class Storage {
   }
 
   static normalizeProjectsData(data: Record<string, unknown>): ProjectsData {
-    const allProjects: Project[] = Array.isArray(data.projects) ? data.projects : []
+    // Pre-streams data (Project › Task › Tab) is converted here, once: the result is
+    // in the new shape, so the next save writes it and later loads skip this.
+    const migration = migrateProjects(Array.isArray(data.projects) ? data.projects : [])
+    const allProjects: Project[] = migration.projects
     // A hidden ad-hoc project is only ever a home for tasks; once the last real
     // one is gone it has no reason to exist. Dropping it here catches every
-    // writer at once — including main's idle-cleanup sweep, which removes tasks
+    // writer at once — including main's own writes for a phone, which remove tasks
     // without going through the renderer. Safe because such a project is always
     // created in the same write as its first task.
     const projects = allProjects.filter(p => !isSpentEphemeralProject(p))
@@ -321,16 +325,16 @@ export class Storage {
 
     const now = Date.now()
     for (const project of normalizedProjects) {
-      if (!Array.isArray(project.tasks)) continue
-      for (const task of project.tasks) {
+      for (const task of projectTasks(project)) {
         const legacy = (task as { lastFocusedAt?: unknown }).lastFocusedAt
         if (typeof legacy === 'number' && task.lastInteractedAt === undefined) {
           task.lastInteractedAt = legacy
         }
         delete (task as { lastFocusedAt?: unknown }).lastFocusedAt
-        // A task with no activity stamp at all reads as infinitely idle, which would make it
-        // the first thing idle-cleanup deletes. Start its clock now instead: nothing should
-        // be deleted on the basis of data we never recorded.
+        // Retired: a task whose worktree waited for its first prompt to name the branch.
+        delete (task as { workspaceDraft?: unknown }).workspaceDraft
+        // A task with no activity stamp at all would sort as the oldest thing in the
+        // inbox and the sidebar; start its clock now instead.
         if (task.lastInteractedAt === undefined && task.inbox?.eventAt === undefined) {
           task.lastInteractedAt = now
         }
@@ -341,7 +345,7 @@ export class Storage {
       projects: normalizedProjects,
       tags,
       projectOrder,
-      pinnedItems: normalizePinnedItems(data.pinnedItems, normalizedProjects)
+      pinnedItems: normalizePinnedItems(migratePinnedItems(data.pinnedItems, migration.migratedStreamIds), normalizedProjects)
     })
   }
 
@@ -449,6 +453,7 @@ export class Storage {
         selectedTaskId: typeof value.selectedTaskId === 'string' ? value.selectedTaskId : null,
         selectedTagIds,
         expandedProjectIds,
+        ...(isRecord(value.streamExpansion) ? { streamExpansion: value.streamExpansion as Record<string, boolean> } : {}),
         taskStates,
         fileBrowserOpen: typeof value.fileBrowserOpen === 'boolean' ? value.fileBrowserOpen : false,
         fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,
@@ -470,22 +475,18 @@ export class Storage {
     const taskStates: Record<string, TaskViewState> = {}
     for (const [taskId, taskState] of Object.entries(value)) {
       if (!isRecord(taskState)) continue
-      const activeTab = isRecord(taskState.activeTab) ? taskState.activeTab : {}
       const fileBrowserActiveTab = (taskState.fileBrowserActiveTab === 'files'
         || taskState.fileBrowserActiveTab === 'git'
         || taskState.fileBrowserActiveTab === 'notes')
         ? taskState.fileBrowserActiveTab
         : undefined
-      taskStates[taskId] = {
-        activeTab: {
-          left: typeof activeTab.left === 'string' ? activeTab.left : null,
-          right: typeof activeTab.right === 'string' ? activeTab.right : null
-        },
-        splitOpen: typeof taskState.splitOpen === 'boolean' ? taskState.splitOpen : false,
-        splitRatio: isFiniteNumber(taskState.splitRatio) ? taskState.splitRatio : 0.5,
+      // Older builds also kept `activeTab.left|right`, `splitOpen` and `splitRatio`
+      // here; the pane layout now lives on the task, so those are dropped.
+      const next: TaskViewState = {
         ...(typeof taskState.fileBrowserOpen === 'boolean' ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
         ...(fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab } : {})
       }
+      if (Object.keys(next).length > 0) taskStates[taskId] = next
     }
 
     return taskStates

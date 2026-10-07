@@ -69,6 +69,8 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   lastTaskId: nullableStr,
   defaultSidebarTab: v.literal('projects', 'inbox'),
   inboxWorkingLast: bool,
+  inboxLayout: v.literal('flat', 'grouped'),
+  autoCollapseQuietStreams: bool,
   promptBoxAgent: v.literal('claude-chat', 'claude', 'codex', 'pi'),
   promptBoxMode: v.literal('', 'default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'),
   taskRecencyHighlight: v.object({
@@ -80,14 +82,6 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   activityPanel: v.object({
     enabled: bool,
     heightPx: num
-  }),
-  idleTaskCleanup: v.object({
-    enabled: bool,
-    byAge: v.object({ enabled: bool, days: num }),
-    byCount: v.object({ enabled: bool, maxTasks: num }),
-    combine: v.literal('and', 'or'),
-    settledOnly: bool,
-    includeCleanWorkspaces: bool
   }),
   mobile: v.optional(mobileConfig)
 }

@@ -1,9 +1,11 @@
 import type { Project, Tab } from '../shared/types'
+import { findTaskInProject, taskTabs } from '../shared/streams'
 
 export interface RecentlyClosedTab {
   projectId: string
   taskId: string
-  pane: 'left' | 'right'
+  /** The column it was in, as an index into the task's pane row. */
+  pane: number
   index: number
   tab: Tab
 }
@@ -35,9 +37,9 @@ export function shiftRestorableClosedTab(
     }
 
     const project = projects.find((item) => item.id === candidate.projectId)
-    const task = project?.tasks.find((item) => item.id === candidate.taskId)
+    const task = findTaskInProject(project, candidate.taskId)
     const tabExists = task
-      ? [...task.tabs.left, ...task.tabs.right].some((tab) => tab.id === candidate.tab.id)
+      ? taskTabs(task).some((tab) => tab.id === candidate.tab.id)
       : false
 
     if (!project || !task || tabExists) {

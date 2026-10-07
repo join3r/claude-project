@@ -93,23 +93,22 @@ export function agentLinkPath(workspaceDir: string, fileRelPath: string, agentCw
 }
 
 export interface AgentTargetTask {
-  tabs: { left: Tab[]; right: Tab[] }
-  activeTab?: { left?: string | null; right?: string | null }
+  panes: readonly { tabs: readonly Tab[]; activeTabId?: string | null }[]
 }
 
 /**
  * Which agent tab of a task receives a link: the most recently focused one
- * (`recency`, newest first), else an agent tab that is active in either pane,
- * else the first agent tab in the left then right pane.
+ * (`recency`, newest first), else an agent tab that is active in some pane
+ * (left to right), else the first agent tab of the row.
  */
 export function pickAgentTarget(task: AgentTargetTask, recency: readonly string[] = []): Tab | null {
-  const agentTabs = [...task.tabs.left, ...task.tabs.right].filter(t => isAgentTabType(t.type))
+  const agentTabs = task.panes.flatMap(pane => pane.tabs).filter(t => isAgentTabType(t.type))
   if (agentTabs.length === 0) return null
   for (const id of recency) {
     const hit = agentTabs.find(t => t.id === id)
     if (hit) return hit
   }
-  for (const id of [task.activeTab?.left, task.activeTab?.right]) {
+  for (const id of task.panes.map(pane => pane.activeTabId)) {
     const hit = id ? agentTabs.find(t => t.id === id) : undefined
     if (hit) return hit
   }

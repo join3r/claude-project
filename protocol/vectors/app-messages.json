@@ -2,11 +2,11 @@
   "description": "Sample JSON for handshake payloads and app messages. Parse `json`; the result must equal `expected` (null = ignore the message). `invalid` entries must fail to parse.",
   "phoneHello": [
     {
-      "json": "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "json": "{\"v\":2,\"min\":2,\"app\":\"ios/0.2.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
       "expected": {
-        "v": 1,
-        "min": 1,
-        "app": "ios/0.1.0",
+        "v": 2,
+        "min": 2,
+        "app": "ios/0.2.0",
         "features": [],
         "kind": "pair",
         "deviceName": "Vladimir's iPhone",
@@ -15,11 +15,11 @@
       }
     },
     {
-      "json": "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[\"x\"],\"kind\":\"resume\",\"deviceName\":\"iPad\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "json": "{\"v\":2,\"min\":2,\"app\":\"ios/0.2.0\",\"features\":[\"x\"],\"kind\":\"resume\",\"deviceName\":\"iPad\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
       "expected": {
-        "v": 1,
-        "min": 1,
-        "app": "ios/0.1.0",
+        "v": 2,
+        "min": 2,
+        "app": "ios/0.2.0",
         "features": [
           "x"
         ],
@@ -29,11 +29,11 @@
       }
     },
     {
-      "json": "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[\"x\"],\"kind\":\"resume\",\"deviceName\":\"iPad\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\",\"pushCap\":\"future\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\"}",
+      "json": "{\"v\":2,\"min\":2,\"app\":\"ios/0.2.0\",\"features\":[\"x\"],\"kind\":\"resume\",\"deviceName\":\"iPad\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\",\"pushCap\":\"future\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\"}",
       "expected": {
-        "v": 1,
-        "min": 1,
-        "app": "ios/0.1.0",
+        "v": 2,
+        "min": 2,
+        "app": "ios/0.2.0",
         "features": [
           "x"
         ],
@@ -45,10 +45,10 @@
   ],
   "desktopHello": [
     {
-      "json": "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"ok\"}",
+      "json": "{\"v\":2,\"min\":2,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"ok\"}",
       "expected": {
-        "v": 1,
-        "min": 1,
+        "v": 2,
+        "min": 2,
         "app": "devtool/0.3.2",
         "features": [],
         "desktopName": "join3r-mbp",
@@ -56,10 +56,10 @@
       }
     },
     {
-      "json": "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"unknown-device\",\"extra\":[1,2]}",
+      "json": "{\"v\":2,\"min\":2,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"unknown-device\",\"extra\":[1,2]}",
       "expected": {
-        "v": 1,
-        "min": 1,
+        "v": 2,
+        "min": 2,
         "app": "devtool/0.3.2",
         "features": [],
         "desktopName": "join3r-mbp",
@@ -85,7 +85,7 @@
       }
     },
     {
-      "json": "{\"t\":\"res\",\"id\":1,\"ok\":true,\"result\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"settledAt\":1789990000000,\"branch\":\"fix-the-login-redirect\",\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"snoozedUntil\":1790003600000,\"tabs\":[]},{\"id\":\"t4\",\"name\":\"flaky-e2e\",\"snoozeUntilAttention\":true,\"tabs\":[]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":\"t2\"},{\"projectId\":\"p2\"}]}}",
+      "json": "{\"t\":\"res\",\"id\":1,\"ok\":true,\"result\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":true},{\"id\":\"s-050\",\"name\":\"0.5.0\",\"branch\":\"0.5.0\"},{\"id\":\"s-bugs\",\"name\":\"bugfixes\"}],\"lastStreamId\":\"s-050\",\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"idle\",\"settledAt\":1789990000000,\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"exited\",\"since\":1789990000000,\"snoozedUntil\":1790003600000,\"tabs\":[]},{\"id\":\"t4\",\"name\":\"Terminal\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"attention\",\"snoozeUntilAttention\":true,\"tabs\":[{\"id\":\"tab4\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"attention\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"streams\":[{\"id\":\"s-main-2\",\"name\":\"main\",\"main\":true}],\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"taskId\":\"t2\"},{\"projectId\":\"p1\",\"streamId\":\"s-bugs\"},{\"projectId\":\"p2\"}]}}",
       "expected": {
         "t": "res",
         "id": 1,
@@ -102,10 +102,32 @@
               "name": "api-server",
               "emoji": "🚀",
               "remote": false,
+              "streams": [
+                {
+                  "id": "s-main",
+                  "name": "main",
+                  "main": true
+                },
+                {
+                  "id": "s-050",
+                  "name": "0.5.0",
+                  "branch": "0.5.0"
+                },
+                {
+                  "id": "s-bugs",
+                  "name": "bugfixes"
+                }
+              ],
+              "lastStreamId": "s-050",
               "tasks": [
                 {
                   "id": "t1",
                   "name": "fix-auth",
+                  "streamId": "s-main",
+                  "streamName": "main",
+                  "status": "working",
+                  "since": 1790000000000,
+                  "activity": "Running Bash",
                   "lastInteractedAt": 1790000000000,
                   "attentionAt": 1790000000000,
                   "eventAt": 1790000000000,
@@ -130,8 +152,10 @@
                 {
                   "id": "t2",
                   "name": "Fix the login redirect",
+                  "streamId": "s-050",
+                  "streamName": "0.5.0",
+                  "status": "idle",
                   "settledAt": 1789990000000,
-                  "branch": "fix-the-login-redirect",
                   "tabs": [
                     {
                       "id": "tab3",
@@ -144,14 +168,28 @@
                 {
                   "id": "t3",
                   "name": "bump-deps",
+                  "streamId": "s-050",
+                  "streamName": "0.5.0",
+                  "status": "exited",
+                  "since": 1789990000000,
                   "snoozedUntil": 1790003600000,
                   "tabs": []
                 },
                 {
                   "id": "t4",
-                  "name": "flaky-e2e",
+                  "name": "Terminal",
+                  "streamId": "s-main",
+                  "streamName": "main",
+                  "status": "attention",
                   "snoozeUntilAttention": true,
-                  "tabs": []
+                  "tabs": [
+                    {
+                      "id": "tab4",
+                      "type": "terminal",
+                      "title": "zsh",
+                      "status": "attention"
+                    }
+                  ]
                 }
               ]
             },
@@ -159,13 +197,25 @@
               "id": "p2",
               "name": "remote-box",
               "remote": true,
+              "streams": [
+                {
+                  "id": "s-main-2",
+                  "name": "main",
+                  "main": true
+                }
+              ],
               "tasks": []
             }
           ],
           "pinned": [
             {
               "projectId": "p1",
+              "streamId": "s-050",
               "taskId": "t2"
+            },
+            {
+              "projectId": "p1",
+              "streamId": "s-bugs"
             },
             {
               "projectId": "p2"
@@ -187,7 +237,7 @@
       }
     },
     {
-      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"settledAt\":1789990000000,\"branch\":\"fix-the-login-redirect\",\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"snoozedUntil\":1790003600000,\"tabs\":[]},{\"id\":\"t4\",\"name\":\"flaky-e2e\",\"snoozeUntilAttention\":true,\"tabs\":[]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":\"t2\"},{\"projectId\":\"p2\"}]}}",
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":true},{\"id\":\"s-050\",\"name\":\"0.5.0\",\"branch\":\"0.5.0\"},{\"id\":\"s-bugs\",\"name\":\"bugfixes\"}],\"lastStreamId\":\"s-050\",\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"idle\",\"settledAt\":1789990000000,\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"exited\",\"since\":1789990000000,\"snoozedUntil\":1790003600000,\"tabs\":[]},{\"id\":\"t4\",\"name\":\"Terminal\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"attention\",\"snoozeUntilAttention\":true,\"tabs\":[{\"id\":\"tab4\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"attention\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"streams\":[{\"id\":\"s-main-2\",\"name\":\"main\",\"main\":true}],\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"taskId\":\"t2\"},{\"projectId\":\"p1\",\"streamId\":\"s-bugs\"},{\"projectId\":\"p2\"}]}}",
       "expected": {
         "t": "evt",
         "e": "inbox",
@@ -203,10 +253,29 @@
               "id": "p1",
               "name": "api-server",
               "remote": false,
+              "streams": [
+                {
+                  "id": "s-main",
+                  "name": "main",
+                  "main": true
+                },
+                {
+                  "id": "s-050",
+                  "name": "0.5.0",
+                  "branch": "0.5.0"
+                },
+                {
+                  "id": "s-bugs",
+                  "name": "bugfixes"
+                }
+              ],
               "tasks": [
                 {
                   "id": "t1",
                   "name": "fix-auth",
+                  "streamId": "s-main",
+                  "streamName": "main",
+                  "status": "working",
                   "tabs": [
                     {
                       "id": "tab1",
@@ -223,6 +292,8 @@
                       "status": "idle"
                     }
                   ],
+                  "since": 1790000000000,
+                  "activity": "Running Bash",
                   "lastInteractedAt": 1790000000000,
                   "attentionAt": 1790000000000,
                   "eventAt": 1790000000000,
@@ -231,6 +302,9 @@
                 {
                   "id": "t2",
                   "name": "Fix the login redirect",
+                  "streamId": "s-050",
+                  "streamName": "0.5.0",
+                  "status": "idle",
                   "tabs": [
                     {
                       "id": "tab3",
@@ -239,35 +313,61 @@
                       "status": "idle"
                     }
                   ],
-                  "settledAt": 1789990000000,
-                  "branch": "fix-the-login-redirect"
+                  "settledAt": 1789990000000
                 },
                 {
                   "id": "t3",
                   "name": "bump-deps",
+                  "streamId": "s-050",
+                  "streamName": "0.5.0",
+                  "status": "exited",
                   "tabs": [],
+                  "since": 1789990000000,
                   "snoozedUntil": 1790003600000
                 },
                 {
                   "id": "t4",
-                  "name": "flaky-e2e",
-                  "tabs": [],
+                  "name": "Terminal",
+                  "streamId": "s-main",
+                  "streamName": "main",
+                  "status": "attention",
+                  "tabs": [
+                    {
+                      "id": "tab4",
+                      "type": "terminal",
+                      "title": "zsh",
+                      "status": "attention"
+                    }
+                  ],
                   "snoozeUntilAttention": true
                 }
               ],
-              "emoji": "🚀"
+              "emoji": "🚀",
+              "lastStreamId": "s-050"
             },
             {
               "id": "p2",
               "name": "remote-box",
               "remote": true,
+              "streams": [
+                {
+                  "id": "s-main-2",
+                  "name": "main",
+                  "main": true
+                }
+              ],
               "tasks": []
             }
           ],
           "pinned": [
             {
               "projectId": "p1",
+              "streamId": "s-050",
               "taskId": "t2"
+            },
+            {
+              "projectId": "p1",
+              "streamId": "s-bugs"
             },
             {
               "projectId": "p2"
@@ -277,7 +377,7 @@
       }
     },
     {
-      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":2,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":null,\"color\":\"red\"}]},\"compressed\":false}",
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":2,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"lastStreamId\":null,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":\"yes\",\"branch\":null,\"color\":\"green\"}],\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"thinking\",\"since\":null,\"activity\":null,\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":null,\"taskId\":null,\"color\":\"red\"}]},\"compressed\":false}",
       "expected": {
         "t": "evt",
         "e": "inbox",
@@ -293,10 +393,19 @@
               "id": "p1",
               "name": "api-server",
               "remote": false,
+              "streams": [
+                {
+                  "id": "s-main",
+                  "name": "main"
+                }
+              ],
               "tasks": [
                 {
                   "id": "t1",
                   "name": "fix-auth",
+                  "streamId": "s-main",
+                  "streamName": "main",
+                  "status": "idle",
                   "tabs": [
                     {
                       "id": "tab1",
@@ -350,7 +459,7 @@
     }
   ],
   "inboxWithUnknownFields": {
-    "json": "{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"taskId\":null,\"color\":\"red\"}]}",
+    "json": "{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"lastStreamId\":null,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":\"yes\",\"branch\":null,\"color\":\"green\"}],\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"thinking\",\"since\":null,\"activity\":null,\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":null,\"taskId\":null,\"color\":\"red\"}]}",
     "expected": {
       "desktop": {
         "id": "20671253fbf6054273bb719d3a34999b",
@@ -362,10 +471,19 @@
           "id": "p1",
           "name": "api-server",
           "remote": false,
+          "streams": [
+            {
+              "id": "s-main",
+              "name": "main"
+            }
+          ],
           "tasks": [
             {
               "id": "t1",
               "name": "fix-auth",
+              "streamId": "s-main",
+              "streamName": "main",
+              "status": "idle",
               "tabs": [
                 {
                   "id": "tab1",
@@ -394,19 +512,21 @@
   },
   "invalid": {
     "phoneHello": [
-      "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
-      "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"bond\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
-      "{\"v\":1,\"min\":1,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"short\"}",
-      "{\"v\":1,\"min\":2,\"app\":\"ios/0.1.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}"
+      "{\"v\":2,\"min\":2,\"app\":\"ios/0.2.0\",\"features\":[],\"kind\":\"pair\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "{\"v\":2,\"min\":2,\"app\":\"ios/0.2.0\",\"features\":[],\"kind\":\"bond\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}",
+      "{\"v\":2,\"min\":2,\"app\":\"ios/0.2.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"short\"}",
+      "{\"v\":2,\"min\":3,\"app\":\"ios/0.2.0\",\"features\":[],\"kind\":\"pair\",\"proof\":\"IbGTAw7kM1BPSfcmnyearcAB2SrMJMIGWGUeA_Z2gBU\",\"deviceName\":\"Vladimir's iPhone\",\"ed\":\"fxqOjqvRnEoTYmv-hcQPOvxXxEXNugdVDJPdwavFuEk\"}"
     ],
     "desktopHello": [
-      "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"maybe\"}",
-      "{\"v\":1,\"min\":1,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":7,\"result\":\"ok\"}"
+      "{\"v\":2,\"min\":2,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":\"join3r-mbp\",\"result\":\"maybe\"}",
+      "{\"v\":2,\"min\":2,\"app\":\"devtool/0.3.2\",\"features\":[],\"desktopName\":7,\"result\":\"ok\"}"
     ],
     "appMessages": [
       "{\"t\":\"req\",\"op\":\"inbox.get\"}",
       "{\"t\":\"res\",\"id\":1,\"ok\":\"yes\"}",
       "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"projects\":[]}}",
+      "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1,\"projects\":[{\"id\":\"p\",\"name\":\"p\",\"remote\":false,\"tasks\":[]}]}}",
+      "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1,\"projects\":[{\"id\":\"p\",\"name\":\"p\",\"remote\":false,\"streams\":[],\"tasks\":[{\"id\":\"t\",\"name\":\"t\",\"tabs\":[]}]}]}}",
       "{\"t\":\"evt\",\"e\":\"pairing\",\"status\":\"maybe\"}",
       "[1,2,3]",
       "not json"
@@ -481,6 +601,48 @@
       "result": {
         "ok": false,
         "update": "local"
+      }
+    },
+    {
+      "local": {
+        "v": 2,
+        "min": 2
+      },
+      "remote": {
+        "v": 1,
+        "min": 1
+      },
+      "result": {
+        "ok": false,
+        "update": "remote"
+      }
+    },
+    {
+      "local": {
+        "v": 1,
+        "min": 1
+      },
+      "remote": {
+        "v": 2,
+        "min": 2
+      },
+      "result": {
+        "ok": false,
+        "update": "local"
+      }
+    },
+    {
+      "local": {
+        "v": 2,
+        "min": 2
+      },
+      "remote": {
+        "v": 2,
+        "min": 2
+      },
+      "result": {
+        "ok": true,
+        "version": 2
       }
     }
   ]

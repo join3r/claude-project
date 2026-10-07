@@ -1,27 +1,15 @@
 /**
- * Pure transitions of this window's `WindowViewState`: selection, expansion,
- * per-task pane state and the file-browser sidebar. None of this is shared with
- * other windows, so these are plain `prev -> next` steps with no sync concerns.
+ * Pure transitions of this window's `WindowViewState`: selection, expansion and
+ * the file-browser sidebar (remembered per task). Pane layout lives on the task.
+ * None of this is shared with other windows, so these are plain `prev -> next`
+ * steps with no sync concerns.
  */
-import { createTaskViewState, reconcileTaskViewState } from '../../../shared/types'
-import type { FileBrowserTab, Project, Task, TaskViewState, WindowViewState } from '../../../shared/types'
-import type { Pane } from './projectsData'
+import { cloneTaskViewState, createTaskViewState, reconcileTaskViewState } from '../../../shared/types'
+import type { FileBrowserTab, Project, Task, WindowViewState } from '../../../shared/types'
+import { projectLastTaskId } from '../../../shared/streams'
 
 export function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
-}
-
-export function cloneTaskState(state: TaskViewState): TaskViewState {
-  return {
-    activeTab: {
-      left: state.activeTab.left,
-      right: state.activeTab.right
-    },
-    splitOpen: state.splitOpen,
-    splitRatio: state.splitRatio,
-    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
-    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
-  }
 }
 
 /** `ids` with `id` present exactly once, keeping identity when it already was. */
@@ -53,28 +41,6 @@ export function clampSidebarWidth(width: number): number {
   return Math.min(420, Math.max(180, width))
 }
 
-/** Store `state` (cloned) as the view state of `taskId`. */
-export function withTaskState(prev: WindowViewState, taskId: string, state: TaskViewState): WindowViewState {
-  return {
-    ...prev,
-    taskStates: {
-      ...prev.taskStates,
-      [taskId]: cloneTaskState(state)
-    }
-  }
-}
-
-/** `current` with `tabId` active in `pane`, as a detached copy. */
-export function withActiveTab(current: TaskViewState, pane: Pane, tabId: string | null): TaskViewState {
-  return {
-    ...cloneTaskState(current),
-    activeTab: {
-      ...current.activeTab,
-      [pane]: tabId
-    }
-  }
-}
-
 /**
  * Select a project, restoring the task it was last left on when that task still
  * exists, and expand it in the sidebar. `null` clears the selection.
@@ -83,9 +49,7 @@ export function selectProjectView(prev: WindowViewState, id: string | null, proj
   if (!id) {
     return { ...prev, selectedProjectId: null, selectedTaskId: null }
   }
-  const restoredTaskId = project?.lastTaskId && project.tasks.some(task => task.id === project.lastTaskId)
-    ? project.lastTaskId
-    : null
+  const restoredTaskId = (project && projectLastTaskId(project)) ?? null
   return {
     ...prev,
     selectedProjectId: id,
@@ -94,25 +58,18 @@ export function selectProjectView(prev: WindowViewState, id: string | null, proj
   }
 }
 
-/** Land on the project's home task with its home tab in front. */
-export function selectProjectHomeView(prev: WindowViewState, projectId: string, homeTask: Task): WindowViewState {
-  const homeTab = homeTask.tabs.left.find(t => t.system === 'home') ?? null
-  const prevTaskState = prev.taskStates[homeTask.id] ?? createTaskViewState(homeTask)
+/**
+ * Land on the project's Home page: the project selected with no task. The file
+ * browser opens on the project's notes, as Home always has.
+ */
+export function selectProjectHomeView(prev: WindowViewState, projectId: string): WindowViewState {
   return {
     ...prev,
     selectedProjectId: projectId,
-    selectedTaskId: homeTask.id,
+    selectedTaskId: null,
     expandedProjectIds: withId(prev.expandedProjectIds, projectId),
-    taskStates: {
-      ...prev.taskStates,
-      [homeTask.id]: {
-        ...prevTaskState,
-        activeTab: {
-          ...prevTaskState.activeTab,
-          left: homeTab?.id ?? prevTaskState.activeTab.left
-        }
-      }
-    }
+    fileBrowserOpen: true,
+    fileBrowserActiveTab: 'notes'
   }
 }
 
@@ -158,7 +115,7 @@ export function removeTaskView(
   }
 }
 
-/** Main deleted a task by itself (idle cleanup); drop what this window kept for it. */
+/** Main deleted a task by itself (a phone closed it); drop what this window kept for it. */
 export function forgetRemovedTaskView(prev: WindowViewState, taskId: string): WindowViewState {
   if (!(taskId in prev.taskStates) && prev.selectedTaskId !== taskId) return prev
   const taskStates = { ...prev.taskStates }
@@ -201,7 +158,7 @@ export function writeSidebarToTask(prev: WindowViewState, task: Task | null, pat
   next.taskStates = {
     ...prev.taskStates,
     [taskId]: {
-      ...cloneTaskState(currentState),
+      ...cloneTaskViewState(currentState),
       ...(patch.fileBrowserOpen !== undefined ? { fileBrowserOpen: patch.fileBrowserOpen } : {}),
       ...(patch.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: patch.fileBrowserActiveTab } : {})
     }
@@ -211,57 +168,16 @@ export function writeSidebarToTask(prev: WindowViewState, task: Task | null, pat
 
 /**
  * The file-browser state to show on landing on `task`: what was saved for it,
- * else open-on-notes for a home task, else whatever the window already shows.
+ * else whatever the window already shows.
  */
 export function sidebarForTask(
   view: Pick<WindowViewState, 'taskStates' | 'fileBrowserOpen' | 'fileBrowserActiveTab'>,
   task: Task
 ): { fileBrowserOpen: boolean; fileBrowserActiveTab: FileBrowserTab } {
   const saved = view.taskStates[task.id]
-  const isHome = task.system === 'home'
-  const fileBrowserOpen = saved?.fileBrowserOpen !== undefined
-    ? saved.fileBrowserOpen
-    : isHome
-      ? true
-      : view.fileBrowserOpen
+  const fileBrowserOpen = saved?.fileBrowserOpen !== undefined ? saved.fileBrowserOpen : view.fileBrowserOpen
   const fileBrowserActiveTab: FileBrowserTab = saved?.fileBrowserActiveTab !== undefined
     ? saved.fileBrowserActiveTab
-    : isHome
-      ? 'notes'
-      : view.fileBrowserActiveTab
+    : view.fileBrowserActiveTab
   return { fileBrowserOpen, fileBrowserActiveTab }
-}
-
-/**
- * After a note is deleted, move every pane that was showing one of its tabs onto
- * the last remaining tab in that pane.
- */
-export function reassignActiveTabsAfterNoteDelete(
-  prev: WindowViewState,
-  project: Project,
-  noteId: string
-): WindowViewState {
-  const isDoomed = (tab: { type: string; noteId?: string }) => tab.type === 'note' && tab.noteId === noteId
-  const nextTaskStates = { ...prev.taskStates }
-  for (const task of project.tasks) {
-    const currentState = reconcileTaskViewState(task, prev.taskStates[task.id])
-    const nextActiveTab = { ...currentState.activeTab }
-    let changed = false
-    for (const pane of ['left', 'right'] as const) {
-      const activeId = currentState.activeTab[pane]
-      const activeTab = task.tabs[pane].find(tab => tab.id === activeId)
-      if (activeTab && isDoomed(activeTab)) {
-        const remaining = task.tabs[pane].filter(tab => !isDoomed(tab))
-        nextActiveTab[pane] = remaining[remaining.length - 1]?.id ?? null
-        changed = true
-      }
-    }
-    if (changed) {
-      nextTaskStates[task.id] = {
-        ...cloneTaskState(currentState),
-        activeTab: nextActiveTab
-      }
-    }
-  }
-  return { ...prev, taskStates: nextTaskStates }
 }

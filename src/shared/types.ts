@@ -1,6 +1,6 @@
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig } from './mobile'
 
-export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note' | 'home'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -35,7 +35,7 @@ export type PromptBoxAgent = typeof PROMPT_BOX_AGENTS[number]
 /**
  * The live state of one tab's process. Lives in shared rather than in the
  * renderer's TabStatusContext because main keeps the authoritative copy too
- * (see `src/main/tab-activity-registry.ts`) and idle cleanup reads both.
+ * (see `src/main/tab-activity-registry.ts`) for the phone's inbox.
  */
 export type TabStatusValue = 'working' | 'attention' | 'exited' | null
 
@@ -47,7 +47,6 @@ export interface Tab {
   sessionId?: string
   filePath?: string
   noteId?: string
-  system?: 'home'
   /** Terminal spawn directory; when omitted, the task/project directory is used. */
   cwd?: string
 }
@@ -60,13 +59,11 @@ export interface ProjectNote {
   updatedAt: number
 }
 
+/**
+ * What one window remembers per task beyond the task itself: the file-browser
+ * sidebar. The pane layout (columns, widths, active tabs) lives on the task.
+ */
 export interface TaskViewState {
-  activeTab: {
-    left: string | null
-    right: string | null
-  }
-  splitOpen: boolean
-  splitRatio: number
   fileBrowserOpen?: boolean
   fileBrowserActiveTab?: FileBrowserTab
 }
@@ -91,34 +88,52 @@ export interface TaskInboxState {
   forcedUnread?: boolean
 }
 
+/**
+ * One column of a task's pane row. Never empty: a pane exists only while it holds a tab.
+ * `width` is the pane's share of the row (the shares of a task's panes add up to 1).
+ */
+export interface TaskPane {
+  tabs: Tab[]
+  activeTabId: string
+  width: number
+}
+
+/**
+ * One agent session (or one terminal) and the tabs that came with it. Lives in a
+ * stream; the stream owns the worktree.
+ */
 export interface Task {
   id: string
   name: string
-  tabs: {
-    left: Tab[]
-    right: Tab[]
-  }
-  activeTab: {
-    left: string | null
-    right: string | null
-  }
-  splitOpen: boolean
-  splitRatio: number
-  workspace?: WorkspaceConfig
   /**
-   * A workspace task whose worktree doesn't exist yet: + Workspace opens it on the
-   * prompt box, and the worktree is created (branch named after the first prompt)
-   * when the first tab opens. Cleared once `workspace` is set.
+   * The agent (or terminal) tab the task is about. Absent while the task has no tab
+   * yet (a new task on its prompt box) or holds neither an agent nor a terminal.
    */
-  workspaceDraft?: WorkspaceDraft
+  mainTabId?: string
+  /** One row of columns, left to right. Empty only while the task has no tab. */
+  panes: TaskPane[]
   lastInteractedAt?: number
   inbox?: TaskInboxState
-  system?: 'home'
 }
 
-export interface WorkspaceDraft {
-  /** The branch the worktree will fork from; unset means main, then master, then the first branch. */
-  baseBranch?: string
+/**
+ * A line of work: a release (`0.5.0`) or anything else (`bugfixes`). Owns the
+ * worktree, or works in the project folder when `workspace` is absent.
+ */
+export interface Stream {
+  id: string
+  /** Free text, e.g. "0.5.0". */
+  name: string
+  /** The project's default project-folder stream; every project has exactly one. */
+  isMain?: true
+  workspace?: WorkspaceConfig
+  tasks: Task[]
+  lastTaskId?: string
+  /**
+   * How many of its tasks are archived (its `Done (N)` row). The tasks
+   * themselves live in `archive/<projectId>.json` (`src/shared/archive.ts`).
+   */
+  archivedTaskCount?: number
 }
 
 export interface WorkspaceConfig {
@@ -140,6 +155,20 @@ export interface WorkspaceCreateRequest extends WorkspaceTarget {
   name: string
   baseBranch: string
 }
+
+/** Bring back an archived stream's worktree from its branch (no new branch). */
+export interface WorkspaceRestoreRequest extends WorkspaceTarget {
+  worktreePath: string
+  branchName: string
+}
+
+/**
+ * `ok`: the worktree is there again (or never went: a kept worktree is reused).
+ * `branch-missing`: the branch was discarded, so there is nothing to check out.
+ */
+export type WorkspaceRestoreResult =
+  | { status: 'ok'; worktreePath: string; branchName: string; relativeProjectPath: string }
+  | { status: 'branch-missing' }
 
 export interface WorkspaceDeleteRequest extends WorkspaceTarget {
   worktreePath: string
@@ -171,54 +200,21 @@ export interface WorkspaceDeleteResult {
   reason?: string
 }
 
-export function isWorkspaceTask(task: Task): boolean {
-  return !!task.workspace
-}
-
-export function isHomeTask(task: Task): boolean {
-  return task.system === 'home'
-}
-
-export function isHomeTab(tab: Tab): boolean {
-  return tab.system === 'home'
-}
-
 const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'claude-chat', 'codex', 'pi']
 
 export function isRenamableTab(tab: Tab): boolean {
-  if (isHomeTab(tab)) return false
   return RENAMABLE_TAB_TYPES.includes(tab.type)
 }
 
-export function createHomeTask(projectId: string): { task: Task; tab: Tab } {
-  const tabId = `home-tab-${projectId}`
-  const tab: Tab = {
-    id: tabId,
-    type: 'home',
-    title: 'Home',
-    system: 'home'
-  }
-  const task: Task = {
-    id: `home-task-${projectId}`,
-    name: 'Home',
-    tabs: { left: [tab], right: [] },
-    activeTab: { left: tabId, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
-    system: 'home'
-  }
-  return { task, tab }
+/** The `main` stream's id for a project. */
+export function mainStreamId(projectId: string): string {
+  return `main-${projectId}`
 }
 
-export function ensureHomeTasks(projects: Project[]): { projects: Project[]; changed: boolean } {
-  let changed = false
-  const next = projects.map((project) => {
-    if (project.tasks.some((t) => t.system === 'home')) return project
-    changed = true
-    const { task } = createHomeTask(project.id)
-    return { ...project, tasks: [task, ...project.tasks] }
-  })
-  return { projects: changed ? next : projects, changed }
+export const MAIN_STREAM_NAME = 'main'
+
+export function createMainStream(projectId: string, tasks: Task[] = []): Stream {
+  return { id: mainStreamId(projectId), name: MAIN_STREAM_NAME, isMain: true, tasks }
 }
 
 export interface Project {
@@ -227,8 +223,11 @@ export interface Project {
   emoji?: string
   icon?: string
   directory: string
-  tasks: Task[]
-  lastTaskId?: string
+  /** Lines of work. The first is always the `main` stream (`isMain`). */
+  streams: Stream[]
+  lastStreamId?: string
+  /** How many streams are archived (its `Done` group); they live in `archive/<projectId>.json`. */
+  archivedStreamCount?: number
   ssh?: SshConfig
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
@@ -261,9 +260,14 @@ export function isEphemeralProject(project: Project): boolean {
   return !!project.ephemeral
 }
 
-/** A hidden ad-hoc project is spent once nothing but its home task is left. */
+/**
+ * A hidden ad-hoc project is spent once it has no open task left. Archived tasks
+ * and streams don't count: they live outside the project's streams, and its
+ * archive file goes with it.
+ */
 export function isSpentEphemeralProject(project: Project): boolean {
-  return isEphemeralProject(project) && !project.tasks.some(task => !isHomeTask(task))
+  return isEphemeralProject(project)
+    && !(project.streams ?? []).some(stream => stream.tasks.length > 0)
 }
 
 export interface SshConfig {
@@ -332,12 +336,21 @@ export type NotesSaveResult = RevisionSaveResult<NotesRecord>
 
 export type PinnedItem =
   | { type: 'project'; projectId: string }
-  | { type: 'task'; projectId: string; taskId: string }
+  | { type: 'stream'; projectId: string; streamId: string }
+  | { type: 'task'; projectId: string; streamId: string; taskId: string }
 
 export function pinnedItemKey(item: PinnedItem): string {
-  return item.type === 'project' ? `project:${item.projectId}` : `task:${item.projectId}:${item.taskId}`
+  switch (item.type) {
+    case 'project': return `project:${item.projectId}`
+    case 'stream': return `stream:${item.projectId}:${item.streamId}`
+    case 'task': return `task:${item.projectId}:${item.taskId}`
+  }
 }
 
+/**
+ * Drop pins whose target is gone, and duplicates. A task pin follows its task:
+ * `streamId` is rewritten to the stream that holds the task now.
+ */
 export function normalizePinnedItems(items: unknown, projects: readonly Project[]): PinnedItem[] {
   if (!Array.isArray(items)) return []
   const projectById = new Map(projects.map(p => [p.id, p]))
@@ -345,17 +358,22 @@ export function normalizePinnedItems(items: unknown, projects: readonly Project[
   const result: PinnedItem[] = []
   for (const raw of items) {
     if (typeof raw !== 'object' || raw === null) continue
-    const item = raw as Partial<PinnedItem> & { projectId?: unknown; taskId?: unknown }
+    const item = raw as { type?: unknown; projectId?: unknown; streamId?: unknown; taskId?: unknown }
     if (typeof item.projectId !== 'string') continue
     const project = projectById.get(item.projectId)
     if (!project) continue
+    const streams = Array.isArray(project.streams) ? project.streams : []
     let normalized: PinnedItem
     if (item.type === 'project') {
       normalized = { type: 'project', projectId: item.projectId }
+    } else if (item.type === 'stream' && typeof item.streamId === 'string') {
+      if (!streams.some(s => s.id === item.streamId)) continue
+      normalized = { type: 'stream', projectId: item.projectId, streamId: item.streamId }
     } else if (item.type === 'task' && typeof item.taskId === 'string') {
-      const tasks = Array.isArray(project.tasks) ? project.tasks : []
-      if (!tasks.some(t => t.id === item.taskId)) continue
-      normalized = { type: 'task', projectId: item.projectId, taskId: item.taskId }
+      const taskId = item.taskId
+      const stream = streams.find(s => s.tasks.some(t => t.id === taskId))
+      if (!stream) continue
+      normalized = { type: 'task', projectId: item.projectId, streamId: stream.id, taskId }
     } else {
       continue
     }
@@ -449,6 +467,10 @@ export interface AppConfig {
   defaultSidebarTab: SidebarTab
   /** Inbox: sink tasks whose agent is working to the bottom of their group. */
   inboxWorkingLast: boolean
+  /** Inbox rows as one list, or under a heading per stream. */
+  inboxLayout: 'flat' | 'grouped'
+  /** Sidebar: fold streams where no task needs you, runs or has news. */
+  autoCollapseQuietStreams: boolean
   /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
@@ -463,7 +485,6 @@ export interface AppConfig {
     enabled: boolean
     heightPx: number
   }
-  idleTaskCleanup: IdleTaskCleanupConfig
   /**
    * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
    * window's stale copy cannot flip it back.
@@ -486,41 +507,11 @@ export interface ExternalEditorsConfig {
   defaultId: string | null
 }
 
-/**
- * Auto-deletion of tasks that have gone quiet. Ships off: the sweep deletes silently, so
- * nothing happens until it is deliberately enabled.
- */
-/**
- * Everything idle cleanup exempts a task for, as main sees it across every window:
- * what is selected somewhere, what the hooks have reported, what still has a live
- * process, and what holds an unsaved buffer.
- */
-export interface CleanupActivity {
-  openTaskIds: string[]
-  statuses: Record<string, TabStatusValue>
-  liveTabIds: string[]
-  dirtyTabIds: string[]
-}
-
-/** A task main deleted on its own (idle cleanup), and the tabs that went with it. */
+/** A task (or some of its tabs) main removed on its own (a phone's close), and the tabs that went. */
 export interface TaskRemoval {
   projectId: string
   taskId: string
   tabIds: string[]
-}
-
-export interface IdleTaskCleanupConfig {
-  enabled: boolean
-  /** Idle longer than `days`. */
-  byAge: { enabled: boolean; days: number }
-  /** More than `maxTasks` tasks in the project. */
-  byCount: { enabled: boolean; maxTasks: number }
-  /** How the two rules compose. Irrelevant unless both are enabled. */
-  combine: 'and' | 'or'
-  /** Only touch tasks explicitly settled in the inbox. */
-  settledOnly: boolean
-  /** Also delete workspace tasks whose worktree is clean and branch already merged. */
-  includeCleanWorkspaces: boolean
 }
 
 /** Interactive Windows tabs are Git Bash only. Legacy `powershell` / `cmd` values coerce here. */
@@ -631,6 +622,11 @@ export interface WindowViewState {
   selectedTaskId: string | null
   selectedTagIds: string[]
   expandedProjectIds: string[]
+  /**
+   * Streams opened or closed by hand (chevron), by stream id. A stream not listed
+   * follows the auto-collapse setting.
+   */
+  streamExpansion?: Record<string, boolean>
   taskStates: Record<string, TaskViewState>
   fileBrowserOpen: boolean
   fileBrowserWidth: number
@@ -692,6 +688,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastTaskId: null,
   defaultSidebarTab: 'inbox',
   inboxWorkingLast: false,
+  inboxLayout: 'flat',
+  autoCollapseQuietStreams: true,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
   taskRecencyHighlight: {
@@ -704,38 +702,21 @@ export const DEFAULT_CONFIG: AppConfig = {
     enabled: true,
     heightPx: 160
   },
-  // Opt-in: the sweep deletes without asking, so it stays dormant until you turn it on.
-  idleTaskCleanup: {
-    enabled: false,
-    byAge: { enabled: true, days: 14 },
-    byCount: { enabled: true, maxTasks: 20 },
-    combine: 'and',
-    settledOnly: true,
-    includeCleanWorkspaces: false
-  },
   externalEditors: { editors: [], defaultId: null },
   mobile: { ...DEFAULT_MOBILE_CONFIG }
 }
 
-export function createTaskViewState(task: Task): TaskViewState {
-  return {
-    activeTab: {
-      left: task.activeTab.left ?? task.tabs.left[task.tabs.left.length - 1]?.id ?? null,
-      right: task.activeTab.right ?? task.tabs.right[task.tabs.right.length - 1]?.id ?? null
-    },
-    splitOpen: task.splitOpen,
-    splitRatio: task.splitRatio
-  }
+/** A task's default view: nothing remembered yet, so the window's own sidebar shows. */
+export function createTaskViewState(_task?: Task): TaskViewState {
+  return {}
 }
 
-function createDefaultTaskStates(projects: Project[]): Record<string, TaskViewState> {
-  const taskStates: Record<string, TaskViewState> = {}
-  for (const project of projects) {
-    for (const task of project.tasks) {
-      taskStates[task.id] = createTaskViewState(task)
-    }
+/** A detached copy holding only the known fields (stored states may carry legacy ones). */
+export function cloneTaskViewState(state: TaskViewState): TaskViewState {
+  return {
+    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
+    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
   }
-  return taskStates
 }
 
 export function createDefaultWindowViewState(): WindowViewState {
@@ -760,19 +741,11 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     selectedTaskId: state.selectedTaskId,
     selectedTagIds: [...state.selectedTagIds],
     expandedProjectIds: [...state.expandedProjectIds],
+    ...(state.streamExpansion ? { streamExpansion: { ...state.streamExpansion } } : {}),
     taskStates: Object.fromEntries(
       Object.entries(state.taskStates).map(([taskId, taskState]) => [
         taskId,
-        {
-          activeTab: {
-            left: taskState.activeTab.left,
-            right: taskState.activeTab.right
-          },
-          splitOpen: taskState.splitOpen,
-          splitRatio: taskState.splitRatio,
-          ...(taskState.fileBrowserOpen !== undefined ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
-          ...(taskState.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: taskState.fileBrowserActiveTab } : {})
-        }
+        cloneTaskViewState(taskState)
       ])
     ),
     fileBrowserOpen: state.fileBrowserOpen,
@@ -815,13 +788,16 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
     return { selectedProjectId: null, selectedTaskId: null }
   }
 
-  const candidateTaskId = config.lastTaskId ?? project.lastTaskId ?? null
-  const remembered = candidateTaskId && project.tasks.some((task) => task.id === candidateTaskId)
-    ? candidateTaskId
-    : null
-
-  const homeTask = project.tasks.find((task) => task.system === 'home') ?? null
-  const taskId = remembered ?? homeTask?.id ?? null
+  // No remembered task means the window was on the project's Home page; a stale
+  // one falls back to the task the project was last left on.
+  const tasks = project.streams.flatMap(stream => stream.tasks)
+  const streamLastTaskId = project.streams.find(stream => stream.id === project.lastStreamId)?.lastTaskId
+  const exists = (id: string | null | undefined): id is string => !!id && tasks.some((task) => task.id === id)
+  const taskId = config.lastTaskId === null
+    ? null
+    : exists(config.lastTaskId)
+      ? config.lastTaskId
+      : exists(streamLastTaskId) ? streamLastTaskId : null
 
   return {
     selectedProjectId: project.id,
@@ -829,44 +805,8 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
   }
 }
 
-export function reconcileTaskViewState(task: Task, state?: TaskViewState): TaskViewState {
-  // For home tasks, ensure the home tab exists in the left pane and is active by default.
-  if (task.system === 'home') {
-    const hasHomeTab = task.tabs.left.some((tab) => tab.system === 'home')
-    if (!hasHomeTab) {
-      const projectId = task.id.startsWith('home-task-')
-        ? task.id.slice('home-task-'.length)
-        : task.id
-      const { tab } = createHomeTask(projectId)
-      task.tabs.left.unshift(tab)
-      if (!task.activeTab.left) task.activeTab.left = tab.id
-    }
-  }
-
-  const fallback = createTaskViewState(task)
-  if (!state) return fallback
-
-  const leftIds = new Set(task.tabs.left.map(tab => tab.id))
-  const rightIds = new Set(task.tabs.right.map(tab => tab.id))
-
-  return {
-    activeTab: {
-      left: state.activeTab.left === null
-        ? null
-        : leftIds.has(state.activeTab.left)
-          ? state.activeTab.left
-          : fallback.activeTab.left,
-      right: state.activeTab.right === null
-        ? null
-        : rightIds.has(state.activeTab.right)
-          ? state.activeTab.right
-          : fallback.activeTab.right
-    },
-    splitOpen: state.splitOpen,
-    splitRatio: state.splitRatio,
-    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
-    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
-  }
+export function reconcileTaskViewState(_task: Task, state?: TaskViewState): TaskViewState {
+  return state ? cloneTaskViewState(state) : createTaskViewState()
 }
 
 export function reconcileWindowViewState(
@@ -877,12 +817,12 @@ export function reconcileWindowViewState(
   const projectById = new Map(projects.map(project => [project.id, project]))
   const selectedProject = state.selectedProjectId ? projectById.get(state.selectedProjectId) ?? null : null
   const selectedTask = selectedProject && state.selectedTaskId
-    ? selectedProject.tasks.find(task => task.id === state.selectedTaskId) ?? null
+    ? selectedProject.streams.flatMap(stream => stream.tasks).find(task => task.id === state.selectedTaskId) ?? null
     : null
 
   const taskStates: Record<string, TaskViewState> = {}
   for (const project of projects) {
-    for (const task of project.tasks) {
+    for (const task of project.streams.flatMap(stream => stream.tasks)) {
       const nextState = state.taskStates[task.id]
       if (nextState) {
         taskStates[task.id] = reconcileTaskViewState(task, nextState)
@@ -891,6 +831,10 @@ export function reconcileWindowViewState(
   }
 
   const expandedProjectIds = (state.expandedProjectIds ?? []).filter(id => projectById.has(id))
+  const streamIds = new Set(projects.flatMap(project => project.streams.map(stream => stream.id)))
+  const streamExpansion = Object.fromEntries(
+    Object.entries(state.streamExpansion ?? {}).filter(([id, open]) => streamIds.has(id) && typeof open === 'boolean')
+  )
 
   const validTagIds = tagIds ?? new Set<string>()
   const selectedTagIds = (state.selectedTagIds ?? []).filter(id => validTagIds.has(id))
@@ -900,6 +844,7 @@ export function reconcileWindowViewState(
     selectedTaskId: selectedTask?.id ?? null,
     selectedTagIds,
     expandedProjectIds,
+    ...(Object.keys(streamExpansion).length > 0 ? { streamExpansion } : {}),
     taskStates,
     fileBrowserOpen: state.fileBrowserOpen ?? false,
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
@@ -919,19 +864,10 @@ export function buildWindowViewState(
 ): WindowViewState {
   const tagIds = new Set(tags.map(t => t.id))
   const storedSelection = resolveStoredSelection(projects, config)
-  const taskStates = createDefaultTaskStates(projects)
+  const taskStates: Record<string, TaskViewState> = {}
   if (seed?.taskStates) {
     for (const [taskId, taskState] of Object.entries(seed.taskStates)) {
-      taskStates[taskId] = {
-        activeTab: {
-          left: taskState.activeTab.left,
-          right: taskState.activeTab.right
-        },
-        splitOpen: taskState.splitOpen,
-        splitRatio: taskState.splitRatio,
-        ...(taskState.fileBrowserOpen !== undefined ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
-        ...(taskState.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: taskState.fileBrowserActiveTab } : {})
-      }
+      taskStates[taskId] = cloneTaskViewState(taskState)
     }
   }
 
@@ -947,6 +883,7 @@ export function buildWindowViewState(
     selectedTaskId,
     selectedTagIds: seed?.selectedTagIds ? [...seed.selectedTagIds] : [],
     expandedProjectIds,
+    ...(seed?.streamExpansion ? { streamExpansion: { ...seed.streamExpansion } } : {}),
     taskStates,
     fileBrowserOpen: seed?.fileBrowserOpen ?? false,
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,

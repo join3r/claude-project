@@ -24,6 +24,7 @@ import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import { buildXtermTheme } from './terminalThemes'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { hasBell, terminalStatusFromOutput } from './terminalStatus'
+import { takePendingCommand } from './terminalStartup'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -32,11 +33,16 @@ interface Props {
   visible: boolean
   projectId: string
   taskId: string
-  pane: 'left' | 'right'
   projectDir: string
   sshConfig?: SshConfig
   shellCommand?: ShellCommandConfig
   cwd?: string
+  /**
+   * The task's main terminal (a terminal task): its bell and exit are the
+   * task's events. An extra terminal beside an agent only lights its own tab,
+   * as its status doesn't count for the task either (`statusTabs`).
+   */
+  isMainTab?: boolean
 }
 
 interface TerminalEntry {
@@ -135,7 +141,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
   }
 }
 
-export default function TerminalTab({ tabId, visible, projectId, taskId, pane, projectDir, sshConfig, shellCommand, cwd }: Props): React.ReactElement {
+export default function TerminalTab({ tabId, visible, projectId, taskId, projectDir, sshConfig, shellCommand, cwd, isMainTab = false }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const { addTab, config, effectiveTerminalTheme, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
@@ -150,6 +156,9 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
 
   const statusStore = useTabStatusStore()
+  // A ref, so a tab that becomes (or stops being) the main tab doesn't re-register its listeners.
+  const isMainTabRef = useRef(isMainTab)
+  isMainTabRef.current = isMainTab
   const lastStatusWriteRef = useRef(0)
   const decayTimerRef = useRef<number | null>(null)
 
@@ -168,7 +177,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       statusStore.setStatus(tabId, next, 'terminal-output')
       // Only the transition into attention is inbox-worthy; ordinary output would
       // otherwise keep every task with a dev server permanently unread.
-      if (next === 'attention') markTaskEvent(projectId, taskId, 'attention')
+      if (next === 'attention' && isMainTabRef.current) markTaskEvent(projectId, taskId, 'attention')
     }
 
     if (decayTimerRef.current) window.clearTimeout(decayTimerRef.current)
@@ -280,7 +289,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
-      addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(uri) })
+      addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: normalizeBrowserUrl(uri) })
     }, { urlRegex: WEB_LINK_REGEX })
     const unicode11Addon = new Unicode11Addon()
     const imageAddon = new ImageAddon()
@@ -354,7 +363,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     ensurePtyExitListener()
     ensurePtySizeListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId, visible, markTaskInteracted])
+  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, projectId, taskId, visible, markTaskInteracted])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
@@ -428,6 +437,10 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
               }
               entry.term.scrollToBottom()
             }
+
+            // A terminal task's start-up command, typed once into its brand-new shell.
+            const startup = shellCommand ? undefined : takePendingCommand(tabId)
+            if (startup) window.api.ptyWrite(tabId, `${startup}\r`)
 
             if (!restoredScrollback) {
               flushPending()
@@ -520,7 +533,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       // was snoozed until something needed you. It stays 'exited' rather than
       // 'attention' though: the tier is for agents blocked on you, and a dead shell
       // isn't blocked, it's over.
-      markTaskEvent(projectId, taskId, exitCode !== 0 ? 'attention' : 'event')
+      if (isMainTabRef.current) markTaskEvent(projectId, taskId, exitCode !== 0 ? 'attention' : 'event')
     })
     ensurePtyListener()
     ensurePtyExitListener()
@@ -557,7 +570,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       <LinkContextMenu
         menu={linkMenu}
         onClose={() => setLinkMenu(null)}
-        onOpenInApp={(targetUrl) => addTab(projectId, taskId, pane, 'browser', { url: targetUrl })}
+        onOpenInApp={(targetUrl) => addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: targetUrl })}
       />
     </div>
   )

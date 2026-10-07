@@ -170,6 +170,8 @@ describe('app messages', () => {
     expect(parseInbox(inbox)).toEqual(inbox)
     expect(() => parseInbox({ ...inbox, projects: [{ id: 'p', name: 'n', tasks: [{ id: 't', name: 'n' }] }] })).toThrow(ProtocolError)
     expect(() => parseInbox({ ...inbox, generatedAt: 'now' })).toThrow(ProtocolError)
-    expect(parseInbox({ ...inbox, projects: [{ id: 'p', name: 'n', tasks: [] }] }).projects[0].remote).toBe(false)
+    expect(parseInbox({ ...inbox, projects: [{ id: 'p', name: 'n', streams: [], tasks: [] }] }).projects[0].remote).toBe(false)
+    // A version 1 project has no streams.
+    expect(() => parseInbox({ ...inbox, projects: [{ id: 'p', name: 'n', tasks: [] }] })).toThrow(ProtocolError)
   })
 })

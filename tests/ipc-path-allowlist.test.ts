@@ -11,7 +11,8 @@ import {
 import { registerFileBrowserHandlers } from '../src/main/ipc/file-browser'
 import type { IpcRegistrar } from '../src/main/ipc/registrar'
 import { validateArgs } from '../src/main/ipc/validate'
-import type { Project } from '../src/shared/types'
+import { createMainStream, type Project } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 const tmpDirs: string[] = []
 
@@ -35,7 +36,7 @@ function project(overrides: Partial<Project>): Project {
     id: 'p1',
     name: 'P',
     directory: '',
-    tasks: [],
+    streams: [createMainStream(overrides.id ?? 'p1')],
     ...overrides
   }
 }
@@ -61,12 +62,12 @@ function layout() {
 describe('allowedLocalRoots', () => {
   it('lists local project directories and workspace worktrees, not remote ones', () => {
     const roots = allowedLocalRoots([
-      project({
+      fixtureProject({
         id: 'local',
+        name: 'P',
         directory: '/work/app',
         tasks: [{
-          id: 't', name: 't', tabs: { left: [], right: [] }, activeTab: { left: null, right: null },
-          splitOpen: false, splitRatio: 0.5,
+          id: 't', name: 't',
           workspace: { worktreePath: '/work/.wt/feat', branchName: 'feat', baseBranch: 'main', relativeProjectPath: 'apps/web' }
         }]
       }),

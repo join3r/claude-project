@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from 'react'
-import { Check, ChevronRight, Clock, Inbox as InboxIcon, SquarePen } from 'lucide-react'
-import type { Project, Task } from '../../shared/types'
-import { isEphemeralProject, isHomeTask, isWorkspaceTask } from '../../shared/types'
+import { Check, ChevronRight, Clock, Inbox as InboxIcon, SquarePen, X } from 'lucide-react'
+import type { AppConfig, Project, Task } from '../../shared/types'
+import { isEphemeralProject } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { RowActions, RowAction } from './ui'
 import {
   formatRelativeAge,
   formatWaitTime,
+  groupInboxByStream,
+  inboxSources,
   inboxState,
   lastActivityAt,
   partitionInbox,
@@ -22,6 +24,8 @@ type Props = {
   onSelectTask: (projectId: string, task: Task) => void
   onTaskContextMenu: (e: React.MouseEvent, projectId: string, taskId: string) => void
   onSettle: (projectId: string, taskId: string) => void
+  /** Archives the task, with the sidebar's confirm rules (`handleCloseTask`). */
+  onClose: (projectId: string, taskId: string) => void
   onNewTask: () => void
   allStatuses: Record<string, TabStatusValue>
   statusSince: Record<string, number>
@@ -29,6 +33,8 @@ type Props = {
   now: number
   /** Settings → Sidebar: working rows sink to the bottom of their group. */
   workingLast?: boolean
+  /** Settings → Sidebar: one list (default), or the live rows gathered by stream. */
+  layout?: AppConfig['inboxLayout']
 }
 
 const STATUS_LABEL: Record<NonNullable<TabStatusValue>, string> = {
@@ -107,24 +113,30 @@ function InboxRow({
   agent,
   selected,
   now,
+  showLocation,
   onSelect,
   onContextMenu,
-  onSettle
+  onSettle,
+  onClose
 }: {
   entry: InboxEntry
   group: GroupKey
   agent: TaskActivitySummary
   selected: boolean
   now: number
+  /** The `Project · Stream` line; the grouped layout's header says it instead. */
+  showLocation: boolean
   onSelect: () => void
   onContextMenu: (e: React.MouseEvent) => void
   onSettle: () => void
+  onClose: () => void
 }): React.ReactElement {
-  const { task, project, unread, yourTurn } = entry
+  const { task, project, stream, unread, yourTurn } = entry
   const activity = lastActivityAt(task)
   // The agent has the ball: nothing for you to do yet, so the row recedes and
   // drops its dot rather than pulsing for attention it does not need.
   const working = entry.status === 'working'
+  const ephemeral = isEphemeralProject(project)
 
   return (
     <div
@@ -138,37 +150,23 @@ function InboxRow({
       onClick={onSelect}
       onContextMenu={onContextMenu}
       title={agent.tooltip}
+      data-testid="inbox-row"
+      data-task-id={task.id}
     >
       <div className="flex items-center gap-1.5">
         {!working && (unread || entry.status || yourTurn)
           ? <StatusDot status={entry.status} />
           : <span className="w-1.5 shrink-0" />}
         <span
-          className="font-semibold shrink-0 max-w-[55%] overflow-hidden text-ellipsis whitespace-nowrap"
-          title={isEphemeralProject(project) ? project.directory : undefined}
-        >
-          {project.name}
-        </span>
-        <span
           className={[
-            'text-xs overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0',
-            // Unread rows lift the task name out of the muted grey — the dot alone
-            // is easy to miss when a project has several rows.
-            unread ? 'text-text' : 'text-text-muted'
+            'overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0',
+            // Unread rows lift the name out of the muted grey — the dot alone
+            // is easy to miss in a long list.
+            unread ? 'font-semibold text-text' : 'text-text-muted'
           ].join(' ')}
         >
           {task.name}
         </span>
-        {isWorkspaceTask(task) && (
-          <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">ws</span>
-        )}
-        {/* This task borrowed a directory rather than living in a project you added. */}
-        {isEphemeralProject(project) && (
-          <span
-            className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0"
-            title={project.directory}
-          >dir</span>
-        )}
         <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
           <RowActions>
             <RowAction
@@ -178,15 +176,50 @@ function InboxRow({
             >
               <Check size={13} />
             </RowAction>
+            <RowAction danger title="Close task" onClick={onClose}>
+              <X size={13} />
+            </RowAction>
           </RowActions>
           <span className="text-2xs text-text-subtle tabular-nums pl-1">
             {activity > 0 ? formatRelativeAge(now - activity) : ''}
           </span>
         </span>
       </div>
+      {showLocation && (
+        <div
+          className="pl-3 flex items-center gap-1 text-2xs text-text-muted overflow-hidden whitespace-nowrap"
+          data-testid="inbox-row-location"
+        >
+          <span className="overflow-hidden text-ellipsis min-w-0" title={ephemeral ? project.directory : undefined}>
+            {project.name}
+          </span>
+          <span className="text-text-subtle shrink-0">·</span>
+          <span className="font-mono overflow-hidden text-ellipsis min-w-0">{stream.name}</span>
+          {/* This task borrowed a directory rather than living in a project you added. */}
+          {ephemeral && (
+            <span
+              className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0"
+              title={project.directory}
+            >dir</span>
+          )}
+        </div>
+      )}
       <div className="pl-3 text-2xs text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap">
         {rowSubtitle(entry, now, group, agent)}
       </div>
+    </div>
+  )
+}
+
+/** The grouped layout's header: the project, then the stream. */
+function StreamHeader({ project, stream }: Pick<InboxEntry, 'project' | 'stream'>): React.ReactElement {
+  return (
+    <div
+      className="flex items-baseline gap-2 px-3 pt-2 pb-1 text-2xs text-text-muted overflow-hidden whitespace-nowrap"
+      data-testid="inbox-stream-header"
+    >
+      <span className="font-bold uppercase tracking-[0.06em] overflow-hidden text-ellipsis min-w-0">{project.name}</span>
+      <span className="ml-auto font-mono shrink-0 max-w-[50%] overflow-hidden text-ellipsis">{stream.name}</span>
     </div>
   )
 }
@@ -230,32 +263,33 @@ export default function InboxPanel({
   onSelectTask,
   onTaskContextMenu,
   onSettle,
+  onClose,
   onNewTask,
   allStatuses,
   statusSince,
   activities,
   now,
-  workingLast = false
+  workingLast = false,
+  layout = 'flat'
 }: Props): React.ReactElement {
   const [settledCollapsed, setSettledCollapsed] = useState(true)
   const [snoozedCollapsed, setSnoozedCollapsed] = useState(true)
 
-  const partition = useMemo(() => {
-    const entries: { task: Task; project: Project }[] = []
-    for (const project of projects) {
-      for (const task of project.tasks) {
-        if (isHomeTask(task)) continue
-        entries.push({ task, project })
-      }
-    }
-    return partitionInbox(entries, allStatuses, statusSince, now, { workingLast })
-  }, [projects, allStatuses, statusSince, now, workingLast])
+  const partition = useMemo(
+    () => partitionInbox(inboxSources(projects), allStatuses, statusSince, now, { workingLast }),
+    [projects, allStatuses, statusSince, now, workingLast]
+  )
+  const grouped = layout === 'grouped'
+  const streamGroups = useMemo(
+    () => (grouped ? groupInboxByStream([...partition.needsYou, ...partition.active]) : []),
+    [grouped, partition]
+  )
 
   const total =
     partition.needsYou.length + partition.active.length +
     partition.settled.length + partition.snoozed.length
 
-  const renderRow = (entry: InboxEntry, group: GroupKey): React.ReactElement => (
+  const renderRow = (entry: InboxEntry, group: GroupKey, showLocation = true): React.ReactElement => (
     <InboxRow
       key={entry.task.id}
       entry={entry}
@@ -263,9 +297,11 @@ export default function InboxPanel({
       agent={taskActivity(entry.task, allStatuses, activities)}
       selected={selectedTaskId === entry.task.id}
       now={now}
+      showLocation={showLocation}
       onSelect={() => onSelectTask(entry.project.id, entry.task)}
       onContextMenu={(e) => onTaskContextMenu(e, entry.project.id, entry.task.id)}
       onSettle={() => onSettle(entry.project.id, entry.task.id)}
+      onClose={() => onClose(entry.project.id, entry.task.id)}
     />
   )
 
@@ -289,18 +325,28 @@ export default function InboxPanel({
 
   return (
     <div className="sidebar-list flex-1 overflow-y-auto py-1">
-      {partition.needsYou.length > 0 && (
-        <>
-          <GroupHeader label="Needs you" count={partition.needsYou.length} />
-          {partition.needsYou.map(entry => renderRow(entry, 'needsYou'))}
-        </>
-      )}
+      {grouped ? (
+        // Grouped: the live rows by stream; settled and snoozed stay below as in flat.
+        streamGroups.map(({ project, stream, entries }) => (
+          <div key={`${project.id}:${stream.id}`} data-testid="inbox-stream-group">
+            <StreamHeader project={project} stream={stream} />
+            {entries.map(entry => renderRow(entry, entry.status === 'attention' ? 'needsYou' : 'active', false))}
+          </div>
+        ))
+      ) : (<>
+        {partition.needsYou.length > 0 && (
+          <>
+            <GroupHeader label="Needs you" count={partition.needsYou.length} />
+            {partition.needsYou.map(entry => renderRow(entry, 'needsYou'))}
+          </>
+        )}
 
-      {partition.active.length > 0 && (
-        <div className={partition.needsYou.length > 0 ? 'mt-1 pt-1 border-t border-hair' : ''}>
-          {partition.active.map(entry => renderRow(entry, 'active'))}
-        </div>
-      )}
+        {partition.active.length > 0 && (
+          <div className={partition.needsYou.length > 0 ? 'mt-1 pt-1 border-t border-hair' : ''}>
+            {partition.active.map(entry => renderRow(entry, 'active'))}
+          </div>
+        )}
+      </>)}
 
       {partition.settled.length > 0 && (
         <>

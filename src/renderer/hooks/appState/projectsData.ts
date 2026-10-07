@@ -5,31 +5,42 @@
  * unit-tested directly.
  */
 import { v4 as uuid } from 'uuid'
-import { createHomeTask, isSpentEphemeralProject, pinnedItemKey } from '../../../shared/types'
-import type { PinnedItem, Project, ProjectsData, Tab, Tag, Task, WorkspaceConfig } from '../../../shared/types'
+import { createMainStream, pinnedItemKey } from '../../../shared/types'
+import type { PinnedItem, Project, ProjectsData, Stream, Tab, Tag, Task, WorkspaceConfig } from '../../../shared/types'
+import {
+  addTaskToStream,
+  findStreamOfTask,
+  findTaskInProject,
+  mapTaskInProject,
+  resolveMainTabId,
+  singlePane,
+  taskTabIds
+} from '../../../shared/streams'
+import { addTabToPane, patchTabInTask } from '../../../shared/panes'
 import { dirBasename } from '../../../shared/paths'
 import { incrementLifetimeStat } from '../lifetimeStats'
 
-export type Pane = 'left' | 'right'
-
 /** The task literal every "add a task" path starts from. */
-export function makeTask(name: string, initialTabs: Tab[], workspace?: WorkspaceConfig): Task {
+export function makeTask(name: string, initialTabs: Tab[]): Task {
+  const mainTabId = resolveMainTabId(initialTabs)
   return {
     id: uuid(),
     name,
-    ...(workspace ? { workspace } : {}),
-    tabs: { left: initialTabs, right: [] },
-    activeTab: { left: initialTabs[initialTabs.length - 1]?.id ?? null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
+    ...(mainTabId ? { mainTabId } : {}),
+    panes: singlePane(initialTabs),
     // Creating a task is an interaction: without the stamp a brand-new task has
     // no activity at all and sinks to the bottom of the inbox's active group.
     lastInteractedAt: Date.now()
   }
 }
 
+/** The stream literal the new-stream dialog creates: a worktree, or the project folder. */
+export function makeStream(name: string, workspace?: WorkspaceConfig): Stream {
+  return { id: uuid(), name, ...(workspace ? { workspace } : {}), tasks: [] }
+}
+
 export function tabIdsOfTask(task: Task): string[] {
-  return [...task.tabs.left, ...task.tabs.right].map(tab => tab.id)
+  return taskTabIds(task)
 }
 
 /** A remote project's working directory lives on the far side of its SSH config. */
@@ -58,24 +69,7 @@ export function mapTask(
   taskId: string,
   fn: (task: Task) => Task
 ): ProjectsData {
-  return mapProject(data, projectId, project => ({
-    ...project,
-    tasks: project.tasks.map(task => (task.id === taskId ? fn(task) : task))
-  }))
-}
-
-/** Replace one pane's tab list of one task. */
-export function mapPaneTabs(
-  data: ProjectsData,
-  projectId: string,
-  taskId: string,
-  pane: Pane,
-  fn: (tabs: Tab[]) => Tab[]
-): ProjectsData {
-  return mapTask(data, projectId, taskId, task => ({
-    ...task,
-    tabs: { ...task.tabs, [pane]: fn(task.tabs[pane]) }
-  }))
+  return mapProject(data, projectId, project => mapTaskInProject(project, taskId, fn))
 }
 
 /** Patch one tab in place; every other tab keeps its identity. */
@@ -83,46 +77,36 @@ export function patchTab(
   data: ProjectsData,
   projectId: string,
   taskId: string,
-  pane: Pane,
   tabId: string,
   patch: Partial<Tab>
 ): ProjectsData {
-  return mapPaneTabs(data, projectId, taskId, pane, tabs =>
-    tabs.map(tab => (tab.id === tabId ? { ...tab, ...patch } : tab))
-  )
+  return mapTask(data, projectId, taskId, task => patchTabInTask(task, tabId, patch))
 }
 
 export function renameTabInData(
   data: ProjectsData,
   projectId: string,
   taskId: string,
-  pane: Pane,
   tabId: string,
   title: string
 ): ProjectsData {
-  return mapPaneTabs(data, projectId, taskId, pane, tabs =>
-    tabs.map(tab => (tab.id === tabId && tab.title !== title ? { ...tab, title } : tab))
-  )
+  return patchTab(data, projectId, taskId, tabId, { title })
 }
 
 /**
- * Put a tab back where it was closed from, clamped into the pane. A replay that
- * finds the tab already there is a no-op.
+ * Put a tab back where it was closed from: at `index` in pane `pane`, both clamped
+ * into the task's row as it is now. A replay that finds the tab already there is a
+ * no-op.
  */
 export function insertTabAt(
   data: ProjectsData,
   projectId: string,
   taskId: string,
-  pane: Pane,
+  pane: number,
   index: number,
   tab: Tab
 ): ProjectsData {
-  return mapTask(data, projectId, taskId, task => {
-    if (task.tabs[pane].some(existingTab => existingTab.id === tab.id)) return task
-    const nextTabs = [...task.tabs[pane]]
-    nextTabs.splice(Math.min(Math.max(index, 0), nextTabs.length), 0, tab)
-    return { ...task, tabs: { ...task.tabs, [pane]: nextTabs } }
-  })
+  return mapTask(data, projectId, taskId, task => addTabToPane(task, pane, tab, { index }))
 }
 
 export function appendProject(data: ProjectsData, project: Project): ProjectsData {
@@ -141,16 +125,34 @@ export function removeProjectFromData(data: ProjectsData, projectId: string): Pr
   }
 }
 
-/** Append a task to a project and count it in the project's lifetime stats. */
-export function appendTaskToProject(data: ProjectsData, projectId: string, task: Task): ProjectsData {
+/**
+ * `task` appended to stream `streamId` (`main` when absent or gone). A replay
+ * that finds the task there is a no-op.
+ */
+export function placeTask(project: Project, task: Task, streamId?: string | null): Project {
+  if (findTaskInProject(project, task.id)) return project
+  return addTaskToStream(project, streamId ?? null, task)
+}
+
+/** Add a task to a project's stream and count it in the project's lifetime stats. */
+export function appendTaskToProject(data: ProjectsData, projectId: string, task: Task, streamId?: string | null): ProjectsData {
   return {
     ...data,
     projects: data.projects.map(project =>
-      project.id === projectId
-        ? incrementLifetimeStat({ ...project, tasks: [...project.tasks, task] }, 'tasksCreated')
+      project.id === projectId && !findTaskInProject(project, task.id)
+        ? incrementLifetimeStat(placeTask(project, task, streamId), 'tasksCreated')
         : project
     )
   }
+}
+
+/** Add a stream at the end of the project's list. A replay that finds it there is a no-op. */
+export function addStreamInData(data: ProjectsData, projectId: string, stream: Stream): ProjectsData {
+  return mapProject(data, projectId, project => (
+    project.streams.some(candidate => candidate.id === stream.id)
+      ? project
+      : { ...project, streams: [...project.streams, stream] }
+  ))
 }
 
 /**
@@ -167,14 +169,13 @@ export function addTaskInDirectoryData(
   if (data.projects.some(p => p.id === ownerId)) {
     return appendTaskToProject(data, ownerId, task)
   }
-  const { task: homeTask } = createHomeTask(ownerId)
-  const project: Project = {
+  const project: Project = placeTask({
     id: ownerId,
     name: dirBasename(directory),
     directory,
     ephemeral: true,
-    tasks: [homeTask, task]
-  }
+    streams: [createMainStream(ownerId)]
+  }, task)
   return {
     ...data,
     projects: [...data.projects, incrementLifetimeStat(project, 'tasksCreated')],
@@ -183,22 +184,59 @@ export function addTaskInDirectoryData(
 }
 
 /**
- * Drop a task; a hidden ad-hoc project left with nothing but its home task goes
- * with it in the same step.
+ * Move a task to `toIndex` of stream `toStreamId` (counted without the task),
+ * within its stream or to another one. The stream it leaves stays even when
+ * emptied, so a worktree never goes away under a drag; its "last task" follows
+ * the task, and so does a pin of the task. Returns `data` itself for a no-op.
  */
-export function removeTaskFromData(data: ProjectsData, projectId: string, taskId: string): ProjectsData {
-  const withoutTask = data.projects.map(project =>
-    project.id === projectId
-      ? { ...project, tasks: project.tasks.filter(task => task.id !== taskId) }
-      : project
-  )
-  const spent = withoutTask.find(p => p.id === projectId && isSpentEphemeralProject(p))
-  if (!spent) return { ...data, projects: withoutTask }
+export function moveTaskInData(
+  data: ProjectsData,
+  projectId: string,
+  taskId: string,
+  toStreamId: string,
+  toIndex: number
+): ProjectsData {
+  const project = data.projects.find(candidate => candidate.id === projectId)
+  const from = findStreamOfTask(project, taskId)
+  const to = project?.streams.find(stream => stream.id === toStreamId)
+  const task = findTaskInProject(project, taskId)
+  if (!project || !from || !to || !task) return data
+  const fromIndex = from.tasks.indexOf(task)
+  const targetTasks = to.tasks.filter(candidate => candidate.id !== taskId)
+  const index = Math.max(0, Math.min(toIndex, targetTasks.length))
+  if (from === to && index === fromIndex) return data
+  const wasLast = from.lastTaskId === taskId
+  const streams = project.streams.map(stream => {
+    if (stream === to) {
+      const tasks = [...targetTasks.slice(0, index), task, ...targetTasks.slice(index)]
+      return { ...stream, tasks, ...(wasLast && from !== to ? { lastTaskId: taskId } : {}) }
+    }
+    if (stream === from) {
+      const { lastTaskId: _last, ...rest } = stream
+      return { ...(wasLast ? rest : stream), tasks: stream.tasks.filter(t => t.id !== taskId) }
+    }
+    return stream
+  })
+  const next: Project = {
+    ...project,
+    streams,
+    ...(wasLast && project.lastStreamId === from.id ? { lastStreamId: to.id } : {})
+  }
   return {
     ...data,
-    projects: withoutTask.filter(p => p.id !== projectId),
-    projectOrder: data.projectOrder.filter(id => id !== projectId)
+    projects: data.projects.map(candidate => (candidate === project ? next : candidate)),
+    pinnedItems: (data.pinnedItems ?? []).map(item => (
+      item.type === 'task' && item.projectId === projectId && item.taskId === taskId ? { ...item, streamId: to.id } : item
+    ))
   }
+}
+
+/** Rename a stream. Its branch keeps its name. */
+export function renameStreamInData(data: ProjectsData, projectId: string, streamId: string, name: string): ProjectsData {
+  return mapProject(data, projectId, project => ({
+    ...project,
+    streams: project.streams.map(stream => (stream.id === streamId ? { ...stream, name } : stream))
+  }))
 }
 
 /**
@@ -249,10 +287,5 @@ export function togglePinnedItemInData(data: ProjectsData, item: PinnedItem): Pr
 }
 
 export function findTask(projects: readonly Project[], projectId: string, taskId: string | null): Task | undefined {
-  return projects.find(candidate => candidate.id === projectId)?.tasks.find(candidate => candidate.id === taskId)
-}
-
-/** The pane a tab lives in, when the task has it. */
-export function paneOfTab(task: Task, tab: Tab): Pane {
-  return task.tabs.left.includes(tab) ? 'left' : 'right'
+  return findTaskInProject(projects.find(candidate => candidate.id === projectId), taskId)
 }
