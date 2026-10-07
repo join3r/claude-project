@@ -81,7 +81,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     sidebarWidth, setSidebarWidth,
     sidebarProjectsCollapsed, toggleSidebarProjectsCollapsed,
     sidebarTab, setSidebarTab,
-    settleTask, unsettleTask
+    settleTask, unsettleTask, unsnoozeTask
   } = useApp()
   const resizeHandle = useResizeHandle({ width: sidebarWidth, onWidthChange: setSidebarWidth, edge: 'right' })
   const allStatuses = useAllTabStatuses()
@@ -521,6 +521,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       ...(type === 'stream' ? { streamId: id } : type === 'task' ? { taskId: id } : {})
     })
   }
+
+  /** The row's clock: wake a snoozed task, else open the snooze presets at the click. */
+  const handleSnoozeFromRow = useCallback((e: React.MouseEvent, projectId: string, taskId: string) => {
+    const task = findTask(projectId, taskId)
+    if (!task) return
+    if (isSnoozed(task, Date.now())) {
+      unsnoozeTask(projectId, taskId)
+      return
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'task', projectId, taskId })
+    setSnoozeSubmenu(true)
+  }, [findTask, unsnoozeTask])
 
   const handleTaskContextMenu = useCallback((e: React.MouseEvent, projectId: string, taskId: string) => {
     e.preventDefault()
@@ -1104,13 +1116,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onSelectTask={handleSelectTask}
           onTaskContextMenu={handleTaskContextMenu}
           onSettle={handleToggleSettled}
+          onSnooze={handleSnoozeFromRow}
           onClose={(projectId, taskId) => void handleCloseTask(projectId, taskId)}
           onNewTask={() => setNewTaskOpen(true)}
           allStatuses={allStatuses}
           statusSince={statusSince}
           activities={agentActivities}
           now={now}
-          workingLast={config?.inboxWorkingLast ?? false}
+          theme={effectiveTheme}
           layout={config?.inboxLayout ?? 'flat'}
         />
       ) : (

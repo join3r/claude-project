@@ -213,8 +213,12 @@ export class Storage {
     try {
       const parsed = result.data
       // Retired keys: the folder tree's collapse state, the new-task auto-open
-      // setting the empty task's prompt box replaced, and idle task cleanup.
-      const { collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, idleTaskCleanup: _idle, ...rest } = parsed
+      // setting the empty task's prompt box replaced, idle task cleanup, and
+      // "working tasks last" (the Inbox gives Working its own folded group now).
+      const {
+        collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, idleTaskCleanup: _idle, inboxWorkingLast: _workingLast,
+        ...rest
+      } = parsed
       const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
       config.windowsTerminal = coerceWindowsTerminal(config.windowsTerminal)
       const savedEditors = (rest.externalEditors && typeof rest.externalEditors === 'object')

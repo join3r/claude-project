@@ -510,12 +510,12 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 <SegCtl
                   options={[
                     { value: 'flat', label: 'Flat' },
-                    { value: 'grouped', label: 'Grouped by stream' }
+                    { value: 'grouped', label: 'Grouped by project' }
                   ] as const}
                   value={config.inboxLayout}
                   onChange={(inboxLayout) => updateConfig({ inboxLayout })}
                 />
-                <HelperText>Grouped puts open tasks under a header per stream; Settled and Snoozed stay at the bottom.</HelperText>
+                <HelperText>Grouped puts open tasks under a header per project, each row naming its stream; Working, Settled and Snoozed stay folded at the bottom.</HelperText>
               </SetBlock>
             </FormGroup>
 
@@ -531,16 +531,6 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                       updateConfig({ autoCollapseQuietStreams })
                       clearStreamExpansion()
                     }}
-                  />
-                }
-              />
-              <GroupRow
-                label="Move working tasks to the end of the Inbox"
-                sub="Tasks whose agent is still running sink below the ones waiting on you."
-                trailing={
-                  <Switch
-                    checked={config.inboxWorkingLast}
-                    onChange={(inboxWorkingLast) => updateConfig({ inboxWorkingLast })}
                   />
                 }
               />
