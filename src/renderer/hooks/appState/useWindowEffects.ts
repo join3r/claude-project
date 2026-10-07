@@ -13,7 +13,7 @@ import type { AppStateCore, UpdateWindowViewState } from './useAppStateCore'
 import { forgetRemovedTaskView, sidebarForTask } from './viewState'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { buildWindowTitle } from './windowTitle'
-import { findTaskInProject } from '../../../shared/streams'
+import { findStreamOfTask, findTaskInProject } from '../../../shared/streams'
 
 export function useNativeTheme(): 'dark' | 'light' {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -168,7 +168,11 @@ export function useSelectionSync(core: AppStateCore, windowFocused: boolean, con
 }
 
 export function useWindowTitle(selectedProject: Project | null, selectedTask: Task | null): void {
+  const stream = selectedTask ? findStreamOfTask(selectedProject ?? undefined, selectedTask.id) : undefined
+  const streamName = stream?.name
+  const streamIsMain = stream?.isMain
   useEffect(() => {
-    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
-  }, [selectedProject?.name, selectedTask?.name])
+    const place = streamName === undefined ? null : { name: streamName, isMain: streamIsMain }
+    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null, place)
+  }, [selectedProject?.name, selectedTask?.name, streamName, streamIsMain])
 }

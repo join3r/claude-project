@@ -8,6 +8,7 @@ import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowse
 import { localProjectFolder } from '../../shared/external-editors'
 import TaskPanes from './TaskPanes'
 import NewTabMenu from './NewTabMenu'
+import TaskHeader from './TaskHeader'
 import { ProjectHome } from './ProjectHome'
 import { ArchivedView } from './ArchivedView'
 import { useArchivedView } from './archivedViewTarget'
@@ -22,7 +23,7 @@ import type { TunnelConfig, TunnelState } from '../../shared/types'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { paletteEvents } from '../palette/paletteEvents'
-import { findTaskInProject, projectTasks, taskWorkspace } from '../../shared/streams'
+import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from '../../shared/streams'
 import { showsTabBars } from '../../shared/panes'
 import type { Task } from '../../shared/types'
 
@@ -322,7 +323,8 @@ export default function ContentArea(): React.ReactElement {
   }, [selectedProject, selectedProjectId, sshStatuses, updateProject])
 
   const selectedTunnelState = selectedProjectId ? tunnelStates[selectedProjectId] : undefined
-  const windowBarTitle = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
+  const selectedStream = selectedTask ? findStreamOfTask(selectedProject, selectedTask.id) : undefined
+  const windowBarTitle = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null, selectedStream)
   const selectedWorkspace = taskWorkspace(selectedProject, selectedTask?.id)
   const selectedProjectDir = selectedWorkspace
     ? joinWorkspaceDir(selectedWorkspace.worktreePath, selectedWorkspace.relativeProjectPath)
@@ -364,97 +366,83 @@ export default function ContentArea(): React.ReactElement {
   return (
     <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
       {selectedProject && (
-        <div className="content-toolbar flex items-center justify-between gap-1.5 px-2 py-0.5 bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]">
-          <div className="flex items-center gap-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-text-muted" title={windowBarTitle}>
-            <span className="text-text font-medium">{selectedProject.name}</span>
-            {selectedTask && (
-              <>
-                <span className="text-text-muted"> / </span>
-                <span className="text-text-muted">{selectedTask.name}</span>
-              </>
-            )}
-            {hasGitSummary && gitSummary && (
-              <span
-                className="inline-flex items-center gap-1.5 ml-1.5 [font-variant-numeric:tabular-nums]"
-                title={`${gitSummary.added} added, ${gitSummary.deleted} removed`}
-              >
-                {gitSummary.added > 0 && (
-                  <span className="text-success">+{gitSummary.added}</span>
-                )}
-                {gitSummary.deleted > 0 && (
-                  <span className="text-danger">-{gitSummary.deleted}</span>
-                )}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-          {isRemoteProject(selectedProject) && (
-            <button
-              className={tunnelButtonClassName}
-              onClick={() => setTunnelPopupOpen(true)}
-              title="Tunnel"
-            >
-              &#8596;
-            </button>
-          )}
-          {hasFileBrowserTabs && (
+        <TaskHeader
+          project={selectedProject}
+          task={selectedTask}
+          stream={selectedStream}
+          projectDir={selectedProjectDir}
+          gitSummary={hasGitSummary ? gitSummary : null}
+          title={windowBarTitle}
+          tools={(
             <>
-              {canShowLocalTabs && (
-                <FileBrowserTabButton
-                  icon={<Folder size={14} />}
-                  tab="files"
-                  label="Files"
-                  fileBrowserOpen={fileBrowserOpen}
-                  fileBrowserActiveTab={fileBrowserActiveTab}
-                  onActivate={handleFileBrowserActivate}
-                />
+              {isRemoteProject(selectedProject) && (
+                <button
+                  className={tunnelButtonClassName}
+                  onClick={() => setTunnelPopupOpen(true)}
+                  title="Tunnel"
+                >
+                  &#8596;
+                </button>
+              )}
+              {hasFileBrowserTabs && (
+                <>
+                  {canShowLocalTabs && (
+                    <FileBrowserTabButton
+                      icon={<Folder size={14} />}
+                      tab="files"
+                      label="Files"
+                      fileBrowserOpen={fileBrowserOpen}
+                      fileBrowserActiveTab={fileBrowserActiveTab}
+                      onActivate={handleFileBrowserActivate}
+                    />
+                  )}
+                  {canShowLocalTabs && (
+                    <FileBrowserTabButton
+                      icon={<GitBranch size={14} />}
+                      tab="git"
+                      label="Git"
+                      fileBrowserOpen={fileBrowserOpen}
+                      fileBrowserActiveTab={fileBrowserActiveTab}
+                      onActivate={handleFileBrowserActivate}
+                    />
+                  )}
+                  <FileBrowserTabButton
+                    icon={<StickyNote size={14} />}
+                    tab="notes"
+                    label="Notes"
+                    fileBrowserOpen={fileBrowserOpen}
+                    fileBrowserActiveTab={fileBrowserActiveTab}
+                    onActivate={handleFileBrowserActivate}
+                  />
+                </>
               )}
               {canShowLocalTabs && (
-                <FileBrowserTabButton
-                  icon={<GitBranch size={14} />}
-                  tab="git"
-                  label="Git"
-                  fileBrowserOpen={fileBrowserOpen}
-                  fileBrowserActiveTab={fileBrowserActiveTab}
-                  onActivate={handleFileBrowserActivate}
+                <OpenInIdeButton
+                  editors={config?.externalEditors?.editors ?? []}
+                  defaultId={config?.externalEditors?.defaultId ?? null}
+                  folder={localProjectFolder(selectedProject, selectedTask)}
+                  onError={setOpenInIdeError}
                 />
               )}
-              <FileBrowserTabButton
-                icon={<StickyNote size={14} />}
-                tab="notes"
-                label="Notes"
-                fileBrowserOpen={fileBrowserOpen}
-                fileBrowserActiveTab={fileBrowserActiveTab}
-                onActivate={handleFileBrowserActivate}
-              />
+              {selectedTask && !showsTabBars(selectedTask) && (
+                <NewTabMenu projectId={selectedProject.id} taskId={selectedTask.id} pane={0} />
+              )}
+              {selectedTask && showsTabBars(selectedTask) && (
+                <button
+                  className="bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
+                  disabled={(selectedTask.panes[selectedFocusedPane]?.tabs.length ?? 0) < 2}
+                  onClick={() => {
+                    const pane = selectedTask.panes[selectedFocusedPane]
+                    if (pane) splitTabRight(selectedProject.id, selectedTask.id, pane.activeTabId)
+                  }}
+                  title={`Split right (${formatShortcutForApp('CmdOrCtrl+D')})`}
+                >
+                  <Columns2 size={15} />
+                </button>
+              )}
             </>
           )}
-          {canShowLocalTabs && (
-            <OpenInIdeButton
-              editors={config?.externalEditors?.editors ?? []}
-              defaultId={config?.externalEditors?.defaultId ?? null}
-              folder={localProjectFolder(selectedProject, selectedTask)}
-              onError={setOpenInIdeError}
-            />
-          )}
-          {selectedTask && !showsTabBars(selectedTask) && (
-            <NewTabMenu projectId={selectedProject.id} taskId={selectedTask.id} pane={0} />
-          )}
-          {selectedTask && showsTabBars(selectedTask) && (
-            <button
-              className="bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
-              disabled={(selectedTask.panes[selectedFocusedPane]?.tabs.length ?? 0) < 2}
-              onClick={() => {
-                const pane = selectedTask.panes[selectedFocusedPane]
-                if (pane) splitTabRight(selectedProject.id, selectedTask.id, pane.activeTabId)
-              }}
-              title={`Split right (${formatShortcutForApp('CmdOrCtrl+D')})`}
-            >
-              <Columns2 size={15} />
-            </button>
-          )}
-          </div>
-        </div>
+        />
       )}
       {openInIdeError && (
         <div role="alert" className="px-2 py-1 text-sm text-danger bg-surface-2 border-b-[0.5px] border-border">

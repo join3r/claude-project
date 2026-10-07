@@ -209,6 +209,9 @@ beforeEach(() => {
     scrollbackDelete: vi.fn().mockResolvedValue(undefined),
     workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' }),
     fbGitStatus: vi.fn().mockResolvedValue(null),
+    gitProjectPosture: vi.fn().mockResolvedValue({ isGitRepo: false, branch: null, upstream: null, ahead: 0, behind: 0, dirtyCount: 0, lastCommit: null }),
+    onAgentActivity: vi.fn().mockReturnValue(() => {}),
+    getAgentActivity: vi.fn().mockResolvedValue({}),
     fbReadFile: vi.fn((_dir: string, filePath: string) => Promise.resolve(DISK[filePath] ?? '')),
     fbWriteFile: vi.fn().mockResolvedValue(undefined),
     onMenuCloseTab: vi.fn((cb: () => void) => {

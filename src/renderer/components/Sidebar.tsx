@@ -39,8 +39,9 @@ import {
 import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
 import { confirmWorktreeRemoval, forceRemoveWorktree } from './sidebar/workspaceRemoval'
-import { streamCloseQuestion, taskCloseQuestion } from './sidebar/closeRules'
+import { streamCloseQuestion } from './sidebar/closeRules'
 import { useWorktreeChoice } from './sidebar/WorktreeChoiceDialog'
+import { useCloseTask } from './sidebar/useCloseTask'
 import { ProjectDoneGroup, StreamDoneRow, type DoneRowActions } from './sidebar/DoneRows'
 import { closeArchivedView, getArchivedView } from './archivedViewTarget'
 import {
@@ -69,7 +70,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome, showArchived,
     addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
-    addTask, addTaskInDirectory, addStream, archiveTask, renameTask,
+    addTask, addTaskInDirectory, addStream, renameTask,
     moveTask, archiveStream, renameStream, reopenTask, reopenStream, deleteArchived,
     reorderProjects, getProjectDir,
     config, updateConfig,
@@ -165,6 +166,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   // The project the New stream dialog is open for.
   const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
   const worktreeChoice = useWorktreeChoice()
+  const closeTaskFlow = useCloseTask()
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const expandedProjects = new Set(expandedProjectIds)
@@ -424,36 +426,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     return true
   }
 
-  /**
-   * Hover ✕ on a task row: the task is archived to its stream's `Done (N)`.
-   * Asks only when its agent is working (unsaved editors ask in `archiveTask`).
-   * Its stream stays, even emptied.
-   */
-  const handleCloseTask = async (projectId: string, taskId: string) => {
-    const project = projects.find(p => p.id === projectId)
-    const task = findTaskInProject(project, taskId)
-    if (!project || !task) return
-    const question = taskCloseQuestion(task, statusOf)
-    if (question && !window.confirm(question)) return
-    // The last task of a hidden ad-hoc project takes the project with it, and any
-    // worktree stream it still has: that gets the stream's pre-flight first.
-    const retiring = isEphemeralProject(project) && projectTasks(project).every(candidate => candidate.id === taskId)
-    const worktrees = retiring ? project.streams.filter(stream => stream.workspace) : []
-    if (worktrees.length === 0) {
-      void archiveTask(projectId, taskId)
-      return
-    }
-    const answers = []
-    for (const stream of worktrees) {
-      const answer = await confirmWorktreeRemoval(project, stream.name, stream.workspace!, worktreeChoice.ask)
-      if (!answer) return
-      answers.push({ stream, answer })
-    }
-    if (!await archiveTask(projectId, taskId)) return
-    for (const { stream, answer } of answers) {
-      if (!answer.done) await forceRemoveWorktree(project, stream.workspace!, answer.keepBranch)
-    }
-  }
+  /** Hover ✕ on a task row, and the menu's Close task (see `useCloseTask`). */
+  const handleCloseTask = closeTaskFlow.closeTask
 
   /**
    * Hover ✕ on a stream row (never `main`): the stream is archived with its
@@ -1309,6 +1283,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       })()}
 
       {worktreeChoice.dialog}
+      {closeTaskFlow.dialog}
 
       {newTaskOpen && config && (
         <NewTaskModal

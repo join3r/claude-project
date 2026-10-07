@@ -67,7 +67,7 @@ export default function TabBar({
   onTabDragStateChange,
   onTabDropTargetChange
 }: Props): React.ReactElement {
-  const { selectedProject, removeTab, setActiveTab, moveTab, splitTabRight, renameTab, convertClaudeTab } = useApp()
+  const { selectedProject, removeTab, setActiveTab, moveTab, splitTabRight, renameTab } = useApp()
   const suppressClickRef = useRef(false)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const tabMenuPos = useMenuPosition<HTMLDivElement>(tabMenu)
@@ -290,18 +290,6 @@ export default function TabBar({
                 }}
               >
                 Rename tab
-              </button>
-            )}
-            {(tab.type === 'claude' || tab.type === 'claude-chat') && (
-              <button
-                type="button"
-                className={menuItemCls}
-                onClick={() => {
-                  convertClaudeTab(projectId, taskId, tab.id, tab.type === 'claude' ? 'claude-chat' : 'claude')
-                  close()
-                }}
-              >
-                {tab.type === 'claude' ? 'Open as chat' : 'Open in terminal'}
               </button>
             )}
             {tabs.length > 1 && (
