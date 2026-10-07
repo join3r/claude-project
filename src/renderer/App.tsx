@@ -43,6 +43,27 @@ function AppInner(): React.ReactElement {
     })
   }, [exportWindowViewState])
 
+  // The New task composer and New stream dialog live in the Sidebar. With it hidden,
+  // Project Home's buttons, the tab bar's "New task in…" and ⌘N show it and replay
+  // the request once its listeners are mounted (child effects run first).
+  const [replay, setReplay] = useState<(() => void) | null>(null)
+  useEffect(() => {
+    if (!sidebarHidden) return
+    const show = (fn: () => void): void => { setSidebarHidden(false); setReplay(() => fn) }
+    const offs = [
+      paletteEvents.on('open-new-task', () => show(() => paletteEvents.emit('open-new-task'))),
+      paletteEvents.on('open-new-task-in', where => show(() => paletteEvents.emit('open-new-task-in', where))),
+      paletteEvents.on('open-new-stream', projectId => show(() => paletteEvents.emit('open-new-stream', projectId))),
+      window.api.onMenuNewTask(() => show(() => paletteEvents.emit('open-new-task')))
+    ]
+    return () => offs.forEach(off => off())
+  }, [sidebarHidden])
+  useEffect(() => {
+    if (!replay || sidebarHidden) return
+    setReplay(null)
+    replay()
+  }, [replay, sidebarHidden])
+
   useEffect(() => paletteEvents.on('toggle-sidebar', () => setSidebarHidden(p => !p)), [])
   useEffect(() => paletteEvents.on('toggle-file-browser', () => toggleFileBrowser()), [toggleFileBrowser])
   useEffect(() => paletteEvents.on('reload-window', () => window.location.reload()), [])
