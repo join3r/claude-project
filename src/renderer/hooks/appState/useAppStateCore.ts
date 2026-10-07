@@ -209,8 +209,7 @@ export function useAppStateCore(): AppStateCore {
       const hydratedWindowViewState = buildWindowViewState(
         projectsWithLifetime,
         hydratedConfig,
-        loadedWindowViewState,
-        finalProjectsData.tags
+        loadedWindowViewState
       )
 
       pendingProjectUpdatersRef.current = []

@@ -310,6 +310,7 @@ describe('Storage', () => {
         viewState: {
           selectedProjectId: 'project-1',
           selectedTaskId: 'task-1',
+          // The removed sidebar tag filter: a stored value is dropped on load.
           selectedTagIds: ['tag-1'],
           taskStates: {
             'task-1': { fileBrowserOpen: true, fileBrowserActiveTab: 'git' }
@@ -321,12 +322,13 @@ describe('Storage', () => {
     storage.saveWindowSession(session as unknown as WindowSessionState)
     const loaded = storage.loadWindowSession(projectsData)
 
+    const { selectedTagIds: _dropped, ...storedViewState } = session.windows[0].viewState
     // reconcileWindowViewState adds default file browser fields
     expect(loaded).toEqual({
       windows: [{
         geometry: session.windows[0].geometry,
         viewState: {
-          ...session.windows[0].viewState,
+          ...storedViewState,
           expandedProjectIds: [],
           fileBrowserOpen: false,
           fileBrowserWidth: 250,
@@ -419,7 +421,7 @@ describe('Storage', () => {
     expect(loaded.windows[0].geometry).toEqual({ x: 50, y: 60, width: 1200, height: 800, isMaximized: false })
     expect(loaded.windows[0].viewState.selectedProjectId).toBeNull()
     expect(loaded.windows[0].viewState.selectedTaskId).toBeNull()
-    expect(loaded.windows[0].viewState.selectedTagIds).toEqual(['tag-1'])
+    expect(loaded.windows[0].viewState).not.toHaveProperty('selectedTagIds')
     expect(loaded.windows[0].viewState.taskStates['task-1']).toEqual({ fileBrowserOpen: true })
   })
 

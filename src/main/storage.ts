@@ -385,9 +385,8 @@ export class Storage {
       return createDefaultWindowSessionState()
     }
 
-    const tagIds = new Set(projectsData.tags.map(tag => tag.id))
     const windows = data.windows
-      .map((entry) => Storage.normalizePersistedWindowState(entry, projectsData.projects, tagIds, defaultSidebarTab))
+      .map((entry) => Storage.normalizePersistedWindowState(entry, projectsData.projects, defaultSidebarTab))
       .filter((entry): entry is PersistedWindowState => entry !== null)
 
     return { windows }
@@ -396,7 +395,6 @@ export class Storage {
   private static normalizePersistedWindowState(
     value: unknown,
     projects: Project[],
-    tagIds: Set<string>,
     defaultSidebarTab: SidebarTab
   ): PersistedWindowState | null {
     if (!isRecord(value)) return null
@@ -404,7 +402,7 @@ export class Storage {
     const geometry = Storage.normalizeWindowGeometry(value.geometry)
     if (!geometry) return null
 
-    const viewState = Storage.normalizeWindowViewState(value.viewState, projects, tagIds, defaultSidebarTab)
+    const viewState = Storage.normalizeWindowViewState(value.viewState, projects, defaultSidebarTab)
     return { geometry, viewState }
   }
 
@@ -429,7 +427,6 @@ export class Storage {
   private static normalizeWindowViewState(
     value: unknown,
     projects: Project[],
-    tagIds: Set<string>,
     defaultSidebarTab: SidebarTab
   ): WindowViewState {
     if (!isRecord(value)) {
@@ -438,12 +435,6 @@ export class Storage {
 
     const projectIds = new Set(projects.map(p => p.id))
     const taskStates = Storage.normalizeTaskStates(value.taskStates)
-    const legacySelected = Array.isArray(value.selectedTagIds)
-      ? value.selectedTagIds
-      : []
-    const selectedTagIds = legacySelected.filter(
-      (id): id is string => typeof id === 'string' && tagIds.has(id)
-    )
     const expandedProjectIds = Array.isArray(value.expandedProjectIds)
       ? value.expandedProjectIds.filter((id): id is string => typeof id === 'string' && projectIds.has(id))
       : []
@@ -455,7 +446,6 @@ export class Storage {
       {
         selectedProjectId: typeof value.selectedProjectId === 'string' ? value.selectedProjectId : null,
         selectedTaskId: typeof value.selectedTaskId === 'string' ? value.selectedTaskId : null,
-        selectedTagIds,
         expandedProjectIds,
         ...(isRecord(value.streamExpansion) ? { streamExpansion: value.streamExpansion as Record<string, boolean> } : {}),
         taskStates,
@@ -468,8 +458,7 @@ export class Storage {
           ? value.sidebarTab
           : defaultSidebarTab
       },
-      projects,
-      tagIds
+      projects
     )
   }
 
