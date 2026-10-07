@@ -6,9 +6,9 @@ import {
   setPendingPrompt,
   shouldNameTask,
   takePendingPrompt,
-  taskNameFromPrompt,
-  workspaceBranchName
+  taskNameFromPrompt
 } from '../src/renderer/components/promptBox'
+import { workspaceBranchName } from '../src/shared/branch-name'
 
 const allOn = { enableClaude: true, enableCodex: true, enablePi: true }
 

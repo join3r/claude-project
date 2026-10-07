@@ -6,7 +6,7 @@
  */
 import { v4 as uuid } from 'uuid'
 import { createMainStream, isSpentEphemeralProject, pinnedItemKey } from '../../../shared/types'
-import type { PinnedItem, Project, ProjectsData, Stream, Tab, Tag, Task, WorkspaceConfig, WorkspaceDraft } from '../../../shared/types'
+import type { PinnedItem, Project, ProjectsData, Stream, Tab, Tag, Task, WorkspaceConfig } from '../../../shared/types'
 import {
   addTaskToStream,
   findStreamOfTask,
@@ -22,31 +22,22 @@ import { dirBasename } from '../../../shared/paths'
 import { incrementLifetimeStat } from '../lifetimeStats'
 
 /** The task literal every "add a task" path starts from. */
-export function makeTask(name: string, initialTabs: Tab[], workspaceDraft?: WorkspaceDraft): Task {
+export function makeTask(name: string, initialTabs: Tab[]): Task {
   const mainTabId = resolveMainTabId(initialTabs)
   return {
     id: uuid(),
     name,
     ...(mainTabId ? { mainTabId } : {}),
     panes: singlePane(initialTabs),
-    ...(workspaceDraft ? { workspaceDraft } : {}),
     // Creating a task is an interaction: without the stamp a brand-new task has
     // no activity at all and sinks to the bottom of the inbox's active group.
     lastInteractedAt: Date.now()
   }
 }
 
-/**
- * Where a new task goes: a new stream named after it when it brings a worktree
- * (TEMPORARY until the new-stream dialog, step 6), else the project's `main`.
- */
-export interface TaskPlacement {
-  /** A new stream to create around the task, holding this worktree. */
-  workspace?: WorkspaceConfig
-  /** A new (still folder) stream, for a task whose worktree comes later (`workspaceDraft`). */
-  ownStream?: boolean
-  /** Precomputed so a replayed updater creates the same stream. */
-  streamId?: string
+/** The stream literal the new-stream dialog creates: a worktree, or the project folder. */
+export function makeStream(name: string, workspace?: WorkspaceConfig): Stream {
+  return { id: uuid(), name, ...(workspace ? { workspace } : {}), tasks: [] }
 }
 
 export function tabIdsOfTask(task: Task): string[] {
@@ -135,32 +126,34 @@ export function removeProjectFromData(data: ProjectsData, projectId: string): Pr
   }
 }
 
-/** `task` placed in `project` per `placement`. A replay that finds the task there is a no-op. */
-export function placeTask(project: Project, task: Task, placement: TaskPlacement = {}): Project {
+/**
+ * `task` appended to stream `streamId` (`main` when absent or gone). A replay
+ * that finds the task there is a no-op.
+ */
+export function placeTask(project: Project, task: Task, streamId?: string | null): Project {
   if (findTaskInProject(project, task.id)) return project
-  if (placement.workspace || placement.ownStream) {
-    const stream: Stream = {
-      id: placement.streamId ?? uuid(),
-      name: task.name,
-      ...(placement.workspace ? { workspace: placement.workspace } : {}),
-      tasks: [task],
-      lastTaskId: task.id
-    }
-    return { ...project, streams: [...project.streams, stream] }
-  }
-  return addTaskToStream(project, null, task)
+  return addTaskToStream(project, streamId ?? null, task)
 }
 
-/** Add a task to a project and count it in the project's lifetime stats. */
-export function appendTaskToProject(data: ProjectsData, projectId: string, task: Task, placement?: TaskPlacement): ProjectsData {
+/** Add a task to a project's stream and count it in the project's lifetime stats. */
+export function appendTaskToProject(data: ProjectsData, projectId: string, task: Task, streamId?: string | null): ProjectsData {
   return {
     ...data,
     projects: data.projects.map(project =>
-      project.id === projectId
-        ? incrementLifetimeStat(placeTask(project, task, placement), 'tasksCreated')
+      project.id === projectId && !findTaskInProject(project, task.id)
+        ? incrementLifetimeStat(placeTask(project, task, streamId), 'tasksCreated')
         : project
     )
   }
+}
+
+/** Add a stream at the end of the project's list. A replay that finds it there is a no-op. */
+export function addStreamInData(data: ProjectsData, projectId: string, stream: Stream): ProjectsData {
+  return mapProject(data, projectId, project => (
+    project.streams.some(candidate => candidate.id === stream.id)
+      ? project
+      : { ...project, streams: [...project.streams, stream] }
+  ))
 }
 
 /**
@@ -172,11 +165,10 @@ export function addTaskInDirectoryData(
   data: ProjectsData,
   ownerId: string,
   directory: string,
-  task: Task,
-  placement?: TaskPlacement
+  task: Task
 ): ProjectsData {
   if (data.projects.some(p => p.id === ownerId)) {
-    return appendTaskToProject(data, ownerId, task, placement)
+    return appendTaskToProject(data, ownerId, task)
   }
   const project: Project = placeTask({
     id: ownerId,
@@ -184,7 +176,7 @@ export function addTaskInDirectoryData(
     directory,
     ephemeral: true,
     streams: [createMainStream(ownerId)]
-  }, task, placement)
+  }, task)
   return {
     ...data,
     projects: [...data.projects, incrementLifetimeStat(project, 'tasksCreated')],
@@ -207,37 +199,6 @@ export function removeTaskFromData(data: ProjectsData, projectId: string, taskId
     projects: withoutTask.filter(p => p.id !== projectId),
     projectOrder: data.projectOrder.filter(id => id !== projectId)
   }
-}
-
-/**
- * Point a task's stream at the worktree just created for it and end the task's
- * draft. A task sitting in `main` (which never takes a worktree) moves into a new
- * stream `streamId` first.
- */
-export function attachWorkspaceInData(
-  data: ProjectsData,
-  projectId: string,
-  taskId: string,
-  workspace: WorkspaceConfig,
-  streamId: string
-): ProjectsData {
-  return mapProject(data, projectId, project => {
-    const stream = findStreamOfTask(project, taskId)
-    const task = findTaskInProject(project, taskId)
-    if (!stream || !task) return project
-    const { workspaceDraft: _draft, ...plain } = task
-    if (stream.isMain) {
-      return placeTask(removeTaskFromProject(project, taskId), plain, { workspace, streamId })
-    }
-    return {
-      ...project,
-      streams: project.streams.map(candidate => (
-        candidate === stream
-          ? { ...candidate, workspace, tasks: candidate.tasks.map(t => (t.id === taskId ? plain : t)) }
-          : candidate
-      ))
-    }
-  })
 }
 
 /**

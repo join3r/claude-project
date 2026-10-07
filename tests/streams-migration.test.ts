@@ -329,10 +329,10 @@ describe('streams migration', () => {
     }])
   })
 
-  it('keeps a draft worktree on the task of a folder stream', () => {
+  it('turns a draft worktree task into a plain task of a folder stream', () => {
     const draft = stream(migrate(legacyData()), 'p-app', 't-draft')
     expect(draft.workspace).toBeUndefined()
-    expect(draft.tasks[0].workspaceDraft).toEqual({ baseBranch: 'develop' })
+    expect(draft.tasks[0]).not.toHaveProperty('workspaceDraft')
   })
 
   it('remembers the last task through the stream', () => {

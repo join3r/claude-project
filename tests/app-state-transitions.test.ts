@@ -14,6 +14,7 @@ import {
 import { findMainStream, findStreamOfTask, projectTasks } from '../src/shared/streams'
 import { fixtureProject, fixtureTask, paneTabsAt } from './helpers/streams-fixtures'
 import {
+  addStreamInData,
   addTaskInDirectoryData,
   appendProject,
   appendTaskToProject,
@@ -21,6 +22,7 @@ import {
   getProjectDir,
   includePendingTags,
   insertTabAt,
+  makeStream,
   makeTask,
   patchTab,
   removeProjectFromData,
@@ -98,7 +100,7 @@ describe('projectsData', () => {
     expect(paneTabsAt(t, 1)).toEqual([])
     expect(t.mainTabId).toBe('a')
     expect(typeof t.lastInteractedAt).toBe('number')
-    expect(t.workspaceDraft).toBeUndefined()
+    expect(t).not.toHaveProperty('workspaceDraft')
     expect(tabIdsOfTask(task('x', [tab('a')], [tab('z')]))).toEqual(['a', 'z'])
   })
 
@@ -125,13 +127,26 @@ describe('projectsData', () => {
     expect(appendTaskToProject(next, 'p', task('t1')).projects[0].streams).toEqual(next.projects[0].streams)
   })
 
-  it('appendTaskToProject gives a task with a worktree its own stream named after it', () => {
-    const d = data([fixtureProject({ id: 'p', directory: '/d' })])
-    const next = appendTaskToProject(d, 'p', { ...task('t1'), name: 'Fix it' }, { workspace: WORKSPACE, streamId: 's1' })
-    const stream = findStreamOfTask(next.projects[0], 't1')!
-    expect(stream).toMatchObject({ id: 's1', name: 'Fix it', workspace: WORKSPACE })
-    expect(stream.isMain).toBeUndefined()
-    expect(findMainStream(next.projects[0])!.tasks).toEqual([])
+  it('appendTaskToProject files the task in the named stream, else main', () => {
+    const p = fixtureProject({ id: 'p', tasks: [{ id: 'w1', workspace: WORKSPACE }] })
+    const worktree = findStreamOfTask(p, 'w1')!
+    const next = appendTaskToProject(data([p]), 'p', task('t1'), worktree.id)
+    expect(findStreamOfTask(next.projects[0], 't1')!.id).toBe(worktree.id)
+    expect(next.projects[0].lifetimeStats?.tasksCreated).toBe(1)
+    // A replay neither adds it twice nor counts it twice.
+    expect(appendTaskToProject(next, 'p', task('t1'), worktree.id)).toEqual(next)
+    const gone = appendTaskToProject(data([p]), 'p', task('t2'), 'no-such-stream')
+    expect(findStreamOfTask(gone.projects[0], 't2')!.isMain).toBe(true)
+  })
+
+  it('addStreamInData appends a stream once, with no task', () => {
+    const p = fixtureProject({ id: 'p', directory: '/d' })
+    const stream = makeStream('0.5.0', WORKSPACE)
+    expect(stream).toMatchObject({ name: '0.5.0', workspace: WORKSPACE, tasks: [] })
+    expect(makeStream('bugfixes')).not.toHaveProperty('workspace')
+    const once = addStreamInData(data([p]), 'p', stream)
+    expect(once.projects[0].streams.map(s => s.name)).toEqual(['main', '0.5.0'])
+    expect(addStreamInData(once, 'p', stream)).toEqual(once)
   })
 
   it('addTaskInDirectoryData mints a hidden project once and reuses it', () => {
@@ -155,10 +170,12 @@ describe('projectsData', () => {
     expect(projectTasks(kept.projects[0])).toEqual([])
   })
 
-  it('removeTaskFromData drops a worktree stream with its last task, never main', () => {
+  it('removeTaskFromData keeps an emptied stream (and its worktree), and main', () => {
     const p = fixtureProject({ id: 'p', tasks: [{ id: 'm1' }, { id: 'w1', workspace: WORKSPACE }] })
     const withoutWorktreeTask = removeTaskFromData(data([p]), 'p', 'w1').projects[0]
-    expect(withoutWorktreeTask.streams.map(s => s.id)).toEqual([findMainStream(p)!.id])
+    expect(withoutWorktreeTask.streams).toHaveLength(2)
+    expect(withoutWorktreeTask.streams[1]).toMatchObject({ workspace: WORKSPACE, tasks: [] })
+    expect(withoutWorktreeTask.streams[1].lastTaskId).toBeUndefined()
     const withoutMainTask = removeTaskFromData(data([p]), 'p', 'm1').projects[0]
     expect(withoutMainTask.streams).toHaveLength(2)
     expect(findMainStream(withoutMainTask)!.tasks).toEqual([])

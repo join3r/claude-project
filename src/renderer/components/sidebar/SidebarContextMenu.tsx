@@ -55,14 +55,14 @@ export default function SidebarContextMenu({
   setContextMenu,
   findTask,
   handleToggleSettled,
-  handleDeleteTask,
-  handleDeleteStream,
+  handleCloseTask,
+  handleCloseStream,
   beginEdit,
   isPinned,
   setDuplicateProjectId,
   setProjectSettingsId,
   onAddTask,
-  onAddWorkspace
+  onNewStream
 }: {
   contextMenu: SidebarContextMenuState | null
   snoozeSubmenu: boolean
@@ -72,15 +72,16 @@ export default function SidebarContextMenu({
   setContextMenu: (menu: null) => void
   findTask: (projectId: string, taskId: string) => Task | undefined
   handleToggleSettled: (projectId: string, taskId: string) => void
-  handleDeleteTask: (projectId: string, taskId: string) => void
-  handleDeleteStream: (projectId: string, streamId: string) => void
+  handleCloseTask: (projectId: string, taskId: string) => void | Promise<void>
+  handleCloseStream: (projectId: string, streamId: string) => void | Promise<void>
   /** Rename inline; `streamId` opens that stream so the row is on screen. */
   beginEdit: (id: string, name: string, projectId?: string, streamId?: string) => void
   isPinned: (item: PinnedItem) => boolean
   setDuplicateProjectId: (projectId: string) => void
   setProjectSettingsId: (projectId: string) => void
-  onAddTask: (projectId: string) => void
-  onAddWorkspace: (projectId: string) => void
+  /** A new task in `streamId`, or in the project's current stream. */
+  onAddTask: (projectId: string, streamId?: string) => void
+  onNewStream: (projectId: string) => void
 }): React.ReactElement {
   const {
     projects, togglePinnedItem, updateProject, setProjectExpanded, connectSsh, removeProject,
@@ -126,15 +127,21 @@ export default function SidebarContextMenu({
                     onAddTask(project.id)
                     closeContextMenu()
                   }}>New task</button>
-                  {!isShellCommandProject(project) && (
-                    <button className={menuItemCls} onClick={() => {
-                      onAddWorkspace(project.id)
-                      closeContextMenu()
-                    }}>New workspace</button>
-                  )}
+                  <button className={menuItemCls} onClick={() => {
+                    onNewStream(project.id)
+                    closeContextMenu()
+                  }}>New stream…</button>
                 </div>
               )
             })()}
+            {contextMenu.type === 'stream' && (
+              <div className="border-b border-hair pb-1 mb-1">
+                <button className={menuItemCls} onClick={() => {
+                  onAddTask(contextMenu.projectId, contextMenu.streamId)
+                  closeContextMenu()
+                }}>New task</button>
+              </div>
+            )}
             {contextMenu.type === 'task' && (() => {
               const task = findTask(contextMenu.projectId, contextMenu.taskId!)
               if (!task) return null
@@ -254,24 +261,24 @@ export default function SidebarContextMenu({
                   }}>{revealInFolderLabel()}</button>
                 )
               })()}
-              {/* `main` can't be removed, only emptied. */}
+              {/* `main` can't be closed, only emptied. */}
               {!(contextMenu.type === 'stream' && projects.find(p => p.id === contextMenu.projectId)
                 ?.streams.find(s => s.id === contextMenu.streamId)?.isMain) && (
               <button className={`${menuItemCls} text-danger`} onClick={() => {
                 setContextMenu(null)
                 if (contextMenu.type === 'task') {
-                  void handleDeleteTask(contextMenu.projectId, contextMenu.taskId!)
+                  void handleCloseTask(contextMenu.projectId, contextMenu.taskId!)
                   return
                 }
                 if (contextMenu.type === 'stream') {
-                  void handleDeleteStream(contextMenu.projectId, contextMenu.streamId!)
+                  void handleCloseStream(contextMenu.projectId, contextMenu.streamId!)
                   return
                 }
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project) return
                 if (!window.confirm(projectDeletePrompt(project))) return
                 void removeProject(project.id)
-              }}>Delete…</button>
+              }}>{contextMenu.type === 'project' ? 'Delete…' : contextMenu.type === 'task' ? 'Close task' : 'Close stream'}</button>
               )}
               {contextMenu.type === 'project' && (() => {
                 const project = projects.find(p => p.id === contextMenu.projectId)

@@ -200,6 +200,11 @@ function buildAppMenu(): void {
           click: () => sendToRenderer('menu-new-task')
         },
         {
+          label: 'New Stream…',
+          accelerator: 'CmdOrCtrl+Alt+N',
+          click: () => sendToRenderer('menu-new-stream')
+        },
+        {
           label: 'New Terminal Tab',
           accelerator: 'CmdOrCtrl+T',
           click: () => sendToRenderer('menu-new-terminal')
@@ -369,7 +374,8 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
         else if (key === 'v') { mainWindow.webContents.paste(); event.preventDefault() }
         else if (key === 'c') { mainWindow.webContents.copy(); event.preventDefault() }
       } else if (input.alt) {
-        if (key === 'i') { mainWindow.webContents.toggleDevTools(); event.preventDefault() }
+        if (key === 'n') send('menu-new-stream')
+        else if (key === 'i') { mainWindow.webContents.toggleDevTools(); event.preventDefault() }
       } else {
         if (key === 'n') send('menu-new-task')
         else if (key === 't') send('menu-new-terminal')

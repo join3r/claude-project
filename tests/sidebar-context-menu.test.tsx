@@ -124,21 +124,19 @@ describe('Sidebar context menu', () => {
     })
   })
 
-  it('asks before deleting a task, and keeps it when you cancel', async () => {
+  it('closes an idle task without asking', async () => {
     const confirm = vi.fn(() => false)
     vi.stubGlobal('confirm', confirm)
     renderSidebar()
     fireEvent.contextMenu(await screen.findByText('Fix the thing'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
-    expect(confirm).toHaveBeenCalledWith('Delete task "Fix the thing"? Its tabs close.')
-    expect(screen.getByText('Fix the thing')).toBeTruthy()
-
-    confirm.mockReturnValue(true)
-    fireEvent.contextMenu(screen.getByText('Fix the thing'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
+    fireEvent.click(await screen.findByText('Close task', { selector: 'button' }))
     await waitFor(() => {
-      expect(projectTasks(saved[saved.length - 1]?.projects[0]).some(t => t.id === 't1')).toBe(false)
+      expect(saved.length).toBeGreaterThan(0)
+      expect(projectTasks(saved[saved.length - 1].projects[0]).some(t => t.id === 't1')).toBe(false)
     })
+    expect(confirm).not.toHaveBeenCalled()
+    // main is emptied, never removed.
+    expect(saved[saved.length - 1]?.projects[0].streams.map(st => st.id)).toEqual([mainStreamId('p1')])
   })
 
   it('asks before deleting a project, and reveals its folder', async () => {
@@ -161,44 +159,47 @@ describe('Sidebar context menu', () => {
 describe('Sidebar pins', () => {
   const lastTasks = () => projectTasks(saved[saved.length - 1]?.projects[0])
 
-  it('adds a task and a workspace from a pinned project', async () => {
+  it('adds a task and opens the new-stream dialog from a pinned project', async () => {
     pinnedItems = [{ type: 'project', projectId: 'p1' }]
     renderSidebar()
     const pinned = (await screen.findByText('Pinned')).parentElement!
     fireEvent.click(within(pinned).getByTitle('New task'))
     await waitFor(() => expect(lastTasks()).toHaveLength(2))
     expect(lastTasks()[1]).toMatchObject({ name: 'New Task' })
-    expect(lastTasks()[1].workspaceDraft).toBeUndefined()
+    expect(lastTasks()[1]).not.toHaveProperty('workspaceDraft')
 
-    fireEvent.click(within(pinned).getByTitle('New workspace'))
-    await waitFor(() => expect(lastTasks()).toHaveLength(3))
-    expect(lastTasks()[2].workspaceDraft).toEqual({})
+    fireEvent.click(within(pinned).getByTitle('New stream'))
+    expect(await screen.findByText('New stream in Alpha Project')).toBeTruthy()
   })
 
-  it('adds a sibling task from a pinned task', async () => {
+  it('adds a sibling task from a pinned task, in its stream', async () => {
     pinnedItems = [{ type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 't1' }]
     renderSidebar()
     const pinned = (await screen.findByText('Pinned')).parentElement!
-    fireEvent.click(within(pinned).getByTitle('New task in Alpha Project'))
+    fireEvent.click(within(pinned).getByTitle('New task in main'))
     await waitFor(() => expect(lastTasks()).toHaveLength(2))
   })
 
-  it('offers + Task and + Workspace under an expanded pinned project', async () => {
+  it('offers + Task and + Stream under an expanded pinned project', async () => {
     pinnedItems = [{ type: 'project', projectId: 'p1' }]
     renderSidebar()
     const pinned = (await screen.findByText('Pinned')).parentElement!
-    expect(within(pinned).queryByText('Workspace')).toBeNull()
+    expect(within(pinned).queryByText('Stream')).toBeNull()
     fireEvent.click(pinned.querySelector('[data-pin-key] button')!)
-    fireEvent.click(within(pinned).getByText('Workspace'))
-    await waitFor(() => expect(lastTasks()[1]?.workspaceDraft).toEqual({}))
+    fireEvent.click(within(pinned).getByText('Stream'))
+    expect(await screen.findByText('New stream in Alpha Project')).toBeTruthy()
   })
 
-  it('adds a workspace from a project\'s context menu', async () => {
+  it('creates a project-folder stream from a project\'s context menu', async () => {
     renderSidebar()
     await screen.findByText('Alpha Project')
     fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
-    fireEvent.click(await screen.findByRole('button', { name: 'New workspace' }))
-    await waitFor(() => expect(lastTasks()[1]?.workspaceDraft).toEqual({}))
+    fireEvent.click(await screen.findByRole('button', { name: 'New stream…' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Project folder' }))
+    fireEvent.change(screen.getByLabelText('Stream name'), { target: { value: 'bugfixes' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create stream' }))
+    await waitFor(() => expect(saved[saved.length - 1]?.projects[0].streams.map(st => st.name)).toEqual(['main', 'bugfixes']))
+    expect(saved[saved.length - 1]?.projects[0].streams[1]).not.toHaveProperty('workspace')
   })
 })
 
@@ -270,18 +271,46 @@ describe('Sidebar stream tree', () => {
     expect(await screen.findByText('Quiet task')).toBeTruthy()
   })
 
-  it('never offers ✕ on main, and deletes another stream with its tasks', async () => {
+  it('never offers ✕ on main; a clean worktree stream closes without asking', async () => {
     const confirm = vi.fn((_message: string) => true)
     vi.stubGlobal('confirm', confirm)
     ;(window.api as unknown as Record<string, unknown>).workspaceDelete = vi.fn().mockResolvedValue({ status: 'ok' })
     renderSidebar()
     await screen.findByText('Busy task')
-    expect(within(streamRow(mainStreamId('p1'))).queryByTitle('Delete stream')).toBeNull()
+    expect(within(streamRow(mainStreamId('p1'))).queryByTitle('Close stream')).toBeNull()
 
-    fireEvent.click(within(streamRow('stream-busy')).getByTitle('Delete stream'))
-    expect(confirm.mock.calls[0][0]).toMatch(/^Delete stream "0\.5\.0"\?[\s\S]*Its task closes[\s\S]*worktree folder is removed/)
+    fireEvent.click(within(streamRow('stream-busy')).getByTitle('Close stream'))
     await waitFor(() => expect(lastProject()?.streams.map(s => s.id)).toEqual([mainStreamId('p1')]))
-    expect(window.api.workspaceDelete).toHaveBeenLastCalledWith(expect.objectContaining({ worktreePath: '/wt/rel', force: true }))
+    expect(confirm).not.toHaveBeenCalled()
+    // Only the pre-flight ran: clean and merged, it removed the worktree itself.
+    expect(window.api.workspaceDelete).toHaveBeenCalledTimes(1)
+    expect(window.api.workspaceDelete).toHaveBeenLastCalledWith(expect.not.objectContaining({ force: true }))
+  })
+
+  it('asks keep branch / discard / cancel when the worktree has work', async () => {
+    const workspaceDelete = vi.fn().mockResolvedValue({ status: 'unmerged', baseBranch: 'main' })
+    ;(window.api as unknown as Record<string, unknown>).workspaceDelete = workspaceDelete
+    renderSidebar()
+    await screen.findByText('Busy task')
+
+    fireEvent.click(within(streamRow('stream-busy')).getByTitle('Close stream'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Keep branch' })).toBeNull())
+    expect(lastProject()?.streams.map(s => s.id) ?? ['unchanged']).not.toEqual([mainStreamId('p1')])
+
+    workspaceDelete.mockResolvedValueOnce({ status: 'unmerged', baseBranch: 'main' }).mockResolvedValueOnce({ status: 'ok' })
+    fireEvent.click(within(streamRow('stream-busy')).getByTitle('Close stream'))
+    expect(await screen.findByText(/not merged into "main"/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Keep branch' }))
+    await waitFor(() => expect(lastProject()?.streams.map(s => s.id)).toEqual([mainStreamId('p1')]))
+    await waitFor(() => expect(workspaceDelete).toHaveBeenLastCalledWith(expect.objectContaining({ force: true, keepBranch: true })))
+  })
+
+  it('adds a task to a stream from its row', async () => {
+    renderSidebar()
+    await screen.findByText('Busy task')
+    fireEvent.click(within(streamRow('stream-busy')).getByTitle('New task in 0.5.0'))
+    await waitFor(() => expect(lastProject()?.streams.find(s => s.id === 'stream-busy')?.tasks).toHaveLength(2))
   })
 
   it('pins a stream from its menu and lists its tasks under the pin', async () => {

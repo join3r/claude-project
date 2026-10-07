@@ -31,8 +31,7 @@ import type {
   Tab,
   Task,
   TaskInboxState,
-  WorkspaceConfig,
-  WorkspaceDraft
+  WorkspaceConfig
 } from './types'
 import { mapProjectTasks, singlePane } from './streams'
 import { normalizeTaskLayout } from './panes'
@@ -46,7 +45,8 @@ export interface LegacyTask {
   splitOpen?: boolean
   splitRatio?: number
   workspace?: WorkspaceConfig
-  workspaceDraft?: WorkspaceDraft
+  /** A worktree still to be cut on the first prompt. Retired: dropped in migration. */
+  workspaceDraft?: { baseBranch?: string }
   lastInteractedAt?: number
   /** Older still: the name `lastInteractedAt` had before. */
   lastFocusedAt?: number
@@ -130,7 +130,6 @@ export function migratedTaskId(tabId: string): string {
 function tasksOf(legacy: LegacyTask): { tasks: Task[]; lastTaskId: string } {
   const tabs = legacyTabs(legacy)
   const inherited = inheritedState(legacy)
-  const draft = !legacy.workspace && isRecord(legacy.workspaceDraft) ? { workspaceDraft: { ...legacy.workspaceDraft } } : {}
   const agentTabs = tabs.filter(tab => isAgentTabType(tab.type))
 
   if (agentTabs.length === 0) {
@@ -144,7 +143,6 @@ function tasksOf(legacy: LegacyTask): { tasks: Task[]; lastTaskId: string } {
       name: legacy.name,
       ...(main ? { mainTabId: main.id } : {}),
       panes: singlePane(ordered, previouslyActive(legacy, ordered) ?? main?.id),
-      ...draft,
       ...inherited
     }
     return { tasks: [task], lastTaskId: task.id }
@@ -162,7 +160,6 @@ function tasksOf(legacy: LegacyTask): { tasks: Task[]; lastTaskId: string } {
       name: taskNameFor(tab, legacy),
       mainTabId: tab.id,
       panes: singlePane(paneTabs, isMru ? previouslyActive(legacy, paneTabs) ?? tab.id : tab.id),
-      ...(isMru ? draft : {}),
       ...inherited
     }
   })

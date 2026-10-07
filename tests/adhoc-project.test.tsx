@@ -11,7 +11,7 @@ import {
 } from '../src/shared/types'
 import { dirBasename } from '../src/shared/paths'
 import { useAppState } from '../src/renderer/hooks/useAppState'
-import { projectTasks, taskWorkspace } from '../src/shared/streams'
+import { projectTasks } from '../src/shared/streams'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 // React import is required by the JSX runtime under vitest's default transform.
@@ -52,6 +52,7 @@ beforeEach(() => {
     onNotesUpdated: vi.fn().mockReturnValue(() => {}),
     onTasksRemoved: vi.fn().mockReturnValue(() => {}),
     onTabsRemoved: vi.fn().mockReturnValue(() => {}),
+    onTabsRestart: vi.fn().mockReturnValue(() => {}),
     onConfigUpdated: vi.fn().mockReturnValue(() => {}),
     reportDirtyTabs: vi.fn().mockResolvedValue(undefined),
     sshStatus: vi.fn().mockResolvedValue('disconnected'),
@@ -136,23 +137,6 @@ describe('addTaskInDirectory', () => {
     act(() => { result.current.addTaskInDirectory('/tmp/other', 'Second') })
 
     expect(result.current.projects.filter(isEphemeralProject).map(p => p.name)).toEqual(['scratch', 'other'])
-  })
-
-  it('carries a workspace through to the task', async () => {
-    const { result } = await mountState()
-
-    act(() => {
-      result.current.addTaskInDirectory('/tmp/scratch', 'Isolated', [], {
-        worktreePath: '/tmp/scratch/.worktrees/isolated',
-        branchName: 'isolated',
-        baseBranch: 'main',
-        relativeProjectPath: ''
-      })
-    })
-
-    const project = adhoc(result.current)!
-    const task = projectTasks(project)[0]
-    expect(taskWorkspace(project, task.id)?.branchName).toBe('isolated')
   })
 })
 

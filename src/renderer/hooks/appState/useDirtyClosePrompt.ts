@@ -25,7 +25,7 @@ const PROCEED: Promise<'proceed'> = Promise.resolve('proceed')
 
 /**
  * The unsaved-editor gate in front of every tab/task/project removal, plus the
- * report of dirty tabs to main that idle cleanup relies on.
+ * report of dirty tabs to main that a phone's task close relies on.
  */
 export function useDirtyClosePrompt(): DirtyCloseActions {
   const dirtyBuffers = useDirtyBufferStore()
@@ -44,7 +44,7 @@ export function useDirtyClosePrompt(): DirtyCloseActions {
     if (dirty.length === 0) return PROCEED
     // A second removal while the dialog is up would strand the first caller's
     // promise; the modal blocks the UI, so this only guards the odd programmatic
-    // caller (idle cleanup) racing the user.
+    // caller racing the user.
     if (dirtyPromptResolveRef.current) return Promise.resolve('cancel')
 
     return new Promise<'proceed' | 'cancel'>(resolve => {
@@ -93,7 +93,7 @@ export function useDirtyClosePrompt(): DirtyCloseActions {
   }, [settleDirtyPrompt])
 
   /**
-   * Publish this window's unsaved editors to main. Idle cleanup runs there with
+   * Publish this window's unsaved editors to main. A phone's close runs there with
    * nobody in front of a Save/Discard dialog, so a dirty buffer has to be a
    * safeguard rather than a prompt — and main cannot see one on its own.
    */

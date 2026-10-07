@@ -29,3 +29,17 @@ export function posixRelativeJoin(dir: string, name: string): string {
   if (!prefix) return name
   return `${prefix}/${name}`
 }
+
+/**
+ * `target` re-based from `fromDir` to `toDir` when it lies inside `fromDir`, else
+ * null. Works for POSIX and Windows separators.
+ */
+export function retargetPath(target: string, fromDir: string, toDir: string): string | null {
+  const from = fromDir.replace(/[/\\]+$/, '')
+  if (!from) return null
+  if (target === from || target === fromDir) return toDir
+  if (!target.startsWith(from)) return null
+  const rest = target.slice(from.length)
+  if (!/^[/\\]/.test(rest)) return null
+  return toDir.replace(/[/\\]+$/, '') + rest
+}

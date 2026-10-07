@@ -170,8 +170,8 @@ export class PtySessions {
     this.deps.ptyManager.kill(id)
     this.runtimes.delete(id)
     this.deps.onKill?.(id)
-    // No process, no activity: a status left at 'working' here would protect the
-    // task from cleanup for the rest of the session.
+    // No process, no activity: a status left at 'working' here would show the
+    // task as busy for the rest of the session.
     this.deps.activityRegistry.remove(id)
     this.deps.broadcastAgentActivity(id)
   }

@@ -11,7 +11,7 @@ import NoteTab from './NoteTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
-import { runsInTaskDir } from '../../shared/streams'
+import { tabSpawnDir } from '../../shared/streams'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
 import type { Tab, AiTabType, Project, Task } from '../../shared/types'
@@ -27,6 +27,12 @@ interface Props {
 }
 
 /** Grid column of pane `index`: panes sit on odd columns, the dividers between them on even ones. */
+/** A tab body's React key: its id, plus the directory its process runs in, if any. */
+function bodyKey(tab: Tab, projectDir: string): string {
+  const dir = tabSpawnDir(tab, projectDir)
+  return dir === null ? tab.id : `${tab.id}@${dir}`
+}
+
 function paneColumn(index: number): number {
   return index * 2 + 1
 }
@@ -178,7 +184,6 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
             project={project}
             taskId={task.id}
             taskName={task.name}
-            workspaceDraft={task.workspaceDraft}
             projectDir={projectDir}
             visible={visible}
           />
@@ -199,7 +204,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
         <div
           // A session tab mounts again (and spawns in the new folder) when the
           // task moves to another worktree; see `useTasks.moveTask`.
-          key={runsInTaskDir(tab) ? `${tab.id}@${projectDir}` : tab.id}
+          key={bodyKey(tab, projectDir)}
           className="relative min-w-0 min-h-0 overflow-hidden"
           style={{ gridColumn: paneColumn(paneIndex), gridRow: bodyRow, display: active ? 'block' : 'none' }}
           data-tab-body={tab.id}

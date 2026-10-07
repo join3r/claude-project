@@ -3,7 +3,7 @@ import { isNotebookFile } from '../../../shared/notebook'
 import { v4 as uuid } from 'uuid'
 import { AI_TAB_META, CLAUDE_CHAT_LABEL } from '../../../shared/types'
 import type { Tab, TabType } from '../../../shared/types'
-import { findTaskInProject, taskTabs } from '../../../shared/streams'
+import { findTaskInProject, isMainTab, taskTabs } from '../../../shared/streams'
 import {
   addTabToPane,
   findTabLocation,
@@ -93,6 +93,9 @@ export function useTabs(
   }, [mutateProjects])
 
   const removeTab = useCallback(async (projectId: string, taskId: string, tabId: string) => {
+    // The main tab closes only with its task, so recently-closed only ever holds plain tabs.
+    const owner = findTask(projectsRef.current, projectId, taskId)
+    if (owner && isMainTab(owner, tabId)) return
     if (await confirmDiscardDirty([tabId]) === 'cancel') return
 
     const task = findTask(projectsRef.current, projectId, taskId)

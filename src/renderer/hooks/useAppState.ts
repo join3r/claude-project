@@ -15,6 +15,7 @@ import {
   useSelectionSync,
   useTasksRemovedListener,
   useTabsRemovedListener,
+  useTabsRestartListener,
   useWindowFocused,
   useWindowTitle
 } from './appState/useWindowEffects'
@@ -70,6 +71,7 @@ export function useAppState(): AppActions {
   const dirty = useDirtyClosePrompt()
   useTasksRemovedListener(core.updateWindowViewState)
   useTabsRemovedListener()
+  useTabsRestartListener()
   const windowFocused = useWindowFocused()
   usePersistence(core)
   const connectSsh = useConnectSsh()

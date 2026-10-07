@@ -24,6 +24,7 @@ import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import { buildXtermTheme } from './terminalThemes'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { hasBell, terminalStatusFromOutput } from './terminalStatus'
+import { takePendingCommand } from './terminalStartup'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -427,6 +428,10 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
               }
               entry.term.scrollToBottom()
             }
+
+            // A terminal task's start-up command, typed once into its brand-new shell.
+            const startup = shellCommand ? undefined : takePendingCommand(tabId)
+            if (startup) window.api.ptyWrite(tabId, `${startup}\r`)
 
             if (!restoredScrollback) {
               flushPending()

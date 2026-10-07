@@ -197,6 +197,7 @@ beforeEach(() => {
     onNotesUpdated: vi.fn().mockReturnValue(() => {}),
     onTasksRemoved: vi.fn().mockReturnValue(() => {}),
     onTabsRemoved: vi.fn().mockReturnValue(() => {}),
+    onTabsRestart: vi.fn().mockReturnValue(() => {}),
     reportDirtyTabs: vi.fn().mockResolvedValue(undefined),
     onConfigUpdated: vi.fn().mockReturnValue(() => {}),
     onSshStatusChanged: vi.fn().mockReturnValue(() => {}),

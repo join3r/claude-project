@@ -9,7 +9,7 @@ export interface WorkspaceDeps {
   remoteWorkspaceManager: RemoteWorkspaceManager
   ensureSshConnected: (projectId: string, sshConfig: SshConfig) => Promise<void>
   socketPath: (projectId: string) => string
-  /** Shared with the idle sweep. */
+  /** Shared with main's own callers (a phone's new task cleanup). */
   deleteWorkspace: (request: WorkspaceDeleteRequest) => Promise<WorkspaceDeleteResult>
 }
 

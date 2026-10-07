@@ -160,16 +160,22 @@ describe('useTabs', () => {
     const hook = mountTabs()
     await loaded(hook)
 
-    act(() => { hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal') })
+    let added = ''
+    act(() => { added = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal').id })
+    // The main tab closes only with its task.
+    expect(workTask(hook.result.current.core.projectsData).mainTabId).toBe('a')
     await act(async () => { await hook.result.current.tabs.removeTab('p1', 't1', 'a') })
-    expect(taskTabs(workTask(hook.result.current.core.projectsData)).map(t => t.id)).not.toContain('a')
+    expect(taskTabs(workTask(hook.result.current.core.projectsData)).map(t => t.id)).toContain('a')
+
+    await act(async () => { await hook.result.current.tabs.removeTab('p1', 't1', added) })
+    expect(taskTabs(workTask(hook.result.current.core.projectsData)).map(t => t.id)).not.toContain(added)
 
     let pane: number | null = null
     act(() => { pane = hook.result.current.tabs.reopenClosedTab() })
     expect(pane).toBe(0)
     const task = workTask(hook.result.current.core.projectsData)
-    expect(task.panes[0].tabs[0].id).toBe('a')
-    expect(task.panes[0].activeTabId).toBe('a')
+    expect(task.panes[0].tabs.map(t => t.id)).toEqual(['a', added])
+    expect(task.panes[0].activeTabId).toBe(added)
     expect(hook.result.current.core.windowViewState).toMatchObject({ selectedProjectId: 'p1', selectedTaskId: 't1' })
   })
 

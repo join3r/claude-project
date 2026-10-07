@@ -1,11 +1,13 @@
 /**
- * The worktree pre-flight behind deleting a task or a stream from the sidebar:
- * ask about uncommitted or unmerged work first, then remove the worktree once
- * its tabs are gone. Step 6 moves this to stream archiving.
+ * The worktree pre-flight behind closing a stream: the non-forced removal
+ * already takes a clean, merged worktree (and its branch); anything else asks
+ * keep branch / discard / cancel, and the forced pass runs once no process holds
+ * the folder any more.
  */
 import { isRemoteProject } from '../../../shared/types'
 import type { Project, WorkspaceConfig, WorkspaceDeleteResult } from '../../../shared/types'
 import { getProjectDir } from '../../hooks/appState/projectsData'
+import { worktreePreflight, worktreeRemovalFor, type WorktreeChoice } from './closeRules'
 
 function deleteRequest(project: Project, workspace: WorkspaceConfig) {
   return {
@@ -18,14 +20,19 @@ function deleteRequest(project: Project, workspace: WorkspaceConfig) {
   }
 }
 
+export type AskWorktreeChoice = (question: { title: string; message: string; branch: string }) => Promise<WorktreeChoice>
+
 /**
- * Run the pre-flight (which already removes a clean, merged worktree) and ask
- * about whatever it found. Null means cancel; otherwise whether to keep the branch.
+ * Run the pre-flight and ask about whatever it found. Null means cancel; `done`
+ * means the pre-flight already removed the worktree; otherwise the forced pass
+ * still has to run, keeping the branch or not.
  */
 export async function confirmWorktreeRemoval(
   project: Project,
-  workspace: WorkspaceConfig
-): Promise<{ keepBranch: boolean } | null> {
+  streamName: string,
+  workspace: WorkspaceConfig,
+  ask: AskWorktreeChoice
+): Promise<{ done: true } | { done: false; keepBranch: boolean } | null> {
   let result: WorkspaceDeleteResult
   try {
     result = await window.api.workspaceDelete(deleteRequest(project, workspace))
@@ -33,25 +40,12 @@ export async function confirmWorktreeRemoval(
     // A pre-flight that never ran is not permission to delete: ask, like 'check-failed'.
     result = { status: 'check-failed', reason: err instanceof Error ? err.message : String(err) }
   }
-
-  let keepBranch = false
-  if (result.status === 'uncommitted') {
-    if (!window.confirm('This workspace has uncommitted changes that will be lost. Delete anyway?')) return null
-  } else if (result.status === 'unmerged') {
-    if (!window.confirm(`Branch "${workspace.branchName}" has not been merged into "${workspace.baseBranch}". Delete workspace?`)) return null
-    keepBranch = !window.confirm(`Also delete the unmerged branch "${workspace.branchName}"?`)
-  } else if (result.status === 'uncommitted-and-unmerged') {
-    if (!window.confirm(`This workspace has uncommitted changes and branch "${workspace.branchName}" has not been merged into "${workspace.baseBranch}". Delete anyway?`)) return null
-    keepBranch = !window.confirm(`Also delete the unmerged branch "${workspace.branchName}"?`)
-  } else if (result.status === 'check-failed') {
-    const reason = result.reason || 'The safety checks did not complete.'
-    if (!window.confirm(`DevTool could not verify that workspace "${workspace.branchName}" is safe to delete.\n\n${reason}\n\nDelete anyway? Uncommitted or unmerged work may be lost.`)) return null
-    // Merge state unknown, so keep the branch unless the user explicitly asks otherwise.
-    keepBranch = !window.confirm(`Also delete the branch "${workspace.branchName}"? Its merge state could not be verified.`)
-  }
-  // 'invalid-worktree' is reported by the forced pass instead: killing the tabs
-  // first can free the worktree, and that pass decides whether anything is left.
-  return { keepBranch }
+  const outcome = worktreePreflight(result, workspace)
+  if (outcome.kind === 'removed') return { done: true }
+  if (outcome.kind === 'force') return { done: false, keepBranch: true }
+  const choice = await ask({ title: `Close stream "${streamName}"?`, message: outcome.message, branch: workspace.branchName })
+  const removal = worktreeRemovalFor(choice)
+  return removal ? { done: false, ...removal } : null
 }
 
 /** The forced pass, once no process holds the worktree any more. */

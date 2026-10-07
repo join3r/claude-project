@@ -25,7 +25,7 @@ export function useNativeTheme(): 'dark' | 'light' {
 }
 
 /**
- * Main deleted a task by itself (idle cleanup). The state change arrives as a
+ * Main deleted a task by itself (a phone closed it). The state change arrives as a
  * normal projects broadcast; this is the part of `removeTask` that is local to
  * a window — the xterm instances and per-tab status entries hanging off the
  * tabs, and this window's own view state.
@@ -58,6 +58,22 @@ export function useTabsRemovedListener(): void {
       }
       for (const tabId of tabIds) {
         void window.api.scrollbackDelete(tabId)
+      }
+    })
+  }, [])
+}
+
+/**
+ * Another window moved a task to another directory and ended its agents and
+ * terminals there. Drop this window's copies (the xterm, the status entries)
+ * before the projects broadcast arrives: then the tab bodies, keyed on the
+ * task's directory, mount again and spawn in the new one. Scrollback stays.
+ */
+export function useTabsRestartListener(): void {
+  useEffect(() => {
+    return window.api.onTabsRestart(({ tabIds }) => {
+      for (const tabId of tabIds) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
       }
     })
   }, [])

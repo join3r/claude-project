@@ -7,7 +7,7 @@ import { isVisibleOnMobile } from './inbox'
 
 /**
  * `chat.new` (SPEC.md §8.2): a new Claude chat tab at the end of a task's first pane.
- * Main commits it itself, as idle cleanup does, so no window has to be open; the
+ * Main commits it itself, so no window has to be open; the
  * windows rebase onto the commit, and none of them switches to the new tab.
  */
 

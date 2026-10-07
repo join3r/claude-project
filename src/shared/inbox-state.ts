@@ -3,7 +3,7 @@ import type { Task, TabStatusValue, TaskInboxState } from './types'
 
 /**
  * The triage predicates the inbox is built on. They live in shared rather than
- * next to the inbox UI because idle cleanup runs in main now and has to answer
+ * next to the inbox UI because main builds the phone's inbox and has to answer
  * "is this unread / snoozed / settled / busy?" exactly the way the window does —
  * a second implementation would be a silent blind spot the moment the two drift.
  *

@@ -154,8 +154,7 @@ export class Storage {
   }
 
   /**
-   * Rotating snapshot of projects.json — recovery net if another instance clobbers it,
-   * and the only thing standing behind a silent idle-cleanup deletion.
+   * Rotating snapshot of projects.json — recovery net if another instance clobbers it.
    *
    * Returns whether a snapshot now exists on disk. Callers that merely want a safety
    * net (startup) ignore it; a caller that is about to delete the user's tasks must
@@ -213,9 +212,9 @@ export class Storage {
     }
     try {
       const parsed = result.data
-      // Retired keys: the folder tree's collapse state, and the new-task auto-open
-      // setting the empty task's prompt box replaced.
-      const { collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, ...rest } = parsed
+      // Retired keys: the folder tree's collapse state, the new-task auto-open
+      // setting the empty task's prompt box replaced, and idle task cleanup.
+      const { collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, idleTaskCleanup: _idle, ...rest } = parsed
       const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
       config.windowsTerminal = coerceWindowsTerminal(config.windowsTerminal)
       const savedEditors = (rest.externalEditors && typeof rest.externalEditors === 'object')
@@ -290,7 +289,7 @@ export class Storage {
     const allProjects: Project[] = migration.projects
     // A hidden ad-hoc project is only ever a home for tasks; once the last real
     // one is gone it has no reason to exist. Dropping it here catches every
-    // writer at once — including main's idle-cleanup sweep, which removes tasks
+    // writer at once — including main's own writes for a phone, which remove tasks
     // without going through the renderer. Safe because such a project is always
     // created in the same write as its first task.
     const projects = allProjects.filter(p => !isSpentEphemeralProject(p))
@@ -332,9 +331,10 @@ export class Storage {
           task.lastInteractedAt = legacy
         }
         delete (task as { lastFocusedAt?: unknown }).lastFocusedAt
-        // A task with no activity stamp at all reads as infinitely idle, which would make it
-        // the first thing idle-cleanup deletes. Start its clock now instead: nothing should
-        // be deleted on the basis of data we never recorded.
+        // Retired: a task whose worktree waited for its first prompt to name the branch.
+        delete (task as { workspaceDraft?: unknown }).workspaceDraft
+        // A task with no activity stamp at all would sort as the oldest thing in the
+        // inbox and the sidebar; start its clock now instead.
         if (task.lastInteractedAt === undefined && task.inbox?.eventAt === undefined) {
           task.lastInteractedAt = now
         }

@@ -21,7 +21,6 @@ import { RevisionStore } from './revision-store'
 import { TabActivityRegistry } from './tab-activity-registry'
 import { SleepBlocker } from './sleep-blocker'
 import type { ActivityUpdate } from '../shared/agent-activity'
-import { runIdleCleanupSweep, type IdleCleanupEnvironment } from './idle-cleanup-sweep'
 import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from './task-teardown'
 import { PaletteFrecencyStorage } from './palette-frecency-storage'
 import { agentCommandOverride, resolveAgentCommand } from './resolve-agent-command'
@@ -39,7 +38,7 @@ import { registerFileBrowserHandlers } from './ipc/file-browser'
 import { registerGitHandlers } from './ipc/git'
 import { registerNotebookHandlers } from './ipc/notebooks'
 import { isRemoteProject, isShellCommandProject } from '../shared/types'
-import { findStreamOfTask, removeTaskFromProject, workspaceReleasedBy } from '../shared/streams'
+import { removeTaskFromProject } from '../shared/streams'
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
@@ -85,7 +84,6 @@ import {
 import { normalizeMobileConfig } from '../shared/mobile'
 import type {
   AppConfig,
-  CleanupActivity,
   PersistedWindowState,
   Project,
   ProjectsData,
@@ -115,8 +113,6 @@ const execFileAsync = promisify(execFile)
  * buffers are unsaved and which PTYs are alive are all safeguards main only
  * learns once the renderers have reported in.
  */
-const IDLE_CLEANUP_STARTUP_DELAY_MS = 15_000
-const IDLE_CLEANUP_INTERVAL_MS = 60 * 60_000
 const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
 
 function clone<T>(value: T): T {
@@ -174,9 +170,6 @@ export class AppRuntime {
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private startupWindowStates: PersistedWindowState[]
-  private idleCleanupTimer: NodeJS.Timeout | null = null
-  private idleCleanupScheduled = false
-  private idleCleanupRunning = false
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
     this.storage.backupProjectsOnStartup()
@@ -225,7 +218,7 @@ export class AppRuntime {
   }
 
   /**
-   * The one write path for canonical projects state from inside main (idle cleanup
+   * The one write path for canonical projects state from inside main (a phone's
    * and anything after it). Going through here is what bumps the revision and tells
    * the windows, so a main-side deletion cannot be resurrected by a stale renderer.
    */
@@ -414,18 +407,11 @@ export class AppRuntime {
       closeTask: (params) => closeTask({
         peek: () => this.projectsStore.peek(),
         dirtyTabIds: () => this.getDirtyTabIds(),
-        checkWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
-        forceDeleteWorkspace: (project, task, keepBranch) => {
-          const workspace = workspaceReleasedBy(project, task.id)
-          return workspace
-            ? this.deleteWorkspace({ ...this.workspaceTarget(project), ...workspace, force: true, keepBranch })
-            : Promise.resolve({ status: 'ok' as const })
-        },
         removeTask: (project, task) => this.removeTaskFromMain(project, task)
       }, params),
       closeTab: async (tabId) => {
         const found = findClosableTab(this.projectsStore.peek(), tabId)
-        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab' }
+        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab, or the task\'s main tab (it closes with the task)' }
         await this.removeTabFromMain(found.project, found.task, found.tab)
         return { ok: true }
       },
@@ -454,7 +440,6 @@ export class AppRuntime {
         : buildWindowViewState(this.projectsStore.peek().projects, this.config)
     })
     this.logDebug(`registerWindow windowId=${window.id}`)
-    this.scheduleIdleCleanup()
     const syncGeometry = () => {
       this.updateWindowGeometry(window.id)
     }
@@ -466,7 +451,7 @@ export class AppRuntime {
       this.logDebug(`windowClosed windowId=${window.id}`)
       this.windows.delete(window.id)
       // A closed window's unsaved buffers went with it; leaving them behind would
-      // protect their tasks from cleanup forever.
+      // block a phone's close of their tasks forever.
       this.dirtyTabsByWindow.delete(window.id)
       for (const [tabId, windowId] of this.statusReporters) {
         if (windowId !== window.id) continue
@@ -490,106 +475,12 @@ export class AppRuntime {
     this.quitting = true
   }
 
-  /**
-   * Idle-task cleanup runs here, not in a renderer. A window's picture of what is
-   * running is per-window by construction, so the window that happened to be asked
-   * could not see an agent working in another one and deleted it anyway (finding
-   * #7). Main receives every hook event, owns every PTY and knows every window's
-   * selection, so it is the only process that can answer "is this safe to delete?".
-   */
-  private scheduleIdleCleanup(): void {
-    if (this.idleCleanupScheduled) return
-    this.idleCleanupScheduled = true
-    setTimeout(() => void this.runIdleCleanup(), IDLE_CLEANUP_STARTUP_DELAY_MS)
-    this.idleCleanupTimer = setInterval(() => void this.runIdleCleanup(), IDLE_CLEANUP_INTERVAL_MS)
-  }
-
-  /** One sweep at a time: the hourly tick must not overlap a sweep still awaiting git. */
-  private async runIdleCleanup(): Promise<void> {
-    if (this.idleCleanupRunning) return
-    this.idleCleanupRunning = true
-    try {
-      await runIdleCleanupSweep(this.idleCleanupEnvironment())
-    } catch (err) {
-      this.logDebug(`idleCleanupFailed error=${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      this.idleCleanupRunning = false
-    }
-  }
-
-  private idleCleanupEnvironment(): IdleCleanupEnvironment {
-    return {
-      readProjects: () => {
-        const data = this.projectsStore.peek()
-        return { projects: data.projects, pinnedItems: data.pinnedItems ?? [] }
-      },
-      readConfig: () => this.config.idleTaskCleanup,
-      readActivity: () => this.getCleanupActivity(),
-      now: () => Date.now(),
-      backupProjects: () => this.storage.backupProjectsOnStartup(),
-      deleteWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
-      removeTask: (project, task) => this.removeTaskFromMain(project, task),
-      forgetWorkspace: (project, task) => this.forgetTaskWorkspace(project, task),
-      log: (message) => this.logDebug(message)
-    }
-  }
-
-  /** Tasks selected in any window — only this process sees all of them. */
-  private getOpenTaskIds(): string[] {
-    const ids = new Set<string>()
-    for (const state of this.windowStates.values()) {
-      if (state.viewState.selectedTaskId) ids.add(state.viewState.selectedTaskId)
-    }
-    return [...ids]
-  }
-
-  /** Tabs whose process is still running, including ones no window currently shows. */
-  private getLiveTabIds(): string[] {
-    return [...this.ptySessions.liveTabIds(), ...this.chatManager.liveTabIds()]
-  }
-
   private getDirtyTabIds(): string[] {
     const ids = new Set<string>()
     for (const tabIds of this.dirtyTabsByWindow.values()) {
       for (const tabId of tabIds) ids.add(tabId)
     }
     return [...ids]
-  }
-
-  /** Deletes the worktree that goes away with the task (`workspaceReleasedBy`), if any. */
-  private async deleteTaskWorkspace(project: Project, task: Task) {
-    const workspace = workspaceReleasedBy(project, task.id)
-    if (!workspace) return { status: 'ok' as const }
-    // No `force`: this both checks that the worktree is clean and the branch merged
-    // *and* performs the deletion when it is. Anything else leaves it untouched.
-    return this.deleteWorkspace({
-      ...this.workspaceTarget(project),
-      worktreePath: workspace.worktreePath,
-      branchName: workspace.branchName,
-      baseBranch: workspace.baseBranch
-    })
-  }
-
-  /** The worktree is gone but the task stayed: leave no record pointing at nothing. */
-  private forgetTaskWorkspace(project: Project, task: Task): void {
-    this.logDebug(`idleCleanupWorkspaceOrphaned project=${project.id} task=${task.id}`)
-    const data = this.projectsStore.peek()
-    this.commitProjects({
-      ...data,
-      projects: data.projects.map(candidate => {
-        if (candidate.id !== project.id) return candidate
-        const stream = findStreamOfTask(candidate, task.id)
-        if (!stream?.workspace) return candidate
-        return {
-          ...candidate,
-          streams: candidate.streams.map(existing => {
-            if (existing !== stream) return existing
-            const { workspace: _gone, ...rest } = existing
-            return rest
-          })
-        }
-      })
-    })
   }
 
   /**
@@ -687,10 +578,6 @@ export class AppRuntime {
   }
 
   async shutdown(): Promise<void> {
-    if (this.idleCleanupTimer) {
-      clearInterval(this.idleCleanupTimer)
-      this.idleCleanupTimer = null
-    }
     this.persistWindowSession()
     this.mobileService?.stop()
     this.updates?.close()
@@ -762,7 +649,7 @@ export class AppRuntime {
    * One hook event, from a terminal tab's curl (hook server) or a chat tab's SDK
    * process (in-process). Each has two consumers: the windows, which draw the
    * status dot for the tabs they mount, and the activity registry, which is what
-   * idle cleanup and the sidebar's activity line read.
+   * the phone's inbox and the sidebar's activity line read.
    */
   private handleHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
     switch (endpoint) {
@@ -897,7 +784,7 @@ export class AppRuntime {
       notesStore: this.notesStore,
       paletteFrecency: this.paletteFrecencyStorage,
       getAgentActivity: () => this.activityRegistry.getActivitySnapshot(),
-      getCleanupActivity: () => this.getCleanupActivity(),
+      restartTabs: (windowId, tabIds) => this.restartTabs(windowId, tabIds),
       reportTabStatus: (windowId, tabId, status) => {
         this.statusReporters.set(tabId, windowId)
         this.activityRegistry.reported(tabId, status)
@@ -991,12 +878,18 @@ export class AppRuntime {
     return resolveAllowedDirectory(dir, allowedLocalRoots(this.projectsStore.peek().projects))
   }
 
-  private getCleanupActivity(): CleanupActivity {
-    return {
-      openTaskIds: this.getOpenTaskIds(),
-      statuses: this.activityRegistry.getSnapshot(),
-      liveTabIds: this.getLiveTabIds(),
-      dirtyTabIds: this.getDirtyTabIds()
+  /**
+   * End these tabs' processes (a PTY keeps its scrollback) and tell every window but
+   * `windowId`, which already let go of them, to drop its copy: each then mounts
+   * them again in the task's new directory and spawns there.
+   */
+  private restartTabs(windowId: number, tabIds: string[]): void {
+    for (const tabId of tabIds) {
+      if (this.ptySessions.has(tabId)) this.ptySessions.kill(tabId)
+      this.chatManager.close(tabId)
+    }
+    for (const [id, window] of this.windows) {
+      if (id !== windowId) safeWebContentsSend(window, 'tabs-restart', { tabIds })
     }
   }
 
@@ -1008,7 +901,7 @@ export class AppRuntime {
     this.broadcastToAllWindows('config-updated', clone(this.config))
   }
 
-  /** Shared by the `workspace-delete` IPC and the idle sweep, which runs it with no `force`. */
+  /** Behind the `workspace-delete` IPC; without `force` it is the pre-flight. */
   private async deleteWorkspace(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> {
     if (request.sshConfig && request.projectId) {
       await this.ensureSshConnected(request.projectId, request.sshConfig)

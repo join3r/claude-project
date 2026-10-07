@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppConfig,
-  CleanupActivity,
   CommitHistoryResult,
   DirectoryEntry,
   GitOperationResult,
@@ -46,12 +45,19 @@ const api = {
     return () => ipcRenderer.removeListener('projects-updated', handler)
   },
 
-  // Idle task cleanup runs entirely in main — a window only reports what main
+  // A phone's task close runs entirely in main — a window only reports what main
   // cannot see (its unsaved buffers) and reacts to what main removed.
   reportDirtyTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('report-dirty-tabs', tabIds),
   /** Status of a tab main has no hooks for (Codex, shells), for the phone's inbox. */
   reportTabStatus: (tabId: string, status: TabStatusValue): Promise<void> => ipcRenderer.invoke('report-tab-status', tabId, status),
-  getCleanupActivity: (): Promise<CleanupActivity> => ipcRenderer.invoke('get-cleanup-activity'),
+  /** This window moved a task to another directory: end these tabs' processes everywhere. */
+  restartTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('tabs-restart', tabIds),
+  /** Another window moved a task: drop these tabs, which mount again in the new directory. */
+  onTabsRestart: (callback: (event: { tabIds: string[] }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: { tabIds: string[] }) => callback(payload)
+    ipcRenderer.on('tabs-restart', handler)
+    return () => ipcRenderer.removeListener('tabs-restart', handler)
+  },
   onTasksRemoved: (callback: (removal: TaskRemoval) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, removal: TaskRemoval) => callback(removal)
     ipcRenderer.on('tasks-removed', handler)
@@ -177,6 +183,19 @@ const api = {
     ipcRenderer.invoke('codex-read-session', cwd, afterTs, projectId, sshConfig),
 
   // Claude session existence check (before spawning with --resume)
+  /**
+   * Before a task moves from `fromDir` to `toDir`: copy its Claude/Pi sessions into
+   * the new directory's session folder, and say which of `dirs` exist there.
+   */
+  taskMovePrepare: (
+    fromDir: string,
+    toDir: string,
+    sessions: Array<{ kind: 'claude' | 'pi'; sessionId: string }>,
+    dirs: string[],
+    projectId?: string,
+    sshConfig?: SshConfig
+  ): Promise<{ dirsExist: boolean[] }> =>
+    ipcRenderer.invoke('task-move-prepare', fromDir, toDir, sessions, dirs, projectId, sshConfig),
   claudeSessionExists: (cwd: string, sessionId: string, projectId?: string, sshConfig?: SshConfig): Promise<boolean> =>
     ipcRenderer.invoke('claude-session-exists', cwd, sessionId, projectId, sshConfig),
 
@@ -289,6 +308,11 @@ const api = {
     const handler = () => callback()
     ipcRenderer.on('menu-reload-tab', handler)
     return () => ipcRenderer.removeListener('menu-reload-tab', handler)
+  },
+  onMenuNewStream: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-new-stream', handler)
+    return () => ipcRenderer.removeListener('menu-new-stream', handler)
   },
   onMenuNewTask: (callback: () => void): (() => void) => {
     const handler = () => callback()

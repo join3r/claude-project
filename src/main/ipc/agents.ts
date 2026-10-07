@@ -22,9 +22,11 @@ import {
   optStr,
   safeId,
   sshConfig,
-  str
+  str,
+  stringList
 } from './schemas'
 import { v } from './validate'
+import { buildRemoteSessionCopyScript, copyLocalSession } from '../agent-session-move'
 
 const execFileAsync = promisify(execFile)
 
@@ -152,6 +154,46 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
     const { stdout } = await execFileAsync(manager.getSshCommand(), sshArgs, { timeout: 5000 })
     return stdout.trim() === 'yes'
   })
+
+  // A task moving to another worktree: copy its Claude/Pi sessions into the new
+  // directory's session folder (so the restart resumes them) and say which of the
+  // given directories exist there (terminals opened on a sub-folder follow it).
+  ipc.handle(
+    'task-move-prepare',
+    [
+      v.string({ nonEmpty: true }),
+      v.string({ nonEmpty: true }),
+      v.array(v.object({ kind: v.literal('claude', 'pi'), sessionId: v.string({ nonEmpty: true, max: 64 }) })),
+      stringList,
+      optSafeId,
+      optSshConfig
+    ],
+    async (_event, fromDir, toDir, sessions, dirs, projectId, config): Promise<{ dirsExist: boolean[] }> => {
+      if (!config || !projectId) {
+        for (const session of sessions) {
+          try {
+            copyLocalSession(session, fromDir, toDir)
+          } catch {
+            // Best effort: the agent then starts a new session, as before.
+          }
+        }
+        return { dirsExist: dirs.map(dir => fs.existsSync(dir) && fs.statSync(dir).isDirectory()) }
+      }
+      await deps.ensureSshConnected(projectId, config)
+      const manager = deps.sshManager()
+      try {
+        const { stdout } = await execFileAsync(manager.getSshCommand(), [
+          '-S', manager.getSocketPath(projectId),
+          `${config.username}@${config.host}`,
+          buildRemoteSessionCopyScript(sessions, fromDir, toDir, dirs)
+        ], { timeout: 15_000 })
+        const flags = stdout.split('\n').map(line => line.trim()).filter(line => line === '0' || line === '1')
+        return { dirsExist: dirs.map((_dir, i) => flags[i] === '1') }
+      } catch {
+        return { dirsExist: dirs.map(() => false) }
+      }
+    }
+  )
 
   ipc.handle('chat-attach', [safeId, chatTabConfig], (event, tabId, config) => {
     const window = BrowserWindow.fromWebContents(event.sender)

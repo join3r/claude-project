@@ -5,6 +5,7 @@
  */
 import { isAgentTabType } from './types'
 import type { Project, Stream, Tab, Task, TaskPane, WorkspaceConfig } from './types'
+import { joinWorkspaceDir, retargetPath } from './workspace-path'
 
 // --- Tasks across a project's streams ---------------------------------------
 
@@ -37,14 +38,12 @@ export function taskWorkspace(project: Project | undefined | null, taskId: strin
 }
 
 /**
- * The worktree that goes away with this task. TEMPORARY rule (until stream
- * archiving, step 6): a non-main stream lives while it has tasks, so removing a
- * stream's only task removes the stream, and its worktree with it.
+ * The directory a stream's tasks work in: its worktree (plus the project's place
+ * inside the repository), else the project's own directory (the remote one over SSH).
  */
-export function workspaceReleasedBy(project: Project | undefined | null, taskId: string): WorkspaceConfig | undefined {
-  const stream = findStreamOfTask(project, taskId)
-  if (!stream || stream.isMain || !stream.workspace) return undefined
-  return stream.tasks.every(task => task.id === taskId) ? stream.workspace : undefined
+export function streamDirectory(project: Project, stream: Stream | undefined): string {
+  if (stream?.workspace) return joinWorkspaceDir(stream.workspace.worktreePath, stream.workspace.relativeProjectPath)
+  return project.ssh ? project.ssh.remoteDir : project.directory
 }
 
 /** `fn` applied to every task; untouched streams and projects keep their identity. */
@@ -69,25 +68,33 @@ export function mapTaskInProject(project: Project, taskId: string, fn: (task: Ta
 }
 
 /**
- * Drop a task. A non-main stream left without tasks goes too (see
- * `workspaceReleasedBy`); `main` always stays.
+ * Drop a task. Its stream stays, even emptied: `main` can only be emptied, and
+ * any other stream (with its worktree) lives until it is closed itself.
  */
 export function removeTaskFromProject(project: Project, taskId: string): Project {
   const stream = findStreamOfTask(project, taskId)
   if (!stream) return project
-  const tasks = stream.tasks.filter(task => task.id !== taskId)
-  const streams = tasks.length === 0 && !stream.isMain
-    ? project.streams.filter(candidate => candidate !== stream)
-    : project.streams.map(candidate => (
-      candidate === stream
-        ? { ...candidate, tasks, ...(candidate.lastTaskId === taskId ? { lastTaskId: undefined } : {}) }
-        : candidate
-    ))
-  const next: Project = { ...project, streams }
-  if (project.lastStreamId === stream.id && !streams.some(candidate => candidate.id === stream.id)) {
-    delete next.lastStreamId
+  return {
+    ...project,
+    streams: project.streams.map(candidate => {
+      if (candidate !== stream) return candidate
+      const { lastTaskId, ...rest } = candidate
+      const tasks = candidate.tasks.filter(task => task.id !== taskId)
+      return lastTaskId === taskId ? { ...rest, tasks } : { ...candidate, tasks }
+    })
   }
-  return next
+}
+
+/**
+ * The stream a new task in `project` goes to when none is named: the stream of
+ * the task this window shows, else the one the project was last left in, else
+ * `main`.
+ */
+export function currentStreamId(project: Project, selectedTaskId?: string | null): string | undefined {
+  const selected = findStreamOfTask(project, selectedTaskId)
+  if (selected) return selected.id
+  const last = project.streams.find(stream => stream.id === project.lastStreamId)
+  return (last ?? findMainStream(project) ?? project.streams[0])?.id
 }
 
 /** Append `task` to the stream `streamId`, or to `main` when that stream is gone. */
@@ -124,6 +131,11 @@ export function withLastTask(project: Project, taskId: string): Project {
 /** Every tab of the task, pane by pane. */
 export function taskTabs(task: Task): Tab[] {
   return task.panes.flatMap(pane => pane.tabs)
+}
+
+/** The task's main tab (its agent or terminal) closes only with the task. */
+export function isMainTab(task: Task, tabId: string): boolean {
+  return task.mainTabId === tabId
 }
 
 export function taskTabIds(task: Task): string[] {
@@ -180,4 +192,50 @@ export function singlePane(tabs: Tab[], activeTabId?: string): TaskPane[] {
   if (tabs.length === 0) return []
   const active = activeTabId && tabs.some(tab => tab.id === activeTabId) ? activeTabId : tabs[tabs.length - 1].id
   return [{ tabs, activeTabId: active, width: 1 }]
+}
+
+/** An agent session whose files live per working directory, so a move must copy them. */
+export interface MovableSession {
+  kind: 'claude' | 'pi'
+  sessionId: string
+}
+
+/** What moving a task from `fromDir` to `toDir` has to carry along. */
+export interface TaskMovePlan {
+  /** Claude (CLI or chat) and Pi sessions to copy into the new directory's session folder. Codex finds its own. */
+  sessions: MovableSession[]
+  /** Terminals opened on a folder inside the old directory: the same folder in the new one. */
+  cwdMoves: { tabId: string; cwd: string }[]
+  /** Tabs whose process ends here and starts again over there. */
+  restartTabIds: string[]
+}
+
+export function planTaskMove(task: Task, fromDir: string, toDir: string): TaskMovePlan {
+  const sessions: MovableSession[] = []
+  const cwdMoves: { tabId: string; cwd: string }[] = []
+  const restartTabIds: string[] = []
+  for (const tab of taskTabs(task)) {
+    if ((tab.type === 'claude' || tab.type === 'claude-chat') && tab.sessionId) sessions.push({ kind: 'claude', sessionId: tab.sessionId })
+    if (tab.type === 'pi' && tab.sessionId) sessions.push({ kind: 'pi', sessionId: tab.sessionId })
+    if (runsInTaskDir(tab)) {
+      restartTabIds.push(tab.id)
+    } else if (tab.type === 'terminal' && tab.cwd) {
+      const cwd = retargetPath(tab.cwd, fromDir, toDir)
+      if (cwd) {
+        cwdMoves.push({ tabId: tab.id, cwd })
+        restartTabIds.push(tab.id)
+      }
+    }
+  }
+  return { sessions, cwdMoves, restartTabIds }
+}
+
+/**
+ * The directory a tab's process runs in, or null for a tab with no process
+ * there (browser, editor, note). Tab bodies are keyed on it, so a change
+ * remounts them and they spawn in the new place.
+ */
+export function tabSpawnDir(tab: Tab, taskDir: string): string | null {
+  if (tab.type === 'terminal') return tab.cwd || taskDir
+  return isAgentTabType(tab.type) ? taskDir : null
 }

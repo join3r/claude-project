@@ -8,9 +8,8 @@ import { NEW_TASK_NAME, PROMPT_BOX_AGENTS } from '../../shared/types'
 import type { AiTabType, AppConfig, Project, PromptBoxAgent } from '../../shared/types'
 import type { ChatImage } from '../../shared/claude-chat'
 import { taskNameFromPrompt } from '../../shared/task-name'
-import { workspaceBranchName } from '../../shared/branch-name'
 
-export { taskNameFromPrompt, workspaceBranchName }
+export { taskNameFromPrompt }
 
 export const PROMPT_BOX_AGENT_LABEL: Record<PromptBoxAgent, string> = {
   'claude-chat': 'Claude',

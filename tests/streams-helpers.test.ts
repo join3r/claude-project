@@ -7,8 +7,12 @@ import {
   resolveMainTabId,
   taskWorkspace,
   withLastTask,
-  workspaceReleasedBy
+  currentStreamId,
+  planTaskMove,
+  streamDirectory,
+  tabSpawnDir
 } from '../src/shared/streams'
+import { retargetPath } from '../src/shared/workspace-path'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 
 const tab = (id: string, type: Tab['type'] = 'terminal'): Tab => ({ id, type, title: id })
@@ -43,20 +47,30 @@ describe('streams', () => {
     expect(taskWorkspace(project(), 'plain')).toBeUndefined()
   })
 
-  it('releases the worktree only with the stream’s last task', () => {
-    const p = project()
-    expect(workspaceReleasedBy(p, 'ws')).toEqual(workspace)
-    p.streams[1].tasks.push(fixtureTask({ id: 'ws2' }))
-    expect(workspaceReleasedBy(p, 'ws')).toBeUndefined()
-  })
-
-  it('removes an emptied stream but never main', () => {
+  it('keeps an emptied stream, worktree and all, and main', () => {
     const p = withLastTask(project(), 'ws')
     const withoutWs = removeTaskFromProject(p, 'ws')
-    expect(withoutWs.streams.map(s => s.id)).toEqual(['main-p'])
-    expect(withoutWs.lastStreamId).toBeUndefined()
+    expect(withoutWs.streams.map(s => s.id)).toEqual(['main-p', 'stream-ws'])
+    expect(withoutWs.streams[1]).toMatchObject({ workspace, tasks: [] })
+    expect(withoutWs.streams[1].lastTaskId).toBeUndefined()
     const withoutPlain = removeTaskFromProject(withoutWs, 'plain')
-    expect(withoutPlain.streams).toEqual([{ id: 'main-p', name: 'main', isMain: true, tasks: [] }])
+    expect(withoutPlain.streams[0]).toEqual({ id: 'main-p', name: 'main', isMain: true, tasks: [] })
+  })
+
+  it('picks the current stream: the selected task’s, else the last one, else main', () => {
+    const p = project()
+    expect(currentStreamId(p, 'ws')).toBe('stream-ws')
+    expect(currentStreamId(p, null)).toBe('main-p')
+    expect(currentStreamId(withLastTask(p, 'ws'), 'gone')).toBe('stream-ws')
+    expect(currentStreamId(withLastTask(p, 'ws'), 'plain')).toBe('main-p')
+  })
+
+  it('names a stream’s directory: its worktree, else the project folder', () => {
+    const p = { ...project(), directory: '/repo/app' }
+    expect(streamDirectory(p, p.streams[1])).toBe('/repo/.worktrees/x')
+    expect(streamDirectory(p, { ...p.streams[1], workspace: { ...workspace, relativeProjectPath: 'app' } })).toBe('/repo/.worktrees/x/app')
+    expect(streamDirectory(p, p.streams[0])).toBe('/repo/app')
+    expect(streamDirectory({ ...p, ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } }, p.streams[0])).toBe('/srv')
   })
 
   it('remembers the last task through its stream', () => {
@@ -65,5 +79,48 @@ describe('streams', () => {
     expect(projectLastTaskId(p)).toBe('ws')
     expect(withLastTask(p, 'ws')).toBe(p)
     expect(projectLastTaskId(removeTaskFromProject(p, 'ws'))).toBeUndefined()
+  })
+})
+
+describe('task moves', () => {
+  it('re-bases a path inside the old directory, and nothing else', () => {
+    expect(retargetPath('/repo/src', '/repo', '/repo/.worktrees/x')).toBe('/repo/.worktrees/x/src')
+    expect(retargetPath('/repo', '/repo/', '/wt')).toBe('/wt')
+    expect(retargetPath('/repository/src', '/repo', '/wt')).toBeNull()
+    expect(retargetPath('/elsewhere', '/repo', '/wt')).toBeNull()
+    expect(retargetPath('C:\\repo\\src', 'C:\\repo', 'C:\\wt')).toBe('C:\\wt\\src')
+  })
+
+  it('plans the session copies, the terminals that follow and the restarts', () => {
+    const task = fixtureTask({
+      id: 't',
+      tabs: {
+        left: [
+          { id: 'cli', type: 'claude', title: 'Claude Code', sessionId: 's-cli' },
+          { id: 'chat', type: 'claude-chat', title: 'Claude', sessionId: 's-chat' },
+          { id: 'pi', type: 'pi', title: 'Pi', sessionId: 's-pi' },
+          { id: 'codex', type: 'codex', title: 'Codex', sessionId: 's-codex' },
+          tab('sh'),
+          { id: 'sub', type: 'terminal', title: 'src', cwd: '/repo/src' },
+          { id: 'out', type: 'terminal', title: 'tmp', cwd: '/tmp' },
+          { id: 'ed', type: 'editor', title: 'a.ts', filePath: 'src/a.ts' }
+        ]
+      }
+    })
+    const plan = planTaskMove(task, '/repo', '/wt')
+    expect(plan.sessions).toEqual([
+      { kind: 'claude', sessionId: 's-cli' },
+      { kind: 'claude', sessionId: 's-chat' },
+      { kind: 'pi', sessionId: 's-pi' }
+    ])
+    expect(plan.cwdMoves).toEqual([{ tabId: 'sub', cwd: '/wt/src' }])
+    expect(plan.restartTabIds).toEqual(['cli', 'chat', 'pi', 'codex', 'sh', 'sub'])
+  })
+
+  it('keys a tab body on the directory its process runs in', () => {
+    expect(tabSpawnDir(tab('sh'), '/wt')).toBe('/wt')
+    expect(tabSpawnDir({ ...tab('sub'), cwd: '/wt/src' }, '/wt')).toBe('/wt/src')
+    expect(tabSpawnDir(tab('c', 'claude-chat'), '/wt')).toBe('/wt')
+    expect(tabSpawnDir(tab('e', 'editor'), '/wt')).toBeNull()
   })
 })

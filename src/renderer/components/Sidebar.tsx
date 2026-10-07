@@ -12,7 +12,9 @@ import ProjectSwitcher from './ProjectSwitcher'
 import ActivityPanel from './ActivityPanel'
 import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
-import type { NewTaskSubmission } from './newTask'
+import NewStreamModal from './NewStreamModal'
+import { terminalTaskName, type NewTaskSubmission } from './newTask'
+import { setPendingCommand } from './terminalStartup'
 import { createTab } from './newTaskTabs'
 import { agentTakesMode, setPendingPrompt, taskNameFromPrompt } from './promptBox'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
@@ -37,6 +39,8 @@ import {
 import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
 import { confirmWorktreeRemoval, forceRemoveWorktree } from './sidebar/workspaceRemoval'
+import { streamCloseQuestion, taskCloseQuestion } from './sidebar/closeRules'
+import { useWorktreeChoice } from './sidebar/WorktreeChoiceDialog'
 import {
   extraTabCount,
   formatActivityAge,
@@ -46,7 +50,7 @@ import {
   sidebarTaskState,
   type SidebarTaskState
 } from './sidebar/streamTree'
-import { findTaskInProject, projectTasks, runsInTaskDir, taskTabs, workspaceReleasedBy } from '../../shared/streams'
+import { currentStreamId, findStreamOfTask, findTaskInProject, projectTasks, runsInTaskDir, taskTabs } from '../../shared/streams'
 
 /** A pin resolved against the data: its project, and the stream or task it names. */
 type ResolvedPin = { item: PinnedItem; key: string; project: Project; stream?: Stream; task?: Task }
@@ -63,7 +67,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     selectedProjectId, selectedTaskId, selectedTagIds,
     switchToTask, selectProjectHome,
     addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
-    addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, removeTask, renameTask,
+    addTask, addTaskInDirectory, addStream, removeTask, renameTask,
     moveTask, removeStream, renameStream,
     reorderProjects, getProjectDir,
     config, updateConfig,
@@ -156,6 +160,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  // The project the New stream dialog is open for.
+  const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
+  const worktreeChoice = useWorktreeChoice()
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const expandedProjects = new Set(expandedProjectIds)
@@ -260,6 +267,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   useEffect(() => {
+    return window.api.onMenuNewStream(() => {
+      if (selectedProjectId) setNewStreamProjectId(selectedProjectId)
+    })
+  }, [selectedProjectId])
+
+  useEffect(() => {
     return window.api.onMenuOpenSettings(() => {
       setSettingsOpen(true)
     })
@@ -313,9 +326,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     beginEdit(project.id, project.name)
   }
 
-  // No inline rename: the task opens on its prompt box, and the first prompt names it.
-  const handleAddTask = (projectId: string) => {
-    addTask(projectId, NEW_TASK_NAME)
+  /**
+   * An empty task in `streamId`, or in the project's current stream (the one this
+   * window is in, else the one last worked in, else `main`). No inline rename:
+   * the task opens on its prompt box, and the first prompt names it.
+   */
+  const handleAddTask = (projectId: string, streamId?: string) => {
+    const project = projects.find(p => p.id === projectId)
+    if (!project) return
+    const target = streamId ?? currentStreamId(project, selectedTaskId)
+    addTask(projectId, NEW_TASK_NAME, [], target)
+    setProjectExpanded(projectId, true)
+    if (target) setStreamExpanded(target, true)
   }
 
   const findTask = useCallback((projectId: string, taskId: string): Task | undefined =>
@@ -330,89 +352,117 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     else settleTask(projectId, taskId)
   }, [findTask, settleTask, unsettleTask])
 
-  // Like + Task, it opens on the prompt box; the worktree is made when the first
-  // prompt is sent, with the branch named after it.
-  const handleAddWorkspace = (projectId: string) => {
-    addPendingWorkspaceTask(projectId, NEW_TASK_NAME)
+  const handleNewStream = (projectId: string) => {
+    setNewStreamProjectId(projectId)
+  }
+
+  const handleStreamCreated = (projectId: string, name: string, workspace?: Parameters<typeof addStream>[2]) => {
+    const stream = addStream(projectId, name, workspace)
+    setNewStreamProjectId(null)
+    setSidebarTab('projects')
+    setProjectExpanded(projectId, true)
+    setStreamExpanded(stream.id, true)
   }
 
   /**
    * File what the composer asked for. A task that starts an agent is born with the
    * agent's tab already in it; the tab picks the prompt up on its first spawn.
    */
-  const handleComposedTask = ({ target, start, workspace, workspaceDraft }: NewTaskSubmission) => {
-    const tab = start ? createTab(start.agent) : null
-    const tabs = tab ? [tab] : []
-    const name = start ? taskNameFromPrompt(start.prompt.text) : NEW_TASK_NAME
-    if (tab && start) {
+  const handleComposedTask = ({ target, streamId, start, terminal }: NewTaskSubmission) => {
+    let tabs: ReturnType<typeof createTab>[] = []
+    let name = NEW_TASK_NAME
+    if (terminal) {
+      const tab = createTab('terminal')
+      if (terminal.command) setPendingCommand(tab.id, terminal.command)
+      tabs = [tab]
+      name = terminalTaskName(terminal.command)
+    } else if (start) {
+      const tab = createTab(start.agent)
       setPendingPrompt(tab.id, start.prompt)
       updateConfig({
         promptBoxAgent: start.agent,
         ...(agentTakesMode(start.agent) ? { promptBoxMode: start.prompt.mode ?? '' } : {})
       })
+      tabs = [tab]
+      name = taskNameFromPrompt(start.prompt.text)
     }
     if (target.kind === 'dir') {
-      addTaskInDirectory(target.directory, name, tabs, workspace, workspaceDraft)
+      addTaskInDirectory(target.directory, name, tabs)
     } else {
-      if (workspace) addWorkspaceTask(target.projectId, name, workspace, tabs)
-      else if (workspaceDraft) addPendingWorkspaceTask(target.projectId, name, workspaceDraft)
-      else addTask(target.projectId, name, tabs)
-      // The task is selected on create; expand its project so switching back
-      // to the tree doesn't hide the thing you just made.
+      addTask(target.projectId, name, tabs, streamId)
+      // The task is selected on create; expand its project and stream so switching
+      // back to the tree doesn't hide the thing you just made.
       setProjectExpanded(target.projectId, true)
+      if (streamId) setStreamExpanded(streamId, true)
     }
     setNewTaskOpen(false)
   }
 
-  // Hover ✕ on a task row. Step 6 turns it into "archive" (with its own confirm rules).
-  const handleDeleteTask = async (projectId: string, taskId: string) => {
+  const statusOf = useCallback((tabId: string) => tabStatusStore.getStatus(tabId), [tabStatusStore])
+
+  /**
+   * Run the stream-level worktree pre-flight, then `close` (which ends the tabs),
+   * then the forced removal. Resolves false when cancelled.
+   */
+  const closeWithWorktree = async (
+    project: Project,
+    stream: Stream,
+    close: () => Promise<boolean>
+  ): Promise<boolean> => {
+    const workspace = stream.workspace
+    if (!workspace) return close()
+    const answer = await confirmWorktreeRemoval(project, stream.name, workspace, worktreeChoice.ask)
+    if (!answer) return false
+    if (!await close()) return false
+    if (!answer.done) await forceRemoveWorktree(project, workspace, answer.keepBranch)
+    return true
+  }
+
+  /**
+   * Hover ✕ on a task row: the task closes (step 7 turns it into archive). Asks
+   * only when its agent is working (unsaved editors ask in `removeTask`). Its
+   * stream stays, even emptied.
+   */
+  const handleCloseTask = async (projectId: string, taskId: string) => {
     const project = projects.find(p => p.id === projectId)
     const task = findTaskInProject(project, taskId)
     if (!project || !task) return
-    // The worktree goes only with its stream's last task (`workspaceReleasedBy`).
-    const workspace = workspaceReleasedBy(project, taskId)
-    // Asked before the workspace pre-flight below: for a clean, merged workspace
-    // that call already removes the worktree.
-    if (!window.confirm(workspace
-      ? `Delete task "${task.name}" and its workspace?\n\nThe worktree folder is removed from disk.`
-      : `Delete task "${task.name}"? Its tabs close.`)) return
-
-    if (!workspace) {
+    const question = taskCloseQuestion(task, statusOf)
+    if (question && !window.confirm(question)) return
+    // The last task of a hidden ad-hoc project takes the project with it, and any
+    // worktree stream it still has: that gets the stream's pre-flight first.
+    const retiring = isEphemeralProject(project) && projectTasks(project).every(candidate => candidate.id === taskId)
+    const worktrees = retiring ? project.streams.filter(stream => stream.workspace) : []
+    if (worktrees.length === 0) {
       void removeTask(projectId, taskId)
       return
     }
-    const answer = await confirmWorktreeRemoval(project, workspace)
-    if (!answer) return
-    // Kill every tab first so no process holds the worktree's directory.
-    for (const tab of taskTabs(task)) {
-      window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
-      window.api.scrollbackDelete(tab.id)
+    const answers = []
+    for (const stream of worktrees) {
+      const answer = await confirmWorktreeRemoval(project, stream.name, stream.workspace!, worktreeChoice.ask)
+      if (!answer) return
+      answers.push({ stream, answer })
     }
-    await forceRemoveWorktree(project, workspace, answer.keepBranch)
-    // Tabs and worktree are already handled.
-    void removeTask(projectId, taskId, true)
+    if (!await removeTask(projectId, taskId)) return
+    for (const { stream, answer } of answers) {
+      if (!answer.done) await forceRemoveWorktree(project, stream.workspace!, answer.keepBranch)
+    }
   }
 
-  // Hover ✕ on a stream row (never `main`). Step 6 turns it into "archive stream".
-  const handleDeleteStream = async (projectId: string, streamId: string) => {
+  /**
+   * Hover ✕ on a stream row (never `main`): its tasks close and the stream goes
+   * (step 7: archive). Asks when a task is working (unsaved editors ask in
+   * `removeStream`); a worktree runs the pre-flight: clean and merged goes
+   * quietly, anything else asks keep branch / discard / cancel.
+   */
+  const handleCloseStream = async (projectId: string, streamId: string) => {
     const project = projects.find(p => p.id === projectId)
     const stream = project?.streams.find(candidate => candidate.id === streamId)
     if (!project || !stream || stream.isMain) return
-    const count = stream.tasks.length
-    const lines = [`Delete stream "${stream.name}"?`]
-    if (count > 0) lines.push(count === 1 ? 'Its task closes, with its tabs.' : `Its ${count} tasks close, with their tabs.`)
-    if (stream.workspace) lines.push('The worktree folder is removed from disk.')
-    if (!window.confirm(lines.join('\n\n'))) return
-    const workspace = stream.workspace
-    if (!workspace) {
-      void removeStream(projectId, streamId)
-      return
-    }
-    const answer = await confirmWorktreeRemoval(project, workspace)
-    if (!answer) return
-    // Closes every tab (no process keeps the worktree) and drops the stream.
-    if (!await removeStream(projectId, streamId, true)) return
-    await forceRemoveWorktree(project, workspace, answer.keepBranch)
+    const question = streamCloseQuestion(stream, statusOf)
+    if (question && !window.confirm(question)) return
+    // Tabs close before the forced removal, so no process holds the worktree.
+    await closeWithWorktree(project, stream, () => removeStream(projectId, streamId, true))
   }
 
   /**
@@ -488,7 +538,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const { pinDragIndex, pinDropIndex, handlePinMouseDown } = usePinnedDrag(resolvedPins, setPinnedOrder)
 
-  /** The "+ Task  + Workspace" row closing an expanded project, in the tree or under a pin. */
+  /** The "+ Task  + Stream" row closing an expanded project, in the tree or under a pin. */
   const renderAddTaskRow = (project: Project, indentCls: string = STREAM_ROW_PL) => (
     <div className={`flex items-center gap-0.5 flex-wrap mx-1.5 ${indentCls} pr-2 py-0.5`}>
       <button
@@ -497,14 +547,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       >
         <Plus size={12} className="inline mr-0.5" /> Task
       </button>
-      {!isShellCommandProject(project) && (
-        <button
-          className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
-          onClick={() => handleAddWorkspace(project.id)}
-        >
-          <Plus size={12} className="inline mr-0.5" /> Workspace
-        </button>
-      )}
+      <button
+        className="bg-transparent border-0 text-text-subtle cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-xs whitespace-nowrap shrink-0 transition-colors duration-(--motion-fast)"
+        onClick={() => handleNewStream(project.id)}
+      >
+        <Plus size={12} className="inline mr-0.5" /> Stream
+      </button>
     </div>
   )
 
@@ -568,7 +616,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {age && <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{age}</span>}
               <RowActions>
-                <RowAction danger title="Delete task" onClick={() => handleDeleteTask(project.id, task.id)}>
+                <RowAction danger title="Close task" onClick={() => void handleCloseTask(project.id, task.id)}>
                   <X size={13} />
                 </RowAction>
               </RowActions>
@@ -647,17 +695,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
               )}
               <span className="ml-auto flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-                <StateDot state={rolled} hideOnHover={removable} />
+                <StateDot state={rolled} hideOnHover />
                 {!open && (
-                  <span className={`text-xs text-text-subtle tabular-nums ${removable ? 'group-hover:hidden' : ''}`}>{stream.tasks.length}</span>
+                  <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>
                 )}
-                {removable && (
-                  <RowActions>
-                    <RowAction danger title="Delete stream" onClick={() => handleDeleteStream(project.id, stream.id)}>
+                <RowActions>
+                  <RowAction title={`New task in ${stream.name}`} onClick={() => handleAddTask(project.id, stream.id)}>
+                    <Plus size={13} />
+                  </RowAction>
+                  {removable && (
+                    <RowAction danger title="Close stream" onClick={() => void handleCloseStream(project.id, stream.id)}>
                       <X size={13} />
                     </RowAction>
-                  </RowActions>
-                )}
+                  )}
+                </RowActions>
               </span>
             </>
           )}
@@ -777,9 +828,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           {stream.workspace && (
             <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
           )}
-          <span className="ml-auto flex items-center gap-1.5 shrink-0">
-            <StateDot state={rolled} />
-            {!open && <span className="text-xs text-text-subtle tabular-nums">{stream.tasks.length}</span>}
+          <span className="ml-auto flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+            <StateDot state={rolled} hideOnHover />
+            {!open && <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>}
+            <RowActions>
+              <RowAction title={`New task in ${stream.name}`} onClick={() => handleAddTask(project.id, stream.id)}>
+                <Plus size={13} />
+              </RowAction>
+            </RowActions>
           </span>
         </div>
         {open && renderStreamTasks(project, stream, 'pin')}
@@ -868,14 +924,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>
             )}
             <RowActions>
-              {/* A task pin adds a sibling (in `main` until step 6 makes it stream-aware). */}
-              {(isProjectPin || task) && (
-                <RowAction title={isProjectPin ? 'New task' : `New task in ${project.name}`} onClick={() => handleAddTask(project.id)}>
-                  <Plus size={13} />
-                </RowAction>
-              )}
-              {isProjectPin && !isShellCommandProject(project) && (
-                <RowAction title="New workspace" onClick={() => handleAddWorkspace(project.id)}>
+              {/* A task pin adds a sibling in its stream; a stream pin, a task in it. */}
+              {(() => {
+                const pinStream = stream ?? (task ? findStreamOfTask(project, task.id) : undefined)
+                return (
+                  <RowAction
+                    title={pinStream ? `New task in ${pinStream.name}` : 'New task'}
+                    onClick={() => handleAddTask(project.id, pinStream?.id)}
+                  >
+                    <Plus size={13} />
+                  </RowAction>
+                )
+              })()}
+              {isProjectPin && (
+                <RowAction title="New stream" onClick={() => handleNewStream(project.id)}>
                   <GitBranch size={13} />
                 </RowAction>
               )}
@@ -1089,14 +1151,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         setContextMenu={setContextMenu}
         findTask={findTask}
         handleToggleSettled={handleToggleSettled}
-        handleDeleteTask={handleDeleteTask}
-        handleDeleteStream={handleDeleteStream}
+        handleCloseTask={handleCloseTask}
+        handleCloseStream={handleCloseStream}
         beginEdit={beginEdit}
         isPinned={isPinned}
         setDuplicateProjectId={setDuplicateProjectId}
         setProjectSettingsId={setProjectSettingsId}
         onAddTask={handleAddTask}
-        onAddWorkspace={handleAddWorkspace}
+        onNewStream={handleNewStream}
       />
 
       <div className="px-3 py-2 border-t border-hair">
@@ -1199,10 +1261,25 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         )
       })()}
 
+      {newStreamProjectId && (() => {
+        const project = projects.find(p => p.id === newStreamProjectId)
+        if (!project) return null
+        return (
+          <NewStreamModal
+            project={project}
+            onCreate={(name, workspace) => handleStreamCreated(project.id, name, workspace)}
+            onClose={() => setNewStreamProjectId(null)}
+          />
+        )
+      })()}
+
+      {worktreeChoice.dialog}
+
       {newTaskOpen && config && (
         <NewTaskModal
           projects={orderedProjects}
           defaultProjectId={selectedProjectId}
+          selectedTaskId={selectedTaskId}
           getProjectDir={getProjectDir}
           config={config}
           allTags={tags}

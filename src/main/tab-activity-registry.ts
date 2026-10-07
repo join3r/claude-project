@@ -6,8 +6,7 @@ import type { TabStatusValue } from '../shared/types'
  * Main's copy of "what is this tab's process doing right now".
  *
  * A window's `TabStatusContext` is per-window by construction, so it is blind to a
- * task running in another window — and idle cleanup deleting a live agent because
- * the sweeping window could not see it is finding #7. Main receives every hook
+ * task running in another window. Main receives every hook
  * event and owns every PTY, so this is the only complete picture there is.
  *
  * The transitions come from `shared/ai-status.ts`, the same state machine
@@ -15,8 +14,7 @@ import type { TabStatusValue } from '../shared/types'
  * Hook and process events feed it directly. The renderer-only heuristics (terminal
  * bell, PTY-quiet) have no equivalent here, so for tabs without hooks the window
  * that mounts them reports its verdict (`reported`) — and a window may not be
- * open, which is why the sweep also treats a live PTY as protection rather than
- * trusting statuses alone.
+ * open.
  */
 export class TabActivityRegistry {
   private readonly statuses = new Map<string, TabStatusValue>()

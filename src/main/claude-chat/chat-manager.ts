@@ -46,7 +46,7 @@ export interface ChatManagerDeps {
   /** A hook payload from the session, for the status/activity pipeline. */
   onHook: (tabId: string, body: Record<string, unknown>) => void
   onPromptResolved: (tabId: string, prompt: ChatPrompt, allowed: boolean) => void
-  /** The process started or ended (liveness for idle cleanup, status). */
+  /** The process started or ended (liveness, status). */
   onProcessChange: (tabId: string, running: boolean, error?: string) => void
   log: (message: string) => void
 }

@@ -35,7 +35,7 @@ export type PromptBoxAgent = typeof PROMPT_BOX_AGENTS[number]
 /**
  * The live state of one tab's process. Lives in shared rather than in the
  * renderer's TabStatusContext because main keeps the authoritative copy too
- * (see `src/main/tab-activity-registry.ts`) and idle cleanup reads both.
+ * (see `src/main/tab-activity-registry.ts`) for the phone's inbox.
  */
 export type TabStatusValue = 'working' | 'attention' | 'exited' | null
 
@@ -112,12 +112,6 @@ export interface Task {
   mainTabId?: string
   /** One row of columns, left to right. Empty only while the task has no tab. */
   panes: TaskPane[]
-  /**
-   * TEMPORARY (removed in step 6): a task whose stream has no worktree yet. The
-   * worktree is created (branch named after the first prompt) when the first tab
-   * opens, and lands on the task's stream.
-   */
-  workspaceDraft?: WorkspaceDraft
   lastInteractedAt?: number
   inbox?: TaskInboxState
 }
@@ -135,11 +129,6 @@ export interface Stream {
   workspace?: WorkspaceConfig
   tasks: Task[]
   lastTaskId?: string
-}
-
-export interface WorkspaceDraft {
-  /** The branch the worktree will fork from; unset means main, then master, then the first branch. */
-  baseBranch?: string
 }
 
 export interface WorkspaceConfig {
@@ -471,7 +460,6 @@ export interface AppConfig {
     enabled: boolean
     heightPx: number
   }
-  idleTaskCleanup: IdleTaskCleanupConfig
   /**
    * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
    * window's stale copy cannot flip it back.
@@ -494,41 +482,11 @@ export interface ExternalEditorsConfig {
   defaultId: string | null
 }
 
-/**
- * Auto-deletion of tasks that have gone quiet. Ships off: the sweep deletes silently, so
- * nothing happens until it is deliberately enabled.
- */
-/**
- * Everything idle cleanup exempts a task for, as main sees it across every window:
- * what is selected somewhere, what the hooks have reported, what still has a live
- * process, and what holds an unsaved buffer.
- */
-export interface CleanupActivity {
-  openTaskIds: string[]
-  statuses: Record<string, TabStatusValue>
-  liveTabIds: string[]
-  dirtyTabIds: string[]
-}
-
-/** A task main deleted on its own (idle cleanup), and the tabs that went with it. */
+/** A task (or some of its tabs) main removed on its own (a phone's close), and the tabs that went. */
 export interface TaskRemoval {
   projectId: string
   taskId: string
   tabIds: string[]
-}
-
-export interface IdleTaskCleanupConfig {
-  enabled: boolean
-  /** Idle longer than `days`. */
-  byAge: { enabled: boolean; days: number }
-  /** More than `maxTasks` tasks in the project. */
-  byCount: { enabled: boolean; maxTasks: number }
-  /** How the two rules compose. Irrelevant unless both are enabled. */
-  combine: 'and' | 'or'
-  /** Only touch tasks explicitly settled in the inbox. */
-  settledOnly: boolean
-  /** Also delete workspace tasks whose worktree is clean and branch already merged. */
-  includeCleanWorkspaces: boolean
 }
 
 /** Interactive Windows tabs are Git Bash only. Legacy `powershell` / `cmd` values coerce here. */
@@ -718,15 +676,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   activityPanel: {
     enabled: true,
     heightPx: 160
-  },
-  // Opt-in: the sweep deletes without asking, so it stays dormant until you turn it on.
-  idleTaskCleanup: {
-    enabled: false,
-    byAge: { enabled: true, days: 14 },
-    byCount: { enabled: true, maxTasks: 20 },
-    combine: 'and',
-    settledOnly: true,
-    includeCleanWorkspaces: false
   },
   externalEditors: { editors: [], defaultId: null },
   mobile: { ...DEFAULT_MOBILE_CONFIG }

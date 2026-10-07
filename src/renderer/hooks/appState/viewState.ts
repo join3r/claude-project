@@ -115,7 +115,7 @@ export function removeTaskView(
   }
 }
 
-/** Main deleted a task by itself (idle cleanup); drop what this window kept for it. */
+/** Main deleted a task by itself (a phone closed it); drop what this window kept for it. */
 export function forgetRemovedTaskView(prev: WindowViewState, taskId: string): WindowViewState {
   if (!(taskId in prev.taskStates) && prev.selectedTaskId !== taskId) return prev
   const taskStates = { ...prev.taskStates }

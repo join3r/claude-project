@@ -1,10 +1,11 @@
 /**
- * Helpers for the "New task" composer: pick where the task goes, type its first
- * prompt, send. The prompt names the task and, for a workspace, its branch.
+ * Helpers for the "New task" composer: pick where the task goes (project and
+ * stream), say whether it is an agent or a terminal, type its first prompt (or
+ * start-up command), send. The prompt or command names the task.
  */
 
 import { fuzzyMatch } from '../palette/fuzzy'
-import type { PromptBoxAgent, WorkspaceConfig, WorkspaceDraft } from '../../shared/types'
+import type { PromptBoxAgent } from '../../shared/types'
 import type { PendingPrompt } from './promptBox'
 import { branchSlug, defaultBaseBranch } from '../../shared/branch-name'
 
@@ -19,44 +20,40 @@ export type NewTaskTarget =
   | { kind: 'project'; projectId: string }
   | { kind: 'dir'; directory: string }
 
-/** What the composer asks for: a task, maybe an agent started on it, maybe a worktree. */
+/** An agent task, or a terminal task. */
+export type NewTaskKind = 'agent' | 'terminal'
+
+/** What the composer asks for: a task in a stream, maybe an agent or a terminal started on it. */
 export interface NewTaskSubmission {
   target: NewTaskTarget
+  /** The stream of a project target; absent means `main`. */
+  streamId?: string
   /** The agent tab to open with the first prompt; absent, the task opens on its prompt box. */
   start?: { agent: PromptBoxAgent; prompt: PendingPrompt }
-  /** A worktree already cut for the task. */
-  workspace?: WorkspaceConfig
-  /** A workspace still to be cut, when the first prompt names it. */
-  workspaceDraft?: WorkspaceDraft
+  /** A terminal task, with the command to type into it once it starts (if any). */
+  terminal?: { command?: string }
 }
 
 export interface NewTaskDraft {
   target: NewTaskTarget | null
-  /** The first prompt. It names the task, and the branch when there is a workspace. */
+  /** The first prompt or start-up command. It names the task. */
   prompt: string
-  /** Whether the task should get its own worktree + branch. */
-  workspace: boolean
-  baseBranch: string
 }
 
-/**
- * A draft is submittable once it has somewhere to go. The prompt is optional: a
- * task created without one opens on its prompt box. A workspace also needs a
- * branch to fork from.
- */
+/** A draft is submittable once it has somewhere to go; the prompt is optional. */
 export function isNewTaskDraftValid(draft: NewTaskDraft): boolean {
   if (!draft.target) return false
-  if (draft.target.kind === 'project' ? !draft.target.projectId : !draft.target.directory) return false
-  return !draft.workspace || !!draft.baseBranch
+  return draft.target.kind === 'project' ? !!draft.target.projectId : !!draft.target.directory
 }
 
-/**
- * A workspace asked for without a prompt: nothing to name the branch after yet,
- * so the task opens on its prompt box and the worktree is cut on the first send.
- */
-export function isPendingWorkspaceDraft(draft: NewTaskDraft): boolean {
-  return draft.workspace && !draft.prompt.trim()
+/** A terminal task's name: its start-up command when it has one, else "Terminal". */
+export function terminalTaskName(command: string | undefined): string {
+  const firstLine = (command ?? '').trim().split('\n')[0].trim()
+  if (!firstLine) return TERMINAL_TASK_NAME
+  return firstLine.length > 60 ? `${firstLine.slice(0, 59)}…` : firstLine
 }
+
+export const TERMINAL_TASK_NAME = 'Terminal'
 
 /**
  * Orders projects for the composer's picker, using the same scorer as the command

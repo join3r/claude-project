@@ -1,20 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, GitBranch, Plus } from 'lucide-react'
+import { ArrowUp, ChevronDown, Plus } from 'lucide-react'
 import type { AppConfig, Project, PromptBoxAgent, Tag } from '../../shared/types'
 import { dirBasename } from '../../shared/paths'
-import { Field, HelperText, menuItemCls } from './ui'
+import { Field, HelperText, SegCtl, menuItemCls } from './ui'
 import AddLocalProject from './AddLocalProject'
 import ChipMenu from './claude-chat/ChipMenu'
 import { AttachmentStrip, toChatImages, useImageAttachments } from './claude-chat/imageAttachments'
-import { defaultBaseBranch, isNewTaskDraftValid, isPendingWorkspaceDraft, matchProjects } from './newTask'
-import type { NewTaskSubmission, NewTaskTarget } from './newTask'
-import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickPromptAgent, workspaceBranchName } from './promptBox'
+import { isNewTaskDraftValid, matchProjects } from './newTask'
+import type { NewTaskKind, NewTaskSubmission, NewTaskTarget } from './newTask'
+import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickPromptAgent } from './promptBox'
+import { currentStreamId } from '../../shared/streams'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
 
 interface Props {
   projects: Project[]
   /** Pre-selected project — the one you were last looking at. */
   defaultProjectId: string | null
+  /** The task this window shows: its stream is the pre-selected one. */
+  selectedTaskId?: string | null
+  /** Pre-selected stream (of the default project), overriding the one above. */
+  defaultStreamId?: string | null
   getProjectDir: (project: Project) => string
   /** Which agents are switched on, and the last agent and mode a prompt went to. */
   config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi' | 'promptBoxAgent' | 'promptBoxMode'>
@@ -43,12 +48,11 @@ function sameTarget(a: NewTaskTarget | null, b: NewTaskTarget): boolean {
     : a.kind === 'dir' && b.kind === 'dir' && a.directory === b.directory
 }
 
-const ATTEMPTS = 3
-
 /**
- * Start a task the way you start an agent: say where, say what, send. The first
- * prompt names the task and opens the chosen agent on it; a workspace gets its
- * branch named after the prompt too. Sent empty, the task opens on its prompt box.
+ * Start a task the way you start an agent: say where (project and stream), say
+ * what, send. The first prompt names the task and opens the chosen agent on it;
+ * sent empty, the task opens on its prompt box. A terminal task opens a terminal,
+ * named after its optional start-up command (typed into it once it starts).
  *
  * The destination list holds exactly one highlighted row, and that row is what
  * gets created — there is no separate "cursor" that can drift away from the
@@ -57,6 +61,8 @@ const ATTEMPTS = 3
 export default function NewTaskModal({
   projects,
   defaultProjectId,
+  selectedTaskId,
+  defaultStreamId,
   getProjectDir,
   config,
   allTags,
@@ -76,27 +82,18 @@ export default function NewTaskModal({
   const [mode, setMode] = useState(config.promptBoxMode ?? '')
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
-  const [workspace, setWorkspace] = useState(false)
-  const [branches, setBranches] = useState<string[]>([])
-  const [branchesLoading, setBranchesLoading] = useState(false)
-  const [baseBranch, setBaseBranch] = useState('')
+  const [kind, setKind] = useState<NewTaskKind>('agent')
+  // Null: the target project's current stream.
+  const [pickedStreamId, setPickedStreamId] = useState<string | null>(defaultStreamId ?? null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [projectFilter, setProjectFilter] = useState('')
   // The directory picked via "Use a directory…", if any. No project record exists
   // for it yet — one is minted only if this draft is actually created.
   const [pickedDir, setPickedDir] = useState<string | null>(null)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
-  // The branch git is cutting right now, or null.
-  const [creating, setCreating] = useState<string | null>(null)
-  const [cancelling, setCancelling] = useState(false)
-  const [error, setError] = useState('')
   const projectListRef = useRef<HTMLDivElement>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
-  // git has no abort once it starts cutting a worktree, so "cancel" means: ignore
-  // whatever comes back, and undo it. Checked after every await, not just the first.
-  const cancelledRef = useRef(false)
-  const mountedRef = useRef(true)
 
   const project = useMemo(
     () => (target?.kind === 'project' ? projects.find(p => p.id === target.projectId) ?? null : null),
@@ -132,21 +129,26 @@ export default function NewTaskModal({
   // project record behind it, so both come straight off the path.
   const targetDir = project ? getProjectDir(project) : pickedDir && target?.kind === 'dir' ? pickedDir : ''
   const targetLabel = project ? project.name : target?.kind === 'dir' ? dirBasename(target.directory) : ''
-  // Shell-command projects have no directory to make a worktree in, and run no agents.
-  const workspaceSupported = target?.kind === 'dir' || (!!project && !project.shellCommand)
-  const workspaceOn = workspace && workspaceSupported
+  // A picked stream that isn't the target project's falls back to its current one.
+  const streamId = project
+    ? (project.streams.some(stream => stream.id === pickedStreamId) ? pickedStreamId! : currentStreamId(project, selectedTaskId))
+    : undefined
+  const streamOptions = project?.streams.map(stream => ({ value: stream.id, label: stream.name })) ?? []
+  const streamLabel = project?.streams.find(stream => stream.id === streamId)?.name ?? 'main'
+  const terminal = kind === 'terminal'
+  // Shell-command projects run their own command in every terminal.
+  const takesCommand = terminal && !project?.shellCommand
   const agents = useMemo(
     () => (target ? availablePromptAgents(config, project ?? {}) : []),
     [config, project, target]
   )
-  const agent = pickPromptAgent(picked ?? config.promptBoxAgent, agents)
+  const agent = terminal ? undefined : pickPromptAgent(picked ?? config.promptBoxAgent, agents)
   const takesMode = !!agent && agentTakesMode(agent)
   // Without an agent to hand it to, there is no prompt — the task opens blank.
-  const promptText = agent ? prompt.trim() : ''
-  const busy = creating !== null
+  const promptText = agent || takesCommand ? prompt.trim() : ''
   // Only the chat view takes images; switching away hides them rather than dropping them.
   const takesImages = agent === 'claude-chat'
-  const attachments = useImageAttachments(takesImages && !busy)
+  const attachments = useImageAttachments(takesImages)
   const images = takesImages ? attachments.images : []
   // Images go with a prompt: one alone would name the task and branch after nothing.
   const imagesNeedPrompt = images.length > 0 && !promptText
@@ -154,10 +156,8 @@ export default function NewTaskModal({
   /** Point the composer somewhere else, dropping everything the old target loaded. */
   const selectTarget = (next: NewTaskTarget): void => {
     setTarget(next)
-    // Another repo means other branches.
-    setBranches([])
-    setBaseBranch('')
-    setError('')
+    // Another project means other streams: start on its current one.
+    setPickedStreamId(null)
   }
 
   // Keep the selection inside the visible list: if the filter hides whatever was
@@ -180,17 +180,6 @@ export default function NewTaskModal({
     row?.scrollIntoView({ block: 'nearest' })
   }, [cursor, pickerOpen])
 
-  // However the dialog goes away — Escape, backdrop, or the parent dropping it —
-  // it takes any request it started with it.
-  useEffect(() => {
-    cancelledRef.current = false
-    mountedRef.current = true
-    return () => {
-      cancelledRef.current = true
-      mountedRef.current = false
-    }
-  }, [])
-
   // Grow with the text, up to a cap.
   useEffect(() => {
     const el = promptRef.current
@@ -201,18 +190,7 @@ export default function NewTaskModal({
 
   const focusPrompt = (): void => { requestAnimationFrame(() => promptRef.current?.focus()) }
 
-  /** Give up on the dialog, and on anything it has in flight. */
-  const requestClose = (): void => {
-    // First press while git is working stays up to say so; a second one bails out
-    // and lets the unwind finish on its own.
-    if (busy && !cancelling) {
-      cancelledRef.current = true
-      setCancelling(true)
-      setError('')
-      return
-    }
-    onClose()
-  }
+  const requestClose = (): void => { onClose() }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -233,7 +211,7 @@ export default function NewTaskModal({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, busy, cancelling, newProjectOpen, pickerOpen])
+  }, [onClose, newProjectOpen, pickerOpen])
 
   useEffect(() => {
     if (!pickerOpen) return
@@ -244,48 +222,16 @@ export default function NewTaskModal({
     return () => window.removeEventListener('mousedown', close)
   }, [pickerOpen])
 
-  // Branches are only fetched once you actually ask for a workspace — the common
-  // case is a plain task, and a git call per project switch would be wasted work.
-  useEffect(() => {
-    if (!workspaceOn || !targetDir) return
-    let cancelled = false
-    setBranchesLoading(true)
-    setError('')
-    window.api.workspaceListBranches({
-      projectDir: targetDir,
-      projectId: project?.ssh ? project.id : undefined,
-      sshConfig: project?.ssh
-    })
-      .then(list => {
-        if (cancelled) return
-        setBranches(list)
-        setBaseBranch(defaultBaseBranch(list))
-      })
-      .catch(err => {
-        if (cancelled) return
-        setBranches([])
-        setBaseBranch('')
-        setError(err instanceof Error ? err.message : 'Failed to list branches. Is this a git repository?')
-      })
-      .finally(() => {
-        if (!cancelled) setBranchesLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [workspaceOn, targetDir, project])
-
-  const draft = { target, prompt: promptText, workspace: workspaceOn, baseBranch }
+  const draft = { target, prompt: promptText }
   const valid = isNewTaskDraftValid(draft) && !imagesNeedPrompt
 
-  /** The unwind is done — drop the dialog, unless the user already walked away. */
-  const finishCancel = (): void => {
-    if (!mountedRef.current) return
-    setCreating(null)
-    setCancelling(false)
-    onClose()
-  }
-
-  const handleCreate = async (): Promise<void> => {
-    if (!valid || busy || !target) return
+  const handleCreate = (): void => {
+    if (!valid || !target) return
+    const where = target.kind === 'project' && streamId ? { streamId } : {}
+    if (terminal) {
+      onCreate({ target, ...where, terminal: takesCommand && promptText ? { command: promptText } : {} })
+      return
+    }
     const start = agent && promptText
       ? {
           agent,
@@ -298,95 +244,13 @@ export default function NewTaskModal({
           }
         }
       : undefined
-
-    if (!workspaceOn) {
-      onCreate({ target, start })
-      return
-    }
-
-    if (isPendingWorkspaceDraft(draft)) {
-      onCreate({ target, workspaceDraft: { baseBranch } })
-      return
-    }
-
-    cancelledRef.current = false
-    setCancelling(false)
-    setError('')
-
-    const workspaceTarget = {
-      projectDir: targetDir,
-      projectId: project?.ssh ? project.id : undefined,
-      sshConfig: project?.ssh
-    }
-
-    // The listed branches rule out most clashes; a branch made since then (or a
-    // stale .worktrees folder) still fails, so step to the next name and retry.
-    const taken = [...branches]
-    let result: Awaited<ReturnType<typeof window.api.workspaceCreate>> | null = null
-    for (let attempt = 1; !result; attempt++) {
-      const name = workspaceBranchName(promptText, taken)
-      setCreating(name)
-      try {
-        result = await window.api.workspaceCreate({ ...workspaceTarget, name, baseBranch })
-      } catch (err) {
-        // A cancelled failure has nothing to unwind — git got no further than we did.
-        if (cancelledRef.current) {
-          finishCancel()
-          return
-        }
-        if (!mountedRef.current) return
-        const message = err instanceof Error ? err.message : 'Failed to create workspace'
-        if (attempt < ATTEMPTS && /already exists/i.test(message)) {
-          taken.push(name)
-          continue
-        }
-        setError(message)
-        setCreating(null)
-        return
-      }
-    }
-
-    if (!cancelledRef.current) {
-      onCreate({
-        target,
-        start,
-        workspace: {
-          worktreePath: result.worktreePath,
-          branchName: result.branchName,
-          baseBranch,
-          relativeProjectPath: result.relativeProjectPath
-        }
-      })
-      return
-    }
-
-    // Cancelled while git was working: the worktree is on disk with nothing
-    // pointing at it. Force is safe here — the branch is seconds old and sits on
-    // its base, so there is no uncommitted or unmerged work to protect.
-    try {
-      await window.api.workspaceDelete({
-        ...workspaceTarget,
-        worktreePath: result.worktreePath,
-        branchName: result.branchName,
-        baseBranch,
-        force: true
-      })
-    } catch (err) {
-      // Never drop an orphan quietly: if we can't undo it, name it so the user can.
-      if (!mountedRef.current) return
-      const why = err instanceof Error ? err.message : 'unknown error'
-      setError(`Cancelled, but the workspace at ${result.worktreePath} could not be removed (${why}). Delete it by hand.`)
-      setCreating(null)
-      setCancelling(false)
-      return
-    }
-    finishCancel()
+    onCreate({ target, ...where, start })
   }
 
   const onPromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
-      void handleCreate()
+      handleCreate()
     } else if (e.key === 'Tab' && e.shiftKey && takesMode) {
       e.preventDefault()
       setMode(nextMode(mode))
@@ -418,7 +282,7 @@ export default function NewTaskModal({
   const handlePickDirectory = async (): Promise<void> => {
     setPickerOpen(false)
     const dir = await window.api.pickDirectory()
-    if (!dir || !mountedRef.current) return
+    if (!dir) return
     setPickedDir(dir)
     setProjectFilter('')
     selectTarget({ kind: 'dir', directory: dir })
@@ -435,6 +299,10 @@ export default function NewTaskModal({
 
   const placeholder = !target
     ? 'Pick a project first'
+    : terminal
+      ? takesCommand
+        ? 'Start-up command (optional), e.g. npm run dev. Enter opens the terminal'
+        : 'Custom shell projects run their own command. Enter opens the terminal.'
     : agent
       ? `What should ${PROMPT_BOX_AGENT_LABEL[agent]} work on? Enter to start, Shift+Enter for a new line`
       : project?.shellCommand
@@ -459,7 +327,6 @@ export default function NewTaskModal({
                 aria-label="Project"
                 aria-expanded={pickerOpen}
                 title={targetDir || targetLabel || undefined}
-                disabled={busy}
                 onClick={() => setPickerOpen(!pickerOpen)}
                 className="inline-flex items-center gap-1 max-w-full h-7 px-2 rounded-md border-0 bg-surface-3 text-md text-text cursor-pointer hover:bg-sel disabled:opacity-50 disabled:cursor-default"
               >
@@ -521,10 +388,31 @@ export default function NewTaskModal({
                 </div>
               )}
             </div>
+            {project && project.streams.length > 1 && (
+              <>
+                <span className="text-md text-text-subtle shrink-0">›</span>
+                <ChipMenu
+                  label={streamLabel}
+                  title="Stream"
+                  placement="down"
+                  options={streamOptions}
+                  value={streamId ?? ''}
+                  onChange={(v) => { setPickedStreamId(v); focusPrompt() }}
+                />
+              </>
+            )}
+            <span className="ml-auto shrink-0">
+              <SegCtl
+                compact
+                options={[{ value: 'agent', label: 'Agent' }, { value: 'terminal', label: 'Terminal' }] as const}
+                value={kind}
+                onChange={(next) => { setKind(next); focusPrompt() }}
+              />
+            </span>
             <button
               type="button"
               onClick={requestClose}
-              className="ml-auto bg-transparent border-0 text-text-muted cursor-pointer text-lg leading-none px-1 rounded-sm hover:text-text"
+              className="bg-transparent border-0 text-text-muted cursor-pointer text-lg leading-none px-1 rounded-sm hover:text-text"
               title="Close"
             >
               &times;
@@ -538,17 +426,16 @@ export default function NewTaskModal({
             <AttachmentStrip images={images} onRemove={attachments.remove} />
             <textarea
               ref={promptRef}
-              rows={3}
+              rows={terminal ? 1 : 3}
               value={prompt}
-              readOnly={busy}
-              disabled={!agent}
+              disabled={!agent && !takesCommand}
               autoFocus
-              aria-label="First prompt"
+              aria-label={terminal ? 'Start-up command' : 'First prompt'}
               placeholder={placeholder}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={onPromptKeyDown}
               onPaste={attachments.onPaste}
-              className="block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] min-h-[82px] max-h-60 disabled:cursor-default"
+              className={`block w-full resize-none bg-transparent border-0 outline-none px-3 pt-2.5 pb-1 text-base text-text placeholder:text-text-subtle leading-[1.5] ${terminal ? 'font-mono min-h-[40px]' : 'min-h-[82px]'} max-h-60 disabled:cursor-default`}
             />
             <div className="flex items-end gap-1 px-1.5 pb-1.5">
               <div className="flex-1 min-w-0 flex items-center gap-0.5 flex-wrap">
@@ -562,42 +449,13 @@ export default function NewTaskModal({
                 {agent === 'claude-chat' && (
                   <ChipMenu label={`Effort: ${effort || 'Default'}`} title="Thinking effort" placement="down" options={EFFORT_OPTIONS} value={effort} onChange={(v) => { setEffort(v); focusPrompt() }} />
                 )}
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={workspaceOn}
-                  aria-label="Isolate in a workspace"
-                  disabled={!workspaceSupported || busy}
-                  title={workspaceSupported
-                    ? 'Run the task in its own git worktree, on a new branch named after the prompt'
-                    : 'Not available for custom shell projects'}
-                  onClick={() => { setWorkspace(!workspaceOn); focusPrompt() }}
-                  className={[
-                    'inline-flex items-center gap-1 h-5 px-1.5 rounded-md border-0 text-xs cursor-pointer disabled:opacity-50 disabled:cursor-default transition-colors duration-(--motion-fast)',
-                    workspaceOn ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:bg-surface-3 hover:text-text'
-                  ].join(' ')}
-                >
-                  <GitBranch size={11} className="shrink-0" aria-hidden />
-                  Workspace
-                </button>
-                {workspaceOn && (
-                  <ChipMenu
-                    label={`from ${baseBranch || (branchesLoading ? '…' : 'no branch')}`}
-                    title="Base branch"
-                    placement="down"
-                    disabled={busy || branches.length === 0}
-                    options={branches.map((b) => ({ value: b, label: b }))}
-                    value={baseBranch}
-                    onChange={(v) => { setBaseBranch(v); focusPrompt() }}
-                  />
-                )}
               </div>
               <button
                 type="button"
-                title={promptText ? 'Start (Enter)' : 'Create an empty task (Enter)'}
+                title={terminal ? 'Open the terminal (Enter)' : promptText ? 'Start (Enter)' : 'Create an empty task (Enter)'}
                 aria-label="Create task"
-                disabled={!valid || busy}
-                onClick={() => void handleCreate()}
+                disabled={!valid}
+                onClick={() => handleCreate()}
                 className="w-6 h-6 shrink-0 inline-flex items-center justify-center rounded-md border-0 bg-accent text-accent-ink cursor-pointer hover:brightness-105 disabled:opacity-35 disabled:cursor-default"
               >
                 <ArrowUp size={14} strokeWidth={2.5} />
@@ -605,21 +463,15 @@ export default function NewTaskModal({
             </div>
           </div>
 
-          {cancelling ? (
-            <HelperText>Cancelling — removing the workspace git already started.</HelperText>
-          ) : creating ? (
-            <HelperText>Creating worktree <span className="font-mono">{creating}</span>…</HelperText>
-          ) : error ? (
-            <HelperText><span className="text-danger">{error}</span></HelperText>
-          ) : workspaceOn && !branchesLoading && branches.length === 0 ? (
-            <HelperText>No branch to fork a workspace from. Is this a git repository with a commit?</HelperText>
-          ) : imagesNeedPrompt ? (
+          {imagesNeedPrompt ? (
             <HelperText>Add a prompt to send the images with.</HelperText>
           ) : !target ? (
             <HelperText>Tasks live in a project — add one, or point this task at a directory.</HelperText>
           ) : (
             <HelperText>
-              {agent
+              {terminal
+                ? `A terminal task in ${streamLabel}. It is named after the start-up command, or "Terminal"; rename it from the sidebar.`
+                : agent
                 ? `The first prompt names the task.${takesImages ? ' Paste or drop images to send them with it.' : ''} Send it empty to open the task without starting an agent.`
                 : 'The task opens empty; add a terminal or browser tab from there.'}
             </HelperText>
