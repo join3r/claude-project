@@ -762,8 +762,9 @@ public enum MockInbox {
                     ]),
                 ]),
                 InboxProject(id: "p-infra", name: "infra", emoji: "🛠️", remote: true, streams: [infraMain], tasks: [
-                    task("t-k8s", "k8s-upgrade", infraMain, lastInteractedAt: ago(90), eventAt: ago(15), tabs: [
-                        InboxTab(id: "tab-9", type: .claude, title: "Claude Code", status: .idle, since: ago(90)),
+                    // Your turn: the agent finished after your last word.
+                    task("t-k8s", "k8s-upgrade", infraMain, lastInteractedAt: ago(90), eventAt: ago(15), unread: true, tabs: [
+                        InboxTab(id: "tab-9", type: .claude, title: "Claude Code", status: .idle, since: ago(15), topic: "Done: upgraded the staging cluster to 1.31"),
                         InboxTab(id: "tab-10", type: .terminal, title: "ssh prod-1", status: .working, since: ago(15), activity: "kubectl rollout"),
                     ]),
                     task("t-tail", "Terminal", infraMain, lastInteractedAt: ago(50), tabs: [

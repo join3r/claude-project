@@ -32,7 +32,10 @@ import Testing
         ])
         let partition = InboxPartition([("a", a), ("b", b)], now: Self.now)
         #expect(partition.needsYou.map(\.task.id) == ["waiting-long", "waiting-short"])
-        #expect(partition.active.map(\.task.id) == ["recent", "older", "woke"])
+        // "recent" had an event and no word since; "older" and "woke" had nothing happen after you.
+        #expect(partition.yourTurn.map(\.task.id) == ["recent"])
+        #expect(partition.quiet.map(\.task.id) == ["older", "woke"])
+        #expect(partition.working.isEmpty)
         #expect(partition.settled.map(\.task.id) == ["settled-new", "settled-old"])
         // A snooze wins over a settle; "until it needs me" sorts last.
         #expect(partition.snoozed.map(\.task.id) == ["snoozed-soon", "snoozed-attention"])
@@ -47,14 +50,49 @@ import Testing
         #expect(unread.unreadCount == 1)
     }
 
-    @Test func sinksWorkingTasksOnlyWhenAsked() {
+    @Test func splitsYourTurnWorkingAndQuietAsTheDesktop() {
         let a = inbox("a", [
             InboxTask(id: "busy", name: "", status: .working, since: Self.nowMs - 1_000, eventAt: Self.nowMs, tabs: [tab("1", .working, since: Self.nowMs - 1_000)]),
-            InboxTask(id: "recent", name: "", eventAt: Self.nowMs - 10, tabs: []),
-            InboxTask(id: "older", name: "", eventAt: Self.nowMs - 500, tabs: []),
+            InboxTask(id: "finished", name: "", lastInteractedAt: Self.nowMs - 100, eventAt: Self.nowMs - 10, tabs: []),
+            InboxTask(id: "answered", name: "", lastInteractedAt: Self.nowMs - 5, eventAt: Self.nowMs - 50, tabs: []),
+            InboxTask(id: "tie", name: "", lastInteractedAt: Self.nowMs - 7, eventAt: Self.nowMs - 7, tabs: []),
+            InboxTask(id: "exited", name: "", status: .exited, lastInteractedAt: Self.nowMs - 900, eventAt: Self.nowMs - 800, tabs: []),
+            InboxTask(id: "fresh", name: "", tabs: []),
+            InboxTask(id: "busy-older", name: "", status: .working, lastInteractedAt: Self.nowMs - 400, tabs: []),
         ])
-        #expect(InboxPartition([("a", a)], now: Self.now).active.map(\.task.id) == ["busy", "recent", "older"])
-        #expect(InboxPartition([("a", a)], now: Self.now, workingLast: true).active.map(\.task.id) == ["recent", "older", "busy"])
+        let partition = InboxPartition([("a", a)], now: Self.now)
+        #expect(partition.working.map(\.task.id) == ["busy", "busy-older"])
+        #expect(partition.yourTurn.map(\.task.id) == ["finished", "exited"])
+        #expect(partition.quiet.map(\.task.id) == ["answered", "tie", "fresh"])
+        #expect(InboxTask(id: "x", name: "", status: .attention, tabs: []).isYourTurn)
+        #expect(!InboxTask(id: "x", name: "", status: .working, eventAt: 9, tabs: []).isYourTurn)
+        #expect(InboxGroup.allCases.filter(\.isOpen) == [.needsYou, .yourTurn, .working, .quiet])
+    }
+
+    @Test func groupsByProjectInFlatOrder() {
+        let a = Inbox(desktop: InboxDesktop(id: "a", name: "a"), generatedAt: 1, projects: [
+            InboxProject(id: "p1", name: "claude-project", tasks: [
+                InboxTask(id: "quiet1", name: "Q", lastInteractedAt: Self.nowMs - 20, tabs: []),
+                InboxTask(id: "turn1", name: "T", eventAt: Self.nowMs - 50, tabs: []),
+                InboxTask(id: "work1", name: "DevTool Streams Redesign", status: .working, eventAt: Self.nowMs - 1, tabs: []),
+            ]),
+            InboxProject(id: "p2", name: "thumb", tasks: [
+                InboxTask(id: "need2", name: "N", status: .attention, since: Self.nowMs - 5, tabs: []),
+                InboxTask(id: "work2", name: "IOS application", status: .working, eventAt: Self.nowMs - 2, tabs: []),
+            ]),
+        ])
+        // The same project id on another desktop is a different card.
+        let b = Inbox(desktop: InboxDesktop(id: "b", name: "b"), generatedAt: 1, projects: [
+            InboxProject(id: "p1", name: "claude-project", tasks: [
+                InboxTask(id: "quiet-b", name: "", lastInteractedAt: Self.nowMs - 30, tabs: []),
+            ]),
+        ])
+        let partition = InboxPartition([("a", a), ("b", b)], now: Self.now)
+        let groups = partition.byProject
+        #expect(groups.map(\.id) == ["a:p2", "a:p1", "b:p1"])
+        #expect(groups.map { $0.entries.map(\.task.id) } == [["need2"], ["turn1", "quiet1"], ["quiet-b"]])
+        #expect(InboxPartition.summary(partition.working) == "claude-project · DevTool Streams Redesign, thumb · IOS application")
+        #expect(InboxPartition.summary([]) == "")
     }
 
     @Test func appliesActionsAsTheDesktopWould() {

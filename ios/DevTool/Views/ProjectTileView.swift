@@ -130,7 +130,7 @@ enum TaskText {
             parts.append("Snoozed")
         case .settled:
             parts.append(InboxClock.activity(task) ?? "Settled")
-        case .needsYou, .active:
+        case .needsYou, .yourTurn, .working, .quiet:
             if let activity = InboxClock.activity(task) {
                 parts.append(activity)
             } else if task.status == .attention || task.status == .working || task.status == .exited {
@@ -148,7 +148,7 @@ enum TaskText {
     static func color(_ task: InboxTask, now: Date) -> Color {
         switch task.inboxGroup(now: now) {
         case .needsYou: .orange
-        case .active where task.status == .working: .blue
+        case .working: .blue
         default: .secondary
         }
     }

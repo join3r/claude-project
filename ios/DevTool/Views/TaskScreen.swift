@@ -329,7 +329,7 @@ struct TaskInfoSheet: View {
             return "Snoozed until \(date.formatted(.dateTime.weekday(.wide).hour().minute()))"
         case .settled:
             return "Settled"
-        case .needsYou, .active:
+        case .needsYou, .yourTurn, .working, .quiet:
             return task.unread ? "Unread" : nil
         }
     }

@@ -57,7 +57,7 @@ public struct ProjectSummary: Sendable, Equatable, Identifiable {
         needsYou = project.tasks.filter { $0.needsYou(now: now) }.count
         working = project.tasks.filter { $0.status == .working }.count
         unread = project.tasks.contains { task in
-            task.unread && [.needsYou, .active].contains(task.inboxGroup(now: now))
+            task.unread && task.inboxGroup(now: now).isOpen
         }
     }
 
@@ -65,7 +65,8 @@ public struct ProjectSummary: Sendable, Equatable, Identifiable {
     static func rank(_ task: InboxTask, now: Date) -> Int {
         switch task.inboxGroup(now: now) {
         case .needsYou: 0
-        case .active: task.status == .working ? 1 : 2
+        case .working: 1
+        case .yourTurn, .quiet: 2
         case .settled: 3
         case .snoozed: 4
         }

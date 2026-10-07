@@ -15,30 +15,59 @@ public struct InboxEntry: Sendable, Equatable, Identifiable {
     public var id: String { "\(desktopId):\(task.id)" }
 }
 
-/// Which of the desktop inbox's groups a task is in. A snooze wins over a
-/// settle, so an explicitly snoozed task stays hidden.
-public enum InboxGroup: Sendable, Equatable {
+/// Which of the desktop inbox's groups a task is in (its `partitionInbox`).
+/// A snooze wins over a settle, and both win over the live split, so a task
+/// put away stays put away while its agent runs.
+public enum InboxGroup: Sendable, Equatable, CaseIterable {
+    /// Blocked on you: a question, a permission prompt, a terminal bell.
     case needsYou
-    case active
+    /// The agent finished and you haven't answered.
+    case yourTurn
+    /// The agent is running: nothing for you to do yet.
+    case working
+    /// Nothing pending either way: you had the last word, or nothing has happened yet.
+    case quiet
     case settled
     case snoozed
+
+    /// Still in the inbox: neither settled nor snoozed.
+    public var isOpen: Bool {
+        switch self {
+        case .needsYou, .yourTurn, .working, .quiet: true
+        case .settled, .snoozed: false
+        }
+    }
 }
 
 extension InboxTask {
+    /// Waiting on you rather than the agent (the desktop's `isYourTurn`): it
+    /// needs you, or its last event came after your last word.
+    public var isYourTurn: Bool {
+        if status == .working { return false }
+        if status == .attention { return true }
+        guard let eventAt else { return false }
+        return eventAt > (lastInteractedAt ?? 0)
+    }
+
     public func inboxGroup(now: Date) -> InboxGroup {
         if isSnoozed(now: now) { return .snoozed }
         if settledAt != nil { return .settled }
         if status == .attention { return .needsYou }
-        return .active
+        if status == .working { return .working }
+        return isYourTurn ? .yourTurn : .quiet
     }
 }
 
 /// The desktop inbox's groups (its `partitionInbox`), over every paired desktop.
 public struct InboxPartition: Sendable, Equatable {
-    /// A tab needs the user; longest wait first.
+    /// Longest wait first.
     public var needsYou: [InboxEntry] = []
-    /// Everything else, by last activity.
-    public var active: [InboxEntry] = []
+    /// Most recent activity first.
+    public var yourTurn: [InboxEntry] = []
+    /// Most recent activity first; shown folded.
+    public var working: [InboxEntry] = []
+    /// Most recent activity first.
+    public var quiet: [InboxEntry] = []
     /// Newest settle first.
     public var settled: [InboxEntry] = []
     /// Soonest wake first; "until it needs me" last.
@@ -46,55 +75,88 @@ public struct InboxPartition: Sendable, Equatable {
 
     public init() {}
 
-    /// `workingLast` sinks tasks whose agent is working below the rest of
-    /// Active, as the desktop's "Move working tasks to the end of the Inbox".
-    public init(_ inboxes: [(desktopId: String, inbox: Inbox)], now: Date, workingLast: Bool = false) {
-        var needsYou: [(InboxEntry, Int)] = []
-        var active: [(InboxEntry, Int)] = []
-        var settled: [(InboxEntry, Int)] = []
-        var snoozed: [(InboxEntry, Int)] = []
+    public init(_ inboxes: [(desktopId: String, inbox: Inbox)], now: Date) {
+        var groups: [InboxGroup: [(InboxEntry, Int)]] = [:]
         var index = 0
         for (desktopId, inbox) in inboxes {
             for project in inbox.projects {
                 for task in project.tasks {
-                    let entry = (InboxEntry(desktopId: desktopId, project: project, task: task), index)
+                    groups[task.inboxGroup(now: now), default: []]
+                        .append((InboxEntry(desktopId: desktopId, project: project, task: task), index))
                     index += 1
-                    switch task.inboxGroup(now: now) {
-                    case .needsYou: needsYou.append(entry)
-                    case .active: active.append(entry)
-                    case .settled: settled.append(entry)
-                    case .snoozed: snoozed.append(entry)
-                    }
                 }
             }
         }
         let nowMs = now.unixMilliseconds
         // Equal keys keep the desktops' own order, as the desktop's stable sort does.
-        func sorted(_ entries: [(InboxEntry, Int)], by key: (InboxTask) -> Int64, descending: Bool) -> [InboxEntry] {
-            entries.sorted { a, b in
+        func sorted(_ group: InboxGroup, by key: (InboxTask) -> Int64, descending: Bool) -> [InboxEntry] {
+            (groups[group] ?? []).sorted { a, b in
                 let ka = key(a.0.task), kb = key(b.0.task)
                 if ka != kb { return descending ? ka > kb : ka < kb }
                 return a.1 < b.1
             }.map(\.0)
         }
-        self.needsYou = sorted(needsYou, by: { $0.since ?? nowMs }, descending: false)
-        self.active = sorted(active, by: \.lastActivityAt, descending: true)
-        if workingLast {
-            // Partitioning keeps the recency order within each half.
-            let working = self.active.filter { $0.task.status == .working }
-            self.active = self.active.filter { $0.task.status != .working } + working
-        }
-        self.settled = sorted(settled, by: { $0.settledAt ?? 0 }, descending: true)
-        self.snoozed = sorted(snoozed, by: { $0.snoozeUntilAttention ? Int64.max : ($0.snoozedUntil ?? Int64.max) }, descending: false)
+        needsYou = sorted(.needsYou, by: { $0.since ?? nowMs }, descending: false)
+        yourTurn = sorted(.yourTurn, by: \.lastActivityAt, descending: true)
+        working = sorted(.working, by: \.lastActivityAt, descending: true)
+        quiet = sorted(.quiet, by: \.lastActivityAt, descending: true)
+        settled = sorted(.settled, by: { $0.settledAt ?? 0 }, descending: true)
+        snoozed = sorted(.snoozed, by: { $0.snoozeUntilAttention ? Int64.max : ($0.snoozedUntil ?? Int64.max) }, descending: false)
     }
 
     public var isEmpty: Bool {
-        needsYou.isEmpty && active.isEmpty && settled.isEmpty && snoozed.isEmpty
+        needsYou.isEmpty && yourTurn.isEmpty && working.isEmpty && quiet.isEmpty && settled.isEmpty && snoozed.isEmpty
     }
 
     /// The Inbox badge, as the desktop's: unread tasks that are neither snoozed nor settled.
     public var unreadCount: Int {
-        (needsYou + active).filter(\.task.unread).count
+        (needsYou + yourTurn + working + quiet).filter(\.task.unread).count
+    }
+
+    /// The open, unfolded groups gathered by project for the grouped layout
+    /// (the desktop's `groupInboxByProject`): Needs you, Your turn and Quiet.
+    /// A project sits where its most urgent task sits in the flat list and
+    /// keeps that order inside. Working, Settled and Snoozed stay folded rows.
+    public var byProject: [InboxProjectGroup] {
+        InboxProjectGroup.group(needsYou + yourTurn + quiet)
+    }
+
+    /// The one-line summary of a folded group: "claude-project · DevTool
+    /// Streams Redesign, thumb · IOS application" (project · task, the
+    /// group's order).
+    public static func summary(_ entries: [InboxEntry]) -> String {
+        entries.map { "\($0.project.name) · \($0.task.name)" }.joined(separator: ", ")
+    }
+}
+
+/// One project's card in the grouped Inbox.
+public struct InboxProjectGroup: Sendable, Equatable, Identifiable {
+    public var desktopId: String
+    public var project: InboxProject
+    public var entries: [InboxEntry]
+
+    public var id: String { "\(desktopId):\(project.id)" }
+
+    public init(desktopId: String, project: InboxProject, entries: [InboxEntry]) {
+        self.desktopId = desktopId
+        self.project = project
+        self.entries = entries
+    }
+
+    /// `entries` by project (per desktop), in order of first appearance.
+    public static func group(_ entries: [InboxEntry]) -> [InboxProjectGroup] {
+        var groups: [InboxProjectGroup] = []
+        var index: [String: Int] = [:]
+        for entry in entries {
+            let key = "\(entry.desktopId):\(entry.project.id)"
+            if let i = index[key] {
+                groups[i].entries.append(entry)
+            } else {
+                index[key] = groups.count
+                groups.append(InboxProjectGroup(desktopId: entry.desktopId, project: entry.project, entries: [entry]))
+            }
+        }
+        return groups
     }
 }
 
