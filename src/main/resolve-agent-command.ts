@@ -33,7 +33,7 @@ export function extraWindowsSearchDirs(env: NodeJS.ProcessEnv, pathMod: PathApi 
 
 export function missingCurlError(): Error {
   return new Error(
-    'Cannot find curl. Install Git for Windows (curl.exe lives in Git\\usr\\bin), then open the Claude tab again.'
+    'Cannot find curl. Install Git for Windows (curl.exe lives in Git\\usr\\bin), then open the Claude task again.'
   )
 }
 

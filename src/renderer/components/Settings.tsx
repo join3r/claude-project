@@ -357,7 +357,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               />
               <GroupRow
                 label="Keep the computer awake while agents work"
-                sub="While an agent tab is working, the system doesn't go to sleep. The display still can."
+                sub="While an agent is working, the system doesn't go to sleep. The display still can."
                 trailing={
                   <Switch
                     checked={config.keepAwakeWhileWorking}
@@ -395,21 +395,21 @@ export default function Settings({ onClose }: Props): React.ReactElement {
               </FormGroup>
             )}
             <FormGroup>
-              <SetBlock label="New Claude tabs open as">
+              <SetBlock label="New Claude tasks open as">
                 <SegCtl
                   options={[{ value: 'terminal', label: 'Terminal' }, { value: 'chat', label: 'Chat' }] as const}
                   value={config.claudeDefaultView}
                   onChange={(claudeDefaultView) => updateConfig({ claudeDefaultView })}
                 />
                 <HelperText>
-                  Chat drives the same `claude` (your login, settings and hooks) in DevTool&apos;s own UI. Right-click a Claude tab to switch it between the two.
+                  Chat drives the same `claude` (your login, settings and hooks) in DevTool&apos;s own UI. Switch a task between the two from the … menu in its header.
                 </HelperText>
               </SetBlock>
             </FormGroup>
             <Group>
               <GroupRow
-                label="Lazy-load Claude tabs"
-                sub="Tabs with prior history wait for a Resume click, saving tokens after a restart."
+                label="Lazy-load Claude tasks"
+                sub="After a restart, Claude Code and Pi tasks with history wait for a Resume click, saving tokens. Chat tasks start only when you send."
                 trailing={
                   <Switch
                     checked={config.lazyLoadClaude}
@@ -501,7 +501,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                   value={config.defaultSidebarTab}
                   onChange={(defaultSidebarTab) => updateConfig({ defaultSidebarTab })}
                 />
-                <HelperText>Applies to new windows; each window remembers the tab you switch to.</HelperText>
+                <HelperText>Applies to new windows; each window remembers which one you last picked.</HelperText>
               </SetBlock>
             </FormGroup>
 
