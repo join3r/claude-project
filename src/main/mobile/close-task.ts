@@ -7,9 +7,10 @@ import { isVisibleOnMobile } from './inbox'
 
 /**
  * `task.close` and `tab.close` (SPEC.md §8.7, §8.8): what the sidebar's Close task
- * and a tab's close button do, run by main for a phone. Main deletes the task itself,
- * so no window has to be open. The phone can't see the desktop's confirm dialogs,
- * so unsaved editors come back as a `blocker` until the phone resends with
+ * and a tab's close button do, run by main for a phone. Main archives the task
+ * itself (to its stream's Done row, as the sidebar's ✕ does), so no window has to
+ * be open. The phone can't see the desktop's confirm dialogs, so unsaved editors
+ * come back as a `blocker` until the phone resends with
  * `discardUnsaved`. A task's stream (and its worktree) stays: worktrees go only
  * with their stream, which the phone can't close yet (step 9).
  */
@@ -20,7 +21,7 @@ export interface CloseTaskDeps {
   peek(): ProjectsData
   /** Editor tabs with unsaved changes in any window. */
   dirtyTabIds(): string[]
-  /** Tear down the task's tabs and drop it from the projects. */
+  /** Tear down the task's tabs and archive it. */
   removeTask(project: Project, task: Task): Promise<void>
 }
 

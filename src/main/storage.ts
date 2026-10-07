@@ -84,13 +84,13 @@ function renameWithRetry(from: string, to: string): void {
   }
 }
 
-type JsonReadResult =
+export type JsonReadResult =
   | { kind: 'missing' }
   | { kind: 'ok'; raw: string; data: Record<string, unknown> }
   | { kind: 'corrupt'; error: unknown }
 
 /** Missing is a normal first run; anything else that fails is a file we must not overwrite blindly. */
-function readJsonRecord(file: string): JsonReadResult {
+export function readJsonRecord(file: string): JsonReadResult {
   let raw: string
   try {
     raw = fs.readFileSync(file, 'utf-8')
@@ -114,7 +114,7 @@ function fileStamp(): string {
 }
 
 /** Rename a bad file out of the way so nothing later overwrites it. Returns the new path, or null. */
-function quarantine(file: string): string | null {
+export function quarantine(file: string): string | null {
   const dest = `${file}.corrupt-${fileStamp()}`
   try {
     fs.renameSync(file, dest)

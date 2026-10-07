@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { archiveTasksInData } from '../src/shared/archive'
 import {
   createDefaultWindowViewState,
   createMainStream,
@@ -26,7 +27,6 @@ import {
   makeTask,
   patchTab,
   removeProjectFromData,
-  removeTaskFromData,
   renameTabInData,
   reorderList,
   tabIdsOfTask,
@@ -159,24 +159,24 @@ describe('projectsData', () => {
     expect(projectTasks(second.projects[0]).map(t => t.id).slice(-2)).toEqual(['t1', 't2'])
   })
 
-  it('removeTaskFromData retires a spent hidden project but keeps a normal one', () => {
+  it('archiveTasksInData retires a spent hidden project but keeps a normal one', () => {
     const hidden: Project = project('p', [task('t1')], { ephemeral: true })
-    const retired = removeTaskFromData(data([hidden]), 'p', 't1')
+    const retired = archiveTasksInData(data([hidden]), 'p', ['t1'])
     expect(retired.projects).toEqual([])
     expect(retired.projectOrder).toEqual([])
 
     const normal: Project = { ...hidden, ephemeral: undefined }
-    const kept = removeTaskFromData(data([normal]), 'p', 't1')
+    const kept = archiveTasksInData(data([normal]), 'p', ['t1'])
     expect(projectTasks(kept.projects[0])).toEqual([])
   })
 
-  it('removeTaskFromData keeps an emptied stream (and its worktree), and main', () => {
+  it('archiveTasksInData keeps an emptied stream (and its worktree), and main', () => {
     const p = fixtureProject({ id: 'p', tasks: [{ id: 'm1' }, { id: 'w1', workspace: WORKSPACE }] })
-    const withoutWorktreeTask = removeTaskFromData(data([p]), 'p', 'w1').projects[0]
+    const withoutWorktreeTask = archiveTasksInData(data([p]), 'p', ['w1']).projects[0]
     expect(withoutWorktreeTask.streams).toHaveLength(2)
-    expect(withoutWorktreeTask.streams[1]).toMatchObject({ workspace: WORKSPACE, tasks: [] })
+    expect(withoutWorktreeTask.streams[1]).toMatchObject({ workspace: WORKSPACE, tasks: [], archivedTaskCount: 1 })
     expect(withoutWorktreeTask.streams[1].lastTaskId).toBeUndefined()
-    const withoutMainTask = removeTaskFromData(data([p]), 'p', 'm1').projects[0]
+    const withoutMainTask = archiveTasksInData(data([p]), 'p', ['m1']).projects[0]
     expect(withoutMainTask.streams).toHaveLength(2)
     expect(findMainStream(withoutMainTask)!.tasks).toEqual([])
   })

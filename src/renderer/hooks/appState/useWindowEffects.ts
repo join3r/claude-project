@@ -25,21 +25,17 @@ export function useNativeTheme(): 'dark' | 'light' {
 }
 
 /**
- * Main deleted a task by itself (a phone closed it). The state change arrives as a
- * normal projects broadcast; this is the part of `removeTask` that is local to
+ * Main archived a task by itself (a phone closed it). The state change arrives as
+ * a normal projects broadcast; this is the part of `archiveTask` that is local to
  * a window — the xterm instances and per-tab status entries hanging off the
- * tabs, and this window's own view state.
+ * tabs, and this window's own view state. The scrollback stays, for Reopen
+ * (disposing a live xterm writes its buffer back, which is what we want here).
  */
 export function useTasksRemovedListener(updateWindowViewState: UpdateWindowViewState): void {
   useEffect(() => {
     return window.api.onTasksRemoved(({ taskId, tabIds }) => {
       for (const tabId of tabIds) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-      }
-      // Disposing a live xterm writes its buffer back synchronously, which would
-      // put back the scrollback file main just deleted.
-      for (const tabId of tabIds) {
-        void window.api.scrollbackDelete(tabId)
       }
       updateWindowViewState(prev => forgetRemovedTaskView(prev, taskId))
     })

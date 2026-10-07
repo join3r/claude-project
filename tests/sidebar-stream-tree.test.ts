@@ -11,7 +11,8 @@ import {
   taskDropSlot,
   type TreeRowLayout
 } from '../src/renderer/components/sidebar/streamTree'
-import { moveTaskInData, removeStreamFromData, renameStreamInData } from '../src/renderer/hooks/appState/projectsData'
+import { moveTaskInData, renameStreamInData } from '../src/renderer/hooks/appState/projectsData'
+import { archiveStreamInData } from '../src/shared/archive'
 import { runsInTaskDir } from '../src/shared/streams'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 
@@ -177,7 +178,7 @@ describe('stream data ops', () => {
     expect(moved.projects[0].streams[0].lastTaskId).toBeUndefined()
   })
 
-  it('removes a stream with its tasks and pins, never main', () => {
+  it('archives a stream with its tasks and pins, never main', () => {
     const before: ProjectsData = {
       ...data(),
       pinnedItems: [
@@ -186,16 +187,17 @@ describe('stream data ops', () => {
         { type: 'project', projectId: 'p' }
       ]
     }
-    const next = removeStreamFromData(before, 'p', 'stream-c')
+    const next = archiveStreamInData(before, 'p', 'stream-c')
     expect(ids(next)).toEqual([[mainStreamId('p'), ['a', 'b']]])
+    expect(next.projects[0].archivedStreamCount).toBe(1)
     expect(next.pinnedItems).toEqual([{ type: 'project', projectId: 'p' }])
-    expect(removeStreamFromData(before, 'p', mainStreamId('p'))).toBe(before)
+    expect(archiveStreamInData(before, 'p', mainStreamId('p'))).toBe(before)
   })
 
   it('drops a hidden ad-hoc project whose last stream goes', () => {
     const adhoc = fixtureProject({ id: 'q', ephemeral: true, tasks: [{ id: 'x', workspace: worktree }] })
     const before: ProjectsData = { projects: [adhoc], tags: [], projectOrder: ['q'], pinnedItems: [] }
-    const next = removeStreamFromData(before, 'q', 'stream-x')
+    const next = archiveStreamInData(before, 'q', 'stream-x')
     expect(next.projects).toEqual([])
     expect(next.projectOrder).toEqual([])
   })

@@ -41,6 +41,8 @@ import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
 import { confirmWorktreeRemoval, forceRemoveWorktree } from './sidebar/workspaceRemoval'
 import { streamCloseQuestion, taskCloseQuestion } from './sidebar/closeRules'
 import { useWorktreeChoice } from './sidebar/WorktreeChoiceDialog'
+import { ProjectDoneGroup, StreamDoneRow, type DoneRowActions } from './sidebar/DoneRows'
+import { closeArchivedView, getArchivedView } from './archivedViewTarget'
 import {
   extraTabCount,
   formatActivityAge,
@@ -65,10 +67,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     projects, tags, projectOrder,
     pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId, selectedTagIds,
-    switchToTask, selectProjectHome,
+    switchToTask, selectProjectHome, showArchived,
     addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
-    addTask, addTaskInDirectory, addStream, removeTask, renameTask,
-    moveTask, removeStream, renameStream,
+    addTask, addTaskInDirectory, addStream, archiveTask, renameTask,
+    moveTask, archiveStream, renameStream, reopenTask, reopenStream, deleteArchived,
     reorderProjects, getProjectDir,
     config, updateConfig,
     toggleTagFilter, clearTagFilters,
@@ -419,9 +421,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }
 
   /**
-   * Hover ✕ on a task row: the task closes (step 7 turns it into archive). Asks
-   * only when its agent is working (unsaved editors ask in `removeTask`). Its
-   * stream stays, even emptied.
+   * Hover ✕ on a task row: the task is archived to its stream's `Done (N)`.
+   * Asks only when its agent is working (unsaved editors ask in `archiveTask`).
+   * Its stream stays, even emptied.
    */
   const handleCloseTask = async (projectId: string, taskId: string) => {
     const project = projects.find(p => p.id === projectId)
@@ -434,7 +436,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const retiring = isEphemeralProject(project) && projectTasks(project).every(candidate => candidate.id === taskId)
     const worktrees = retiring ? project.streams.filter(stream => stream.workspace) : []
     if (worktrees.length === 0) {
-      void removeTask(projectId, taskId)
+      void archiveTask(projectId, taskId)
       return
     }
     const answers = []
@@ -443,17 +445,17 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (!answer) return
       answers.push({ stream, answer })
     }
-    if (!await removeTask(projectId, taskId)) return
+    if (!await archiveTask(projectId, taskId)) return
     for (const { stream, answer } of answers) {
       if (!answer.done) await forceRemoveWorktree(project, stream.workspace!, answer.keepBranch)
     }
   }
 
   /**
-   * Hover ✕ on a stream row (never `main`): its tasks close and the stream goes
-   * (step 7: archive). Asks when a task is working (unsaved editors ask in
-   * `removeStream`); a worktree runs the pre-flight: clean and merged goes
-   * quietly, anything else asks keep branch / discard / cancel.
+   * Hover ✕ on a stream row (never `main`): the stream is archived with its
+   * tasks to the project's `Done` group. Asks when a task is working (unsaved
+   * editors ask in `archiveStream`); a worktree runs the pre-flight: clean and
+   * merged goes quietly, anything else asks keep branch / discard / cancel.
    */
   const handleCloseStream = async (projectId: string, streamId: string) => {
     const project = projects.find(p => p.id === projectId)
@@ -462,7 +464,34 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const question = streamCloseQuestion(stream, statusOf)
     if (question && !window.confirm(question)) return
     // Tabs close before the forced removal, so no process holds the worktree.
-    await closeWithWorktree(project, stream, () => removeStream(projectId, streamId, true))
+    await closeWithWorktree(project, stream, () => archiveStream(projectId, streamId, true))
+  }
+
+  /** What the Done rows do: open read-only, reopen, delete for good (after a confirm). */
+  const doneActions: DoneRowActions = {
+    open: showArchived,
+    reopenTask: (projectId, taskId) => {
+      if (getArchivedView()?.id === taskId) closeArchivedView()
+      void reopenTask(projectId, taskId)
+    },
+    reopenStream: (projectId, streamId) => {
+      void reopenStream(projectId, streamId).then(({ notice }) => {
+        if (notice) window.alert(notice)
+      }).catch((err: unknown) => {
+        window.alert(`Couldn't reopen the stream: ${err instanceof Error ? err.message : String(err)}`)
+      })
+    },
+    deleteTask: (projectId, entry) => {
+      if (!window.confirm(`Delete "${entry.task.name}" permanently? It can't be reopened afterwards. The agent's own session files are kept.`)) return
+      if (getArchivedView()?.id === entry.task.id) closeArchivedView()
+      void deleteArchived(projectId, { tasks: [entry.task.id] })
+    },
+    deleteStream: (projectId, entry) => {
+      const count = entry.stream.tasks.length + entry.doneTasks.length
+      if (!window.confirm(`Delete stream "${entry.stream.name}" and its ${count} ${count === 1 ? 'task' : 'tasks'} permanently? It can't be reopened afterwards. Its branch and the agents' session files are kept.`)) return
+      if (getArchivedView()?.id === entry.stream.id) closeArchivedView()
+      void deleteArchived(projectId, { streams: [entry.stream.id] })
+    }
   }
 
   /**
@@ -642,7 +671,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           </React.Fragment>
         ))}
         {slot?.index === stream.tasks.length && dropLine}
-        {/* Step 7: the stream's collapsed "Done (N)" row (archived tasks) goes here. */}
+        <StreamDoneRow project={project} stream={stream} now={now} actions={doneActions} />
       </>
     )
   }
@@ -804,7 +833,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       {isExpanded && (
         <div className="pb-1">
           {project.streams.map(stream => renderStream(project, stream))}
-          {/* Step 7: the project's "Done" group (archived streams) goes here. */}
+          <ProjectDoneGroup project={project} now={now} actions={doneActions} />
           {renderAddTaskRow(project)}
         </div>
       )}

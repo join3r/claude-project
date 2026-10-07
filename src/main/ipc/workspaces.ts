@@ -1,8 +1,8 @@
-import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceTarget } from '../../shared/types'
+import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceRestoreRequest, WorkspaceRestoreResult, WorkspaceTarget } from '../../shared/types'
 import type { RemoteWorkspaceManager } from '../remote-workspace-manager'
 import type { WorkspaceManager } from '../workspace-manager'
 import type { IpcRegistrar } from './registrar'
-import { workspaceCreateRequest, workspaceDeleteRequest, workspaceListBranchesRequest } from './schemas'
+import { workspaceCreateRequest, workspaceDeleteRequest, workspaceListBranchesRequest, workspaceRestoreRequest } from './schemas'
 
 export interface WorkspaceDeps {
   workspaceManager: WorkspaceManager
@@ -29,6 +29,8 @@ export function registerWorkspaceHandlers(ipc: IpcRegistrar, deps: WorkspaceDeps
   ipc.handle('workspace-create', [workspaceCreateRequest], (_event, request) => createWorkspace(deps, request))
 
   ipc.handle('workspace-delete', [workspaceDeleteRequest], (_event, request) => deps.deleteWorkspace(request))
+
+  ipc.handle('workspace-restore', [workspaceRestoreRequest], (_event, request) => restoreWorkspace(deps, request))
 }
 
 type WorkspaceGit = Pick<WorkspaceDeps, 'workspaceManager' | 'remoteWorkspaceManager' | 'ensureSshConnected' | 'socketPath'>
@@ -60,4 +62,14 @@ export async function createWorkspace(deps: WorkspaceGit, request: WorkspaceCrea
       })()
     : await deps.workspaceManager.create(request.projectDir, request.name, request.baseBranch)
   return { ...result, baseBranch: request.baseBranch }
+}
+
+/** An archived stream's worktree back from its branch, over SSH for a remote project. */
+export async function restoreWorkspace(deps: WorkspaceGit, request: WorkspaceRestoreRequest): Promise<WorkspaceRestoreResult> {
+  const { projectId, sshConfig } = request
+  if (sshConfig && projectId) {
+    await deps.ensureSshConnected(projectId, sshConfig)
+    return deps.remoteWorkspaceManager.restore(deps.socketPath(projectId), { ...request, projectId, sshConfig })
+  }
+  return deps.workspaceManager.restore(request.projectDir, request.worktreePath, request.branchName)
 }

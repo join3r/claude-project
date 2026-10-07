@@ -280,4 +280,25 @@ describe.skipIf(!hasPython3)('RemoteWorkspaceManager remote script', { timeout: 
     expect(result.status).toBe('ok')
     expect(fs.existsSync(worktreePath)).toBe(false)
   })
+
+  it('restores a kept branch as a worktree, and reports a discarded one', async () => {
+    const worktreePath = createWorktree('kept-ws', 'master')
+    commitInWorktree(worktreePath, 'kept.txt')
+    await deleteWorkspace({ worktreePath, branchName: 'kept-ws', baseBranch: 'master', force: true, keepBranch: true })
+    expect(fs.existsSync(worktreePath)).toBe(false)
+
+    const restore = (branchName: string, at: string) => manager.restore('/tmp/proj.sock', {
+      projectDir: repoDir, projectId: 'proj-1', sshConfig, worktreePath: at, branchName
+    })
+
+    expect(await restore('kept-ws', worktreePath)).toEqual({ status: 'ok', worktreePath, branchName: 'kept-ws', relativeProjectPath: '' })
+    expect(fs.existsSync(path.join(worktreePath, 'kept.txt'))).toBe(true)
+    // Already there: reused as is.
+    expect(await restore('kept-ws', worktreePath)).toMatchObject({ status: 'ok', worktreePath })
+
+    const goneAt = createWorktree('gone-ws', 'master')
+    await deleteWorkspace({ worktreePath: goneAt, branchName: 'gone-ws', baseBranch: 'master', force: true })
+    expect(await restore('gone-ws', goneAt)).toEqual({ status: 'branch-missing' })
+    expect(fs.existsSync(goneAt)).toBe(false)
+  })
 })

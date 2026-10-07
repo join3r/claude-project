@@ -21,8 +21,11 @@ import type {
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
   WorkspaceListBranchesRequest,
+  WorkspaceRestoreRequest,
+  WorkspaceRestoreResult,
   WindowViewState
 } from '../shared/types'
+import type { ArchivedStream, ArchivedTask, ProjectArchive } from '../shared/archive'
 import type { CondaListResult } from '../shared/conda'
 import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared/notebook'
 import type { AgentActivity } from '../shared/agent-activity'
@@ -411,6 +414,28 @@ const api = {
   }> => ipcRenderer.invoke('workspace-create', request),
   workspaceDelete: (request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> =>
     ipcRenderer.invoke('workspace-delete', request),
+  /** An archived stream's worktree back from its branch (`branch-missing` when it was discarded). */
+  workspaceRestore: (request: WorkspaceRestoreRequest): Promise<WorkspaceRestoreResult> =>
+    ipcRenderer.invoke('workspace-restore', request),
+
+  // Archive: `<config dir>/archive/<projectId>.json`. Each change resolves to the archive as it now is.
+  archiveLoad: (projectId: string): Promise<ProjectArchive> => ipcRenderer.invoke('archive-load', projectId),
+  archiveAddTasks: (projectId: string, entries: ArchivedTask[]): Promise<ProjectArchive> =>
+    ipcRenderer.invoke('archive-add-tasks', projectId, entries),
+  archiveAddStream: (projectId: string, entry: ArchivedStream): Promise<ProjectArchive> =>
+    ipcRenderer.invoke('archive-add-stream', projectId, entry),
+  archiveRemove: (projectId: string, ids: { tasks?: string[]; streams?: string[] }): Promise<ProjectArchive> =>
+    ipcRenderer.invoke('archive-remove', projectId, ids),
+  /** Scrollback of archived tabs deleted for good. */
+  archiveDeleteTabs: (tabIds: string[]): Promise<void> => ipcRenderer.invoke('archive-delete-tabs', tabIds),
+  /** A Claude session's messages (the SDK's), for an archived task's read-only view. */
+  archiveTranscript: (sessionId: string, cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<unknown[]> =>
+    ipcRenderer.invoke('archive-transcript', sessionId, cwd, projectId, sshConfig),
+  onArchiveChanged: (callback: (projectId: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, projectId: string) => callback(projectId)
+    ipcRenderer.on('archive-changed', handler)
+    return () => ipcRenderer.removeListener('archive-changed', handler)
+  },
 
   // Native notebooks. One jupyter_client helper per tab, local conda env only.
   notebookKernelStart: (

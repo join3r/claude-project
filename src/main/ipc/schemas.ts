@@ -6,7 +6,8 @@ import type {
   WindowViewState,
   WorkspaceCreateRequest,
   WorkspaceDeleteRequest,
-  WorkspaceListBranchesRequest
+  WorkspaceListBranchesRequest,
+  WorkspaceRestoreRequest
 } from '../../shared/types'
 import type { ChatImage, ChatPromptResponse } from '../../shared/claude-chat'
 import type { ChatTabConfig } from '../claude-chat/chat-manager'
@@ -158,6 +159,33 @@ export const workspaceDeleteRequest = v.object({
   force: v.optional(v.boolean()),
   keepBranch: v.optional(v.boolean())
 }) as Validator<WorkspaceDeleteRequest>
+
+export const workspaceRestoreRequest = v.object({
+  ...workspaceTarget,
+  worktreePath: v.string({ nonEmpty: true }),
+  branchName: v.string({ nonEmpty: true })
+}) as Validator<WorkspaceRestoreRequest>
+
+/** An archived task or stream, as a window builds it: checked for shape, kept whole. */
+export const archivedTaskEntry = v.object({
+  task: taskShape,
+  streamId: v.string({ nonEmpty: true }),
+  streamName: v.string(),
+  dir: v.string(),
+  archivedAt: v.number()
+}, 'passthrough')
+
+export const archivedStreamEntry = v.object({
+  stream: v.object({
+    id: v.string({ nonEmpty: true }),
+    name: v.string(),
+    workspace: v.optional(workspaceConfig),
+    tasks: v.array(taskShape)
+  }, 'passthrough'),
+  doneTasks: v.array(archivedTaskEntry),
+  dir: v.string(),
+  archivedAt: v.number()
+}, 'passthrough')
 
 export const chatTabConfig = v.object({
   cwd: v.string(),

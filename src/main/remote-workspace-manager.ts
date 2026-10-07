@@ -1,5 +1,5 @@
 import { execFile } from 'child_process'
-import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceListBranchesRequest } from '../shared/types'
+import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceListBranchesRequest, WorkspaceRestoreRequest, WorkspaceRestoreResult } from '../shared/types'
 import { sshExecutable } from './resolve-agent-command'
 
 type RemoteWorkspaceResponse<T> =
@@ -165,6 +165,72 @@ try:
             'relativeProjectPath': relative_project_path
         }
     }))
+except Exception as err:
+    print(json.dumps({'ok': False, 'error': str(err)}))
+`
+    )
+  }
+
+  /** {@link WorkspaceManager.restore} over SSH. */
+  async restore(
+    socketPath: string,
+    request: WorkspaceRestoreRequest & { projectId: string; sshConfig: SshConfig }
+  ): Promise<WorkspaceRestoreResult> {
+    return this.runRemote(
+      socketPath,
+      request.projectId,
+      request.sshConfig,
+      {
+        projectDir: request.projectDir,
+        worktreePath: request.worktreePath,
+        branchName: request.branchName
+      },
+      `
+import os, subprocess
+
+def git(args, timeout=5, check=True):
+    return subprocess.run(['git'] + args, capture_output=True, text=True, timeout=timeout, check=check)
+
+def real_path(target):
+    try:
+        return os.path.realpath(target)
+    except Exception:
+        return os.path.abspath(target)
+
+try:
+    repo_root = subprocess.run(
+        ['git', 'rev-parse', '--show-toplevel'],
+        cwd=payload['projectDir'],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True
+    ).stdout.strip()
+    rel = os.path.relpath(os.path.realpath(payload['projectDir']), os.path.realpath(repo_root))
+    if rel == '.':
+        rel = ''
+    worktree_path = payload['worktreePath']
+    branch = payload['branchName']
+    listing = git(['-C', repo_root, 'worktree', 'list', '--porcelain']).stdout
+    registered = [line[len('worktree '):].strip() for line in listing.splitlines() if line.startswith('worktree ')]
+    if os.path.exists(worktree_path) and any(real_path(entry) == real_path(worktree_path) for entry in registered if entry):
+        print(json.dumps({'ok': True, 'data': {'status': 'ok', 'worktreePath': worktree_path, 'branchName': branch, 'relativeProjectPath': rel}}))
+        raise SystemExit(0)
+    if git(['-C', repo_root, 'show-ref', '--verify', '--quiet', 'refs/heads/' + branch], check=False).returncode != 0:
+        print(json.dumps({'ok': True, 'data': {'status': 'branch-missing'}}))
+        raise SystemExit(0)
+    dest = os.path.join(repo_root, '.worktrees', branch) if os.path.exists(worktree_path) else worktree_path
+    if os.path.exists(dest):
+        raise RuntimeError('Cannot restore the worktree: "%s" already exists' % dest)
+    git(['-C', repo_root, 'worktree', 'prune'], check=False)
+    try:
+        git(['-C', repo_root, 'worktree', 'add', dest, branch], timeout=10)
+    except subprocess.CalledProcessError as err:
+        msg = err.stderr.strip() or err.stdout.strip() or str(err)
+        raise RuntimeError('Failed to restore the worktree: ' + msg)
+    print(json.dumps({'ok': True, 'data': {'status': 'ok', 'worktreePath': dest, 'branchName': branch, 'relativeProjectPath': rel}}))
+except SystemExit:
+    raise
 except Exception as err:
     print(json.dumps({'ok': False, 'error': str(err)}))
 `

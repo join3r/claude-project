@@ -5,14 +5,13 @@
  * unit-tested directly.
  */
 import { v4 as uuid } from 'uuid'
-import { createMainStream, isSpentEphemeralProject, pinnedItemKey } from '../../../shared/types'
+import { createMainStream, pinnedItemKey } from '../../../shared/types'
 import type { PinnedItem, Project, ProjectsData, Stream, Tab, Tag, Task, WorkspaceConfig } from '../../../shared/types'
 import {
   addTaskToStream,
   findStreamOfTask,
   findTaskInProject,
   mapTaskInProject,
-  removeTaskFromProject,
   resolveMainTabId,
   singlePane,
   taskTabIds
@@ -185,23 +184,6 @@ export function addTaskInDirectoryData(
 }
 
 /**
- * Drop a task; a hidden ad-hoc project left with no task goes with it in the
- * same step.
- */
-export function removeTaskFromData(data: ProjectsData, projectId: string, taskId: string): ProjectsData {
-  const withoutTask = data.projects.map(project =>
-    project.id === projectId ? removeTaskFromProject(project, taskId) : project
-  )
-  const spent = withoutTask.find(p => p.id === projectId && isSpentEphemeralProject(p))
-  if (!spent) return { ...data, projects: withoutTask }
-  return {
-    ...data,
-    projects: withoutTask.filter(p => p.id !== projectId),
-    projectOrder: data.projectOrder.filter(id => id !== projectId)
-  }
-}
-
-/**
  * Move a task to `toIndex` of stream `toStreamId` (counted without the task),
  * within its stream or to another one. The stream it leaves stays even when
  * emptied, so a worktree never goes away under a drag; its "last task" follows
@@ -247,30 +229,6 @@ export function moveTaskInData(
       item.type === 'task' && item.projectId === projectId && item.taskId === taskId ? { ...item, streamId: to.id } : item
     ))
   }
-}
-
-/**
- * Drop a whole stream with its tasks (never `main`), and the pins on it or its
- * tasks. A hidden ad-hoc project left with no task goes in the same step.
- */
-export function removeStreamFromData(data: ProjectsData, projectId: string, streamId: string): ProjectsData {
-  const project = data.projects.find(candidate => candidate.id === projectId)
-  const stream = project?.streams.find(candidate => candidate.id === streamId)
-  if (!project || !stream || stream.isMain) return data
-  const next: Project = { ...project, streams: project.streams.filter(candidate => candidate !== stream) }
-  if (project.lastStreamId === streamId) delete next.lastStreamId
-  const pinnedItems = (data.pinnedItems ?? []).filter(item => (
-    item.projectId !== projectId || item.type === 'project' || item.streamId !== streamId
-  ))
-  if (isSpentEphemeralProject(next)) {
-    return {
-      ...data,
-      projects: data.projects.filter(candidate => candidate !== project),
-      projectOrder: data.projectOrder.filter(id => id !== projectId),
-      pinnedItems: pinnedItems.filter(item => item.projectId !== projectId)
-    }
-  }
-  return { ...data, projects: data.projects.map(candidate => (candidate === project ? next : candidate)), pinnedItems }
 }
 
 /** Rename a stream. Its branch keeps its name. */

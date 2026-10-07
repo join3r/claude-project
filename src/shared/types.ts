@@ -129,6 +129,11 @@ export interface Stream {
   workspace?: WorkspaceConfig
   tasks: Task[]
   lastTaskId?: string
+  /**
+   * How many of its tasks are archived (its `Done (N)` row). The tasks
+   * themselves live in `archive/<projectId>.json` (`src/shared/archive.ts`).
+   */
+  archivedTaskCount?: number
 }
 
 export interface WorkspaceConfig {
@@ -150,6 +155,20 @@ export interface WorkspaceCreateRequest extends WorkspaceTarget {
   name: string
   baseBranch: string
 }
+
+/** Bring back an archived stream's worktree from its branch (no new branch). */
+export interface WorkspaceRestoreRequest extends WorkspaceTarget {
+  worktreePath: string
+  branchName: string
+}
+
+/**
+ * `ok`: the worktree is there again (or never went: a kept worktree is reused).
+ * `branch-missing`: the branch was discarded, so there is nothing to check out.
+ */
+export type WorkspaceRestoreResult =
+  | { status: 'ok'; worktreePath: string; branchName: string; relativeProjectPath: string }
+  | { status: 'branch-missing' }
 
 export interface WorkspaceDeleteRequest extends WorkspaceTarget {
   worktreePath: string
@@ -207,6 +226,8 @@ export interface Project {
   /** Lines of work. The first is always the `main` stream (`isMain`). */
   streams: Stream[]
   lastStreamId?: string
+  /** How many streams are archived (its `Done` group); they live in `archive/<projectId>.json`. */
+  archivedStreamCount?: number
   ssh?: SshConfig
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
@@ -239,7 +260,11 @@ export function isEphemeralProject(project: Project): boolean {
   return !!project.ephemeral
 }
 
-/** A hidden ad-hoc project is spent once it has no task left. */
+/**
+ * A hidden ad-hoc project is spent once it has no open task left. Archived tasks
+ * and streams don't count: they live outside the project's streams, and its
+ * archive file goes with it.
+ */
 export function isSpentEphemeralProject(project: Project): boolean {
   return isEphemeralProject(project)
     && !(project.streams ?? []).some(stream => stream.tasks.length > 0)

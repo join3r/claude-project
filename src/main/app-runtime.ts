@@ -7,6 +7,7 @@ import { promisify } from 'util'
 import { Storage } from './storage'
 import { CONFIG_DIR } from './config-dir'
 import { ScrollbackStorage } from './scrollback-storage'
+import { ArchiveStorage } from './archive-storage'
 import { PtyManager } from './pty-manager'
 import { PtySessions } from './pty-sessions'
 import { HookServer } from './hook-server'
@@ -34,11 +35,13 @@ import { registerSshHandlers, routeBrowserDirectQuietly, routeBrowserThroughSock
 import { registerAgentHandlers } from './ipc/agents'
 import { registerTerminalHandlers } from './ipc/terminals'
 import { createWorkspace, listWorkspaceBranches, registerWorkspaceHandlers } from './ipc/workspaces'
+import { registerArchiveHandlers } from './ipc/archive'
+import { readLocalTranscript, readRemoteTranscript } from './claude-chat/transcript'
 import { registerFileBrowserHandlers } from './ipc/file-browser'
 import { registerGitHandlers } from './ipc/git'
 import { registerNotebookHandlers } from './ipc/notebooks'
 import { isRemoteProject, isShellCommandProject } from '../shared/types'
-import { removeTaskFromProject } from '../shared/streams'
+import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../shared/archive'
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
@@ -133,6 +136,7 @@ function getWindowGeometry(window: BrowserWindow): WindowGeometry {
 export class AppRuntime {
   private readonly storage = new Storage(CONFIG_DIR)
   private readonly scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
+  private readonly archiveStorage = new ArchiveStorage(path.join(CONFIG_DIR, 'archive'))
   private readonly notesStorage = new NotesStorage(CONFIG_DIR)
   private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
   private readonly ptyManager = new PtyManager()
@@ -187,6 +191,7 @@ export class AppRuntime {
       persist: (data) => this.notesStorage.save(data),
       broadcast: (envelope) => this.broadcastToAllWindows('notes-updated', envelope)
     })
+    this.forgetArchivesOfVanishedProjects()
     this.config = this.storage.loadConfig()
     setPortableNodeDir(this.config.portableNodeDir)
     this.sleepBlocker = new SleepBlocker(
@@ -407,7 +412,7 @@ export class AppRuntime {
       closeTask: (params) => closeTask({
         peek: () => this.projectsStore.peek(),
         dirtyTabIds: () => this.getDirtyTabIds(),
-        removeTask: (project, task) => this.removeTaskFromMain(project, task)
+        removeTask: (project, task) => this.archiveTaskFromMain(project, task)
       }, params),
       closeTab: async (tabId) => {
         const found = findClosableTab(this.projectsStore.peek(), tabId)
@@ -484,30 +489,32 @@ export class AppRuntime {
   }
 
   /**
-   * Delete a task on main's own behalf, doing here every piece of teardown
-   * `useAppState.removeTask` does in a window — the PTYs (which outlive a hidden
-   * tab), the scrollback files, the hook injections and the activity entries.
-   * A renderer only tears down tabs it has mounted, so nothing here may be left
-   * to the broadcast; the broadcast covers only what is renderer-local (xterm
-   * instances, per-window status entries, view state).
+   * Archive a task on main's own behalf (a phone's `task.close`), doing here every
+   * piece of teardown a window does when it closes one — the PTYs (which outlive a
+   * hidden tab), the hook injections and the activity entries. The scrollback
+   * stays, for Reopen. A renderer only tears down tabs it has mounted, so nothing
+   * here may be left to the broadcast; the broadcast covers only what is
+   * renderer-local (xterm instances, per-window status entries, view state).
    */
-  private async removeTaskFromMain(project: Project, task: Task): Promise<void> {
-    const tabIds = await tearDownTaskTabs(project, task, this.teardownTargets())
+  private async archiveTaskFromMain(project: Project, task: Task): Promise<void> {
+    const entry = archivedTaskEntry(project, task.id, Date.now())
+    const tabIds = await tearDownTaskTabs(project, task, { ...this.teardownTargets(), deleteScrollback: () => {} })
 
     // Sent before the state commit, and on the same ordered channel: a window that
     // learns the task is gone first unmounts its tabs, and the components that own
     // the xterm instances and status entries would no longer be listening.
     this.broadcastToAllWindows('tasks-removed', { projectId: project.id, taskId: task.id, tabIds })
 
+    // The file first, then the data: a crash in between leaves the task in both
+    // (the archive view hides it), never in neither.
     const data = this.projectsStore.peek()
-    this.commitProjects({
-      ...data,
-      projects: data.projects.map(candidate =>
-        candidate.id === project.id
-          ? removeTaskFromProject(candidate, task.id)
-          : candidate
-      )
-    })
+    const next = archiveTasksInData(data, project.id, [task.id])
+    const retired = !next.projects.some(candidate => candidate.id === project.id)
+    if (entry && !retired) {
+      this.archiveStorage.update(project.id, archive => withArchivedTasks(archive, [entry]))
+      this.broadcastToAllWindows('archive-changed', project.id)
+    }
+    this.commitProjects(next)
 
     // Main's own copy of each window's selection is what gets persisted on quit,
     // so it has to forget the task too.
@@ -527,6 +534,27 @@ export class AppRuntime {
       })
     }
     this.persistWindowSession()
+  }
+
+  /**
+   * A project that leaves the data (deleted, or a spent hidden one swept away)
+   * takes its archive with it, and the scrollback of the archived tabs: its Done
+   * rows are unreachable from then on.
+   */
+  private forgetArchivesOfVanishedProjects(): void {
+    let before = this.projectsStore.peek().projects
+    this.projectsStore.subscribe((data) => {
+      const gone = vanishedProjectIds(before, data.projects)
+      before = data.projects
+      for (const projectId of gone) {
+        try {
+          for (const tabId of archivedTabIds(this.archiveStorage.load(projectId))) this.scrollbackStorage.delete(tabId)
+          this.archiveStorage.delete(projectId)
+        } catch (err) {
+          this.logDebug(`archiveForget projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+    })
   }
 
   /** What a window does for the tabs it closes, done by main for tabs no window may be showing. */
@@ -550,13 +578,23 @@ export class AppRuntime {
 
   /**
    * Close one tab on main's own behalf (the phone's `tab.close`): the same teardown
-   * as {@link removeTaskFromMain}, for one tab, with the task left in place.
+   * as {@link archiveTaskFromMain}, for one tab (a closed tab's scrollback goes), with the task left in place.
    */
   private async removeTabFromMain(project: Project, task: Task, tab: Tab): Promise<void> {
     const tabIds = await tearDownTabs(project, task, [tab], this.teardownTargets())
     // Before the commit, for the same reason as `tasks-removed`.
     this.broadcastToAllWindows('tabs-removed', { projectId: project.id, taskId: task.id, tabIds })
     this.commitProjects(removeTabFromData(this.projectsStore.peek(), task.id, tab.id))
+  }
+
+  /** Run a shell script on a remote project's host over its control socket; resolves its stdout. */
+  private async remoteExec(projectId: string, sshConfig: SshConfig, script: string): Promise<string> {
+    const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
+      '-S', this.sshManager.getSocketPath(projectId),
+      `${sshConfig.username}@${sshConfig.host}`,
+      script
+    ], { timeout: 30_000, maxBuffer: 512 * 1024 * 1024 })
+    return stdout
   }
 
   /** Where a project's workspaces live, for the workspace helpers. */
@@ -710,14 +748,7 @@ export class AppRuntime {
           : env.SHELL || '/bin/sh'
         return { file: shell, args: ['-c', command], cwd: config.cwd, env }
       },
-      remoteExec: async (projectId, sshConfig, script) => {
-        const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
-          '-S', this.sshManager.getSocketPath(projectId),
-          `${sshConfig.username}@${sshConfig.host}`,
-          script
-        ], { timeout: 30_000, maxBuffer: 512 * 1024 * 1024 })
-        return stdout
-      },
+      remoteExec: (projectId, sshConfig, script) => this.remoteExec(projectId, sshConfig, script),
       onHook: (tabId, body) => {
         const event = typeof body.hook_event_name === 'string' ? body.hook_event_name : ''
         this.handleHook(hookEndpointFor(event), tabId, body)
@@ -855,6 +886,19 @@ export class AppRuntime {
       ensureSshConnected: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
       socketPath: (projectId) => this.sshManager.getSocketPath(projectId),
       deleteWorkspace: (request) => this.deleteWorkspace(request)
+    })
+
+    registerArchiveHandlers(ipc, {
+      archive: this.archiveStorage,
+      broadcastChanged: (projectId) => this.broadcastToAllWindows('archive-changed', projectId),
+      deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
+      readTranscript: async (sessionId, cwd, projectId, sshConfig) => {
+        if (projectId && sshConfig) {
+          await this.ensureSshConnected(projectId, sshConfig)
+          return readRemoteTranscript(sessionId, (script) => this.remoteExec(projectId, sshConfig, script))
+        }
+        return readLocalTranscript(sessionId, cwd)
+      }
     })
 
     registerFileBrowserHandlers(ipc, { resolveRoot })

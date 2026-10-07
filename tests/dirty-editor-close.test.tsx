@@ -349,7 +349,7 @@ describe('closing an editor with unsaved changes', () => {
     await type(1, 'unsaved b')
 
     await act(async () => {
-      void app.removeTask('p1', 't1')
+      void app.archiveTask('p1', 't1')
       await new Promise(resolve => setTimeout(resolve, 0))
     })
 

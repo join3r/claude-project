@@ -9,6 +9,8 @@ import { localProjectFolder } from '../../shared/external-editors'
 import TaskPanes from './TaskPanes'
 import NewTabButtons from './NewTabButtons'
 import { ProjectHome } from './ProjectHome'
+import { ArchivedView } from './ArchivedView'
+import { useArchivedView } from './archivedViewTarget'
 import TunnelPopup from './TunnelPopup'
 import UnsavedChangesModal from './UnsavedChangesModal'
 import StateSyncErrorModal from './StateSyncErrorModal'
@@ -76,6 +78,8 @@ export default function ContentArea(): React.ReactElement {
     config
   } = useApp()
   useMetaHeld()
+  const archivedView = useArchivedView()
+  const showsArchived = !!archivedView && !!selectedProject && !selectedTask && archivedView.projectId === selectedProject.id
   const selectedFocusedPane = Math.max(0, Math.min((selectedTask?.panes.length ?? 1) - 1, useFocusedPane(selectedTaskId ?? '')))
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
@@ -467,7 +471,9 @@ export default function ContentArea(): React.ReactElement {
         <div className="flex-1 flex items-center justify-center text-text-muted text-md">Select or create a task to get started</div>
       )}
       {/* A project with no task selected shows its Home page (clicking the project name lands here). */}
-      {selectedProject && !selectedTask && (
+      {/* An archived task or stream opened from a Done row shows read-only in Home's place. */}
+      {showsArchived && archivedView && <ArchivedView key={`${archivedView.kind}:${archivedView.id}`} target={archivedView} />}
+      {selectedProject && !selectedTask && !showsArchived && (
         <div className="flex-1 min-h-0 flex overflow-hidden" data-testid="project-home">
           <ProjectHome projectId={selectedProject.id} />
         </div>

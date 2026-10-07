@@ -1,9 +1,22 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { v4 as uuid } from 'uuid'
 import { isEphemeralProject } from '../../../shared/types'
-import type { Stream, Tab, Task, WorkspaceConfig } from '../../../shared/types'
+import type { Project, Stream, Tab, Task, WorkspaceConfig } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
-import { findStreamOfTask, findTaskInProject, planTaskMove, projectTasks, streamDirectory, taskTabs } from '../../../shared/streams'
+import { findStreamOfTask, findTaskInProject, planTaskMove, projectTasks, streamDirectory, taskTabIds, taskTabs } from '../../../shared/streams'
+import {
+  archiveStreamInData,
+  archiveTasksInData,
+  archivedStreamEntry,
+  archivedTaskEntry,
+  reopenStreamInData,
+  reopenTargetStream,
+  reopenTaskInData,
+  syncArchiveCounts,
+  visibleArchive,
+  type ProjectArchive
+} from '../../../shared/archive'
+import { adoptArchive, loadArchive, setArchiveLoadedHandler } from '../archiveStore'
 import { patchTabInTask } from '../../../shared/panes'
 import {
   addStreamInData,
@@ -13,9 +26,7 @@ import {
   makeStream,
   makeTask,
   mapTask,
-  removeTaskFromData,
   moveTaskInData,
-  removeStreamFromData,
   renameStreamInData,
   tabIdsOfTask
 } from './projectsData'
@@ -30,11 +41,13 @@ export interface TasksActions {
   /** A new stream at the end of the project's list: a worktree's, or the project folder's. */
   addStream: (projectId: string, name: string, workspace?: WorkspaceConfig) => Stream
   /**
-   * Close a task: its tabs end and it leaves its stream (which stays, even
-   * emptied). Asks first only about unsaved editors; the caller asks the rest.
-   * Resolves false when that question was cancelled.
+   * Close a task: it is archived. Its tabs end (their scrollback is kept for
+   * Reopen) and it leaves its stream (which stays, even emptied) for that
+   * stream's `Done (N)`. Asks first only about unsaved editors; the caller asks
+   * the rest. Resolves false when that question was cancelled, or the archive
+   * could not be written (nothing is closed then).
    */
-  removeTask: (projectId: string, taskId: string) => Promise<boolean>
+  archiveTask: (projectId: string, taskId: string) => Promise<boolean>
   renameTask: (projectId: string, taskId: string, name: string) => void
   /**
    * Move a task to `toIndex` of stream `toStreamId` (counted without the task).
@@ -45,11 +58,28 @@ export interface TasksActions {
    */
   moveTask: (projectId: string, taskId: string, toStreamId: string, toIndex: number, options?: { restart?: boolean }) => Promise<boolean>
   /**
-   * Remove a stream (never `main`) and every task in it. The worktree is removed
-   * too unless `skipWorkspaceCleanup` (the caller already ran the pre-flight).
-   * Resolves false when nothing was removed (unsaved editors kept it).
+   * Close a stream (never `main`): it is archived with every task in it, to the
+   * project's `Done` group. The worktree is removed too unless
+   * `skipWorkspaceCleanup` (the caller already ran the pre-flight). Resolves
+   * false when nothing was closed (unsaved editors kept it, or the archive could
+   * not be written).
    */
-  removeStream: (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => Promise<boolean>
+  archiveStream: (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => Promise<boolean>
+  /**
+   * Reopen an archived task: back at the end of its stream (`main` when that
+   * stream is closed), selected in this window. Its agent resumes its session
+   * when its tabs mount; a session from another directory is copied over first.
+   */
+  reopenTask: (projectId: string, taskId: string) => Promise<boolean>
+  /**
+   * Reopen an archived stream with the tasks it had open. A worktree stream gets
+   * its worktree back from its branch; when the branch was discarded it comes
+   * back as a project-folder stream and `notice` says so. Rejects when git
+   * fails otherwise (nothing reopened).
+   */
+  reopenStream: (projectId: string, streamId: string) => Promise<{ reopened: boolean; notice?: string }>
+  /** Delete archived tasks and streams for good (and their tabs' scrollback). */
+  deleteArchived: (projectId: string, ids: { tasks?: string[]; streams?: string[] }) => Promise<void>
   /** Rename a stream. Its branch keeps its name. */
   renameStream: (projectId: string, streamId: string, name: string) => void
   /**
@@ -109,24 +139,28 @@ export function useTasks(
     return stream
   }, [mutateProjects])
 
-  const removeTask = useCallback(async (projectId: string, taskId: string) => {
+  const archiveTask = useCallback(async (projectId: string, taskId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = findTaskInProject(project, taskId)
     if (!project || !task) return false
     // One dialog for every unsaved editor under the task, not one per tab.
     if (await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
 
-    for (const tab of taskTabs(task)) {
-      window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
-      void window.api.scrollbackDelete(tab.id)
-    }
-
     // A hidden ad-hoc project exists only to give its tasks somewhere to live —
-    // once the last real one is gone it goes with them, in the same mutation so
-    // no empty record is ever written out.
+    // once the last open one is gone it goes with them, in the same mutation so
+    // no empty record is ever written out, and so does its archive.
     const ownerRetired = isEphemeralProject(project)
       && !projectTasks(project).some(candidate => candidate.id !== taskId)
-    mutateProjects(prev => removeTaskFromData(prev, projectId, taskId))
+    const entry = archivedTaskEntry(project, taskId, Date.now())
+    // The file first, then the data: a crash in between leaves the task in both
+    // (the Done row hides it while it is open), never in neither.
+    if (entry && !ownerRetired && !await writeArchive(projectId, () => window.api.archiveAddTasks(projectId, [entry]))) return false
+
+    // Ending the tabs; the scrollback stays for Reopen.
+    for (const tab of taskTabs(task)) {
+      window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
+    }
+    mutateProjects(prev => archiveTasksInData(prev, projectId, [taskId]))
     updateWindowViewState(prev => removeTaskView(prev, projectId, taskId, ownerRetired))
     return true
   }, [confirmDiscardDirty, mutateProjects, updateWindowViewState])
@@ -190,15 +224,18 @@ export function useTasks(
     return true
   }, [confirmDiscardDirty, mutateProjects])
 
-  const removeStream = useCallback(async (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => {
+  const archiveStream = useCallback(async (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const stream = project?.streams.find(candidate => candidate.id === streamId)
     if (!project || !stream || stream.isMain) return false
     const tabIds = stream.tasks.flatMap(tabIdsOfTask)
     if (await confirmDiscardDirty(tabIds) === 'cancel') return false
+    const ownerRetired = isEphemeralProject(project)
+      && !project.streams.some(candidate => candidate.id !== streamId && candidate.tasks.length > 0)
+    const entry = archivedStreamEntry(project, streamId, Date.now())
+    if (entry && !ownerRetired && !await writeArchive(projectId, () => window.api.archiveAddStream(projectId, entry))) return false
     for (const tabId of tabIds) {
       window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-      void window.api.scrollbackDelete(tabId)
     }
     const workspace = stream.workspace
     if (workspace && !skipWorkspaceCleanup) {
@@ -214,15 +251,92 @@ export function useTasks(
         }
       ).then(reportRefusedWorkspaceDelete).catch(() => {})
     }
-    const ownerRetired = isEphemeralProject(project)
-      && !project.streams.some(candidate => candidate.id !== streamId && candidate.tasks.length > 0)
-    mutateProjects(prev => removeStreamFromData(prev, projectId, streamId))
+    mutateProjects(prev => archiveStreamInData(prev, projectId, streamId))
     updateWindowViewState(prev => stream.tasks.reduce(
       (view, task) => removeTaskView(view, projectId, task.id, ownerRetired),
       prev
     ))
     return true
   }, [confirmDiscardDirty, mutateProjects, updateWindowViewState])
+
+  // Whenever this window reads an archive, the Done counts follow the file.
+  useEffect(() => {
+    setArchiveLoadedHandler((projectId, archive) => {
+      mutateProjects(prev => syncArchiveCounts(prev, projectId, archive))
+    })
+    return () => setArchiveLoadedHandler(null)
+  }, [mutateProjects])
+
+  const reopenTask = useCallback(async (projectId: string, taskId: string) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    if (!project) return false
+    const archive = visibleArchive(await loadArchive(projectId), project)
+    const entry = archive.tasks.find(candidate => candidate.task.id === taskId)
+    const target = entry && reopenTargetStream(project, entry)
+    if (!entry || !target) return false
+    const [task] = await carryOver(project, [entry.task], entry.dir, streamDirectory(project, target))
+    // The data first, then the file (see `archiveTask`).
+    mutateProjects(prev => reopenTaskInData(prev, projectId, { ...entry, task }))
+    await writeArchive(projectId, () => window.api.archiveRemove(projectId, { tasks: [taskId] }))
+    switchToTask(projectId, taskId)
+    return true
+  }, [mutateProjects, projectsRef, switchToTask])
+
+  const reopenStream = useCallback(async (projectId: string, streamId: string) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    if (!project) return { reopened: false }
+    const archive = visibleArchive(await loadArchive(projectId), project)
+    const entry = archive.streams.find(candidate => candidate.stream.id === streamId)
+    if (!entry) return { reopened: false }
+    let workspace: WorkspaceConfig | null = null
+    let notice: string | undefined
+    const old = entry.stream.workspace
+    if (old) {
+      const restored = await window.api.workspaceRestore({
+        projectDir: getProjectDir(project),
+        projectId: project.ssh ? projectId : undefined,
+        sshConfig: project.ssh,
+        worktreePath: old.worktreePath,
+        branchName: old.branchName
+      })
+      if (restored.status === 'ok') {
+        workspace = {
+          worktreePath: restored.worktreePath,
+          branchName: restored.branchName,
+          baseBranch: old.baseBranch,
+          relativeProjectPath: restored.relativeProjectPath
+        }
+      } else {
+        notice = `Branch "${old.branchName}" no longer exists, so "${entry.stream.name}" reopened in the project folder.`
+      }
+    }
+    const dir = streamDirectory(project, { ...entry.stream, ...(workspace ? { workspace } : { workspace: undefined }) })
+    const tasks = await carryOver(project, entry.stream.tasks, entry.dir, dir)
+    mutateProjects(prev => reopenStreamInData(prev, projectId, { ...entry, stream: { ...entry.stream, tasks } }, workspace))
+    await writeArchive(projectId, () => window.api.archiveRemove(projectId, { streams: [streamId] }))
+    const first = entry.stream.lastTaskId ?? entry.stream.tasks[0]?.id
+    if (first) switchToTask(projectId, first)
+    return { reopened: true, notice }
+  }, [mutateProjects, projectsRef, switchToTask])
+
+  const deleteArchived = useCallback(async (projectId: string, ids: { tasks?: string[]; streams?: string[] }) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    if (!project) return
+    const archive = await loadArchive(projectId)
+    const tasks = new Set(ids.tasks ?? [])
+    const streams = new Set(ids.streams ?? [])
+    const tabIds = [
+      ...archive.tasks.filter(entry => tasks.has(entry.task.id)).flatMap(entry => taskTabIds(entry.task)),
+      ...archive.streams.filter(entry => streams.has(entry.stream.id)).flatMap(entry => [
+        ...entry.stream.tasks.flatMap(taskTabIds),
+        ...entry.doneTasks.flatMap(done => taskTabIds(done.task))
+      ])
+    ]
+    const next = await window.api.archiveRemove(projectId, ids)
+    adoptArchive(projectId, next)
+    mutateProjects(prev => syncArchiveCounts(prev, projectId, next))
+    if (tabIds.length > 0) await window.api.archiveDeleteTabs(tabIds).catch(() => {})
+  }, [mutateProjects, projectsRef])
 
   const renameStream = useCallback((projectId: string, streamId: string, name: string) => {
     mutateProjects(prev => renameStreamInData(prev, projectId, streamId, name))
@@ -241,5 +355,53 @@ export function useTasks(
     return null
   }, [addTask, switchToTask])
 
-  return { addTask, addTaskInDirectory, addStream, removeTask, renameTask, moveTask, removeStream, renameStream, taskForTab }
+  return {
+    addTask, addTaskInDirectory, addStream, archiveTask, renameTask, moveTask, archiveStream, renameStream, taskForTab,
+    reopenTask, reopenStream, deleteArchived
+  }
+}
+
+/**
+ * Write the archive file through `write` and adopt what it hands back. A failed
+ * write says so and resolves false: whatever was being closed stays open.
+ */
+async function writeArchive(projectId: string, write: () => Promise<ProjectArchive>): Promise<boolean> {
+  try {
+    adoptArchive(projectId, await write())
+    return true
+  } catch (err) {
+    window.alert(`Couldn't update the archive: ${err instanceof Error ? err.message : String(err)}`)
+    return false
+  }
+}
+
+/**
+ * A task reopening somewhere else than it was archived from (its stream is gone,
+ * or its worktree came back elsewhere or not at all) takes its sessions along:
+ * Claude and Pi keep them per directory, so they are copied over first and its
+ * agent resumes there. A terminal opened on a folder inside the old directory
+ * opens on the same folder in the new one, or at the new top when it isn't
+ * there. Returns the tasks as they reopen.
+ */
+async function carryOver(project: Project, tasks: Task[], fromDir: string, toDir: string): Promise<Task[]> {
+  if (!fromDir || fromDir === toDir) return tasks
+  const plans = tasks.map(task => planTaskMove(task, fromDir, toDir))
+  const sessions = plans.flatMap(plan => plan.sessions)
+  const cwdMoves = plans.flatMap(plan => plan.cwdMoves)
+  if (sessions.length === 0 && cwdMoves.length === 0) return tasks
+  let dirsExist: boolean[] = []
+  try {
+    const prepared = await window.api.taskMovePrepare(
+      fromDir, toDir, sessions, cwdMoves.map(move => move.cwd), project.ssh ? project.id : undefined, project.ssh
+    )
+    dirsExist = prepared.dirsExist
+  } catch {
+    // The agents start new sessions instead; terminals start at the new top.
+  }
+  const cwds = new Map(cwdMoves.map((move, i) => [move.tabId, dirsExist[i] ? move.cwd : undefined]))
+  return tasks.map(task => (
+    taskTabs(task).some(tab => cwds.has(tab.id))
+      ? [...cwds].reduce((next, [tabId, cwd]) => patchTabInTask(next, tabId, { cwd }), task)
+      : task
+  ))
 }

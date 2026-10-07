@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import type { AppStateCore } from './useAppStateCore'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { selectProjectHomeView, selectProjectView, switchToTaskView } from './viewState'
+import { closeArchivedView, openArchivedView, type ArchivedViewTarget } from '../../components/archivedViewTarget'
 
 export interface SelectionActions {
   /** Select a project (restoring its last task), or clear the selection with `null`. */
@@ -10,6 +11,8 @@ export interface SelectionActions {
   selectProjectHome: (projectId: string) => void
   setSelectedTaskId: (id: string | null) => void
   switchToTask: (projectId: string, taskId: string) => void
+  /** Show an archived task or stream read-only (the project selected, no task). */
+  showArchived: (target: ArchivedViewTarget) => void
 }
 
 /** Which project and task this window is looking at. Landing on a remote project connects it. */
@@ -33,6 +36,7 @@ export function useSelection(
   const selectProjectHome = useCallback((projectId: string) => {
     const project = projectsRef.current.find(p => p.id === projectId) ?? null
     if (!project) return
+    closeArchivedView()
     updateWindowViewState(prev => selectProjectHomeView(prev, projectId))
     ensureRemoteConnected(projectId, project, connectSsh)
   }, [connectSsh, updateWindowViewState])
@@ -42,6 +46,7 @@ export function useSelection(
   }, [updateWindowViewState])
 
   const switchToTask = useCallback((projectId: string, taskId: string) => {
+    closeArchivedView()
     updateWindowViewState(prev => switchToTaskView(prev, projectId, taskId))
 
     markTaskVisited(projectId, taskId)
@@ -50,7 +55,13 @@ export function useSelection(
     ensureRemoteConnected(projectId, project, connectSsh)
   }, [connectSsh, updateWindowViewState, markTaskVisited])
 
+  const showArchived = useCallback((target: ArchivedViewTarget) => {
+    openArchivedView(target)
+    updateWindowViewState(prev => ({ ...prev, selectedProjectId: target.projectId, selectedTaskId: null }))
+  }, [updateWindowViewState])
+
   return {
+    showArchived,
     setSelectedProjectId: selectProject,
     selectProjectHome,
     setSelectedTaskId: selectTask,

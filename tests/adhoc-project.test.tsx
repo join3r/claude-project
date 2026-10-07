@@ -59,7 +59,9 @@ beforeEach(() => {
     sshConnect: vi.fn().mockResolvedValue(undefined),
     sshDisconnect: vi.fn().mockResolvedValue(undefined),
     scrollbackDelete: vi.fn().mockResolvedValue(undefined),
-    workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' })
+    workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' }),
+    archiveAddTasks: vi.fn().mockImplementation((_projectId: string, entries: unknown[]) =>
+      Promise.resolve({ version: 1, tasks: entries, streams: [] }))
   }
 })
 
@@ -140,19 +142,20 @@ describe('addTaskInDirectory', () => {
   })
 })
 
-describe('removeTask on an ad-hoc project', () => {
-  it('retires the hidden project along with its last real task', async () => {
+describe('archiveTask on an ad-hoc project', () => {
+  it('retires the hidden project along with its last real task, writing no archive for it', async () => {
     const { result } = await mountState()
 
     act(() => { result.current.addTaskInDirectory('/tmp/scratch', 'Poke at it') })
     const project = adhoc(result.current)!
     const taskId = projectTasks(project)[0].id
 
-    await act(async () => { await result.current.removeTask(project.id, taskId) })
+    await act(async () => { await result.current.archiveTask(project.id, taskId) })
 
     expect(result.current.projects.filter(isEphemeralProject)).toHaveLength(0)
     expect(result.current.projectOrder).not.toContain(project.id)
     expect(result.current.selectedProjectId).toBeNull()
+    expect((window as any).api.archiveAddTasks).not.toHaveBeenCalled()
   })
 
   it('keeps it while another real task is still there', async () => {
@@ -163,11 +166,13 @@ describe('removeTask on an ad-hoc project', () => {
     const project = adhoc(result.current)!
     const firstId = projectTasks(project).find(t => t.name === 'First')!.id
 
-    await act(async () => { await result.current.removeTask(project.id, firstId) })
+    await act(async () => { await result.current.archiveTask(project.id, firstId) })
 
     const still = adhoc(result.current)
     expect(still).toBeDefined()
     expect(projectTasks(still).map(t => t.name)).toEqual(['Second'])
+    expect((window as any).api.archiveAddTasks).toHaveBeenCalledWith(project.id, [expect.objectContaining({ task: expect.objectContaining({ id: firstId }) })])
+    expect(still!.streams[0].archivedTaskCount).toBe(1)
   })
 
   it('leaves an ordinary project standing when its last task goes', async () => {
@@ -176,7 +181,7 @@ describe('removeTask on an ad-hoc project', () => {
     act(() => { result.current.addTask('p1', 'Only task') })
     const taskId = projectTasks(result.current.projects[0])[0].id
 
-    await act(async () => { await result.current.removeTask('p1', taskId) })
+    await act(async () => { await result.current.archiveTask('p1', taskId) })
 
     expect(result.current.projects.map(p => p.id)).toContain('p1')
   })
