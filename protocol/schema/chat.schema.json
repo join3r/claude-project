@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://devtool.awantech.sk/schema/mobile/v1/chat.schema.json",
+  "$id": "https://devtool.awantech.sk/schema/mobile/v2/chat.schema.json",
   "title": "Chat view",
   "description": "The chat view model, SPEC.md §6.2, and the chat.* results, §6.3. Describes what a desktop sends; receivers keep unknown item and prompt kinds as 'Needs a newer app' and ignore unknown fields.",
   "$ref": "#/$defs/view",

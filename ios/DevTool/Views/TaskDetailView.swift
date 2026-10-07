@@ -34,16 +34,14 @@ struct TaskDetailView: View {
                     LabeledContent("Project") {
                         ProjectHeader(project: project, desktopName: nil)
                     }
-                    LabeledContent("Desktop", value: desktop?.name ?? "")
-                    if let branch = task.branch {
-                        LabeledContent("Branch") {
-                            Label(branch, systemImage: "arrow.triangle.branch")
-                                .labelStyle(.titleAndIcon)
-                                .lineLimit(1)
+                    if let stream = project.streams.first(where: { $0.id == task.streamId }) ?? fallbackStream(task) {
+                        LabeledContent("Stream") {
+                            StreamLabel(stream: stream)
                         }
                     }
+                    LabeledContent("Desktop", value: desktop?.name ?? "")
                     LabeledContent("Status") {
-                        StatusBadge(status: task.summaryStatus)
+                        StatusBadge(status: task.status)
                     }
                     if let triage = triageText(task) {
                         LabeledContent("Inbox", value: triage)
@@ -99,14 +97,12 @@ struct TaskDetailView: View {
                         Button(role: .destructive) {
                             closingTask = CloseTaskRequest(desktopId: ref.desktopId, task: task)
                         } label: {
-                            Label(task.branch == nil ? "Close task" : "Close workspace", systemImage: "xmark.circle")
+                            Label("Close task", systemImage: "xmark.circle")
                         }
                         .tint(.red)
                         .disabled(offline)
                     } footer: {
-                        if task.branch != nil {
-                            Text("Removes the worktree from disk. You're asked first if it has uncommitted or unmerged work.")
-                        }
+                        Text("Moves it to its stream's Done list on the desktop, where it can be reopened. The stream and its worktree stay.")
                     }
                 }
             }
@@ -146,10 +142,11 @@ struct TaskDetailView: View {
                     }
                 }
                 if model.supports(DesktopFeature.pin, on: ref.desktopId) {
-                    let pinned = model.inboxes[ref.desktopId]?.isPinned(projectId: project.id, taskId: task.id) ?? false
+                    let pin = InboxPin.task(task, in: project)
+                    let pinned = model.inboxes[ref.desktopId]?.isPinned(pin) ?? false
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(pinned ? "Unpin" : "Pin", systemImage: pinned ? "pin.fill" : "pin") {
-                            Task { await model.setPin(InboxPin(projectId: project.id, taskId: task.id), pinned: !pinned, desktopId: ref.desktopId) }
+                            Task { await model.setPin(pin, pinned: !pinned, desktopId: ref.desktopId) }
                         }
                         .disabled(offline)
                     }
@@ -164,6 +161,11 @@ struct TaskDetailView: View {
         } else {
             ContentUnavailableView("Task not found", systemImage: "questionmark.folder", description: Text("It may have been closed on the desktop."))
         }
+    }
+
+    /// A task whose stream isn't listed (an inbox cached by an older build).
+    private func fallbackStream(_ task: InboxTask) -> InboxStream? {
+        task.streamName.isEmpty ? nil : InboxStream(id: task.streamId, name: task.streamName)
     }
 
     /// "New chat" (§8.2, §8.3): adds a Claude chat to the task on the desktop

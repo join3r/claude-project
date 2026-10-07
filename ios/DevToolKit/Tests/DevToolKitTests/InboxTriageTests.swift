@@ -18,13 +18,13 @@ import Testing
 
     @Test func groupsAndOrdersAcrossDesktops() {
         let a = inbox("a", [
-            InboxTask(id: "waiting-short", name: "", tabs: [tab("1", .attention, since: Self.nowMs - 1_000)]),
+            InboxTask(id: "waiting-short", name: "", status: .attention, since: Self.nowMs - 1_000, tabs: [tab("1", .attention, since: Self.nowMs - 1_000)]),
             InboxTask(id: "recent", name: "", eventAt: Self.nowMs - 10, tabs: []),
             InboxTask(id: "settled-old", name: "", settledAt: 100, tabs: []),
-            InboxTask(id: "snoozed-attention", name: "", snoozeUntilAttention: true, tabs: [tab("2", .attention)]),
+            InboxTask(id: "snoozed-attention", name: "", status: .attention, snoozeUntilAttention: true, tabs: [tab("2", .attention)]),
         ])
         let b = inbox("b", [
-            InboxTask(id: "waiting-long", name: "", tabs: [tab("3", .working, since: 1), tab("4", .attention, since: Self.nowMs - 9_000)]),
+            InboxTask(id: "waiting-long", name: "", status: .attention, since: Self.nowMs - 9_000, tabs: [tab("3", .working, since: 1), tab("4", .attention, since: Self.nowMs - 9_000)]),
             InboxTask(id: "older", name: "", lastInteractedAt: Self.nowMs - 500, tabs: []),
             InboxTask(id: "settled-new", name: "", settledAt: 200, tabs: []),
             InboxTask(id: "snoozed-soon", name: "", settledAt: 300, snoozedUntil: Self.nowMs + 60_000, tabs: []),
@@ -49,7 +49,7 @@ import Testing
 
     @Test func sinksWorkingTasksOnlyWhenAsked() {
         let a = inbox("a", [
-            InboxTask(id: "busy", name: "", eventAt: Self.nowMs, tabs: [tab("1", .working, since: Self.nowMs - 1_000)]),
+            InboxTask(id: "busy", name: "", status: .working, since: Self.nowMs - 1_000, eventAt: Self.nowMs, tabs: [tab("1", .working, since: Self.nowMs - 1_000)]),
             InboxTask(id: "recent", name: "", eventAt: Self.nowMs - 10, tabs: []),
             InboxTask(id: "older", name: "", eventAt: Self.nowMs - 500, tabs: []),
         ])

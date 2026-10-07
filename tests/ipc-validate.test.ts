@@ -100,11 +100,13 @@ describe('domain schemas', () => {
 
   it('checks the directories main reads out of a projects save', () => {
     const save = revisionSave(projectsData)
-    const data = { projects: [{ id: 'p', directory: '/x', tasks: [] }], tags: [], projectOrder: ['p'], pinnedItems: [] }
+    const data = { projects: [{ id: 'p', directory: '/x', streams: [{ id: 's', name: 'main', tasks: [] }] }], tags: [], projectOrder: ['p'], pinnedItems: [] }
     expect(save({ baseRevision: 1, data }, 's')).toEqual({ baseRevision: 1, data })
-    expect(() => save({ baseRevision: 1, data: { projects: [{ id: 'p', directory: 5, tasks: [] }] } }, 's')).toThrow(/directory/)
-    expect(() => save({ baseRevision: 1, data: { projects: [{ id: 'p', tasks: [{ id: 't', workspace: { worktreePath: 1 } }] }] } }, 's'))
+    expect(() => save({ baseRevision: 1, data: { projects: [{ id: 'p', directory: 5, streams: [] }] } }, 's')).toThrow(/directory/)
+    expect(() => save({ baseRevision: 1, data: { projects: [{ id: 'p', streams: [{ id: 's', workspace: { worktreePath: 1 }, tasks: [] }] }] } }, 's'))
       .toThrow(/worktreePath/)
+    // The pre-streams shape (tasks owning worktrees) is migrated on load and never saved.
+    expect(() => save({ baseRevision: 1, data: { projects: [{ id: 'p', directory: '/x', tasks: [] }] } }, 's')).toThrow(/streams/)
     expect(() => save({ baseRevision: -1, data }, 's')).toThrow(/baseRevision/)
   })
 })

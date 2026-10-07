@@ -421,41 +421,42 @@ public struct ChatNewResult: Sendable, Equatable {
     }
 }
 
-/// `task.new` (§8.4) params: a new task in `projectId` whose Claude chat starts on `prompt`.
+/// `task.new` (§8.4) params: a new task in one of `projectId`'s streams whose
+/// Claude chat starts on `prompt`.
 public struct TaskNewParams: Sendable, Equatable {
     public var projectId: String
+    /// nil: the stream the project was last used in, else `main`.
+    public var streamId: String?
     public var prompt: String
     /// One of `TaskOp.modes`; nil leaves Claude's own default.
     public var mode: String?
-    /// Give the task its own worktree on a new branch (§8.6). Only for desktops
-    /// that list `DesktopFeature.taskWorkspace`.
-    public var workspace: Bool
 
-    public init(projectId: String, prompt: String, mode: String? = nil, workspace: Bool = false) {
+    public init(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil) {
         self.projectId = projectId
+        self.streamId = streamId
         self.prompt = prompt
         self.mode = mode
-        self.workspace = workspace
     }
 }
 
-/// `task.close` (§8.7) params. Each `discard*` flag accepts the loss a blocker
-/// reported; `keepBranch` keeps a discarded workspace's branch.
+/// `task.close` (§8.7) params: archive the task. Each flag accepts what a
+/// blocker reported.
 public struct TaskCloseParams: Sendable, Equatable {
     public var taskId: String
+    /// Close even though its agent is working (`.working`).
+    public var stopWorking: Bool
+    /// Close even though an editor has unsaved changes (`.unsaved`).
     public var discardUnsaved: Bool
-    public var discardWorkspace: Bool
-    public var keepBranch: Bool
 
-    public init(taskId: String, discardUnsaved: Bool = false, discardWorkspace: Bool = false, keepBranch: Bool = false) {
+    public init(taskId: String, stopWorking: Bool = false, discardUnsaved: Bool = false) {
         self.taskId = taskId
+        self.stopWorking = stopWorking
         self.discardUnsaved = discardUnsaved
-        self.discardWorkspace = discardWorkspace
-        self.keepBranch = keepBranch
     }
 }
 
-/// `pin.set` (§8.10) params: pin or unpin a project, or its task when `pin.taskId` is set.
+/// `pin.set` (§8.10) params: pin or unpin a project, a stream (`pin.streamId`)
+/// or a task (`pin.taskId`).
 public struct PinSetParams: Sendable, Equatable {
     public var pin: InboxPin
     public var pinned: Bool
@@ -500,24 +501,19 @@ public struct TaskTriageParams: Sendable, Equatable {
     }
 }
 
-/// Why `task.close` left a task open (§8.7).
+/// Why `task.close` left a task open (§8.7), in the order the desktop checks.
 public enum TaskCloseBlocker: String, Sendable, Equatable, CaseIterable {
+    /// An agent tab of the task is working.
+    case working
+    /// An editor tab has unsaved changes in a desktop window.
     case unsaved
-    case uncommitted
-    case unmerged
-    case uncommittedAndUnmerged = "uncommitted-and-unmerged"
-    case checkFailed = "check-failed"
-
-    /// The branch may hold work that isn't anywhere else, so the phone asks
-    /// whether to keep it.
-    public var asksAboutBranch: Bool { self != .unsaved && self != .uncommitted }
 }
 
 /// `task.close` result.
 public enum TaskCloseResult: Sendable, Equatable {
-    /// The task is gone; `warning` says what was left behind (a worktree folder).
-    case closed(warning: String?)
-    case blocked(TaskCloseBlocker, branch: String?, baseBranch: String?, message: String?)
+    /// The task is archived (its stream's Done row on the desktop).
+    case closed
+    case blocked(TaskCloseBlocker)
 }
 
 /// `task.new` result: the new task and its claude-chat tab, already sent the prompt.
@@ -1002,13 +998,14 @@ extension TaskNewParams {
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ProtocolError("prompt is empty") }
         let mode = try o.optStr("mode")
         if let mode, !TaskOp.modes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
-        return TaskNewParams(projectId: projectId, prompt: prompt, mode: mode, workspace: o.flag("workspace"))
+        return TaskNewParams(projectId: projectId, streamId: try o.optStr("streamId"), prompt: prompt, mode: mode)
     }
 
     public var json: JSONValue {
-        var fields: JSONObject = ["projectId": .string(projectId), "prompt": .string(prompt)]
+        var fields: JSONObject = ["projectId": .string(projectId)]
+        if let streamId { fields["streamId"] = .string(streamId) }
+        fields["prompt"] = .string(prompt)
         if let mode { fields["mode"] = .string(mode) }
-        if workspace { fields["workspace"] = .bool(true) }
         return .object(fields)
     }
 }
@@ -1017,15 +1014,13 @@ extension TaskCloseParams {
     /// The desktop's side: a missing `taskId` throws (`bad-request`).
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> TaskCloseParams {
         let o = try Fields(value, "params")
-        return TaskCloseParams(taskId: try o.str("taskId"), discardUnsaved: o.flag("discardUnsaved"),
-                               discardWorkspace: o.flag("discardWorkspace"), keepBranch: o.flag("keepBranch"))
+        return TaskCloseParams(taskId: try o.str("taskId"), stopWorking: o.flag("stopWorking"), discardUnsaved: o.flag("discardUnsaved"))
     }
 
     public var json: JSONValue {
         var fields: JSONObject = ["taskId": .string(taskId)]
+        if stopWorking { fields["stopWorking"] = .bool(true) }
         if discardUnsaved { fields["discardUnsaved"] = .bool(true) }
-        if discardWorkspace { fields["discardWorkspace"] = .bool(true) }
-        if keepBranch { fields["keepBranch"] = .bool(true) }
         return .object(fields)
     }
 }
@@ -1034,11 +1029,13 @@ extension PinSetParams {
     /// The desktop's side: a missing `projectId` or a non-boolean `pinned` throws (`bad-request`).
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> PinSetParams {
         let o = try Fields(value, "params")
-        return PinSetParams(pin: InboxPin(projectId: try o.str("projectId"), taskId: try o.optStr("taskId")), pinned: try o.bool("pinned"))
+        let pin = InboxPin(projectId: try o.str("projectId"), streamId: try o.optStr("streamId"), taskId: try o.optStr("taskId"))
+        return PinSetParams(pin: pin, pinned: try o.bool("pinned"))
     }
 
     public var json: JSONValue {
         var fields: JSONObject = ["projectId": .string(pin.projectId)]
+        if let streamId = pin.streamId { fields["streamId"] = .string(streamId) }
         if let taskId = pin.taskId { fields["taskId"] = .string(taskId) }
         fields["pinned"] = .bool(pinned)
         return .object(fields)
@@ -1086,26 +1083,21 @@ extension TaskTriageParams {
 }
 
 extension TaskCloseResult {
-    /// A blocker this build doesn't know reads as `.checkFailed`.
+    /// A blocker outside `TaskCloseBlocker` throws: a desktop sends only those.
     public static func parse(_ value: JSONValue) throws(ProtocolError) -> TaskCloseResult {
         let o = try Fields(value, "result")
-        if try o.bool("closed") { return .closed(warning: try o.optStr("warning")) }
-        let blocker = TaskCloseBlocker(rawValue: try o.str("blocker")) ?? .checkFailed
-        return .blocked(blocker, branch: try o.optStr("branch"), baseBranch: try o.optStr("baseBranch"), message: try o.optStr("message"))
+        if try o.bool("closed") { return .closed }
+        let raw = try o.str("blocker")
+        guard let blocker = TaskCloseBlocker(rawValue: raw) else { throw ProtocolError("unknown blocker \(raw)") }
+        return .blocked(blocker)
     }
 
     public var json: JSONValue {
         switch self {
-        case .closed(let warning):
-            var fields: JSONObject = ["closed": .bool(true)]
-            if let warning { fields["warning"] = .string(warning) }
-            return .object(fields)
-        case .blocked(let blocker, let branch, let baseBranch, let message):
-            var fields: JSONObject = ["closed": .bool(false), "blocker": .string(blocker.rawValue)]
-            if let branch { fields["branch"] = .string(branch) }
-            if let baseBranch { fields["baseBranch"] = .string(baseBranch) }
-            if let message { fields["message"] = .string(message) }
-            return .object(fields)
+        case .closed:
+            return .object(["closed": .bool(true)])
+        case .blocked(let blocker):
+            return .object(["closed": .bool(false), "blocker": .string(blocker.rawValue)])
         }
     }
 }

@@ -16,11 +16,13 @@ function setup(decide: (hello: VerifiedHello) => HandshakeResult = () => 'ok', f
   const toPhone: Uint8Array[] = []
   const hellos: VerifiedHello[] = []
   const established: HandshakeResult[] = []
+  const incompatible: { update: 'phone' | 'desktop'; deviceName?: string }[] = []
   const appMessages: AppMessage[] = []
   let lost = 0
   const hooks: ChannelHooks = {
     sendFrame: (data) => toPhone.push(data),
     onHello: (hello) => { hellos.push(hello); return decide(hello) },
+    onIncompatible: (info) => incompatible.push(info),
     onEstablished: (result) => established.push(result),
     onAppMessage: (message) => appMessages.push(message),
     onSessionLost: () => { lost++ }
@@ -38,7 +40,7 @@ function setup(decide: (hello: VerifiedHello) => HandshakeResult = () => 'ok', f
     for (const data of phone.outbox.splice(0)) channel.receive(data)
     for (const data of toPhone.splice(0)) phone.receive(data)
   }
-  return { desktop, channel, phone, hooks, toPhone, hellos, established, appMessages, lost: () => lost, pump }
+  return { desktop, channel, phone, hooks, toPhone, hellos, established, appMessages, incompatible, lost: () => lost, pump }
 }
 
 describe('Noise channel (desktop responder)', () => {
@@ -54,9 +56,9 @@ describe('Noise channel (desktop responder)', () => {
     env.phone.startHandshake(env.phone.hello('resume'))
     env.pump()
     expect(env.hellos).toHaveLength(1)
-    expect(env.hellos[0].hello).toMatchObject({ kind: 'resume', deviceName: 'Test iPhone', v: 1, min: 1 })
+    expect(env.hellos[0].hello).toMatchObject({ kind: 'resume', deviceName: 'Test iPhone', v: 2, min: 2 })
     expect(bytesEqual(env.hellos[0].remoteStatic, env.phone.x.pub)).toBe(true)
-    expect(env.phone.desktopHello).toEqual({ v: 1, min: 1, app: 'devtool/test', features: [], desktopName: 'test-mbp', result: 'ok' })
+    expect(env.phone.desktopHello).toEqual({ v: 2, min: 2, app: 'devtool/test', features: [], desktopName: 'test-mbp', result: 'ok' })
     expect(env.channel.established).toBe(true)
     expect(env.established).toEqual(['ok'])
 
@@ -90,16 +92,26 @@ describe('Noise channel (desktop responder)', () => {
 
   it('answers incompatible on the version alone, before parsing the rest', () => {
     const env = setup()
-    env.phone.startHandshake(utf8Encode(JSON.stringify({ v: 3, min: 2, future: true })))
+    env.phone.startHandshake(utf8Encode(JSON.stringify({ v: 4, min: 3, future: true })))
     env.pump()
     expect(env.phone.desktopHello?.result).toBe('incompatible')
     expect(env.hellos).toHaveLength(0)
     expect(env.channel.established).toBe(false)
+    expect(env.incompatible).toEqual([{ update: 'desktop', deviceName: undefined }])
+  })
+
+  it('refuses a version 1 phone (the streams cutover) and says the phone has to update', () => {
+    const env = setup()
+    env.phone.startHandshake({ ...env.phone.hello('resume'), v: 1, min: 1 })
+    env.pump()
+    expect(env.phone.desktopHello).toMatchObject({ v: 2, min: 2, result: 'incompatible' })
+    expect(env.hellos).toHaveLength(0)
+    expect(env.incompatible).toEqual([{ update: 'phone', deviceName: 'Test iPhone' }])
   })
 
   it('answers rejected to a malformed hello payload', () => {
     const env = setup()
-    env.phone.startHandshake(utf8Encode(JSON.stringify({ v: 1, min: 1, kind: 'resume' })))
+    env.phone.startHandshake(utf8Encode(JSON.stringify({ v: 2, min: 2, kind: 'resume' })))
     env.pump()
     expect(env.phone.desktopHello?.result).toBe('rejected')
     expect(env.hellos).toHaveLength(0)

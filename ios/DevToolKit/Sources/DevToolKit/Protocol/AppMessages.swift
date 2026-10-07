@@ -7,8 +7,10 @@ import Foundation
 /// and a newer desktop's extra tab types or statuses don't break the phone.
 public enum AppProtocol {
     /// The version this build speaks (N) and the oldest it still accepts.
-    public static let version = 1
-    public static let minVersion = 1
+    /// Version 2 (streams, SPEC.md §9) is a hard cutover: a version 1 desktop
+    /// answers `incompatible` and the phone asks to update DevTool there.
+    public static let version = 2
+    public static let minVersion = 2
     public static var local: VersionInfo { VersionInfo(v: version, min: minVersion) }
 }
 
@@ -178,8 +180,6 @@ public enum DesktopFeature {
     public static let taskNew = "task.new"
     /// The desktop answers `chat.settings` (§8.5).
     public static let chatSettings = "chat.settings"
-    /// `task.new` takes `workspace: true` (§8.6).
-    public static let taskWorkspace = "task.workspace"
     /// The desktop answers `task.close` (§8.7).
     public static let taskClose = "task.close"
     /// The desktop answers `tab.close` (§8.8).
@@ -301,7 +301,19 @@ extension Inbox {
 
     private static func parsePin(_ value: JSONValue) throws(ProtocolError) -> InboxPin {
         let o = try Fields(value, "pin")
-        return InboxPin(projectId: try o.str("projectId"), taskId: try optStr(o, "taskId"))
+        return InboxPin(projectId: try o.str("projectId"), streamId: try optStr(o, "streamId"), taskId: try optStr(o, "taskId"))
+    }
+
+    /// A status this build doesn't know is shown as idle rather than dropping the row.
+    private static func parseStatus(_ o: Fields) throws(ProtocolError) -> TabStatus {
+        let status = try o.str("status")
+        let known: [String] = ["working", "attention", "exited", "idle"]
+        return known.contains(status) ? TabStatus(rawValue: status) : .idle
+    }
+
+    private static func parseStream(_ value: JSONValue) throws(ProtocolError) -> InboxStream {
+        let o = try Fields(value, "stream")
+        return InboxStream(id: try o.str("id"), name: try o.str("name"), isMain: o["main"] == .bool(true), branch: try optStr(o, "branch"))
     }
 
     private static func optInt(_ f: Fields, _ key: String) throws(ProtocolError) -> Int64? {
@@ -319,6 +331,8 @@ extension Inbox {
             name: try o.str("name"),
             emoji: try optStr(o, "emoji"),
             remote: o["remote"] == .bool(true),
+            streams: try o.array("streams").map { (v) throws(ProtocolError) in try parseStream(v) },
+            lastStreamId: try optStr(o, "lastStreamId"),
             tasks: try o.array("tasks").map { (v) throws(ProtocolError) in try parseTask(v) }
         )
     }
@@ -326,9 +340,12 @@ extension Inbox {
     private static func parseTask(_ value: JSONValue) throws(ProtocolError) -> InboxTask {
         let o = try Fields(value, "task")
         let id = try o.str("id"), name = try o.str("name")
+        let streamId = try o.str("streamId"), streamName = try o.str("streamName")
+        let status = try parseStatus(o)
         let tabs = try o.array("tabs").map { (v) throws(ProtocolError) in try parseTab(v) }
         return InboxTask(
-            id: id, name: name,
+            id: id, name: name, streamId: streamId, streamName: streamName,
+            status: status, since: try optInt(o, "since"), activity: try optStr(o, "activity"),
             lastInteractedAt: try optInt(o, "lastInteractedAt"),
             attentionAt: try optInt(o, "attentionAt"),
             eventAt: try optInt(o, "eventAt"),
@@ -336,21 +353,17 @@ extension Inbox {
             settledAt: try optInt(o, "settledAt"),
             snoozedUntil: try optInt(o, "snoozedUntil"),
             snoozeUntilAttention: o["snoozeUntilAttention"] == .bool(true),
-            branch: try optStr(o, "branch"),
             tabs: tabs
         )
     }
 
     private static func parseTab(_ value: JSONValue) throws(ProtocolError) -> InboxTab {
         let o = try Fields(value, "tab")
-        let status = try o.str("status")
-        let known: [String] = ["working", "attention", "exited", "idle"]
         return InboxTab(
             id: try o.str("id"),
             type: TabType(rawValue: try o.str("type")),
             title: try o.str("title"),
-            // A status this build doesn't know is shown as idle rather than dropping the tab.
-            status: known.contains(status) ? TabStatus(rawValue: status) : .idle,
+            status: try parseStatus(o),
             since: try optInt(o, "since"),
             activity: try optStr(o, "activity")
         )
@@ -371,6 +384,7 @@ extension Inbox {
 extension InboxPin {
     var json: JSONValue {
         var o: JSONObject = ["projectId": .string(projectId)]
+        if let streamId { o["streamId"] = .string(streamId) }
         if let taskId { o["taskId"] = .string(taskId) }
         return .object(o)
     }
@@ -381,14 +395,28 @@ extension InboxProject {
         var o: JSONObject = ["id": .string(id), "name": .string(name)]
         if let emoji { o["emoji"] = .string(emoji) }
         o["remote"] = .bool(remote)
+        o["streams"] = .array(streams.map(\.json))
+        if let lastStreamId { o["lastStreamId"] = .string(lastStreamId) }
         o["tasks"] = .array(tasks.map(\.json))
+        return .object(o)
+    }
+}
+
+extension InboxStream {
+    var json: JSONValue {
+        var o: JSONObject = ["id": .string(id), "name": .string(name)]
+        if isMain { o["main"] = .bool(true) }
+        if let branch { o["branch"] = .string(branch) }
         return .object(o)
     }
 }
 
 extension InboxTask {
     var json: JSONValue {
-        var o: JSONObject = ["id": .string(id), "name": .string(name)]
+        var o: JSONObject = ["id": .string(id), "name": .string(name), "streamId": .string(streamId),
+                             "streamName": .string(streamName), "status": .string(status.rawValue)]
+        if let since { o["since"] = .int(since) }
+        if let activity { o["activity"] = .string(activity) }
         if let lastInteractedAt { o["lastInteractedAt"] = .int(lastInteractedAt) }
         if let attentionAt { o["attentionAt"] = .int(attentionAt) }
         if let eventAt { o["eventAt"] = .int(eventAt) }
@@ -396,7 +424,6 @@ extension InboxTask {
         if let settledAt { o["settledAt"] = .int(settledAt) }
         if let snoozedUntil { o["snoozedUntil"] = .int(snoozedUntil) }
         if snoozeUntilAttention { o["snoozeUntilAttention"] = .bool(true) }
-        if let branch { o["branch"] = .string(branch) }
         o["tabs"] = .array(tabs.map(\.json))
         return .object(o)
     }

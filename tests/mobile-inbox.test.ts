@@ -53,14 +53,22 @@ describe('buildInbox', () => {
       name: 'project p1',
       emoji: '🚀',
       remote: false,
+      streams: [{ id: mainStreamId('p1'), name: 'main', main: true }],
       tasks: [{
         id: 't1',
         name: 'task t1',
+        streamId: mainStreamId('p1'),
+        streamName: 'main',
+        status: 'working',
+        since: 3,
         lastInteractedAt: 5,
         attentionAt: 7,
         tabs: [{ id: 'a', type: 'claude-chat', title: 'Claude', status: 'working', since: 3 }]
       }]
     }])
+    // The wire keeps the spec's key order.
+    expect(Object.keys(inbox.projects[0])).toEqual(['id', 'name', 'emoji', 'remote', 'streams', 'tasks'])
+    expect(Object.keys(inbox.projects[0].tasks[0])).toEqual(['id', 'name', 'streamId', 'streamName', 'status', 'since', 'lastInteractedAt', 'attentionAt', 'tabs'])
   })
 
   it('omits optional fields that are absent', () => {
@@ -70,14 +78,46 @@ describe('buildInbox', () => {
     const [t] = p.tasks
     expect('lastInteractedAt' in t).toBe(false)
     expect('attentionAt' in t).toBe(false)
-    expect('branch' in t).toBe(false)
+    expect('since' in t).toBe(false)
+    expect('activity' in t).toBe(false)
+    expect('lastStreamId' in p).toBe(false)
+    expect(t.status).toBe('idle')
     expect(t.tabs[0]).toEqual({ id: 'a', type: 'terminal', title: 'a', status: 'idle' })
   })
 
-  it('names the branch of a workspace task', () => {
+  it('lists the open streams with the branch of a worktree stream, and the last used one', () => {
     const workspace = { worktreePath: '/src/p1/.worktrees/fix', branchName: 'fix', baseBranch: 'main', relativeProjectPath: '' }
-    const inbox = buildInbox(data([project('p1', [task('t1', [], { workspace })])]), lookup(), DESKTOP, NOW)
-    expect(inbox.projects[0].tasks[0].branch).toBe('fix')
+    const empty: Stream = { id: 's-empty', name: 'bugfixes', tasks: [] }
+    const p = { ...project('p1', [task('t1', [], { workspace })], { streams: [empty] }), lastStreamId: 's-empty' }
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW).projects
+    expect(wire.streams).toEqual([
+      { id: mainStreamId('p1'), name: 'main', main: true },
+      { id: 'stream-t1', name: 'task t1', branch: 'fix' },
+      { id: 's-empty', name: 'bugfixes' }
+    ])
+    expect(wire.lastStreamId).toBe('s-empty')
+    expect(wire.tasks.map(t => [t.id, t.streamId, t.streamName])).toEqual([['t1', 'stream-t1', 'task t1']])
+    // A last stream that is gone (archived) is not sent.
+    const gone = buildInbox(data([{ ...p, lastStreamId: 'archived' }]), lookup(), DESKTOP, NOW).projects[0]
+    expect('lastStreamId' in gone).toBe(false)
+  })
+
+  it('gives each task one status from its main tab and agent tabs, not its extra terminals', () => {
+    const working: AgentActivity = { ...emptyActivity(1), tool: { name: 'Bash', label: 'Bash · npm test', startedAt: 1 }, turnStartedAt: 1 }
+    const agent = task('agent', [tab('chat', 'claude-chat'), tab('side', 'terminal')])
+    const term = task('term', [tab('sh', 'terminal'), tab('sh2', 'terminal')])
+    const inbox = buildInbox(
+      data([project('p1', [agent, term])]),
+      lookup({ chat: 'working', side: 'attention', sh: 'exited', sh2: 'attention' }, { chat: working }, { chat: 4, sh: 9 }),
+      DESKTOP,
+      NOW
+    )
+    const [a, t] = inbox.projects[0].tasks
+    expect([a.status, a.since, a.activity]).toEqual(['working', 4, 'Bash · npm test'])
+    // A terminal task's main tab is its first terminal.
+    expect([t.status, t.since]).toEqual(['exited', 9])
+    // The tabs keep their own statuses.
+    expect(a.tabs.map(x => x.status)).toEqual(['working', 'attention'])
   })
 
   it('marks SSH projects as remote', () => {
@@ -176,7 +216,10 @@ describe('buildInbox', () => {
         { type: 'project', projectId: 'p1' }
       ]
     }
-    expect(buildInbox(d, lookup(), DESKTOP, NOW).pinned).toEqual([{ projectId: 'p1', taskId: 't2' }, { projectId: 'p1' }])
+    expect(buildInbox(d, lookup(), DESKTOP, NOW).pinned).toEqual([
+      { projectId: 'p1', streamId: mainStreamId('p1'), taskId: 't2' },
+      { projectId: 'p1' }
+    ])
   })
 
   it('leaves pinned out when nothing is pinned', () => {
@@ -212,7 +255,7 @@ describe('buildInbox', () => {
     })
   })
 
-  it('sends each task of a stream as its own wire task, all on the stream\'s branch', () => {
+  it('sends each task of a stream as its own wire task, naming its stream', () => {
     const workspace = { worktreePath: '/src/p1/.worktrees/rel', branchName: 'rel-0.5', baseBranch: 'main', relativeProjectPath: '' }
     const stream: Stream = {
       id: 's-rel',
@@ -222,12 +265,17 @@ describe('buildInbox', () => {
     }
     const inbox = buildInbox(data([project('p1', [task('plain', [])], { streams: [stream] })]), lookup(), DESKTOP, NOW)
     const tasks = inbox.projects[0].tasks
-    expect(tasks.map(t => [t.id, t.branch])).toEqual([['plain', undefined], ['a1', 'rel-0.5'], ['a2', 'rel-0.5']])
+    expect(tasks.map(t => [t.id, t.streamId, t.streamName])).toEqual([
+      ['plain', mainStreamId('p1'), 'main'],
+      ['a1', 's-rel', '0.5.0'],
+      ['a2', 's-rel', '0.5.0']
+    ])
+    expect(inbox.projects[0].streams[1]).toEqual({ id: 's-rel', name: '0.5.0', branch: 'rel-0.5' })
     expect(tasks[1].tabs.map(t => t.id)).toEqual(['x'])
     expect(tasks[2].tabs.map(t => t.id)).toEqual(['y'])
   })
 
-  it('sends a stream pin as one task pin per task in it, deduplicated', () => {
+  it('sends stream pins as they are, a task pin with its current stream, deduplicated', () => {
     const stream: Stream = { id: 's1', name: 'bugfixes', tasks: [fixtureTask(task('a1', [])), fixtureTask(task('a2', []))] }
     const p1 = project('p1', [task('t1', [])], { streams: [stream] })
     const d: ProjectsData = {
@@ -240,9 +288,9 @@ describe('buildInbox', () => {
       ]
     }
     expect(buildInbox(d, lookup(), DESKTOP, NOW).pinned).toEqual([
-      { projectId: 'p1', taskId: 'a2' },
-      { projectId: 'p1', taskId: 'a1' },
-      { projectId: 'p1', taskId: 't1' }
+      { projectId: 'p1', streamId: 's1', taskId: 'a2' },
+      { projectId: 'p1', streamId: 's1' },
+      { projectId: 'p1', streamId: mainStreamId('p1') }
     ])
   })
 

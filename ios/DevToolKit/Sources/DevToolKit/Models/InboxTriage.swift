@@ -28,7 +28,7 @@ extension InboxTask {
     public func inboxGroup(now: Date) -> InboxGroup {
         if isSnoozed(now: now) { return .snoozed }
         if settledAt != nil { return .settled }
-        if summaryStatus == .attention { return .needsYou }
+        if status == .attention { return .needsYou }
         return .active
     }
 }
@@ -77,12 +77,12 @@ public struct InboxPartition: Sendable, Equatable {
                 return a.1 < b.1
             }.map(\.0)
         }
-        self.needsYou = sorted(needsYou, by: { $0.statusSince ?? nowMs }, descending: false)
+        self.needsYou = sorted(needsYou, by: { $0.since ?? nowMs }, descending: false)
         self.active = sorted(active, by: \.lastActivityAt, descending: true)
         if workingLast {
             // Partitioning keeps the recency order within each half.
-            let working = self.active.filter { $0.task.summaryStatus == .working }
-            self.active = self.active.filter { $0.task.summaryStatus != .working } + working
+            let working = self.active.filter { $0.task.status == .working }
+            self.active = self.active.filter { $0.task.status != .working } + working
         }
         self.settled = sorted(settled, by: { $0.settledAt ?? 0 }, descending: true)
         self.snoozed = sorted(snoozed, by: { $0.snoozeUntilAttention ? Int64.max : ($0.snoozedUntil ?? Int64.max) }, descending: false)

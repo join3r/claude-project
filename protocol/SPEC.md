@@ -1,8 +1,8 @@
-# DevTool mobile protocol, v1 (normative)
+# DevTool mobile protocol, v2 (normative)
 
 This is the normative wire spec for the DevTool mobile client: identities, the pairing URI, the relay protocol, the encrypted phone ↔ desktop channel, and the test vectors. `protocol/ts`, `relay/`, the desktop (`src/main/mobile/`) and the iOS `DevToolKit` implement exactly what it says. If an implementation has to deviate, change this file in the same change. [PROTOCOL.md](PROTOCOL.md) is the short map.
 
-Section numbers (§1–§7) are the ones code comments cite. §6 (chat) was added in M2 and §7 (push) in M3. Nothing had shipped yet, so both are part of protocol v1 with no version bump or feature flag.
+Section numbers (§1–§9) are the ones code comments cite. §6 (chat) was added in M2 and §7 (push) in M3. Nothing had shipped yet, so both are part of protocol v1 with no version bump or feature flag. Version 2 (§9) moved the channel to the desktop's Project › Stream › Task model in one hard cutover; the relay protocol (§3), Noise (§4.2) and push (§7) did not change.
 
 ## 1. Identities and encodings
 
@@ -107,7 +107,7 @@ The rules above left these open. `relay/` implements them, and clients may rely 
 ### 4.3 Handshake payloads (UTF-8 JSON)
 Message 1 payload (phone):
 ```json
-{ "v": 1, "min": 1, "app": "ios/0.1.0", "features": [],
+{ "v": 2, "min": 2, "app": "ios/0.2.0", "features": [],
   "kind": "pair" | "resume",
   "proof": "<b64u pairProof>",          // kind=pair only
   "deviceName": "Vladimir's iPhone",
@@ -115,7 +115,7 @@ Message 1 payload (phone):
 ```
 Message 2 payload (desktop):
 ```json
-{ "v": 1, "min": 1, "app": "devtool/0.3.2", "features": [],
+{ "v": 2, "min": 2, "app": "devtool/0.3.2", "features": [],
   "desktopName": "join3r-mbp",
   "result": "ok" | "pending" | "rejected" | "incompatible" | "unknown-device" }
 ```
@@ -124,7 +124,7 @@ Desktop rules:
 - `pair`: the `proof` must equal (constant-time compare) the live offer's `pairProof`, and the offer must be unexpired. Then the desktop answers `pending` and asks the user to Accept.
   - On Accept, it stores the pairing, sends relay `authorize`, and sends the app message `pairing` with `status: "accepted"`.
   - On Reject, it sends `status: "rejected"`, and the relay disconnects the phone when the offer lapses.
-- Version: `chosen = min(v_phone, v_desktop)`. If `chosen < max(min_phone, min_desktop)`, the answer is `incompatible`. The desktop supports N and N−1. In M1, N is 1.
+- Version: `chosen = min(v_phone, v_desktop)`. If `chosen < max(min_phone, min_desktop)`, the answer is `incompatible`. N is 2, and both sides send `min: 2`: version 1 is refused, not translated (§9). The side whose `v` is below the other's `min` is the one to update. The desktop says so in its Mobile settings ("Update DevTool on your iPhone" for a phone below its `min`), and the phone says "Update DevTool" (the desktop is older) or "Update the app".
   - The desktop reads only `{ v, min }` first and negotiates on that, so a phone whose payload has a future shape still gets a clean `incompatible`. Both sides must send `min <= v`, with `v >= 1`.
 - The phone's `ed` must be the Ed25519 key the relay authenticated, i.e. `deviceId(ed) == frame.from`. If it isn't, the desktop answers `rejected`.
 - `pair` with a wrong proof, or with no live unexpired offer, is answered `rejected`. A correct proof consumes the offer on the desktop too, so the next phone needs a new QR.
@@ -148,12 +148,20 @@ Desktop rules:
   "generatedAt": 1790000000000,
   "projects": [{
     "id": "…", "name": "api-server", "emoji": "🚀", "remote": false,
+    "streams": [
+      { "id": "…", "name": "main", "main": true },
+      { "id": "…", "name": "0.5.0", "branch": "0.5.0" }
+    ],
+    "lastStreamId": "…",
     "tasks": [{
-      "id": "…", "name": "fix-auth", "lastInteractedAt": 1790000000000,
+      "id": "…", "name": "fix-auth",
+      "streamId": "…", "streamName": "0.5.0",
+      "status": "working" | "attention" | "exited" | "idle",
+      "since": 1790000000000, "activity": "Running Bash",
+      "lastInteractedAt": 1790000000000,
       "attentionAt": 1790000000000,
       "eventAt": 1790000000000, "unread": true,
       "settledAt": 1790000000000, "snoozedUntil": 1790000000000, "snoozeUntilAttention": true,
-      "branch": "fix-auth",
       "tabs": [{
         "id": "…", "type": "claude-chat", "title": "Claude",
         "status": "working" | "attention" | "exited" | "idle",
@@ -162,16 +170,18 @@ Desktop rules:
       }]
     }]
   }],
-  "pinned": [{ "projectId": "…" }, { "projectId": "…", "taskId": "…" }]
+  "pinned": [{ "projectId": "…" }, { "projectId": "…", "streamId": "…" }, { "projectId": "…", "streamId": "…", "taskId": "…" }]
 }
 ```
-- Only agent/terminal tab types are included: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
-- `activity` is an optional short label derived from `AgentActivity`.
-- `branch` is present only on a workspace task (one with its own git worktree): the branch the worktree is on.
+- `streams` lists the project's open streams in sidebar order, `main` first (`main: true`, exactly one, the project folder), empty ones included. `branch` is present only on a worktree stream: the branch its worktree is on. `lastStreamId` is the stream the project was last used in, present only while that stream is open.
+- `tasks` lists every open task, stream by stream. A task is one agent session or one terminal task (its main tab is a terminal). `streamId` and `streamName` name the stream holding it (the phone's `Project · Stream` line); `streamId` is always one of the project's `streams`.
+- A task's `status` is its one status: the strongest of its **status tabs** (its main tab, plus any agent tab) in the order `attention`, `working`, `exited`, else `idle`. An extra terminal's bell or exit lights only its own tab, never the task. `since` is when the task entered `status` (the oldest change among the status tabs in it), and `activity` the label of the first such tab that has one. The desktop Inbox and sidebar read the same status.
+- Only agent/terminal tab types are included in `tabs`: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. A tab's `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
+- `activity` (on a task or a tab) is an optional short label derived from `AgentActivity`.
 - The triage fields carry the desktop inbox's state for the task (§8.11). `eventAt` is the task's last event: a hook notification or stop, a terminal bell, a process exit. `unread: true` is present while the desktop counts the task unread. `settledAt` is present while the task is settled (an event after the settle un-settles it). `snoozedUntil` is present while a timed snooze hasn't passed at `generatedAt`, and `snoozeUntilAttention: true` while the task is snoozed until it needs the user. A desktop sends at most one of the two snooze fields, and drops `settledAt` from a snoozed task. A receiver treats `unread` and `snoozeUntilAttention` other than `true` as absent.
-- Home tasks, ephemeral-but-spent projects, and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
+- Archived streams and tasks are never sent, nor is anything inside an archived stream. Ephemeral-but-spent projects (no open task left) and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.
-- `pinned` is the desktop sidebar's Pinned list in its order: a project, or one of its tasks when `taskId` is set. A pin whose project or task isn't in `projects` (hidden, spent, gone, a home task) is left out, and the field is absent when nothing is left. A phone ignores a pin it can't resolve.
+- `pinned` is the desktop sidebar's Pinned list in its order: a project, a stream when `streamId` is set, or a task when `taskId` is set (its `streamId` is then the stream holding the task now). A pin whose project, stream or task isn't in `projects` (hidden, spent, archived, gone) is left out, and the field is absent when nothing is left. A phone ignores a pin it can't resolve. A pinned stream shows its tasks under it; its tasks are not pinned by themselves.
 
 ## 5. Test vectors (`protocol/vectors/`)
 - `noise-ik.json`: fixed static and ephemeral keys for both sides, prologue, payloads, and the expected message 1 and message 2 bytes, then 3 transport messages each way with their expected ciphertexts. The TS implementation must *also* pass the official cacophony `Noise_IK_25519_AESGCM_SHA256` vectors, which ensures the generated vectors aren't just self-consistent.
@@ -375,7 +385,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.6 adds `"task.workspace"`, §8.7 `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"` and §8.11 `"task.triage"`. A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, "New workspace" only for one that lists `task.workspace`, and the close actions only for one that lists the matching op. An older desktop answers an op it doesn't know `unsupported` anyway, and one without `task.workspace` ignores `workspace` and starts a plain task, so a phone must not send it there. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"` and §8.11 `"task.triage"`. (Version 1's `"task.workspace"`, §8.6, is gone.) A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (phone → desktop `req`)
 
@@ -383,20 +393,20 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 |---|---|---|
 | `chat.new` | `{ taskId }` | `{ tabId }` |
 
-- The desktop adds a new `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) at the end of the task's left pane and saves it as a main-side projects commit, so every open window picks it up the same way as any other change. It needs no open window, and it doesn't select the task or switch any window's visible tab.
+- The desktop adds a new `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) at the end of the task's first pane and saves it as a main-side projects commit, so every open window picks it up the same way as any other change. It needs no open window, and it doesn't select the task or switch any window's visible tab.
 - The chat's process isn't started. The phone opens the tab with `chat.open` (§6.3), which starts it, and the tab appears in the next `inbox` event.
-- Errors: unknown `taskId`, a home task, or a task in a project hidden from mobile (§4.4) → `not-found`. Claude turned off in the desktop's settings → `unsupported`. Missing or malformed `taskId` → `bad-request`.
+- Errors: unknown or archived `taskId`, or a task in a project hidden from mobile (§4.4) → `not-found`. Claude turned off in the desktop's settings → `unsupported`. Missing or malformed `taskId` → `bad-request`.
 
 ### 8.3 Phone behaviour (no wire rules)
 
 - **New chat:** a "New chat" row in a task's tab list (for desktops that list `chat.new`), disabled while the desktop is offline. It opens the new chat as soon as the op answers.
-- **New task:** a "New task" action on each project (for desktops that list `task.new`), disabled while the desktop is offline. It asks for the first prompt and a permission mode, then opens the new chat as soon as the op answers.
-- **New workspace:** a "New workspace" action next to it (for desktops that list `task.workspace`): the same sheet, sending `workspace: true`.
-- **Close task / Close workspace:** a swipe action on a task row and a button in the task's screen (for desktops that list `task.close`), confirmed first. A `blocker` (§8.7) becomes a second confirmation that names what would be lost, and its answer resends the op with the matching `discard*` flag. For `unmerged`, `uncommitted-and-unmerged` and `check-failed` it also asks whether to keep the branch. A `warning` is shown once the task is gone.
+- **New task:** a "New task" action on each project (for desktops that list `task.new`), disabled while the desktop is offline. It asks for the first prompt, a permission mode and, when the project has more than one stream, a stream (defaulting to the project's `lastStreamId`, else `main`), then opens the new chat as soon as the op answers.
+- **Streams:** a project's task list is grouped by stream in `streams` order, each group headed by the stream's name (and `branch`). An Inbox row shows `Project · Stream` under the task's name.
+- **Close task:** a swipe action on a task row and a button in the task's screen (for desktops that list `task.close`), confirmed first ("moves it to Done"). A `blocker` (§8.7) becomes a second confirmation that names it, and its answer resends the op with the matching flag. The phone doesn't browse or reopen archived tasks, and doesn't close streams.
 - **Close tab:** a swipe action on a tab row (for desktops that list `tab.close`), confirmed first for an agent that is working or waiting.
 - **Tool images:** a tool row with `images` (from a desktop that lists `chat.image`) shows a strip of thumbnails under it, fetched with a small `maxSide`. Tapping one opens it full screen, fetched again at the screen's size, with zoom and the share sheet. Against a desktop without the feature the row only says how many images there are. Fetched images are cached in memory for the session, not on disk.
-- **Pinned:** a "Pinned" section above the projects lists the desktop's `pinned` entries in order, a project as a row that opens its tasks and a task as a task row. For a desktop that lists `pin`, a project's header menu and a task row's swipe and context menu offer Pin or Unpin, disabled while the desktop is offline. Against a desktop without the feature the section is still shown, read-only.
-- **Inbox:** an Inbox entry above the desktops, and the screen the app opens to, lists every task of every paired desktop in the desktop inbox's groups: **Needs you** (a tab needs the user, longest wait first), then the rest by last activity (`eventAt` or `lastInteractedAt`), then **Settled** and **Snoozed**, both collapsed. A timed snooze ends on the phone's clock at `snoozedUntil`. Unread tasks are marked. For a desktop that lists `task.triage`, a task row offers Settle (or Unsettle), Snooze with the desktop's presets (until it needs you, 1 hour, this evening at 18:00, tomorrow at 9:00, Monday at 9:00, in the phone's time zone), Unsnooze, and Mark read or unread, disabled while the desktop is offline. Opening an unread task, or a task's screen staying open while it turns unread, sends `read`. Against a desktop without the feature the groups are still shown, read-only.
+- **Pinned:** a "Pinned" section above the projects lists the desktop's `pinned` entries in order: a project as a row that opens its tasks, a stream as a row (`Project › Stream`) that opens its tasks, and a task as a task row. For a desktop that lists `pin`, a project's header menu, a stream group's header menu and a task row's swipe and context menu offer Pin or Unpin, disabled while the desktop is offline. Against a desktop without the feature the section is still shown, read-only.
+- **Inbox:** an Inbox entry above the desktops, and the screen the app opens to, lists every task of every paired desktop in the desktop inbox's groups: **Needs you** (the task's `status` is `attention`, longest wait first), then the rest by last activity (`eventAt` or `lastInteractedAt`), then **Settled** and **Snoozed**, both collapsed. A timed snooze ends on the phone's clock at `snoozedUntil`. Unread tasks are marked. For a desktop that lists `task.triage`, a task row offers Settle (or Unsettle), Snooze with the desktop's presets (until it needs you, 1 hour, this evening at 18:00, tomorrow at 9:00, Monday at 9:00, in the phone's time zone), Unsnooze, and Mark read or unread, disabled while the desktop is offline. Opening an unread task, or a task's screen staying open while it turns unread, sends `read`. Against a desktop without the feature the groups are still shown, read-only.
 - **Require Face ID for approvals:** an app setting, off by default. When it is on, every answer to a permission, question or plan in the app asks for device-owner authentication first (Face ID, with the passcode as fallback), and the notification's Allow and Deny open the app, authenticate and then answer instead of answering in the background.
 - **Offline:** the phone keeps the last transcript of each chat it has opened (the view items it holds, at most the §6.4 window) next to the cached inbox, and shows it read-only under the offline banner when the desktop is offline. Returning to the foreground reconnects at once rather than waiting out the relay backoff. Nothing is queued, as before.
 
@@ -404,12 +414,12 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 
 | op | params | result |
 |---|---|---|
-| `task.new` | `{ projectId, prompt, mode? }` | `{ taskId, tabId }` |
+| `task.new` | `{ projectId, streamId?, prompt, mode? }` | `{ taskId, tabId }` |
 
 - `prompt` is the first message (≤ 32000 chars, not blank, as `chat.send`). `mode` is one of `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`. Absent, Claude starts in its own default mode.
-- The desktop adds a task at the end of the project, named after the prompt's first non-empty line (whitespace collapsed, at most 50 characters with a trailing `…`), with one `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) in its left pane. It saves this as a main-side projects commit, like §8.2. It doesn't select the task or switch any window's visible tab.
+- The desktop adds a task at the end of stream `streamId`, or, when it is absent, of the stream the project was last used in (`lastStreamId`, §4.4), else `main`. The task is named after the prompt's first non-empty line (whitespace collapsed, at most 50 characters with a trailing `…`), with one `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) as its main tab in its only pane. That stream becomes the project's `lastStreamId`. The desktop saves this as a main-side projects commit, like §8.2. It doesn't select the task or switch any window's visible tab. It starts the chat in the stream's folder (its worktree, else the project's).
 - The desktop then attaches the chat's runtime (which starts the process), applies `mode`, and sends `prompt` as a `chat.send` from this phone would, so a `done` push (§7.6) follows the turn. It answers once the prompt is sent. The phone opens the chat with `chat.open`, and the task appears in the next `inbox` event.
-- Errors: unknown `projectId` or a project hidden from mobile (§4.4) → `not-found`. A shell-command project or Claude turned off in the desktop's settings → `unsupported`. Missing or malformed params → `bad-request`.
+- Errors: unknown `projectId`, a project hidden from mobile (§4.4), or an unknown or archived `streamId` → `not-found`. A shell-command project or Claude turned off in the desktop's settings → `unsupported`. Missing or malformed params → `bad-request`. Version 1's `workspace` flag is ignored like any unknown field: worktrees belong to streams, which only the desktop creates.
 
 ### 8.5 `chat.settings` (phone → desktop `req`)
 
@@ -422,27 +432,23 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - A desktop that implements this op lists `"chat.settings"` in its features (§8.1) and sends `settings` and `usage` in the chat view (§6.2). The phone shows the pickers read-only for a desktop that sends `settings` without listing the feature.
 - Errors: unknown tab, as §6.3 → `not-found`. No field, an unknown `mode`, `model` or `effort` → `bad-request`.
 
-### 8.6 Workspaces with `task.new`
+### 8.6 Workspaces with `task.new` (version 1 only)
 
-A desktop that lists `"task.workspace"` accepts `workspace: true` in `task.new`'s params (§8.4). Anything but `true` means no workspace.
-- Before it adds the task, the desktop creates a git worktree for it on a new branch, as its + Workspace does on the first prompt. The branch is named after the prompt (lower-case, git-safe, at most 40 characters cut at a word, `task` when nothing is left), with `-2`, `-3`… past existing branches. It forks from `main`, else `master`, else the first local branch. Remote (SSH) projects get the worktree on the remote host.
-- The chat then starts inside the worktree, and the task's inbox entry carries `branch` (§4.4).
-- Errors, besides §8.4's: a project folder that isn't a git repository, or one with no branch → `unsupported`. A worktree that can't be created → `internal`, with git's message. No task is added in either case.
+Removed in version 2. A worktree belongs to a stream (§4.4 `branch`), made on the desktop's New stream; a phone picks the stream in `task.new` (§8.4) instead.
 
 ### 8.7 `task.close` (phone → desktop `req`)
 
 | op | params | result |
 |---|---|---|
-| `task.close` | `{ taskId, discardUnsaved?, discardWorkspace?, keepBranch? }` | `{ closed: true, warning? }` or `{ closed: false, blocker, branch?, baseBranch?, message? }` |
+| `task.close` | `{ taskId, stopWorking?, discardUnsaved? }` | `{ closed: true }` or `{ closed: false, blocker }` |
 
-- Deletes the task, as the desktop sidebar's Delete task does: its tabs' processes stop, their scrollback and hook injections go, and the task leaves the projects in a main-side commit. Windows showing it move off it. Flags are `true` or absent.
-- Before deleting, the desktop checks in this order and answers `closed: false` with the first `blocker` that applies, changing nothing:
+- Archives the task, as the desktop sidebar's and Inbox's Close task does: its tabs' processes stop and their hook injections go, their scrollback is kept, and the task moves to its stream's Done row (out of `projects.json`, into the project's archive) in a main-side commit. Windows showing it move off it. The stream stays, even emptied, and so does its worktree. Archiving the last open task of an ephemeral project removes the project. Flags are `true` or absent.
+- Before archiving, the desktop checks in this order and answers `closed: false` with the first `blocker` that applies, changing nothing (the same questions the sidebar asks):
+  - `working`: an agent tab of the task is working, unless `stopWorking`.
   - `unsaved`: an editor tab in the task has unsaved changes in a desktop window, unless `discardUnsaved`.
-  - For a workspace task, unless `discardWorkspace`: `uncommitted` (the worktree has uncommitted changes), `unmerged` (the branch isn't merged into `baseBranch`), `uncommitted-and-unmerged`, or `check-failed` (git couldn't answer, with its `message`). These carry `branch` and `baseBranch`.
-- A clean, merged workspace is removed with its branch without asking. With `discardWorkspace`, the worktree is removed whatever its state, and the branch too unless `keepBranch`.
-- `closed: true` may carry a `warning` when the task is gone but its worktree folder was left on disk.
-- A phone treats a `blocker` it doesn't know as `check-failed`.
-- Errors: unknown `taskId`, a home task, or a task in a project hidden from mobile → `not-found`. Missing `taskId` → `bad-request`.
+- A desktop sends only these two blockers; a phone treats any other as a malformed answer.
+- The archived task leaves the next `inbox`. A phone can't browse or reopen archived tasks; the desktop's Done row can.
+- Errors: unknown or archived `taskId`, or a task in a project hidden from mobile → `not-found`. Missing `taskId` → `bad-request`.
 
 ### 8.8 `tab.close` (phone → desktop `req`)
 
@@ -451,7 +457,8 @@ A desktop that lists `"task.workspace"` accepts `workspace: true` in `task.new`'
 | `tab.close` | `{ tabId }` | `{}` |
 
 - Closes one tab the phone sees in its inbox (§4.4), as its close button on the desktop does: its process stops and its scrollback and hook injection go. The task stays, even without tabs. A chat open on a phone stops sending events, as for a tab closed on the desktop: the tab leaves the next `inbox`, and further `chat.*` ops on it answer `not-found`.
-- Errors: unknown tab, a tab type the inbox doesn't carry, a home tab, or a project hidden from mobile → `not-found`. Missing `tabId` → `bad-request`.
+- A task's main tab (its agent, or a terminal task's first terminal) closes only with its task (§8.7).
+- Errors: unknown tab, a tab type the inbox doesn't carry, a task's main tab, or a project hidden from mobile → `not-found`. Missing `tabId` → `bad-request`.
 
 ### 8.9 `chat.image` (phone → desktop `req`)
 
@@ -470,11 +477,11 @@ A desktop that lists `"task.workspace"` accepts `workspace: true` in `task.new`'
 
 | op | params | result |
 |---|---|---|
-| `pin.set` | `{ projectId, taskId?, pinned }` | `{}` |
+| `pin.set` | `{ projectId, streamId?, taskId?, pinned }` | `{}` |
 
-- Pins (`pinned: true`) or unpins (`false`) the project, or its task `taskId`, in the desktop sidebar's Pinned list, as the sidebar's Pin and Unpin do. A new pin goes to the end of the list. Pinning what is already pinned, or unpinning what isn't, changes nothing and still answers `{}`. The desktop saves the change as a main-side projects commit, and the new list arrives in the next `inbox` event.
+- Pins (`pinned: true`) or unpins (`false`) the project, its stream `streamId`, or its task `taskId`, in the desktop sidebar's Pinned list, as the sidebar's Pin and Unpin do. With `taskId` the pin is the task's (its `streamId`, if sent, is ignored: a task pin follows the task's current stream). A stream pin and the pins of its tasks are separate entries. A new pin goes to the end of the list. Pinning what is already pinned, or unpinning what isn't, changes nothing and still answers `{}`. The desktop saves the change as a main-side projects commit, and the new list arrives in the next `inbox` event.
 - A desktop that implements this op lists `"pin"` in its features (§8.1).
-- Errors: unknown `projectId`, a project hidden from mobile (§4.4), or an unknown or home `taskId` → `not-found`. Missing `projectId`, a `pinned` that isn't a boolean, or a malformed `taskId` → `bad-request`.
+- Errors: unknown `projectId`, a project hidden from mobile (§4.4), or an unknown or archived `streamId` or `taskId` → `not-found`. Missing `projectId`, a `pinned` that isn't a boolean, or a malformed `streamId` or `taskId` → `bad-request`.
 
 ### 8.11 `task.triage` (phone → desktop `req`)
 
@@ -487,9 +494,19 @@ A desktop that lists `"task.workspace"` accepts `workspace: true` in `task.new`'
   - `unread`: marks it unread until the next visit.
   - `settle`: settles it ("done for now"). This also marks it read and ends a snooze. An event after the settle un-settles it.
   - `unsettle`: undoes a settle.
-  - `snooze`: hides it until `until` (Unix ms), or, with `untilAttention: true`, until a tab next needs the user. Exactly one of the two must be present. This also marks it read and replaces a settle.
+  - `snooze`: hides it until `until` (Unix ms), or, with `untilAttention: true`, until the task next needs the user. Exactly one of the two must be present. This also marks it read and replaces a settle.
   - `unsnooze`: ends a snooze.
 - An action that wouldn't change what the inbox shows (`read` on a read task, `unsettle` on a task that isn't settled, and so on) changes nothing and still answers `{}`. Otherwise the desktop saves the change as a main-side projects commit and answers once it is made. The new state arrives in the next `inbox` event (§4.4).
 - `until` and `untilAttention` are ignored on actions other than `snooze`.
 - A desktop that implements this op lists `"task.triage"` in its features (§8.1) and sends the triage fields (§4.4).
-- Errors: unknown `taskId`, a home task, or a task in a project hidden from mobile → `not-found`. Missing `taskId`, an unknown `action`, or a `snooze` without exactly one of `until` (a non-negative integer) and `untilAttention: true` → `bad-request`.
+- Errors: unknown or archived `taskId`, or a task in a project hidden from mobile → `not-found`. Missing `taskId`, an unknown `action`, or a `snooze` without exactly one of `until` (a non-negative integer) and `untilAttention: true` → `bad-request`.
+
+## 9. Version 2: streams
+
+The desktop moved from Project › Task › Tab to **Project › Stream › Task**: a stream is a line of work (`main`, `0.5.0`, `bugfixes`) that owns the worktree, and a task is one agent session or one terminal task with its own tabs. The phone keeps the word "task"; its meaning moved down one level. Version 2 carries that model, with no translation for version 1 peers (§4.3 refuses them):
+
+- §4.4: projects list their `streams` and `lastStreamId`; tasks carry `streamId`, `streamName` and one `status` (with `since` and `activity`); `branch` moved from the task to its stream; pins may name a stream; archived streams and tasks are never sent.
+- §8.4: `task.new` takes an optional `streamId`, defaulting to the stream last used. §8.6 (`workspace`, `"task.workspace"`) is gone.
+- §8.7: `task.close` archives, with the desktop's blockers (`working`, `unsaved`) instead of the worktree ones; a stream and its worktree outlive their tasks.
+- §8.10: `pin.set` takes an optional `streamId`.
+- The relay (§3), the pairing URI (§2, still `v: 1`), Noise (§4.2), chat (§6) and push (§7, payload `v: 1`) are unchanged. A push `title` names the stream when it isn't `main` (`project · stream / task`).

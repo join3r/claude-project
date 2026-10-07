@@ -31,18 +31,19 @@ function sharedStream(): Stream {
   return { id: 's-fix', name: 'fix', workspace, tasks: [fixtureTask({ id: 't2' }), fixtureTask({ id: 't3' })] }
 }
 
-function deps(projects: ProjectsData, options: { dirty?: string[] } = {}) {
+function deps(projects: ProjectsData, options: { dirty?: string[]; working?: string[] } = {}) {
   const calls: string[] = []
   const d: CloseTaskDeps = {
     peek: () => projects,
     dirtyTabIds: () => options.dirty ?? [],
+    statusOf: (tabId) => (options.working?.includes(tabId) ? 'working' : null),
     removeTask: async (_p, task) => { calls.push(`remove ${task.id}`) }
   }
   return { d, calls }
 }
 
 describe('closeTask (SPEC.md §8.7)', () => {
-  it('removes a plain task', async () => {
+  it('archives a plain task', async () => {
     const { d, calls } = deps(data())
     expect(await closeTask(d, { taskId: 't1' })).toEqual({ ok: true, result: { closed: true } })
     expect(calls).toEqual(['remove t1'])
@@ -58,6 +59,22 @@ describe('closeTask (SPEC.md §8.7)', () => {
     expect(await closeTask(d, { taskId: 't1' })).toEqual({ ok: true, result: { closed: false, blocker: 'unsaved' } })
     expect(calls).toEqual([])
     expect(await closeTask(d, { taskId: 't1', discardUnsaved: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(calls).toEqual(['remove t1'])
+  })
+
+  it('reports a working agent first, then unsaved editors, as the sidebar asks', async () => {
+    const { d, calls } = deps(data(), { dirty: ['ed1'], working: ['tab1'] })
+    expect(await closeTask(d, { taskId: 't1' })).toEqual({ ok: true, result: { closed: false, blocker: 'working' } })
+    expect(await closeTask(d, { taskId: 't1', discardUnsaved: true })).toEqual({ ok: true, result: { closed: false, blocker: 'working' } })
+    expect(await closeTask(d, { taskId: 't1', stopWorking: true })).toEqual({ ok: true, result: { closed: false, blocker: 'unsaved' } })
+    expect(calls).toEqual([])
+    expect(await closeTask(d, { taskId: 't1', stopWorking: true, discardUnsaved: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(calls).toEqual(['remove t1'])
+  })
+
+  it('does not count a busy terminal as working', async () => {
+    const { d, calls } = deps(data(), { working: ['tab2'] })
+    expect(await closeTask(d, { taskId: 't1' })).toEqual({ ok: true, result: { closed: true } })
     expect(calls).toEqual(['remove t1'])
   })
 

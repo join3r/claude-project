@@ -1,6 +1,6 @@
 import Foundation
 
-/// A full snapshot of one desktop's projects, tasks and agent tabs
+/// A full snapshot of one desktop's projects, streams, tasks and agent tabs
 /// (spec §4.4). Every `inbox` event replaces the previous one.
 ///
 /// Decoding is tolerant: unknown fields are ignored, unknown enum values map
@@ -30,41 +30,71 @@ public struct Inbox: Codable, Sendable, Equatable {
 
     public var generatedDate: Date { Date(unixMilliseconds: generatedAt) }
 
-    public func isPinned(projectId: String, taskId: String? = nil) -> Bool {
-        pinned.contains(InboxPin(projectId: projectId, taskId: taskId))
+    /// Whether the desktop's Pinned list holds exactly this pin: a project
+    /// pin, a stream pin, or a task pin (matched by task, whatever stream it
+    /// names). A task of a pinned stream is not pinned by itself.
+    public func isPinned(_ pin: InboxPin) -> Bool {
+        pinned.contains { $0.key == pin.key }
     }
 
-    /// The pins this inbox can show, in order. A pin whose project or task
-    /// isn't here is skipped (§4.4).
+    /// The pins this inbox can show, in order. A pin whose project, stream or
+    /// task isn't here is skipped (§4.4).
     public var resolvedPins: [ResolvedPin] {
         pinned.compactMap { pin in
             guard let project = projects.first(where: { $0.id == pin.projectId }) else { return nil }
-            guard let taskId = pin.taskId else { return .project(project) }
-            guard let task = project.tasks.first(where: { $0.id == taskId }) else { return nil }
-            return .task(task, project: project)
+            if let taskId = pin.taskId {
+                guard let task = project.tasks.first(where: { $0.id == taskId }) else { return nil }
+                return .task(task, project: project)
+            }
+            if let streamId = pin.streamId {
+                guard let stream = project.streams.first(where: { $0.id == streamId }) else { return nil }
+                return .stream(stream, project: project)
+            }
+            return .project(project)
         }
     }
 }
 
-/// One entry of the desktop's Pinned list: a project, or one of its tasks.
+/// One entry of the desktop's Pinned list: a project, one of its streams
+/// (`streamId`), or one of its tasks (`taskId`, with the stream holding it).
 public struct InboxPin: Codable, Sendable, Hashable {
     public var projectId: String
+    public var streamId: String?
     public var taskId: String?
 
-    public init(projectId: String, taskId: String? = nil) {
+    public init(projectId: String, streamId: String? = nil, taskId: String? = nil) {
         self.projectId = projectId
+        self.streamId = streamId
         self.taskId = taskId
+    }
+
+    public static func project(_ project: InboxProject) -> InboxPin { InboxPin(projectId: project.id) }
+    public static func stream(_ stream: InboxStream, in project: InboxProject) -> InboxPin {
+        InboxPin(projectId: project.id, streamId: stream.id)
+    }
+    public static func task(_ task: InboxTask, in project: InboxProject) -> InboxPin {
+        InboxPin(projectId: project.id, streamId: task.streamId, taskId: task.id)
+    }
+
+    /// What the pin names, as the desktop's `pinnedItemKey`: a task pin is the
+    /// task's whatever stream it names.
+    public var key: String {
+        if let taskId { return "task:\(projectId):\(taskId)" }
+        if let streamId { return "stream:\(projectId):\(streamId)" }
+        return "project:\(projectId)"
     }
 }
 
 /// A pin matched to what it names in the inbox.
 public enum ResolvedPin: Sendable, Equatable, Identifiable {
     case project(InboxProject)
+    case stream(InboxStream, project: InboxProject)
     case task(InboxTask, project: InboxProject)
 
     public var id: String {
         switch self {
         case .project(let project): "project:\(project.id)"
+        case .stream(let stream, let project): "stream:\(project.id):\(stream.id)"
         case .task(let task, let project): "task:\(project.id):\(task.id)"
         }
     }
@@ -85,13 +115,21 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
     public var name: String
     public var emoji: String?
     public var remote: Bool
+    /// Open streams in the desktop sidebar's order, `main` first, empty ones included.
+    public var streams: [InboxStream]
+    /// The stream the project was last used in: New task's default.
+    public var lastStreamId: String?
+    /// Open tasks, stream by stream.
     public var tasks: [InboxTask]
 
-    public init(id: String, name: String, emoji: String? = nil, remote: Bool = false, tasks: [InboxTask]) {
+    public init(id: String, name: String, emoji: String? = nil, remote: Bool = false,
+                streams: [InboxStream] = [], lastStreamId: String? = nil, tasks: [InboxTask]) {
         self.id = id
         self.name = name
         self.emoji = emoji
         self.remote = remote
+        self.streams = streams
+        self.lastStreamId = lastStreamId
         self.tasks = tasks
     }
 
@@ -101,13 +139,84 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
         name = try c.decode(String.self, forKey: .name)
         emoji = try c.decodeIfPresent(String.self, forKey: .emoji)
         remote = try c.decodeIfPresent(Bool.self, forKey: .remote) ?? false
+        streams = try c.decodeIfPresent([InboxStream].self, forKey: .streams) ?? []
+        lastStreamId = try c.decodeIfPresent(String.self, forKey: .lastStreamId)
         tasks = try c.decodeIfPresent([InboxTask].self, forKey: .tasks) ?? []
+    }
+
+    /// The `main` stream (the project folder).
+    public var mainStream: InboxStream? {
+        streams.first(where: \.isMain) ?? streams.first
+    }
+
+    /// New task's default stream: the one last used, else `main` (§8.3).
+    public var defaultStream: InboxStream? {
+        streams.first(where: { $0.id == lastStreamId }) ?? mainStream
+    }
+
+    /// The tasks of one stream, in the desktop's order.
+    public func tasks(in stream: InboxStream) -> [InboxTask] {
+        tasks.filter { $0.streamId == stream.id }
+    }
+
+    /// The task list grouped by stream, in `streams` order. Streams with no
+    /// task are left out; a task naming a stream that isn't listed gets a
+    /// group of its own at the end (it shouldn't happen).
+    public var streamGroups: [(stream: InboxStream, tasks: [InboxTask])] {
+        var groups: [(stream: InboxStream, tasks: [InboxTask])] = streams.compactMap { stream in
+            let list = self.tasks(in: stream)
+            return list.isEmpty ? nil : (stream, list)
+        }
+        let known = Set(streams.map(\.id))
+        for task in tasks where !known.contains(task.streamId) {
+            if let i = groups.firstIndex(where: { $0.stream.id == task.streamId }) {
+                groups[i].tasks.append(task)
+            } else {
+                groups.append((InboxStream(id: task.streamId, name: task.streamName), [task]))
+            }
+        }
+        return groups
+    }
+}
+
+/// A line of work in a project (§4.4), e.g. `main`, `0.5.0`, `bugfixes`.
+public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public var id: String
+    public var name: String
+    /// The project's default stream (its folder); it can't be closed.
+    public var isMain: Bool
+    /// Set on a worktree stream: its branch.
+    public var branch: String?
+
+    public init(id: String, name: String, isMain: Bool = false, branch: String? = nil) {
+        self.id = id
+        self.name = name
+        self.isMain = isMain
+        self.branch = branch
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        isMain = (try? c.decodeIfPresent(Bool.self, forKey: .isMain)) == true
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
     }
 }
 
 public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var name: String
+    /// The stream holding the task, and its name (the `Project · Stream` line).
+    public var streamId: String
+    public var streamName: String
+    /// The task's one status: the strongest of its main tab and agent tabs
+    /// (§4.4). An extra terminal's bell doesn't count.
+    public var status: TabStatus
+    /// Unix milliseconds when `status` began.
+    public var since: Int64?
+    /// What the agent is doing, e.g. "Running Bash".
+    public var activity: String?
     /// Unix milliseconds.
     public var lastInteractedAt: Int64?
     /// Unix milliseconds. Set while a tab needs the user.
@@ -121,20 +230,25 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var settledAt: Int64?
     /// Unix milliseconds. A timed snooze; it ends on the phone's clock.
     public var snoozedUntil: Int64?
-    /// Snoozed until a tab next needs the user.
+    /// Snoozed until the task next needs the user.
     public var snoozeUntilAttention: Bool
-    /// Set on a workspace task: the branch of its worktree (§4.4).
-    public var branch: String?
     public var tabs: [InboxTab]
 
     public init(
-        id: String, name: String, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
+        id: String, name: String, streamId: String = "", streamName: String = "",
+        status: TabStatus = .idle, since: Int64? = nil, activity: String? = nil,
+        lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
         eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil,
         snoozedUntil: Int64? = nil, snoozeUntilAttention: Bool = false,
-        branch: String? = nil, tabs: [InboxTab]
+        tabs: [InboxTab]
     ) {
         self.id = id
         self.name = name
+        self.streamId = streamId
+        self.streamName = streamName
+        self.status = status
+        self.since = since
+        self.activity = activity
         self.lastInteractedAt = lastInteractedAt
         self.attentionAt = attentionAt
         self.eventAt = eventAt
@@ -142,14 +256,19 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         self.settledAt = settledAt
         self.snoozedUntil = snoozedUntil
         self.snoozeUntilAttention = snoozeUntilAttention
-        self.branch = branch
         self.tabs = tabs
     }
 
+    /// Also reads an inbox cached by a version 1 build (no streams, status per
+    /// tab only) until the desktop sends a fresh one.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
+        streamId = try c.decodeIfPresent(String.self, forKey: .streamId) ?? ""
+        streamName = try c.decodeIfPresent(String.self, forKey: .streamName) ?? ""
+        since = try c.decodeIfPresent(Int64.self, forKey: .since)
+        activity = try c.decodeIfPresent(String.self, forKey: .activity)
         lastInteractedAt = try c.decodeIfPresent(Int64.self, forKey: .lastInteractedAt)
         attentionAt = try c.decodeIfPresent(Int64.self, forKey: .attentionAt)
         eventAt = try c.decodeIfPresent(Int64.self, forKey: .eventAt)
@@ -157,13 +276,9 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         settledAt = try c.decodeIfPresent(Int64.self, forKey: .settledAt)
         snoozedUntil = try c.decodeIfPresent(Int64.self, forKey: .snoozedUntil)
         snoozeUntilAttention = (try? c.decodeIfPresent(Bool.self, forKey: .snoozeUntilAttention)) == true
-        branch = try c.decodeIfPresent(String.self, forKey: .branch)
         tabs = try c.decodeIfPresent([InboxTab].self, forKey: .tabs) ?? []
-    }
-
-    /// The most significant status across the task's tabs.
-    public var summaryStatus: TabStatus {
-        tabs.map(\.status).max(by: { $0.priority < $1.priority }) ?? .idle
+        status = try c.decodeIfPresent(TabStatus.self, forKey: .status)
+            ?? tabs.map(\.status).max(by: { $0.priority < $1.priority }) ?? .idle
     }
 
     /// Sort key for task lists: attention first by recency, then last interaction.
@@ -184,12 +299,6 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         return now.unixMilliseconds < snoozedUntil
     }
 
-    /// When the task's current status began: the oldest `since` among the tabs
-    /// in that status (the desktop's `taskStatusSince`).
-    public var statusSince: Int64? {
-        let status = summaryStatus
-        return tabs.filter { $0.status == status }.compactMap(\.since).min()
-    }
 }
 
 public struct InboxTab: Codable, Sendable, Equatable, Identifiable {

@@ -30,6 +30,8 @@ import Foundation
 struct LaunchOptions: Sendable {
     enum DemoRoute: String, Sendable {
         case sidebar
+        /// The first desktop's project list (streams and their tasks).
+        case projects
         case task
         case pair
         case settings

@@ -12,6 +12,7 @@ struct InboxView: View {
     @State private var snoozing: InboxEntry?
     @AppStorage(InboxSettings.workingLastKey) private var workingLast = false
     @State private var newTask: NewTaskTarget?
+    @State private var closing: CloseTaskRequest?
 
     var body: some View {
         // Wait times and snooze expiry are worked out against the clock; the
@@ -28,6 +29,9 @@ struct InboxView: View {
         }
         .sheet(item: $newTask) { target in
             NewTaskSheet(target: target)
+        }
+        .closeTaskFlow($closing) { closed in
+            if selection == TaskRef(desktopId: closed.desktopId, taskId: closed.taskId) { selection = nil }
         }
         .confirmationDialog(
             snoozing.map { "Snooze “\($0.task.name)”" } ?? "",
@@ -112,7 +116,7 @@ struct InboxView: View {
         let canTriage = model.supports(DesktopFeature.taskTriage, on: entry.desktopId) && !offline
         let unread = entry.task.unread
         // The agent has the ball: nothing for you to do yet, so the row recedes.
-        let working = group != .snoozed && entry.task.summaryStatus == .working
+        let working = group != .snoozed && entry.task.status == .working
         return InboxRow(
             entry: entry,
             group: group,
@@ -161,10 +165,19 @@ struct InboxView: View {
                 TriageMenuItems(ref: ref, task: entry.task, now: now)
                     .disabled(offline)
             }
+            if model.supports(DesktopFeature.taskClose, on: entry.desktopId) {
+                Button(role: .destructive) {
+                    closing = CloseTaskRequest(desktopId: entry.desktopId, task: entry.task)
+                } label: {
+                    Label("Close task", systemImage: "xmark.circle")
+                }
+                .disabled(offline)
+            }
             if model.supports(DesktopFeature.pin, on: entry.desktopId) {
-                let pinned = model.inboxes[entry.desktopId]?.isPinned(projectId: entry.project.id, taskId: entry.task.id) ?? false
+                let pin = InboxPin.task(entry.task, in: entry.project)
+                let pinned = model.inboxes[entry.desktopId]?.isPinned(pin) ?? false
                 Button {
-                    Task { await model.setPin(InboxPin(projectId: entry.project.id, taskId: entry.task.id), pinned: !pinned, desktopId: entry.desktopId) }
+                    Task { await model.setPin(pin, pinned: !pinned, desktopId: entry.desktopId) }
                 } label: {
                     Label(pinned ? "Unpin task" : "Pin task", systemImage: pinned ? "pin.slash" : "pin")
                 }
@@ -240,7 +253,7 @@ struct InboxRow: View {
 
     var body: some View {
         let task = entry.task
-        let status = task.summaryStatus
+        let status = task.status
         let activity = task.lastActivityAt
         // A working task drops its dot, as on the desktop: the agent has the ball.
         let showDot = task.unread && status != .working
@@ -282,7 +295,8 @@ struct InboxRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// "🚀 api-server · join3r-mbp", the desktop only when several are paired.
+    /// "🚀 api-server · 0.5.0 · join3r-mbp" (`Project · Stream`), the desktop
+    /// only when several are paired.
     private var place: String {
         var parts: [String] = []
         if let emoji = entry.project.emoji, !emoji.isEmpty {
@@ -290,7 +304,7 @@ struct InboxRow: View {
         } else {
             parts.append(entry.project.name)
         }
-        if let branch = entry.task.branch { parts.append(branch) }
+        if !entry.task.streamName.isEmpty { parts.append(entry.task.streamName) }
         if let desktopName { parts.append(desktopName) }
         return parts.joined(separator: " · ")
     }
@@ -387,15 +401,15 @@ enum InboxClock {
             if let until = task.snoozedUntil { return "Snoozed for \(wait(until - nowMs))" }
             return "Snoozed"
         }
-        let status = task.summaryStatus
+        let status = task.status
         let line = activity(task)
         switch status {
         case .attention:
             let label = line ?? "Needs you"
-            return task.statusSince.map { "\(label) · waiting \(wait(nowMs - $0))" } ?? label
+            return task.since.map { "\(label) · waiting \(wait(nowMs - $0))" } ?? label
         case .working:
             let label = line ?? "Working"
-            return task.statusSince.map { "\(label) · \(wait(nowMs - $0))" } ?? label
+            return task.since.map { "\(label) · \(wait(nowMs - $0))" } ?? label
         case .exited:
             return "Exited"
         default:
@@ -406,12 +420,10 @@ enum InboxClock {
         }
     }
 
-    /// The activity of the tab you would act on: the one that needs you, else
-    /// the one working, else any.
-    private static func activity(_ task: InboxTask) -> String? {
-        task.tabs
-            .filter { !($0.activity ?? "").isEmpty }
-            .max { $0.status.priority < $1.status.priority }?
-            .activity
+    /// What the task is doing: the desktop picks it from the tab that sets the
+    /// task's status, so an extra terminal's activity never stands for the task.
+    static func activity(_ task: InboxTask) -> String? {
+        guard let activity = task.activity, !activity.isEmpty else { return nil }
+        return activity
     }
 }

@@ -1,4 +1,4 @@
-import type { Project, ProjectsData, Tab, Task } from '../../shared/types'
+import { isAgentTabType, type Project, type ProjectsData, type Tab, type TabStatusValue, type Task } from '../../shared/types'
 import { AppErrorCode, INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
 import type { TaskCloseParams, TaskCloseResult } from '../../../protocol/ts/index.ts'
 import { findTaskInProject, isMainTab, mapTaskInProject, projectTasks, taskTabs } from '../../shared/streams'
@@ -9,10 +9,11 @@ import { isVisibleOnMobile } from './inbox'
  * `task.close` and `tab.close` (SPEC.md §8.7, §8.8): what the sidebar's Close task
  * and a tab's close button do, run by main for a phone. Main archives the task
  * itself (to its stream's Done row, as the sidebar's ✕ does), so no window has to
- * be open. The phone can't see the desktop's confirm dialogs, so unsaved editors
- * come back as a `blocker` until the phone resends with
- * `discardUnsaved`. A task's stream (and its worktree) stays: worktrees go only
- * with their stream, which the phone can't close yet (step 9).
+ * be open. The phone can't see the desktop's confirm dialogs, so what the sidebar
+ * asks about comes back as a `blocker`, in the sidebar's order: a working agent
+ * (until the phone resends with `stopWorking`), then unsaved editors (until
+ * `discardUnsaved`). A task's stream (and its worktree) stays: worktrees go only
+ * with their stream, which the phone doesn't close.
  */
 
 type Outcome<T> = { ok: true; result: T } | { ok: false; code: string; message: string }
@@ -21,6 +22,8 @@ export interface CloseTaskDeps {
   peek(): ProjectsData
   /** Editor tabs with unsaved changes in any window. */
   dirtyTabIds(): string[]
+  /** A tab's live status (`TabActivityRegistry`). */
+  statusOf(tabId: string): TabStatusValue
   /** Tear down the task's tabs and archive it. */
   removeTask(project: Project, task: Task): Promise<void>
 }
@@ -38,6 +41,10 @@ export async function closeTask(deps: CloseTaskDeps, params: TaskCloseParams): P
   const found = findTask(deps.peek(), params.taskId)
   if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such task' }
   const { project, task } = found
+  // The sidebar's `isTaskWorking`: an agent tab mid-turn.
+  if (!params.stopWorking && taskTabs(task).some((tab) => isAgentTabType(tab.type) && deps.statusOf(tab.id) === 'working')) {
+    return { ok: true, result: { closed: false, blocker: 'working' } }
+  }
   if (!params.discardUnsaved) {
     const dirty = new Set(deps.dirtyTabIds())
     if (taskTabs(task).some((tab) => dirty.has(tab.id))) {

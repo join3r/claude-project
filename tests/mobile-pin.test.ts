@@ -8,7 +8,7 @@ function project(id: string, extra: Partial<Project> = {}): Project {
     id,
     directory: `/src/${id}`,
     tasks: [{ id: `${id}-t1` }],
-    // A stream of two tasks, which the phone sees as two tasks.
+    // A stream of two tasks.
     streams: [{ id: `${id}-s`, name: 'bugfixes', tasks: [fixtureTask({ id: `${id}-s1` }), fixtureTask({ id: `${id}-s2` })] }],
     ...extra
   })
@@ -52,21 +52,23 @@ describe('setPinInData (SPEC.md §8.10)', () => {
     expect(result.data.pinnedItems).toEqual([{ type: 'task', projectId: 'p1', streamId: 'p1-s', taskId: 'p1-s2' }])
   })
 
-  it('treats a task as pinned while its stream is, and unpinning it drops the stream pin too', () => {
-    const streamPin = { type: 'stream', projectId: 'p1', streamId: 'p1-s' } as const
-    const start = data([
-      { type: 'project', projectId: 'p1' },
-      streamPin,
-      { type: 'task', projectId: 'p1', streamId: 'p1-s', taskId: 'p1-s1' }
-    ])
-    expect(setPinInData(start, { projectId: 'p1', taskId: 'p1-s2', pinned: true })).toEqual({ ok: true, data: start, changed: false })
-    const unpinned = setPinInData(start, { projectId: 'p1', taskId: 'p1-s2', pinned: false })
+  it('pins and unpins a stream, separately from its tasks', () => {
+    const taskPin = { type: 'task', projectId: 'p1', streamId: 'p1-s', taskId: 'p1-s1' } as const
+    const start = data([taskPin])
+    const pinned = setPinInData(start, { projectId: 'p1', streamId: 'p1-s', pinned: true })
+    if (!pinned.ok) throw new Error(pinned.code)
+    expect(pinned.data.pinnedItems).toEqual([taskPin, { type: 'stream', projectId: 'p1', streamId: 'p1-s' }])
+    // A task of a pinned stream is not pinned by itself.
+    expect(setPinInData(pinned.data, { projectId: 'p1', taskId: 'p1-s2', pinned: false })).toMatchObject({ ok: true, changed: false })
+    const unpinned = setPinInData(pinned.data, { projectId: 'p1', streamId: 'p1-s', pinned: false })
     if (!unpinned.ok) throw new Error(unpinned.code)
-    expect(unpinned.changed).toBe(true)
-    // The stream pin goes; the other task's own pin and the project pin stay.
-    expect(unpinned.data.pinnedItems).toEqual([
-      { type: 'project', projectId: 'p1' },
-      { type: 'task', projectId: 'p1', streamId: 'p1-s', taskId: 'p1-s1' }
-    ])
+    expect(unpinned.data.pinnedItems).toEqual([taskPin])
+    expect(setPinInData(start, { projectId: 'p1', streamId: 'gone', pinned: true })).toMatchObject({ ok: false, code: 'not-found' })
+  })
+
+  it('takes the task over the stream when both are named', () => {
+    const result = setPinInData(data(), { projectId: 'p1', streamId: 'wrong', taskId: 'p1-s2', pinned: true })
+    if (!result.ok) throw new Error(result.code)
+    expect(result.data.pinnedItems).toEqual([{ type: 'task', projectId: 'p1', streamId: 'p1-s', taskId: 'p1-s2' }])
   })
 })

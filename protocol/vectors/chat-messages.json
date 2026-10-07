@@ -829,30 +829,23 @@
         }
       },
       {
-        "json": "{\"projectId\":\"p1\",\"prompt\":\"Plan the refactor\",\"mode\":\"plan\"}",
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"prompt\":\"Plan the refactor\",\"mode\":\"plan\"}",
         "expected": {
           "projectId": "p1",
           "prompt": "Plan the refactor",
+          "streamId": "s-050",
           "mode": "plan"
         }
       },
       {
-        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"mode\":null,\"extra\":true}",
+        "json": "{\"projectId\":\"p1\",\"streamId\":null,\"prompt\":\"Go\",\"mode\":null,\"extra\":true}",
         "expected": {
           "projectId": "p1",
           "prompt": "Go"
         }
       },
       {
-        "json": "{\"projectId\":\"p1\",\"prompt\":\"Fix the login redirect\",\"workspace\":true}",
-        "expected": {
-          "projectId": "p1",
-          "prompt": "Fix the login redirect",
-          "workspace": true
-        }
-      },
-      {
-        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"workspace\":\"yes\"}",
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"workspace\":true}",
         "expected": {
           "projectId": "p1",
           "prompt": "Go"
@@ -881,6 +874,7 @@
         "{\"projectId\":\"p1\"}",
         "{\"projectId\":\"p1\",\"prompt\":\"   \"}",
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"mode\":\"yolo\"}",
+        "{\"projectId\":\"p1\",\"streamId\":7,\"prompt\":\"Go\"}",
         "null"
       ],
       "results": [
@@ -899,16 +893,15 @@
         }
       },
       {
-        "json": "{\"taskId\":\"t1\",\"discardUnsaved\":true,\"discardWorkspace\":true,\"keepBranch\":true}",
+        "json": "{\"taskId\":\"t1\",\"stopWorking\":true,\"discardUnsaved\":true}",
         "expected": {
           "taskId": "t1",
-          "discardUnsaved": true,
-          "discardWorkspace": true,
-          "keepBranch": true
+          "stopWorking": true,
+          "discardUnsaved": true
         }
       },
       {
-        "json": "{\"taskId\":\"t1\",\"discardWorkspace\":1,\"keepBranch\":null,\"extra\":true}",
+        "json": "{\"taskId\":\"t1\",\"stopWorking\":1,\"discardUnsaved\":null,\"discardWorkspace\":true,\"extra\":true}",
         "expected": {
           "taskId": "t1"
         }
@@ -922,43 +915,23 @@
         }
       },
       {
-        "json": "{\"closed\":true,\"warning\":\"The worktree could not be removed.\"}",
+        "json": "{\"closed\":true,\"warning\":\"ignored\"}",
         "expected": {
-          "closed": true,
-          "warning": "The worktree could not be removed."
+          "closed": true
         }
       },
       {
-        "json": "{\"closed\":false,\"blocker\":\"unsaved\"}",
+        "json": "{\"closed\":false,\"blocker\":\"working\"}",
+        "expected": {
+          "closed": false,
+          "blocker": "working"
+        }
+      },
+      {
+        "json": "{\"closed\":false,\"blocker\":\"unsaved\",\"extra\":1}",
         "expected": {
           "closed": false,
           "blocker": "unsaved"
-        }
-      },
-      {
-        "json": "{\"closed\":false,\"blocker\":\"unmerged\",\"branch\":\"fix-login\",\"baseBranch\":\"main\"}",
-        "expected": {
-          "closed": false,
-          "blocker": "unmerged",
-          "branch": "fix-login",
-          "baseBranch": "main"
-        }
-      },
-      {
-        "json": "{\"closed\":false,\"blocker\":\"check-failed\",\"branch\":\"fix-login\",\"message\":\"git failed\",\"extra\":1}",
-        "expected": {
-          "closed": false,
-          "blocker": "check-failed",
-          "branch": "fix-login",
-          "message": "git failed"
-        }
-      },
-      {
-        "json": "{\"closed\":false,\"blocker\":\"stash-pending\",\"branch\":\"fix-login\"}",
-        "expected": {
-          "closed": false,
-          "blocker": "check-failed",
-          "branch": "fix-login"
         }
       }
     ],
@@ -972,6 +945,7 @@
         "{}",
         "{\"closed\":false}",
         "{\"closed\":\"yes\"}",
+        "{\"closed\":false,\"blocker\":\"unmerged\"}",
         "[]"
       ]
     }
@@ -1009,15 +983,24 @@
         }
       },
       {
-        "json": "{\"projectId\":\"p1\",\"taskId\":\"t2\",\"pinned\":false}",
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"pinned\":true}",
+        "expected": {
+          "projectId": "p1",
+          "pinned": true,
+          "streamId": "s-050"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"taskId\":\"t2\",\"pinned\":false}",
         "expected": {
           "projectId": "p1",
           "pinned": false,
+          "streamId": "s-050",
           "taskId": "t2"
         }
       },
       {
-        "json": "{\"projectId\":\"p1\",\"taskId\":null,\"pinned\":true,\"extra\":1}",
+        "json": "{\"projectId\":\"p1\",\"streamId\":null,\"taskId\":null,\"pinned\":true,\"extra\":1}",
         "expected": {
           "projectId": "p1",
           "pinned": true
@@ -1030,6 +1013,7 @@
         "{\"projectId\":\"p1\"}",
         "{\"projectId\":\"p1\",\"pinned\":\"yes\"}",
         "{\"projectId\":\"p1\",\"taskId\":7,\"pinned\":true}",
+        "{\"projectId\":\"p1\",\"streamId\":7,\"pinned\":true}",
         "null"
       ]
     }
