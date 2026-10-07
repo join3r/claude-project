@@ -161,6 +161,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  // Where the composer opens when something other than the selection chose it.
+  const [newTaskWhere, setNewTaskWhere] = useState<{ projectId: string; streamId?: string } | null>(null)
   // The project the New stream dialog is open for.
   const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
   const worktreeChoice = useWorktreeChoice()
@@ -259,6 +261,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   useEffect(() => {
     return paletteEvents.on('open-new-task', () => setNewTaskOpen(true))
+  }, [])
+
+  useEffect(() => {
+    return paletteEvents.on('open-new-task-in', (where) => { setNewTaskWhere(where); setNewTaskOpen(true) })
+  }, [])
+
+  useEffect(() => {
+    return paletteEvents.on('open-new-stream', (projectId) => setNewStreamProjectId(projectId))
   }, [])
 
   useEffect(() => {
@@ -391,6 +401,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (streamId) setStreamExpanded(streamId, true)
     }
     setNewTaskOpen(false)
+    setNewTaskWhere(null)
   }
 
   const statusOf = useCallback((tabId: string) => tabStatusStore.getStatus(tabId), [tabStatusStore])
@@ -1242,15 +1253,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       {newTaskOpen && config && (
         <NewTaskModal
           projects={orderedProjects}
-          defaultProjectId={selectedProjectId}
+          defaultProjectId={newTaskWhere?.projectId ?? selectedProjectId}
           selectedTaskId={selectedTaskId}
+          defaultStreamId={newTaskWhere?.streamId ?? null}
           getProjectDir={getProjectDir}
           config={config}
           allTags={tags}
           onEnsureTag={addTag}
           onAddProject={addProject}
           onCreate={handleComposedTask}
-          onClose={() => setNewTaskOpen(false)}
+          onClose={() => { setNewTaskOpen(false); setNewTaskWhere(null) }}
         />
       )}
 
