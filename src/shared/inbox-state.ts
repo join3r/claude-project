@@ -1,5 +1,6 @@
-import { taskTabIds } from './streams'
-import type { Task, TabStatusValue, TaskInboxState } from './types'
+import { resolveMainTabId, taskTabs } from './streams'
+import { isAgentTabType } from './types'
+import type { Tab, Task, TabStatusValue, TaskInboxState } from './types'
 
 /**
  * The triage predicates the inbox is built on. They live in shared rather than
@@ -54,22 +55,32 @@ export function isSnoozed(task: Task, now: number): boolean {
 }
 
 /**
- * Rolls the per-tab statuses of a task up to a single task status. Unlike the
- * project tree's dot, this covers *every* tab, not just AI ones: the inbox lists
- * terminal-only tasks too.
+ * The tabs whose live status is the task's status: its main tab (the agent, or
+ * the terminal of a terminal task) and any agent tab. Extra terminals, browsers
+ * and editors are the task's tools, not the task: a dev server's output or a
+ * test run's bell in a side terminal doesn't make the task need you.
  *
- * Terminal tabs are deliberately still allowed to push a task into "Needs you".
- * That was wrong while terminal 'attention' meant "a line matched /error|fail/" —
- * a test run or a stack trace read as "an agent is blocked on you". Since
- * terminalStatus.ts now sets it only on a real terminal bell, it is a program
- * deliberately asking for the user, which is exactly what the tier means. If the
- * bell ever proves noisy, filter here (by tab type) rather than by weakening
- * the tab's own dot.
+ * A terminal task's main terminal is allowed to push it into "Needs you":
+ * terminalStatus.ts sets 'attention' only on a real terminal bell, which is a
+ * program deliberately asking for the user, exactly what the tier means.
+ *
+ * The sidebar's dot (`sidebarTaskState`) and the Inbox both read this, so a
+ * task never shows one state in the tree and another in the Inbox.
  */
+export function statusTabs(task: Task): Tab[] {
+  const tabs = taskTabs(task)
+  const mainTabId = resolveMainTabId(tabs, task.mainTabId)
+  return tabs.filter((tab) => tab.id === mainTabId || isAgentTabType(tab.type))
+}
+
+/** Whether `tabId`'s status and events count for its task (see `statusTabs`). */
+export function isStatusTab(task: Task, tabId: string): boolean {
+  return statusTabs(task).some((tab) => tab.id === tabId)
+}
+
+/** The strongest live status of the task's status tabs: attention, then working, then exited. */
 export function taskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const tabIds = taskTabIds(task)
-  if (tabIds.length === 0) return null
-  const statuses = tabIds.map((id) => allStatuses[id]).filter(Boolean)
+  const statuses = statusTabs(task).map((tab) => allStatuses[tab.id]).filter(Boolean)
   if (statuses.includes('attention')) return 'attention'
   if (statuses.includes('working')) return 'working'
   if (statuses.includes('exited')) return 'exited'

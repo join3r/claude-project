@@ -1126,12 +1126,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onSelectTask={handleSelectTask}
           onTaskContextMenu={handleTaskContextMenu}
           onSettle={handleToggleSettled}
+          onClose={(projectId, taskId) => void handleCloseTask(projectId, taskId)}
           onNewTask={() => setNewTaskOpen(true)}
           allStatuses={allStatuses}
           statusSince={statusSince}
           activities={agentActivities}
           now={now}
           workingLast={config?.inboxWorkingLast ?? false}
+          layout={config?.inboxLayout ?? 'flat'}
         />
       ) : (
       <div className="sidebar-list flex-1 overflow-y-auto py-1">

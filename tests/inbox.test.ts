@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatWaitTime,
+  groupInboxByStream,
+  inboxLocation,
+  inboxSources,
   isSettled,
   isSnoozed,
   isUnread,
@@ -8,12 +11,14 @@ import {
   lastActivityAt,
   partitionInbox,
   snoozePresets,
+  statusTabs,
   taskStatus,
   taskStatusSince
 } from '../src/renderer/components/inbox'
 import { createMainStream } from '../src/shared/types'
-import type { Project, Task, TaskInboxState } from '../src/shared/types'
-import { projectTasks, singlePane } from '../src/shared/streams'
+import type { Project, ProjectsData, Stream, Task, TaskInboxState } from '../src/shared/types'
+import { singlePane } from '../src/shared/streams'
+import { archiveStreamInData, archiveTasksInData } from '../src/shared/archive'
 import type { TabStatusValue } from '../src/renderer/context/TabStatusContext'
 
 const NOW = new Date('2026-07-28T12:00:00').getTime()
@@ -111,10 +116,40 @@ describe('taskStatus', () => {
     expect(taskStatus(makeTask('t'), { a: 'attention' })).toBeNull()
   })
 
-  it('counts terminal tabs too — a failed command is worth surfacing', () => {
+  it('counts a terminal task\'s bell — its main tab is the terminal', () => {
     const task = makeTask('t')
     task.panes = singlePane([{ id: 'term', type: 'terminal', title: 'Terminal' }])
+    task.mainTabId = 'term'
     expect(taskStatus(task, { term: 'attention' })).toBe('attention')
+  })
+
+  it('ignores an extra terminal beside the agent: it is a tool of the task, not the task', () => {
+    const task = makeTask('t')
+    task.panes = singlePane([
+      { id: 'agent', type: 'claude', title: 'Claude' },
+      { id: 'term', type: 'terminal', title: 'npm test' },
+      { id: 'web', type: 'browser', title: 'localhost' }
+    ])
+    task.mainTabId = 'agent'
+    expect(statusTabs(task).map(tab => tab.id)).toEqual(['agent'])
+    expect(taskStatus(task, { term: 'attention', agent: 'working' })).toBe('working')
+    expect(taskStatusSince(task, { term: 'attention', agent: 'working' }, { term: NOW - 9000, agent: NOW - 1000 }))
+      .toBe(NOW - 1000)
+  })
+
+  it('still counts a second agent tab opened inside the task', () => {
+    const task = makeTask('t', undefined, { aiTabIds: ['a', 'b'] })
+    task.mainTabId = 'a'
+    expect(taskStatus(task, { b: 'attention' })).toBe('attention')
+  })
+
+  it('falls back to the agent, else the terminal, when the task names no main tab', () => {
+    const task = makeTask('t')
+    task.panes = singlePane([
+      { id: 'web', type: 'browser', title: 'localhost' },
+      { id: 'term', type: 'terminal', title: 'Terminal' }
+    ])
+    expect(statusTabs(task).map(tab => tab.id)).toEqual(['term'])
   })
 
   it('reports the oldest since stamp among tabs in that status', () => {
@@ -172,7 +207,8 @@ describe('partitionInbox', () => {
   const snoozedTask = makeTask('snoozed', { snoozedAt: NOW, snoozedUntil: NOW + 60_000 })
 
   const project = makeProject('p', [blockedLong, blockedShort, recent, older, settledTask, snoozedTask])
-  const entries = projectTasks(project).map(task => ({ task, project }))
+  const stream = project.streams[0]
+  const entries = inboxSources([project])
   const statuses: Record<string, TabStatusValue> = { bl: 'attention', bs: 'attention' }
   const since = { bl: NOW - 600_000, bs: NOW - 30_000 }
 
@@ -196,7 +232,7 @@ describe('partitionInbox', () => {
       { aiTabIds: ['sb'] }
     )
     const result = partitionInbox(
-      [{ task: snoozedAndBlocked, project }],
+      [{ task: snoozedAndBlocked, project, stream }],
       { sb: 'attention' },
       { sb: NOW - 1000 },
       NOW
@@ -208,7 +244,7 @@ describe('partitionInbox', () => {
   it('flags your-turn rows, but never settled or snoozed ones', () => {
     const settledAfterStop = makeTask('settled-stop', { eventAt: NOW - 5000, settledAt: NOW })
     const result = partitionInbox(
-      [...entries, { task: settledAfterStop, project }],
+      [...entries, { task: settledAfterStop, project, stream }],
       statuses,
       since,
       NOW
@@ -221,12 +257,90 @@ describe('partitionInbox', () => {
 
   it('sinks working rows to the end of active only when asked', () => {
     const busy = makeTask('busy', { eventAt: NOW }, { aiTabIds: ['w'] })
-    const withBusy = [...entries, { task: busy, project }]
+    const withBusy = [...entries, { task: busy, project, stream }]
     const working = { ...statuses, w: 'working' as const }
     expect(partitionInbox(withBusy, working, since, NOW).active.map(e => e.task.id))
       .toEqual(['busy', 'recent', 'older'])
     expect(partitionInbox(withBusy, working, since, NOW, { workingLast: true }).active.map(e => e.task.id))
       .toEqual(['recent', 'older', 'busy'])
+  })
+})
+
+describe('inbox sources and the grouped layout', () => {
+  function streamOf(id: string, name: string, tasks: Task[]): Stream {
+    return { id, name, tasks }
+  }
+
+  // DevTool: main (quiet, recent), 0.5.0 (one blocked, one older), bugfixes (newest event).
+  const quiet = makeTask('quiet', { eventAt: NOW - 50_000 })
+  const blocked = makeTask('blocked', undefined, { aiTabIds: ['b'] })
+  const older = makeTask('older', { eventAt: NOW - 90_000 })
+  const fresh = makeTask('fresh', { eventAt: NOW - 1000 })
+  const termTask = makeTask('term-task', { eventAt: NOW - 70_000 })
+  termTask.panes = singlePane([{ id: 'bell', type: 'terminal', title: 'Terminal' }])
+  termTask.mainTabId = 'bell'
+  const devtool: Project = {
+    id: 'devtool',
+    name: 'DevTool',
+    directory: '/tmp/devtool',
+    streams: [
+      createMainStream('devtool', [quiet]),
+      streamOf('s050', '0.5.0', [older, blocked]),
+      streamOf('sfix', 'bugfixes', [fresh])
+    ]
+  }
+  const stem: Project = {
+    id: 'stem',
+    name: 'Stem',
+    directory: '/tmp/stem',
+    streams: [createMainStream('stem', [termTask])]
+  }
+  const statuses: Record<string, TabStatusValue> = { b: 'attention', bell: 'attention' }
+  const since = { b: NOW - 5_000, bell: NOW - 60_000 }
+
+  it('lists every task with its project and stream', () => {
+    const sources = inboxSources([devtool, stem])
+    expect(sources.map(s => `${s.project.id}/${s.stream.name}/${s.task.id}`)).toEqual([
+      'devtool/main/quiet', 'devtool/0.5.0/older', 'devtool/0.5.0/blocked', 'devtool/bugfixes/fresh', 'stem/main/term-task'
+    ])
+    expect(inboxLocation(sources[1])).toBe('DevTool · 0.5.0')
+  })
+
+  it('puts a terminal task whose bell rang under Needs you', () => {
+    const { needsYou } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
+    expect(needsYou.map(e => e.task.id)).toEqual(['term-task', 'blocked'])
+    expect(needsYou[0].yourTurn).toBe(true)
+  })
+
+  it('flat order: needs you by longest wait, then the rest by recency', () => {
+    const { needsYou, active } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
+    expect([...needsYou, ...active].map(e => e.task.id))
+      .toEqual(['term-task', 'blocked', 'fresh', 'quiet', 'older'])
+  })
+
+  it('grouped: a stream sits where its most urgent row is, its rows in flat order', () => {
+    const { needsYou, active } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
+    const groups = groupInboxByStream([...needsYou, ...active])
+    expect(groups.map(g => `${g.project.name} ${g.stream.name}: ${g.entries.map(e => e.task.id).join(',')}`)).toEqual([
+      'Stem main: term-task',
+      'DevTool 0.5.0: blocked,older',
+      'DevTool bugfixes: fresh',
+      'DevTool main: quiet'
+    ])
+  })
+
+  it('keeps two projects\' main streams apart', () => {
+    const { active } = partitionInbox(inboxSources([devtool, stem]), {}, {}, NOW)
+    const mains = groupInboxByStream(active).filter(g => g.stream.isMain)
+    expect(mains.map(g => g.project.id).sort()).toEqual(['devtool', 'stem'])
+  })
+
+  it('never lists archived tasks or the tasks of an archived stream', () => {
+    const data: ProjectsData = { projects: [devtool, stem], projectOrder: ['devtool', 'stem'] } as ProjectsData
+    const afterTask = archiveTasksInData(data, 'devtool', ['fresh'])
+    const afterStream = archiveStreamInData(afterTask, 'devtool', 's050')
+    const ids = inboxSources(afterStream.projects).map(s => s.task.id)
+    expect(ids).toEqual(['quiet', 'term-task'])
   })
 })
 

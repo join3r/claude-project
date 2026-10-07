@@ -12,6 +12,7 @@ import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
 import { tabSpawnDir } from '../../shared/streams'
+import { isStatusTab } from '../../shared/inbox-state'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
 import type { Tab, AiTabType, Project, Task } from '../../shared/types'
@@ -97,7 +98,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
 
   const renderTab = (tab: Tab, tabVisible: boolean): React.ReactNode => {
     if (tab.type === 'terminal') {
-      return <TerminalTab tabId={tab.id} visible={tabVisible} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} shellCommand={project.shellCommand} cwd={tab.cwd} />
+      return <TerminalTab tabId={tab.id} visible={tabVisible} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} shellCommand={project.shellCommand} cwd={tab.cwd} isMainTab={isStatusTab(task, tab.id)} />
     }
     if (tab.type === 'browser') {
       return <BrowserTab tabId={tab.id} visible={tabVisible} initialUrl={tab.url} projectId={projectId} taskId={task.id} sshConfig={project.ssh} />
