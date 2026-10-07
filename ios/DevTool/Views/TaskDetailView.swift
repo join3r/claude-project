@@ -8,8 +8,6 @@ struct TaskDetailView: View {
     /// The phone closed this task (§8.7); the caller leaves the screen.
     var onClosed: () -> Void = {}
 
-    @State private var creatingChat = false
-    @State private var newChatError: String?
     @State private var closingTask: CloseTaskRequest?
     /// A busy tab waiting on "Close tab?".
     @State private var confirmTab: InboxTab?
@@ -79,9 +77,6 @@ struct TaskDetailView: View {
                     }
                     if task.tabs.isEmpty {
                         Text("No agent or terminal tabs").foregroundStyle(.secondary)
-                    }
-                    if model.supports(DesktopFeature.chatNew, on: ref.desktopId) {
-                        newChatRow(offline: offline)
                     }
                 } header: {
                     Text("Tabs")
@@ -153,11 +148,6 @@ struct TaskDetailView: View {
                 }
             }
             .refreshable { await model.refresh([ref.desktopId]) }
-            .alert("Couldn't start a chat", isPresented: Binding(get: { newChatError != nil }, set: { if !$0 { newChatError = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(newChatError ?? "")
-            }
         } else {
             ContentUnavailableView("Task not found", systemImage: "questionmark.folder", description: Text("It may have been closed on the desktop."))
         }
@@ -166,35 +156,6 @@ struct TaskDetailView: View {
     /// A task whose stream isn't listed (an inbox cached by an older build).
     private func fallbackStream(_ task: InboxTask) -> InboxStream? {
         task.streamName.isEmpty ? nil : InboxStream(id: task.streamId, name: task.streamName)
-    }
-
-    /// "New chat" (§8.2, §8.3): adds a Claude chat to the task on the desktop
-    /// and opens it once it shows up in the inbox.
-    private func newChatRow(offline: Bool) -> some View {
-        Button {
-            Task { await createChat() }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "plus.bubble")
-                    .frame(width: 28)
-                Text("New chat")
-                Spacer()
-                if creatingChat { ProgressView() }
-            }
-        }
-        .disabled(offline || creatingChat)
-    }
-
-    private func createChat() async {
-        guard !creatingChat else { return }
-        creatingChat = true
-        defer { creatingChat = false }
-        do {
-            // RootView waits for the tab to appear in the inbox, then pushes the chat.
-            model.requestedChat = try await model.newChat(in: ref)
-        } catch {
-            newChatError = error.localizedDescription
-        }
     }
 
     /// A working or waiting tab is confirmed first; an idle or exited one closes at once.

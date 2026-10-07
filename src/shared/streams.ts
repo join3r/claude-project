@@ -107,6 +107,26 @@ export function addTaskToStream(project: Project, streamId: string | null, task:
   }
 }
 
+/**
+ * The stream the New stream dialog (and a phone's `stream.new`) creates: a worktree,
+ * or the project folder when `workspace` is absent.
+ */
+export function makeStreamWithId(id: string, name: string, workspace?: WorkspaceConfig): Stream {
+  return { id, name, ...(workspace ? { workspace } : {}), tasks: [] }
+}
+
+/** Add `stream` at the end of the project's list. One already there is left alone. */
+export function addStreamToProject(project: Project, stream: Stream): Project {
+  return project.streams.some(candidate => candidate.id === stream.id)
+    ? project
+    : { ...project, streams: [...project.streams, stream] }
+}
+
+/** Whether a stream may offer a worktree: not for a shell-command project. */
+export function streamWorktreeSupported(project: Project): boolean {
+  return !project.shellCommand
+}
+
 /** The task the project was last left on, when it still exists. */
 export function projectLastTaskId(project: Project): string | undefined {
   const stream = project.streams.find(candidate => candidate.id === project.lastStreamId)

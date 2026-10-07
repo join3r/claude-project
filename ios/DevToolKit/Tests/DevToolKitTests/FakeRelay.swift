@@ -81,9 +81,10 @@ actor FakeRelay: WebSocketConnector {
         /// The last `push.register` (nil after `push.unregister`).
         var pushRegistration: PushRegisterParams?
         /// The hello's `features` (§8.1).
-        var features: [String] = [DesktopFeature.chatNew]
-        /// Tabs added with `chat.new`, at the end of task `t`.
+        var features: [String] = [DesktopFeature.taskNew]
+        /// Tabs added with `task.new`, at the end of task `t`.
         var newTabs: [String] = []
+        var streamNewParams: [StreamNewParams] = []
         var taskNewParams: [TaskNewParams] = []
         var taskCloseParams: [TaskCloseParams] = []
         var closedTabs: [String] = []
@@ -154,20 +155,31 @@ actor FakeRelay: WebSocketConnector {
                     }
                     return app(.resOk(id: id, result: .object([:])), to: from)
                 }
-                if op == ChatOp.new {
-                    guard features.contains(DesktopFeature.chatNew) else {
+                if op == TaskOp.newStream || op == TaskOp.listBranches {
+                    let feature = op == TaskOp.newStream ? DesktopFeature.streamNew : DesktopFeature.branchesList
+                    guard features.contains(feature) else {
                         return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
                     }
-                    let taskId: String
+                    if op == TaskOp.listBranches {
+                        guard case .object(let o)? = params, case .string(let projectId)? = o["projectId"] else {
+                            return app(.resError(id: id, code: AppErrorCode.badRequest, message: "projectId must be a string"), to: from)
+                        }
+                        // "p" has worktrees; "shell" runs a shell command, so it has none.
+                        if projectId == "shell" {
+                            return app(.resError(id: id, code: AppErrorCode.unsupported, message: "No worktrees"), to: from)
+                        }
+                        guard projectId == "p" else { return app(.resError(id: id, code: AppErrorCode.notFound, message: "No such project"), to: from) }
+                        return app(.resOk(id: id, result: BranchesListResult(branches: ["dev", "main"], defaultBase: "main").json), to: from)
+                    }
+                    let parsed: StreamNewParams
                     do {
-                        taskId = try ChatNewParams.parse(params).taskId
+                        parsed = try StreamNewParams.parse(params)
                     } catch {
                         return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
                     }
-                    guard taskId == "t" else { return app(.resError(id: id, code: AppErrorCode.notFound, message: "No such task"), to: from) }
-                    let tabId = "tab-new-\(newTabs.count + 1)"
-                    newTabs.append(tabId)
-                    return app(.resOk(id: id, result: ChatNewResult(tabId: tabId).json), to: from)
+                    guard parsed.projectId == "p" else { return app(.resError(id: id, code: AppErrorCode.notFound, message: "No such project"), to: from) }
+                    streamNewParams.append(parsed)
+                    return app(.resOk(id: id, result: StreamNewResult(streamId: "s-new-\(streamNewParams.count)").json), to: from)
                 }
                 if op == TaskOp.new {
                     guard features.contains(DesktopFeature.taskNew) else {

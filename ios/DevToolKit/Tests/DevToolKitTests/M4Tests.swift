@@ -2,39 +2,53 @@ import Foundation
 import Testing
 @testable import DevToolKit
 
-/// `chat.new` samples in `protocol/vectors/chat-messages.json` (§8.2).
-@Suite struct ChatNewVectorTests {
-    @Test func paramsAndResults() throws {
-        let new = try #require(try Vectors.load("chat-messages.json")["new"])
+/// `stream.new` and `branches.list` samples in `protocol/vectors/chat-messages.json` (§8.12, §8.13).
+@Suite struct StreamNewVectorTests {
+    @Test func streamNewParamsAndResults() throws {
+        let new = try #require(try Vectors.load("chat-messages.json")["streamNew"])
         #expect(!new["params"].array.isEmpty)
         for sample in new["params"].array {
-            let parsed = try ChatNewParams.parse(try JSONValue.parse(sample["json"].str))
+            let parsed = try StreamNewParams.parse(try JSONValue.parse(sample["json"].str))
             #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
         }
         #expect(!new["results"].array.isEmpty)
         for sample in new["results"].array {
-            let parsed = try ChatNewResult.parse(try JSONValue.parse(sample["json"].str))
+            let parsed = try StreamNewResult.parse(try JSONValue.parse(sample["json"].str))
             #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
         }
-    }
-
-    @Test func invalid() throws {
-        let invalid = try #require(try Vectors.load("chat-messages.json")["new"]?["invalid"])
-        #expect(!invalid["params"].array.isEmpty && !invalid["results"].array.isEmpty)
-        for json in invalid["params"].array {
-            #expect(throws: (any Error).self, "\(json.str)") {
-                _ = try ChatNewParams.parse(try JSONValue.parse(json.str))
-            }
+        for json in new["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try StreamNewParams.parse(try JSONValue.parse(json.str)) }
         }
-        for json in invalid["results"].array {
-            #expect(throws: (any Error).self, "\(json.str)") {
-                _ = try ChatNewResult.parse(try JSONValue.parse(json.str))
-            }
+        for json in new["invalid"]["results"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try StreamNewResult.parse(try JSONValue.parse(json.str)) }
         }
     }
 
-    @Test func chatNewIsNotATabOp() throws {
-        #expect(try ChatParams.parse(op: ChatOp.new, .object(["taskId": "t1"])) == nil)
+    @Test func branchesListParamsAndResults() throws {
+        let list = try #require(try Vectors.load("chat-messages.json")["branchesList"])
+        #expect(!list["results"].array.isEmpty)
+        for sample in list["results"].array {
+            let parsed = try BranchesListResult.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in list["invalid"]["results"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try BranchesListResult.parse(try JSONValue.parse(json.str)) }
+        }
+        // `branches.list` params are just a project ID; the phone only builds them.
+        for sample in list["params"].array {
+            let projectId = try #require(try JSONValue.parse(sample["json"].str)["projectId"]?.stringValue)
+            #expect(JSONValue.object(["projectId": .string(projectId)]) == sample["expected"])
+        }
+    }
+
+    @Test func folderStreamsDropBranchFields() {
+        let params = StreamNewParams(projectId: "p", name: "Docs", worktree: false, branch: "docs", baseBranch: "main")
+        #expect(params.json == .object(["projectId": "p", "name": "Docs", "worktree": false]))
+    }
+
+    @Test func newOpsAreNotTabOps() throws {
+        #expect(try ChatParams.parse(op: TaskOp.newStream, .object(["projectId": "p", "name": "x", "worktree": false])) == nil)
+        #expect(try ChatParams.parse(op: "chat.new", .object(["taskId": "t1"])) == nil)
     }
 
     @Test func featuresKeepUnknownStrings() throws {
@@ -48,11 +62,11 @@ import Testing
         let old = #"{"id":"a","name":"n","relayURL":"wss://r","desktopX25519PublicKey":"x","desktopEd25519PublicKey":"e","keysReference":"k","pairedAt":0}"#
         let record = try JSONDecoder().decode(DesktopRecord.self, from: Data(old.utf8))
         #expect(record.features == nil)
-        #expect(!record.supports(DesktopFeature.chatNew))
+        #expect(!record.supports(DesktopFeature.streamNew))
         var updated = record
-        updated.features = [DesktopFeature.chatNew]
+        updated.features = [DesktopFeature.streamNew]
         let decoded = try JSONDecoder().decode(DesktopRecord.self, from: try JSONEncoder().encode(updated))
-        #expect(decoded.supports(DesktopFeature.chatNew))
+        #expect(decoded.supports(DesktopFeature.streamNew))
     }
 }
 
@@ -155,40 +169,64 @@ import Testing
     }
 }
 
-/// `features`, `chat.new` and `reconnectNow()` over `RelayDesktopConnection`.
+/// `features`, the M4 ops and `reconnectNow()` over `RelayDesktopConnection`.
 @Suite(.serialized) struct M4ConnectionTests {
     static let isFeatures: @Sendable (DesktopConnectionEvent) -> Bool = {
         if case .features = $0 { return true }
         return false
     }
 
-    @Test func featuresArriveBeforeOnlineAndChatNewWorks() async throws {
+    @Test func featuresArriveBeforeOnline() async throws {
         let o = try await ChatConnectionTests.online()
         let events = await o.events.events
         let features = try #require(events.firstIndex { Self.isFeatures($0) })
         let online = try #require(events.firstIndex(of: .state(.online)))
         #expect(features < online)
-        #expect(events[features] == .features([DesktopFeature.chatNew]))
-
-        let tabId = try await o.connection.newChat(taskId: "t")
-        #expect(tabId == "tab-new-1")
-        #expect(o.desktop.requests.last?.op == ChatOp.new)
-        #expect(o.desktop.requests.last?.params == .object(["taskId": "t"]))
-        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")) {
-            _ = try await o.connection.newChat(taskId: "nope")
-        }
+        #expect(events[features] == .features([DesktopFeature.taskNew]))
         await o.connection.stop()
+    }
+
+    @Test func streamNewAndBranchesListWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        let features = [DesktopFeature.streamNew, DesktopFeature.branchesList]
+        desktop.features = features
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features(Set(features)) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        let listed = try await connection.listBranches(projectId: "p")
+        #expect(listed == BranchesListResult(branches: ["dev", "main"], defaultBase: "main"))
+        #expect(desktop.requests.last?.op == TaskOp.listBranches)
+        #expect(desktop.requests.last?.params == .object(["projectId": "p"]))
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "No worktrees")) {
+            _ = try await connection.listBranches(projectId: "shell")
+        }
+
+        let streamId = try await connection.newStream(projectId: "p", name: "0.6.0", worktree: true, baseBranch: "main")
+        #expect(streamId == "s-new-1")
+        #expect(desktop.requests.last?.op == TaskOp.newStream)
+        #expect(desktop.requests.last?.params == .object(["projectId": "p", "name": "0.6.0", "worktree": true, "baseBranch": "main"]))
+        _ = try await connection.newStream(projectId: "p", name: "Docs", worktree: false, branch: "ignored")
+        #expect(desktop.requests.last?.params == .object(["projectId": "p", "name": "Docs", "worktree": false]))
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
+            _ = try await connection.newStream(projectId: "nope", name: "x", worktree: false)
+        }
+        await connection.stop()
     }
 
     @Test func taskNewWorksWhenListed() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
-        desktop.features = [DesktopFeature.chatNew, DesktopFeature.taskNew]
+        desktop.features = [DesktopFeature.taskNew]
         desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
         let connection = rig.factory.connection(for: rig.record(for: desktop))
         let events = EventRecorder(connection)
         await connection.start()
-        try await events.waitFor { $0 == .features([DesktopFeature.chatNew, DesktopFeature.taskNew]) }
+        try await events.waitFor { $0 == .features([DesktopFeature.taskNew]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
 
         let result = try await connection.newTask(projectId: "p", prompt: "Fix the login", mode: "plan")
@@ -285,8 +323,8 @@ import Testing
         await connection.start()
         try await events.waitFor { $0 == .features([]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
-        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Unknown op chat.new")) {
-            _ = try await connection.newChat(taskId: "t")
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Unknown op stream.new")) {
+            _ = try await connection.newStream(projectId: "p", name: "x", worktree: false)
         }
         await connection.stop()
     }
@@ -330,28 +368,40 @@ import Testing
     }
 }
 
-/// `MockDesktopConnection`'s `chat.new` and features.
-@Suite struct MockChatNewTests {
-    @Test func addsAClaudeChatTab() async throws {
+/// `MockDesktopConnection`'s M4 ops and features.
+@Suite struct MockM4Tests {
+    @Test func listsFeaturesAndMakesStreams() async throws {
         let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
         let events = EventRecorder(mock)
         await mock.start()
         try await events.waitFor { $0 == .features([
-            DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
+            DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
+            DesktopFeature.streamNew, DesktopFeature.branchesList,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
-        let tabId = try await mock.newChat(taskId: "t-auth")
+        let listed = try await mock.listBranches(projectId: "p-api")
+        #expect(listed.defaultBase == "main")
+        #expect(listed.branches.first == "main" && listed.branches.contains("0.5.0"))
+
+        let streamId = try await mock.newStream(projectId: "p-api", name: "Chapter 2", worktree: true)
         try await events.waitFor { event in
             guard case .inbox(let inbox) = event else { return false }
-            let task = inbox.projects.flatMap(\.tasks).first { $0.id == "t-auth" }
-            return task?.tabs.last?.id == tabId && task?.tabs.last?.type == .claudeChat
+            let stream = inbox.projects.first { $0.id == "p-api" }?.streams.last
+            return stream == InboxStream(id: streamId, name: "Chapter 2", branch: "chapter-2")
         }
-        let opened = try await mock.openChat(tabId: tabId)
-        #expect(opened.view.items.isEmpty)
-        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")) {
-            _ = try await mock.newChat(taskId: "missing")
+        #expect(try await mock.listBranches(projectId: "p-api").branches.last == "chapter-2")
+        let folder = try await mock.newStream(projectId: "p-web", name: "Docs", worktree: false)
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event else { return false }
+            return inbox.projects.first { $0.id == "p-web" }?.streams.last == InboxStream(id: folder, name: "Docs")
+        }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.internal, message: "Branch \"0.5.0\" already exists")) {
+            _ = try await mock.newStream(projectId: "p-api", name: "0.5.0", worktree: true)
+        }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")) {
+            _ = try await mock.listBranches(projectId: "missing")
         }
         await mock.stop()
     }
@@ -416,7 +466,7 @@ import Testing
         let events = EventRecorder(mock)
         await mock.start()
         try await events.waitFor(RelayConnectionTests.isInbox)
-        let tabId = try await mock.newChat(taskId: "t-auth")
+        let tabId = "tab-2"
         try await mock.closeTab(tabId: tabId)
         try await events.waitFor { event in
             guard case .inbox(let inbox) = event else { return false }

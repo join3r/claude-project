@@ -403,24 +403,6 @@ public struct ChatEarlierResult: Sendable, Equatable {
     }
 }
 
-/// `chat.new` params (§8.2).
-public struct ChatNewParams: Sendable, Equatable {
-    public var taskId: String
-
-    public init(taskId: String) {
-        self.taskId = taskId
-    }
-}
-
-/// `chat.new` result: the new claude-chat tab, which `chat.open` then starts.
-public struct ChatNewResult: Sendable, Equatable {
-    public var tabId: String
-
-    public init(tabId: String) {
-        self.tabId = tabId
-    }
-}
-
 /// `task.new` (§8.4) params: a new task in one of `projectId`'s streams whose
 /// Claude chat starts on `prompt`.
 public struct TaskNewParams: Sendable, Equatable {
@@ -498,6 +480,50 @@ public struct TaskTriageParams: Sendable, Equatable {
     public init(taskId: String, action: Action) {
         self.taskId = taskId
         self.action = action
+    }
+}
+
+/// `stream.new` (§8.12) params: a new stream in `projectId`, on a new worktree
+/// or in the project folder, as the desktop's New stream dialog makes it.
+public struct StreamNewParams: Sendable, Equatable {
+    public var projectId: String
+    /// Non-blank; sent and parsed trimmed.
+    public var name: String
+    /// true: a new worktree on `branch`, forked from `baseBranch`. false: the
+    /// project folder (`branch` and `baseBranch` are dropped).
+    public var worktree: Bool
+    /// nil: the desktop makes one from `name`.
+    public var branch: String?
+    /// nil: `BranchesListResult.defaultBase`.
+    public var baseBranch: String?
+
+    public init(projectId: String, name: String, worktree: Bool, branch: String? = nil, baseBranch: String? = nil) {
+        self.projectId = projectId
+        self.name = name
+        self.worktree = worktree
+        self.branch = worktree ? branch : nil
+        self.baseBranch = worktree ? baseBranch : nil
+    }
+}
+
+/// `stream.new` result: the new stream, which shows up in the next inbox.
+public struct StreamNewResult: Sendable, Equatable {
+    public var streamId: String
+
+    public init(streamId: String) {
+        self.streamId = streamId
+    }
+}
+
+/// `branches.list` (§8.13) result: a project's local branches for the New
+/// stream sheet's From picker, and the one to pick first ("" when there is none).
+public struct BranchesListResult: Sendable, Equatable {
+    public var branches: [String]
+    public var defaultBase: String
+
+    public init(branches: [String], defaultBase: String) {
+        self.branches = branches
+        self.defaultBase = defaultBase
     }
 }
 
@@ -588,6 +614,10 @@ public enum TaskOp {
     public static let setPin = "pin.set"
     /// `task.triage` (§8.11): read, unread, settle, snooze and their undo.
     public static let triage = "task.triage"
+    /// `stream.new` (§8.12): a stream on a new worktree or in the project folder.
+    public static let newStream = "stream.new"
+    /// `branches.list` (§8.13): a project's branches for the New stream sheet.
+    public static let listBranches = "branches.list"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
 }
@@ -627,8 +657,6 @@ public enum ChatOp {
     public static let answer = "chat.answer"
     public static let interrupt = "chat.interrupt"
     public static let detail = "chat.detail"
-    /// `chat.new` (§8.2) names a task, not a tab, so it isn't one of `ChatParams.ops`.
-    public static let new = "chat.new"
     /// `chat.settings` (§8.5); parsed by `ChatSettingsParams`, not `ChatParams`.
     public static let settings = "chat.settings"
     /// `chat.image` (§8.9); parsed by `ChatImageParams`, not `ChatParams`.
@@ -970,23 +998,6 @@ extension ChatEarlierResult {
     public var json: JSONValue { .object(["items": .array(items.map(\.json)), "hasEarlier": .bool(hasEarlier)]) }
 }
 
-extension ChatNewParams {
-    /// The desktop's side; a missing or non-string `taskId` throws (`bad-request`).
-    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> ChatNewParams {
-        ChatNewParams(taskId: try Fields(value, "params").str("taskId"))
-    }
-
-    public var json: JSONValue { .object(["taskId": .string(taskId)]) }
-}
-
-extension ChatNewResult {
-    public static func parse(_ value: JSONValue) throws(ProtocolError) -> ChatNewResult {
-        ChatNewResult(tabId: try Fields(value, "result").str("tabId"))
-    }
-
-    public var json: JSONValue { .object(["tabId": .string(tabId)]) }
-}
-
 extension TaskNewParams {
     /// The desktop's side: a missing `projectId`, a blank or over-long prompt, or an
     /// unknown `mode` throws (`bad-request`).
@@ -1079,6 +1090,56 @@ extension TaskTriageParams {
         default: break
         }
         return .object(fields)
+    }
+}
+
+extension StreamNewParams {
+    /// The desktop's side: a missing `projectId`, a blank `name`, a missing or
+    /// non-boolean `worktree`, or a blank `branch` or `baseBranch` with a worktree
+    /// throws (`bad-request`). `name` and `branch` come back trimmed.
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> StreamNewParams {
+        let o = try Fields(value, "params")
+        let projectId = try o.str("projectId")
+        let name = try o.str("name").trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { throw ProtocolError("name is empty") }
+        let worktree = try o.bool("worktree")
+        guard worktree else { return StreamNewParams(projectId: projectId, name: name, worktree: false) }
+        let branch = try o.optStr("branch")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if branch?.isEmpty == true { throw ProtocolError("branch is empty") }
+        let baseBranch = try o.optStr("baseBranch")
+        if let baseBranch, baseBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ProtocolError("baseBranch is empty") }
+        return StreamNewParams(projectId: projectId, name: name, worktree: true, branch: branch, baseBranch: baseBranch)
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["projectId": .string(projectId), "name": .string(name), "worktree": .bool(worktree)]
+        if worktree, let branch { fields["branch"] = .string(branch) }
+        if worktree, let baseBranch { fields["baseBranch"] = .string(baseBranch) }
+        return .object(fields)
+    }
+}
+
+extension StreamNewResult {
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> StreamNewResult {
+        StreamNewResult(streamId: try Fields(value, "result").str("streamId"))
+    }
+
+    public var json: JSONValue { .object(["streamId": .string(streamId)]) }
+}
+
+extension BranchesListResult {
+    /// A branch that isn't a string throws.
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> BranchesListResult {
+        let o = try Fields(value, "result")
+        let branches = try o.array("branches").map { (branch: JSONValue) throws(ProtocolError) -> String in
+            guard case .string(let name) = branch else { throw ProtocolError("branches must be strings") }
+            return name
+        }
+        return BranchesListResult(branches: branches, defaultBase: try o.str("defaultBase"))
+    }
+
+    public var json: JSONValue {
+        .object(["branches": .array(branches.map(JSONValue.string)), "defaultBase": .string(defaultBase)])
     }
 }
 

@@ -211,13 +211,6 @@ extension DesktopConnection {
         _ = try await request(ChatOp.interrupt, params: .object(["tabId": .string(tabId)]))
     }
 
-    /// `chat.new` (§8.2): adds a claude-chat tab to the task and returns its
-    /// ID. The tab shows up in the next inbox; `chat.open` starts it.
-    public func newChat(taskId: String) async throws -> String {
-        let result = try await request(ChatOp.new, params: ChatNewParams(taskId: taskId).json)
-        return try decode(result, ChatNewResult.parse).tabId
-    }
-
     /// `task.new` (§8.4): a new task in the project's stream `streamId` (nil:
     /// the stream the project was last used in), named after `prompt`, whose
     /// Claude chat starts on it. The desktop answers once the prompt is sent,
@@ -256,6 +249,25 @@ extension DesktopConnection {
     /// or undo either. The new state comes back in the next inbox.
     public func triage(taskId: String, _ action: TaskTriageParams.Action) async throws {
         _ = try await request(TaskOp.triage, params: TaskTriageParams(taskId: taskId, action: action).json)
+    }
+
+    /// `stream.new` (§8.12): a new stream at the end of the project's list,
+    /// on a new worktree (`branch` nil: made from the name; `baseBranch` nil:
+    /// the desktop's default base) or in the project folder. Returns its ID;
+    /// the stream shows up in the next inbox. A worktree means git (over SSH
+    /// for a remote project), so this waits longer than other ops.
+    public func newStream(projectId: String, name: String, worktree: Bool, branch: String? = nil, baseBranch: String? = nil) async throws -> String {
+        let params = StreamNewParams(projectId: projectId, name: name, worktree: worktree, branch: branch, baseBranch: baseBranch)
+        let result = try await request(TaskOp.newStream, params: params.json, timeout: .seconds(60))
+        return try decode(result, StreamNewResult.parse).streamId
+    }
+
+    /// `branches.list` (§8.13): the project's local branches for the From
+    /// picker, and the one to pick first. Throws `.remote(code: "unsupported")`
+    /// for a project that can't have worktrees (a shell-command project).
+    public func listBranches(projectId: String) async throws -> BranchesListResult {
+        let result = try await request(TaskOp.listBranches, params: .object(["projectId": .string(projectId)]), timeout: .seconds(30))
+        return try decode(result, BranchesListResult.parse)
     }
 
     /// `chat.settings` (§8.5): change the chat's permission mode, model or

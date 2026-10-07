@@ -387,13 +387,15 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.2 sends `"features": ["chat.new"]`, one that also implements §8.4 adds `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"` and §8.11 `"task.triage"`. (Version 1's `"task.workspace"`, §8.6, is gone.) A phone shows "New chat" only for a desktop that lists `chat.new`, "New task" only for one that lists `task.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"` and §8.13 `"branches.list"`. (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
-### 8.2 `chat.new` (phone → desktop `req`)
+### 8.2 `chat.new` (retired)
 
 | op | params | result |
 |---|---|---|
 | `chat.new` | `{ taskId }` | `{ tabId }` |
+
+**Retired.** A task has exactly one agent, so a second chat is a new task (`task.new`, §8.4). A current desktop doesn't list `"chat.new"` and answers the op `unsupported`, like any op it doesn't know (§4.4). A current phone never sends it. Older desktops that list the feature answer it as follows:
 
 - The desktop adds a new `claude-chat` tab (title `Claude`, a fresh tab ID and session ID) at the end of the task's first pane and saves it as a main-side projects commit, so every open window picks it up the same way as any other change. It needs no open window, and it doesn't select the task or switch any window's visible tab.
 - The chat's process isn't started. The phone opens the tab with `chat.open` (§6.3), which starts it, and the tab appears in the next `inbox` event.
@@ -401,7 +403,7 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 
 ### 8.3 Phone behaviour (no wire rules)
 
-- **New chat:** a "New chat" row in a task's tab list (for desktops that list `chat.new`), disabled while the desktop is offline. It opens the new chat as soon as the op answers.
+- **New stream:** a "New stream" action on each project (for desktops that list `stream.new`), disabled while the desktop is offline. It asks for a name (prefilled with the next version after the project's last stream when that one is a version) and where the stream works: a new worktree, with a branch (defaulting to the name) and a base branch picked from `branches.list` (§8.13), or the project folder. When `branches.list` answers `unsupported` the project has no worktrees and only the project folder is offered.
 - **New task:** a "New task" action on each project (for desktops that list `task.new`), disabled while the desktop is offline. It asks for the first prompt, a permission mode and, when the project has more than one stream, a stream (defaulting to the project's `lastStreamId`, else `main`), then opens the new chat as soon as the op answers.
 - **Streams:** a project's task list is grouped by stream in `streams` order, each group headed by the stream's name (and `branch`). An Inbox row shows `Project · Stream` under the task's name.
 - **Close task:** a swipe action on a task row and a button in the task's screen (for desktops that list `task.close`), confirmed first ("moves it to Done"). A `blocker` (§8.7) becomes a second confirmation that names it, and its answer resends the op with the matching flag. The phone doesn't browse or reopen archived tasks, and doesn't close streams.
@@ -502,6 +504,30 @@ Removed in version 2. A worktree belongs to a stream (§4.4 `branch`), made on t
 - `until` and `untilAttention` are ignored on actions other than `snooze`.
 - A desktop that implements this op lists `"task.triage"` in its features (§8.1) and sends the triage fields (§4.4).
 - Errors: unknown or archived `taskId`, or a task in a project hidden from mobile → `not-found`. Missing `taskId`, an unknown `action`, or a `snooze` without exactly one of `until` (a non-negative integer) and `untilAttention: true` → `bad-request`.
+
+### 8.12 `stream.new` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `stream.new` | `{ projectId, name, worktree, branch?, baseBranch? }` | `{ streamId }` |
+
+- Makes a stream, as the desktop's New stream dialog does on Create. `name` is any non-blank text (trimmed). `worktree` is a boolean:
+  - `true`: the desktop creates a git worktree on a new branch `branch` (trimmed; absent: the name made into a branch name, as the dialog prefills it), forked from `baseBranch` (absent: `defaultBase` from §8.13), the same way the dialog does, over SSH for a remote project. The stream's `branch` (§4.4) is that branch.
+  - `false`: the stream works in the project folder, like `main`. `branch` and `baseBranch` are ignored.
+- The stream goes at the end of the project's `streams`, empty, and is saved as a main-side projects commit; it appears in the next `inbox` event. It doesn't become the project's `lastStreamId`, and no window switches to it. The desktop answers once the stream is saved, which can take a while with a worktree (git, SSH).
+- A desktop that implements this op lists `"stream.new"` in its features (§8.1).
+- Errors: unknown `projectId` or a project hidden from mobile (§4.4) → `not-found`. `worktree: true` on a shell-command project, which has no folder to make a worktree in → `unsupported`. Missing `projectId`, a blank `name`, a missing or non-boolean `worktree`, or (with a worktree) a blank `branch` or `baseBranch`, or a `name` that leaves no branch name when `branch` is absent → `bad-request`. A repository with no branch to fork from, or git failing (an invalid or existing branch, an unknown base, not a git repository, SSH down) → `internal`, with git's reason as the `message`; nothing is saved then.
+
+### 8.13 `branches.list` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `branches.list` | `{ projectId }` | `{ branches, defaultBase }` |
+
+- The project's local branches, as the New stream dialog's From picker lists them (over SSH for a remote project), in git's order. `defaultBase` is the one the dialog picks first: `main`, else `master`, else the first branch, else `""` when there is none.
+- A shell-command project has no worktrees, so the op answers `unsupported` for it, and the phone offers only the project folder (§8.3). This is the only way the phone learns it: the inbox carries no flag for it.
+- A desktop that implements this op lists `"branches.list"` in its features (§8.1).
+- Errors: unknown `projectId` or a project hidden from mobile → `not-found`. A shell-command project → `unsupported`. Missing `projectId` → `bad-request`. Not a git repository, or SSH down → `internal`, with the reason as the `message`.
 
 ## 9. Version 2: streams
 

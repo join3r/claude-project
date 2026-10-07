@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -617,15 +617,6 @@ function chatMessages(): unknown {
         text({ ...event, upserts: [{ kind: 'tool', id: 'x', name: 'Read', summary: 's', status: 'done', hasDetail: true, images: 'two' }] })
       ]
     },
-    // §8.2: `chat.new` names a task, so it has parsers of its own.
-    new: {
-      params: [text({ taskId: 't1' }), text({ taskId: 't1', pane: 'right' })].map((json) => ({ json, expected: parseChatNewParams(JSON.parse(json)) })),
-      results: [text({ tabId: 'tab-new' }), text({ tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseChatNewResult(JSON.parse(json)) })),
-      invalid: {
-        params: [text({}), text({ taskId: 7 }), text({ tabId: 'tab-chat' }), 'null'],
-        results: [text({}), text({ tabId: null }), '[]']
-      }
-    },
     // §8.4: `task.new` names a project (and optionally a stream) and carries the first prompt.
     taskNew: {
       params: [
@@ -704,6 +695,43 @@ function chatMessages(): unknown {
           text({ taskId: 't1', action: 'snooze', until: '1790003600000' }),
           'null'
         ]
+      }
+    },
+    // §8.12: `stream.new` makes a stream on a new worktree or in the project folder.
+    streamNew: {
+      params: [
+        text({ projectId: 'p1', name: '0.6.0', worktree: true }),
+        text({ projectId: 'p1', name: ' Chapter 2 ', worktree: true, branch: ' chapter-2 ', baseBranch: 'main', extra: 1 }),
+        text({ projectId: 'p1', name: 'Docs', worktree: false, branch: 'docs', baseBranch: 'main' }),
+        text({ projectId: 'p1', name: '0.6.0', worktree: true, branch: null, baseBranch: null })
+      ].map((json) => ({ json, expected: parseStreamNewParams(JSON.parse(json)) })),
+      results: [text({ streamId: 's-060' }), text({ streamId: 's-060', branch: '0.6.0' })].map((json) => ({ json, expected: parseStreamNewResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ name: '0.6.0', worktree: true }),
+          text({ projectId: 'p1', worktree: true }),
+          text({ projectId: 'p1', name: '   ', worktree: false }),
+          text({ projectId: 'p1', name: '0.6.0' }),
+          text({ projectId: 'p1', name: '0.6.0', worktree: 'yes' }),
+          text({ projectId: 'p1', name: '0.6.0', worktree: true, branch: '  ' }),
+          text({ projectId: 'p1', name: '0.6.0', worktree: true, baseBranch: '' }),
+          text({ projectId: 'p1', name: '0.6.0', worktree: true, branch: 7 }),
+          'null'
+        ],
+        results: [text({}), text({ streamId: 7 }), '[]']
+      }
+    },
+    // §8.13: `branches.list` lists a project's local branches for the From picker.
+    branchesList: {
+      params: [text({ projectId: 'p1' }), text({ projectId: 'p1', extra: true })].map((json) => ({ json, expected: parseBranchesListParams(JSON.parse(json)) })),
+      results: [
+        text({ branches: ['main', '0.5.0', 'fix/login'], defaultBase: 'main' }),
+        text({ branches: [], defaultBase: '' }),
+        text({ branches: ['develop'], defaultBase: 'develop', remote: 'origin' })
+      ].map((json) => ({ json, expected: parseBranchesListResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), text({ projectId: 7 }), 'null'],
+        results: [text({ branches: ['main'] }), text({ defaultBase: 'main' }), text({ branches: ['main', 7], defaultBase: 'main' }), text({ branches: 'main', defaultBase: 'main' }), '[]']
       }
     },
     // §8.9: `chat.image` fetches one tool-result image.

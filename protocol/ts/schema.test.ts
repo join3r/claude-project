@@ -139,4 +139,14 @@ describe('JSON Schema', () => {
     }
     expect(checked).toBeGreaterThan(8)
   })
+
+  it('accepts the stream.new and branches.list samples and rejects the invalid ones (§8.12, §8.13)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
+    for (const s of chat.streamNew.params) expect(check('streamNewParams', s.expected), s.json).toEqual([])
+    for (const s of chat.streamNew.results) expect(check('streamNewResult', s.expected), s.json).toEqual([])
+    for (const s of chat.branchesList.params) expect(check('branchesListParams', s.expected), s.json).toEqual([])
+    for (const s of chat.branchesList.results) expect(check('branchesListResult', s.expected), s.json).toEqual([])
+    for (const text of chat.streamNew.invalid.params) expect(check('streamNewParams', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.branchesList.invalid.results) expect(check('branchesListResult', JSON.parse(text)), text).not.toEqual([])
+  })
 })

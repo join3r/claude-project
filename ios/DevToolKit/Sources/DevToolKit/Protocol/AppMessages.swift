@@ -174,8 +174,6 @@ public enum AppOp {
 /// Optional ops a side names in its hello's `features` (§8.1). Unknown
 /// strings are ignored.
 public enum DesktopFeature {
-    /// The desktop answers `chat.new` (§8.2).
-    public static let chatNew = "chat.new"
     /// The desktop answers `task.new` (§8.4).
     public static let taskNew = "task.new"
     /// The desktop answers `chat.settings` (§8.5).
@@ -190,6 +188,10 @@ public enum DesktopFeature {
     public static let pin = "pin"
     /// The desktop answers `task.triage` and sends the triage fields (§8.11, §4.4).
     public static let taskTriage = "task.triage"
+    /// The desktop answers `stream.new` (§8.12).
+    public static let streamNew = "stream.new"
+    /// The desktop answers `branches.list` (§8.13).
+    public static let branchesList = "branches.list"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

@@ -205,7 +205,7 @@ export class ChatBridge {
 
   private async run(state: PhoneState, op: string, params: ChatParams): Promise<unknown> {
     const resolved = this.resolve(params.tabId)
-    if (!resolved) throw new OpError(AppErrorCode.NotFound, 'No such chat tab')
+    if (!resolved) throw new OpError(AppErrorCode.NotFound, 'No such chat')
     switch (op) {
       case ChatOp.Open:
         return this.open(state, resolved)

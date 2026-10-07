@@ -134,14 +134,6 @@ final class AppModel {
         desktop(desktopId)?.supports(feature) ?? false
     }
 
-    /// `chat.new` (§8.2): adds a Claude chat to the task and returns the
-    /// route to it. The tab shows up with the next inbox.
-    func newChat(in ref: TaskRef) async throws -> ChatRoute {
-        guard let connection = connections[ref.desktopId] else { throw DesktopConnectionError.notConnected }
-        let tabId = try await connection.newChat(taskId: ref.taskId)
-        return ChatRoute(desktopId: ref.desktopId, tabId: tabId)
-    }
-
     /// `task.new` (§8.4): a new task in the project's stream `streamId` (nil:
     /// the one last used) whose Claude chat starts on `prompt`, and the route
     /// to that chat. The task shows up with the next inbox.
@@ -149,6 +141,20 @@ final class AppModel {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
         let result = try await connection.newTask(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode)
         return ChatRoute(desktopId: desktopId, tabId: result.tabId)
+    }
+
+    /// `stream.new` (§8.12): a new stream in the project, on a new worktree
+    /// or in the project folder. Returns its ID; it shows up with the next inbox.
+    func newStream(desktopId: String, projectId: String, name: String, worktree: Bool, branch: String?, baseBranch: String?) async throws -> String {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.newStream(projectId: projectId, name: name, worktree: worktree, branch: branch, baseBranch: baseBranch)
+    }
+
+    /// `branches.list` (§8.13): the From picker's branches. `unsupported`
+    /// means the project can't have worktrees.
+    func listBranches(desktopId: String, projectId: String) async throws -> BranchesListResult {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.listBranches(projectId: projectId)
     }
 
     /// `task.close` (§8.7): archives the task. It leaves with the next inbox.

@@ -10,7 +10,7 @@ import { isVisibleOnMobile } from './inbox'
  * (the phone's pick, else the stream the project was last used in, else `main`),
  * named after the first prompt, with one Claude chat tab in its only pane. The
  * stream becomes the project's most recently used one, so the phone's next New
- * task defaults to it. Main commits it itself, like `chat.new`, so no window has
+ * task defaults to it. Main commits it itself, so no window has
  * to be open and none of them switches to it; sending the prompt is the caller's
  * next step.
  */
