@@ -75,7 +75,7 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
   // Without a prompt to go by, the branch is named after the task.
   const openTab = async (type: TabType): Promise<void> => {
     if (!(await workspace.ensure(taskName))) return
-    addTab(project.id, taskId, 'left', type)
+    addTab(project.id, taskId, 0, type)
   }
 
   if (!agent) {
@@ -99,7 +99,7 @@ export default function TaskPromptBox({ project, taskId, taskName, workspaceDraf
     const text = draft.trim()
     if (!text || busy) return
     if (!(await workspace.ensure(text))) return
-    const tab = addTab(project.id, taskId, 'left', agent)
+    const tab = addTab(project.id, taskId, 0, agent)
     setPendingPrompt(tab.id, {
       text,
       ...(takesMode && currentMode ? { mode: currentMode } : {}),

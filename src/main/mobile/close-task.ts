@@ -1,7 +1,8 @@
 import type { Project, ProjectsData, Tab, Task, WorkspaceDeleteResult } from '../../shared/types'
 import { AppErrorCode, INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
 import type { TaskCloseParams, TaskCloseResult } from '../../../protocol/ts/index.ts'
-import { findTaskInProject, mapTaskInProject, paneTabs, projectTasks, taskTabs, withTabsByPane, workspaceReleasedBy } from '../../shared/streams'
+import { findTaskInProject, mapTaskInProject, projectTasks, taskTabs, workspaceReleasedBy } from '../../shared/streams'
+import { removeTabFromTask } from '../../shared/panes'
 import { isVisibleOnMobile } from './inbox'
 
 /**
@@ -128,10 +129,7 @@ export function removeTabFromData(data: ProjectsData, taskId: string, tabId: str
     ...data,
     projects: data.projects.map((project) => {
       if (!findTaskInProject(project, taskId)) return project
-      return mapTaskInProject(project, taskId, (task) => withTabsByPane(task, {
-        left: paneTabs(task, 'left').filter((tab) => tab.id !== tabId),
-        right: paneTabs(task, 'right').filter((tab) => tab.id !== tabId)
-      }))
+      return mapTaskInProject(project, taskId, (task) => removeTabFromTask(task, tabId))
     })
   }
 }

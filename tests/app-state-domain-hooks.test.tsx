@@ -8,7 +8,7 @@ import {
   type ProjectsData,
   type Task
 } from '../src/shared/types'
-import { findTaskInProject, paneTabs, taskTabs } from '../src/shared/streams'
+import { findTaskInProject, taskTabs } from '../src/shared/streams'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { useAppStateCore, usePersistence } from '../src/renderer/hooks/appState/useAppStateCore'
 import { useTaskInbox } from '../src/renderer/hooks/appState/useTaskInbox'
@@ -131,41 +131,60 @@ describe('useTabs', () => {
     await loaded(hook)
 
     let tabId = ''
-    act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 'right', 'terminal').id })
+    act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal').id })
 
     const task = workTask(hook.result.current.core.projectsData)
-    expect(paneTabs(task, 'right').map(t => t.id)).toEqual([tabId])
-    expect(hook.result.current.core.windowViewState.taskStates.t1.activeTab.right).toBe(tabId)
+    expect(task.panes).toHaveLength(1)
+    expect(task.panes[0].tabs.map(t => t.id)).toEqual(['a', tabId])
+    expect(task.panes[0].activeTabId).toBe(tabId)
+  })
+
+  it('splits a tab off to the right, then closes the pane its last tab leaves', async () => {
+    const hook = mountTabs()
+    await loaded(hook)
+
+    let tabId = ''
+    act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal').id })
+    act(() => { hook.result.current.tabs.splitTabRight('p1', 't1', tabId) })
+    let task = workTask(hook.result.current.core.projectsData)
+    expect(task.panes.map(pane => pane.tabs.map(t => t.id))).toEqual([['a'], [tabId]])
+    expect(task.panes.map(pane => pane.width)).toEqual([0.5, 0.5])
+
+    act(() => { hook.result.current.tabs.moveTab('p1', 't1', tabId, { kind: 'tab', pane: 0, index: 0 }) })
+    task = workTask(hook.result.current.core.projectsData)
+    expect(task.panes.map(pane => pane.tabs.map(t => t.id))).toEqual([[tabId, 'a']])
+    expect(task.panes[0]).toMatchObject({ activeTabId: tabId, width: 1 })
   })
 
   it('reopens a closed tab where it was', async () => {
     const hook = mountTabs()
     await loaded(hook)
 
-    act(() => { hook.result.current.tabs.addTab('p1', 't1', 'left', 'terminal') })
-    await act(async () => { await hook.result.current.tabs.removeTab('p1', 't1', 'left', 'a') })
-    expect(paneTabs(workTask(hook.result.current.core.projectsData), 'left').map(t => t.id)).not.toContain('a')
+    act(() => { hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal') })
+    await act(async () => { await hook.result.current.tabs.removeTab('p1', 't1', 'a') })
+    expect(taskTabs(workTask(hook.result.current.core.projectsData)).map(t => t.id)).not.toContain('a')
 
-    let pane: 'left' | 'right' | null = null
+    let pane: number | null = null
     act(() => { pane = hook.result.current.tabs.reopenClosedTab() })
-    expect(pane).toBe('left')
-    expect(paneTabs(workTask(hook.result.current.core.projectsData), 'left')[0].id).toBe('a')
+    expect(pane).toBe(0)
+    const task = workTask(hook.result.current.core.projectsData)
+    expect(task.panes[0].tabs[0].id).toBe('a')
+    expect(task.panes[0].activeTabId).toBe('a')
     expect(hook.result.current.core.windowViewState).toMatchObject({ selectedProjectId: 'p1', selectedTaskId: 't1' })
-    expect(hook.result.current.core.windowViewState.taskStates.t1.activeTab.left).toBe('a')
   })
 
   it('focuses an existing editor tab instead of opening a second one', async () => {
     const hook = mountTabs()
     await loaded(hook)
 
-    act(() => { hook.result.current.tabs.openOrFocusEditorTab('p1', 't1', 'left', 'src/a.ts') })
-    act(() => { hook.result.current.tabs.setActiveTab('p1', 't1', 'left', 'a') })
-    act(() => { hook.result.current.tabs.openOrFocusEditorTab('p1', 't1', 'right', 'src/a.ts') })
+    act(() => { hook.result.current.tabs.openOrFocusEditorTab('p1', 't1', 0, 'src/a.ts') })
+    act(() => { hook.result.current.tabs.setActiveTab('p1', 't1', 'a') })
+    act(() => { hook.result.current.tabs.openOrFocusEditorTab('p1', 't1', 'focused', 'src/a.ts') })
 
     const task = workTask(hook.result.current.core.projectsData)
     const editors = taskTabs(task).filter(t => t.type === 'editor')
     expect(editors).toHaveLength(1)
-    expect(hook.result.current.core.windowViewState.taskStates.t1.activeTab.left).toBe(editors[0].id)
+    expect(task.panes[0].activeTabId).toBe(editors[0].id)
   })
 })
 

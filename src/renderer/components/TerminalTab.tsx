@@ -32,7 +32,6 @@ interface Props {
   visible: boolean
   projectId: string
   taskId: string
-  pane: 'left' | 'right'
   projectDir: string
   sshConfig?: SshConfig
   shellCommand?: ShellCommandConfig
@@ -135,7 +134,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
   }
 }
 
-export default function TerminalTab({ tabId, visible, projectId, taskId, pane, projectDir, sshConfig, shellCommand, cwd }: Props): React.ReactElement {
+export default function TerminalTab({ tabId, visible, projectId, taskId, projectDir, sshConfig, shellCommand, cwd }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const { addTab, config, effectiveTerminalTheme, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
@@ -280,7 +279,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
-      addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(uri) })
+      addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: normalizeBrowserUrl(uri) })
     }, { urlRegex: WEB_LINK_REGEX })
     const unicode11Addon = new Unicode11Addon()
     const imageAddon = new ImageAddon()
@@ -354,7 +353,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
     ensurePtyExitListener()
     ensurePtySizeListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, pane, projectId, taskId, visible, markTaskInteracted])
+  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, projectId, taskId, visible, markTaskInteracted])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
@@ -557,7 +556,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, pane, p
       <LinkContextMenu
         menu={linkMenu}
         onClose={() => setLinkMenu(null)}
-        onOpenInApp={(targetUrl) => addTab(projectId, taskId, pane, 'browser', { url: targetUrl })}
+        onOpenInApp={(targetUrl) => addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: targetUrl })}
       />
     </div>
   )

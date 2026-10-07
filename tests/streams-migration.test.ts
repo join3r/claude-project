@@ -380,6 +380,18 @@ describe('streams migration', () => {
     expect(project(data, 'p-bare').streams).toEqual([{ id: 'main-p-bare', name: 'main', isMain: true, tasks: [] }])
   })
 
+  it('repairs a stored pane row (empty panes, widths, active and main tabs) and leaves a good one alone', () => {
+    const t = tab('t1', 'terminal', 'zsh')
+    const c = tab('c1', 'claude', 'Claude Code')
+    const good = { id: 'good', name: 'good', lastInteractedAt: 1, mainTabId: 'c1', panes: [{ tabs: [c], activeTabId: 'c1', width: 0.4 }, { tabs: [t], activeTabId: 't1', width: 0.6 }] }
+    const bad = { id: 'bad', name: 'bad', lastInteractedAt: 1, mainTabId: 'gone', panes: [{ tabs: [], activeTabId: 'x', width: 0.5 }, { tabs: [t, c], activeTabId: 'x', width: 0.25 }] }
+    const raw = { projects: [{ id: 'p-row', name: 'row', directory: '/row', streams: [{ id: 'main-p-row', name: 'main', isMain: true, tasks: [good, bad] }] }] }
+    const tasks = project(migrate(raw), 'p-row').streams[0].tasks
+    expect(tasks[0]).toEqual(good)
+    expect(tasks[1]).toEqual({ id: 'bad', name: 'bad', lastInteractedAt: 1, mainTabId: 'c1', panes: [{ tabs: [t, c], activeTabId: 'c1', width: 1 }] })
+    expect(project(migrate({ projects: [project(migrate(raw), 'p-row')] }), 'p-row').streams[0].tasks[1]).toEqual(tasks[1])
+  })
+
   const snapshotDir = process.env.DEVTOOL_MIGRATION_SNAPSHOTS
   it.runIf(!!snapshotDir)('loses nothing on the real snapshots in DEVTOOL_MIGRATION_SNAPSHOTS', () => {
     const files = fs.readdirSync(snapshotDir!).filter(f => f.endsWith('.json'))

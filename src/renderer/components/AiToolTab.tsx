@@ -49,7 +49,6 @@ interface Props {
   toolType: AiTabType
   visible: boolean
   sessionId?: string
-  pane: 'left' | 'right'
   projectId: string
   taskId: string
   projectDir: string
@@ -143,7 +142,7 @@ function ensureBeforeUnloadHandler(): void {
   })
 }
 
-export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
+export default function AiToolTab({ tabId, toolType, visible, sessionId, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
@@ -293,7 +292,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       if (!latestSessionId || latestSessionId === latestSessionIdRef.current) return
 
       latestSessionIdRef.current = latestSessionId
-      updateTabSessionId(projectId, taskId, pane, tabId, latestSessionId)
+      updateTabSessionId(projectId, taskId, tabId, latestSessionId)
       stopCodexSessionPolling()
     } catch {
       // sqlite3 not available or remote host reconnecting — skip this cycle.
@@ -397,7 +396,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
-      addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(uri) })
+      addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: normalizeBrowserUrl(uri) })
     }, { urlRegex: WEB_LINK_REGEX })
     const unicode11Addon = new Unicode11Addon()
     const imageAddon = new ImageAddon()
@@ -505,7 +504,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
         onSessionStart: (body: Record<string, unknown>) => {
           const newSessionId = body.session_id as string | undefined
           if (newSessionId) {
-            updateTabSessionId(projectId, taskId, pane, tabId, newSessionId)
+            updateTabSessionId(projectId, taskId, tabId, newSessionId)
           }
         }
       })
@@ -549,7 +548,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
     ensurePtySizeListener()
     ensureExitListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, toolType, config, addTab, pane, projectId, taskId, visible, markTaskInteracted, markTaskEvent, applyStatus, restartStaleTimer])
+  }, [tabId, toolType, config, addTab, projectId, taskId, visible, markTaskInteracted, markTaskEvent, applyStatus, restartStaleTimer])
 
   // Show stored scrollback in the xterm before the user clicks Resume so they
   // can see what the session was about. Skipped if the tab will auto-spawn
@@ -915,7 +914,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, pane, p
       <LinkContextMenu
         menu={linkMenu}
         onClose={() => setLinkMenu(null)}
-        onOpenInApp={(targetUrl) => addTab(projectId, taskId, pane, 'browser', { url: targetUrl })}
+        onOpenInApp={(targetUrl) => addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: targetUrl })}
       />
     </div>
   )

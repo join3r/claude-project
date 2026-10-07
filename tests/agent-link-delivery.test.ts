@@ -4,16 +4,12 @@ import {
   AGENT_READY_TIMEOUT_MS,
   agentTerminalReady,
   onAgentInsert,
-  queueAgentInsert,
-  resolveAgentLinkRoute
+  queueAgentInsert
 } from '../src/renderer/agentLink/linkToAgent'
 import { getAgentRecency, noteAgentTabTyped } from '../src/renderer/agentLink/agentTabRecency'
 import { commandRegistry } from '../src/renderer/palette/CommandRegistry'
 import { paletteEvents, setPaletteReturnFocus } from '../src/renderer/palette/paletteEvents'
 import '../src/renderer/palette/sources/commands'
-import type { Tab } from '../src/shared/types'
-
-const tab = (id: string, type: Tab['type']): Tab => ({ id, type, title: id })
 
 describe('agent insert queue', () => {
   it('holds links for a tab that has not mounted yet and hands them over on subscribe', () => {
@@ -27,7 +23,7 @@ describe('agent insert queue', () => {
     off()
   })
 
-  it('queues again once the tab unsubscribes (e.g. unmounted by closing the split)', () => {
+  it('queues again once the tab unsubscribes (e.g. its tab was closed)', () => {
     const got: string[] = []
     const off = onAgentInsert('split', text => got.push(text))
     off()
@@ -58,34 +54,6 @@ describe('agent insert queue', () => {
     const off = onAgentInsert('closed', text => got.push(text))
     expect(got).toEqual([])
     off()
-  })
-})
-
-describe('resolveAgentLinkRoute', () => {
-  const task = {
-    tabs: { left: [tab('ed', 'editor')], right: [tab('claude', 'claude')] }
-  }
-
-  it('opens a closed split when the agent lives in the right pane', () => {
-    const route = resolveAgentLinkRoute(task, { activeTab: { left: 'ed', right: 'claude' }, splitOpen: false }, [])
-    expect(route).toMatchObject({ pane: 'right', openSplit: true })
-    expect(route?.tab.id).toBe('claude')
-  })
-
-  it('leaves an open split alone', () => {
-    const route = resolveAgentLinkRoute(task, { activeTab: { left: 'ed', right: 'claude' }, splitOpen: true }, [])
-    expect(route?.openSplit).toBe(false)
-  })
-
-  it('never opens the split for a left-pane agent', () => {
-    const left = { tabs: { left: [tab('ed', 'editor'), tab('pi', 'pi')], right: [] } }
-    const route = resolveAgentLinkRoute(left, { activeTab: { left: 'ed', right: null }, splitOpen: false }, [])
-    expect(route).toMatchObject({ pane: 'left', openSplit: false })
-  })
-
-  it('returns null without an agent tab', () => {
-    const none = { tabs: { left: [tab('ed', 'editor')], right: [] } }
-    expect(resolveAgentLinkRoute(none, { activeTab: { left: 'ed', right: null }, splitOpen: false }, [])).toBeNull()
   })
 })
 

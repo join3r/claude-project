@@ -9,7 +9,7 @@ import { isVisibleOnMobile } from './inbox'
 /**
  * `task.new` (SPEC.md §8.4): a new task at the end of a project's `main` stream (or,
  * with a worktree, in a new stream of its own), named after the
- * first prompt, with one Claude chat tab in its left pane. Main commits it itself,
+ * first prompt, with one Claude chat tab in its only pane. Main commits it itself,
  * like `chat.new`, so no window has to be open and none of them switches to it;
  * sending the prompt is the caller's next step.
  */

@@ -2,10 +2,9 @@ import { useState, useEffect, useCallback, useRef, type Dispatch, type MutableRe
 import {
   buildWindowViewState,
   createDefaultWindowViewState,
-  pruneUnusedTags,
-  reconcileTaskViewState
+  pruneUnusedTags
 } from '../../../shared/types'
-import type { AppConfig, NotesRecord, Project, ProjectsData, Task, TaskViewState, WindowViewState } from '../../../shared/types'
+import type { AppConfig, NotesRecord, Project, ProjectsData, WindowViewState } from '../../../shared/types'
 import { applyQueuedStateUpdates, type StateUpdater } from '../stateHydration'
 import { RevisionSyncClient } from '../revisionSync'
 import { backfillLifetimeStats } from '../lifetimeStats'
@@ -50,7 +49,6 @@ export interface AppStateCore {
   mutateProjects: MutateProjects
   mutateNotes: MutateNotes
   updateWindowViewState: UpdateWindowViewState
-  getTaskViewStateForTask: (task: Task) => TaskViewState
   updateConfig: (updates: Partial<AppConfig>) => void
 
   stateSyncError: string | null
@@ -175,10 +173,6 @@ export function useAppStateCore(): AppStateCore {
       const next = updater(prev)
       return areWindowStatesEqual(prev, next) ? prev : next
     })
-  }, [])
-
-  const getTaskViewStateForTask = useCallback((task: Task): TaskViewState => {
-    return reconcileTaskViewState(task, windowViewStateRef.current.taskStates[task.id])
   }, [])
 
   const updateConfig = useCallback((updates: Partial<AppConfig>) => {
@@ -310,7 +304,6 @@ export function useAppStateCore(): AppStateCore {
     mutateProjects,
     mutateNotes,
     updateWindowViewState,
-    getTaskViewStateForTask,
     updateConfig,
     stateSyncError,
     dismissStateSyncError

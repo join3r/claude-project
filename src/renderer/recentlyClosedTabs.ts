@@ -4,7 +4,8 @@ import { findTaskInProject, taskTabs } from '../shared/streams'
 export interface RecentlyClosedTab {
   projectId: string
   taskId: string
-  pane: 'left' | 'right'
+  /** The column it was in, as an index into the task's pane row. */
+  pane: number
   index: number
   tab: Tab
 }

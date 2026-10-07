@@ -57,7 +57,7 @@ export default function NotesList(): React.ReactElement {
 
   const handleNoteClick = useCallback((noteId: string) => {
     if (!selectedProjectId) return
-    openOrFocusNoteTab(selectedProjectId, selectedTaskId, 'left', noteId)
+    openOrFocusNoteTab(selectedProjectId, selectedTaskId, 'focused', noteId)
   }, [selectedProjectId, selectedTaskId, openOrFocusNoteTab])
 
   const handleDoubleClick = useCallback((noteId: string, currentName: string) => {

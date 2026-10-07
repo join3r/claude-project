@@ -11,8 +11,8 @@ import {
   type TaskViewState,
   type WindowViewState
 } from '../src/shared/types'
-import { findMainStream, findStreamOfTask, paneTabs, projectTasks, tabsByPane } from '../src/shared/streams'
-import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
+import { findMainStream, findStreamOfTask, projectTasks } from '../src/shared/streams'
+import { fixtureProject, fixtureTask, paneTabsAt } from './helpers/streams-fixtures'
 import {
   addTaskInDirectoryData,
   appendProject,
@@ -39,14 +39,12 @@ import {
 } from '../src/renderer/hooks/appState/inbox'
 import {
   forgetRemovedTaskView,
-  reassignActiveTabsAfterNoteDelete,
   removeTaskView,
   selectProjectHomeView,
   selectProjectView,
   setProjectExpandedView,
   sidebarForTask,
   toggleId,
-  withActiveTab,
   writeSidebarToTask
 } from '../src/renderer/hooks/appState/viewState'
 import {
@@ -97,7 +95,7 @@ describe('projectsData', () => {
     const t = makeTask('New', [tab('a'), tab('b')])
     expect(t.panes).toHaveLength(1)
     expect(t.panes[0].activeTabId).toBe('b')
-    expect(paneTabs(t, 'right')).toEqual([])
+    expect(paneTabsAt(t, 1)).toEqual([])
     expect(t.mainTabId).toBe('a')
     expect(typeof t.lastInteractedAt).toBe('number')
     expect(t.workspaceDraft).toBeUndefined()
@@ -169,21 +167,21 @@ describe('projectsData', () => {
   it('tab edits touch only the target tab', () => {
     const other = tab('b')
     const d = data([project('p', [task('t', [tab('a'), other])])])
-    const renamed = renameTabInData(d, 'p', 't', 'left', 'a', 'Renamed')
-    expect(paneTabs(projectTasks(renamed.projects[0])[0], 'left')[0].title).toBe('Renamed')
-    expect(paneTabs(projectTasks(renamed.projects[0])[0], 'left')[1]).toBe(other)
-    const patched = patchTab(d, 'p', 't', 'left', 'a', { url: 'http://x' })
-    expect(paneTabs(projectTasks(patched.projects[0])[0], 'left')[0].url).toBe('http://x')
+    const renamed = renameTabInData(d, 'p', 't', 'a', 'Renamed')
+    expect(paneTabsAt(projectTasks(renamed.projects[0])[0], 0)[0].title).toBe('Renamed')
+    expect(paneTabsAt(projectTasks(renamed.projects[0])[0], 0)[1]).toBe(other)
+    const patched = patchTab(d, 'p', 't', 'a', { url: 'http://x' })
+    expect(paneTabsAt(projectTasks(patched.projects[0])[0], 0)[0].url).toBe('http://x')
   })
 
   it('insertTabAt clamps the index and is idempotent', () => {
     const d = data([project('p', [task('t', [tab('a')])])])
-    const leftIds = (x: ProjectsData) => paneTabs(projectTasks(x.projects[0])[0], 'left').map(t => t.id)
-    const once = insertTabAt(d, 'p', 't', 'left', 99, tab('z'))
+    const leftIds = (x: ProjectsData) => paneTabsAt(projectTasks(x.projects[0])[0], 0).map(t => t.id)
+    const once = insertTabAt(d, 'p', 't', 0, 99, tab('z'))
     expect(leftIds(once)).toEqual(['a', 'z'])
-    const twice = insertTabAt(once, 'p', 't', 'left', 0, tab('z'))
+    const twice = insertTabAt(once, 'p', 't', 0, 0, tab('z'))
     expect(leftIds(twice)).toEqual(['a', 'z'])
-    const front = insertTabAt(d, 'p', 't', 'left', -5, tab('z'))
+    const front = insertTabAt(d, 'p', 't', 0, -5, tab('z'))
     expect(leftIds(front)).toEqual(['z', 'a'])
   })
 
@@ -265,7 +263,7 @@ describe('view state transitions', () => {
   })
 
   it('removeTaskView only clears the project selection when the owner retired', () => {
-    const prev = view({ selectedProjectId: 'p', selectedTaskId: 't', taskStates: { t: withActiveTab(taskState(task('t')), 'left', null) } })
+    const prev = view({ selectedProjectId: 'p', selectedTaskId: 't', taskStates: { t: taskState(task('t')) } })
     const kept = removeTaskView(prev, 'p', 't', false)
     expect(kept).toMatchObject({ selectedProjectId: 'p', selectedTaskId: null, taskStates: {} })
     expect(removeTaskView(prev, 'p', 't', true).selectedProjectId).toBeNull()
@@ -288,16 +286,8 @@ describe('view state transitions', () => {
   it('sidebarForTask prefers saved state, then the window', () => {
     const base = view({ fileBrowserOpen: false, fileBrowserActiveTab: 'files' })
     expect(sidebarForTask(base, task('t'))).toEqual({ fileBrowserOpen: false, fileBrowserActiveTab: 'files' })
-    const saved = { ...base, taskStates: { t: { ...withActiveTab(taskState(task('t')), 'left', null), fileBrowserOpen: true } } }
+    const saved = { ...base, taskStates: { t: { ...taskState(task('t')), fileBrowserOpen: true } } }
     expect(sidebarForTask(saved, task('t')).fileBrowserOpen).toBe(true)
-  })
-
-  it('reassignActiveTabsAfterNoteDelete moves off the doomed note tab', () => {
-    const noteTab = tab('n', { type: 'note', noteId: 'note1' })
-    const t = task('t', [tab('a'), noteTab])
-    const p = project('p', [t])
-    const next = reassignActiveTabsAfterNoteDelete(view({ taskStates: { t: withActiveTab(taskState(t), 'left', 'n') } }), p, 'note1')
-    expect(next.taskStates.t.activeTab.left).toBe('a')
   })
 })
 
@@ -323,10 +313,10 @@ describe('notes transitions', () => {
     const p = project('p', [task('t', [tab('a')], [noteTab])])
     expect(noteTabIds(p, 'n1')).toEqual(['nt'])
     const d = data([p])
-    expect(paneTabs(projectTasks(retitleNoteTabs(d, 'p', 'n1', 'new').projects[0])[0], 'right')[0].title).toBe('new')
+    expect(paneTabsAt(projectTasks(retitleNoteTabs(d, 'p', 'n1', 'new').projects[0])[0], 1)[0].title).toBe('new')
     // The emptied right pane closes.
     const removed = projectTasks(removeNoteTabs(d, 'p', 'n1').projects[0])[0]
-    expect(tabsByPane(removed)).toEqual({ left: [tab('a')], right: [] })
+    expect(paneTabsAt(removed, 0)).toEqual([tab('a')])
     expect(removed.panes).toHaveLength(1)
   })
 })

@@ -115,9 +115,7 @@ vi.mock('../src/renderer/context/AppContext', () => ({
         }]
       }]
     }],
-    getTaskViewState: () => ({ activeTab: mocks.task.activeTab, splitOpen: true }),
-    setActiveTab: (...args: unknown[]) => mocks.setActiveTab(...args),
-    toggleSplit: () => {}
+    setActiveTab: (...args: unknown[]) => mocks.setActiveTab(...args)
   })
 }))
 
@@ -141,7 +139,6 @@ function renderTab(visible = true) {
       projectDir="/project"
       projectId="p1"
       taskId="t1"
-      pane="left"
       effectiveTheme="dark"
     />
   )
@@ -219,8 +216,7 @@ describe('EditorTab', () => {
           projectDir="/project"
           projectId="p1"
           taskId="t1"
-          pane="left"
-          effectiveTheme="dark"
+              effectiveTheme="dark"
         />
       )
     })
@@ -233,8 +229,7 @@ describe('EditorTab', () => {
           projectDir="/project"
           projectId="p1"
           taskId="t1"
-          pane="left"
-          effectiveTheme="dark"
+              effectiveTheme="dark"
         />
       )
     })
@@ -358,7 +353,7 @@ describe('EditorTab', () => {
       await press(LINK_SELECTION_KEYBINDING)
 
       expect(inserts).toEqual([{ tabId: 'pi-1', text: '@src/notes.txt (lines 1-2) ' }])
-      expect(activated).toEqual([['p1', 't1', 'right', 'pi-1']])
+      expect(activated).toEqual([['p1', 't1', 'pi-1']])
       expect((window as any).api.fbWriteFile).not.toHaveBeenCalled()
     })
 

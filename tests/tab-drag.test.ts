@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getTabDropIndex, getTabReorderInsertIndex } from '../src/renderer/components/tabDrag'
+import { getBodyDropTarget, getTabDropIndex } from '../src/renderer/components/tabDrag'
 
 describe('tab drag helpers', () => {
   const items = [
@@ -23,10 +23,16 @@ describe('tab drag helpers', () => {
     expect(getTabDropIndex(items, 260, 'tab-b')).toBe(3)
   })
 
-  it('detects adjacent same-pane drops as no-ops', () => {
-    expect(getTabReorderInsertIndex(1, 1)).toBeNull()
-    expect(getTabReorderInsertIndex(1, 2)).toBeNull()
-    expect(getTabReorderInsertIndex(2, 1)).toBe(1)
-    expect(getTabReorderInsertIndex(1, 3)).toBe(2)
+  it('splits a pane when dropped near its edge and appends to it in the middle', () => {
+    const rect = { left: 100, width: 400 }
+    expect(getBodyDropTarget(1, rect, 120, 3)).toEqual({ kind: 'split', pane: 1, side: 'left', inBody: true })
+    expect(getBodyDropTarget(1, rect, 490, 3)).toEqual({ kind: 'split', pane: 1, side: 'right', inBody: true })
+    expect(getBodyDropTarget(1, rect, 300, 3)).toEqual({ kind: 'tab', pane: 1, index: 3, inBody: true })
+  })
+
+  it('caps the split zone on wide panes', () => {
+    const wide = { left: 0, width: 2000 }
+    expect(getBodyDropTarget(0, wide, 170, 1).kind).toBe('tab')
+    expect(getBodyDropTarget(0, wide, 150, 1).kind).toBe('split')
   })
 })

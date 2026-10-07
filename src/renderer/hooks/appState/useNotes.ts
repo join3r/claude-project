@@ -3,7 +3,8 @@ import { v4 as uuid } from 'uuid'
 import type { NotesRecord, ProjectNote } from '../../../shared/types'
 import { incrementLifetimeStat } from '../lifetimeStats'
 import type { AppStateCore } from './useAppStateCore'
-import { mapProject, paneOfTab, type Pane } from './projectsData'
+import { mapProject } from './projectsData'
+import type { PaneRef } from '../../components/paneFocus'
 import {
   addNoteToRecord,
   deleteNoteFromRecord,
@@ -13,7 +14,6 @@ import {
   removeNoteTabs,
   retitleNoteTabs
 } from './notesData'
-import { reassignActiveTabsAfterNoteDelete } from './viewState'
 import type { TabsActions } from './useTabs'
 import type { TasksActions } from './useTasks'
 import { createTab } from '../../components/newTaskTabs'
@@ -26,7 +26,7 @@ export interface NotesActions {
   deleteNote: (projectId: string, noteId: string) => void
   /** Debounced: the edit shows at once, the write waits for typing to pause. */
   updateNoteContent: (projectId: string, noteId: string, content: string) => void
-  openOrFocusNoteTab: (projectId: string, taskId: string | null, pane: Pane, noteId: string) => void
+  openOrFocusNoteTab: (projectId: string, taskId: string | null, pane: PaneRef, noteId: string) => void
 }
 
 /** Project notes and the note tabs that show them. */
@@ -34,7 +34,7 @@ export function useNotes(
   core: AppStateCore,
   deps: Pick<TabsActions, 'addTab' | 'setActiveTab'> & Pick<TasksActions, 'taskForTab'>
 ): NotesActions {
-  const { notes, notesRef, mutateNotes, mutateProjects, projectsRef, updateWindowViewState } = core
+  const { notes, notesRef, mutateNotes, mutateProjects, projectsRef } = core
   const { addTab, setActiveTab, taskForTab } = deps
 
   const createNote = useCallback((projectId: string, name: string): ProjectNote => {
@@ -64,17 +64,12 @@ export function useNotes(
     const removedTabIds = project ? noteTabIds(project, noteId) : []
     if (removedTabIds.length === 0) return
 
-    updateWindowViewState(prev => {
-      if (!project) return prev
-      return reassignActiveTabsAfterNoteDelete(prev, project, noteId)
-    })
-
     mutateProjects(prev => removeNoteTabs(prev, projectId, noteId))
 
     for (const tabId of removedTabIds) {
       window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
     }
-  }, [mutateNotes, mutateProjects, updateWindowViewState])
+  }, [mutateNotes, mutateProjects])
 
   const updateNoteContent = useCallback((projectId: string, noteId: string, content: string) => {
     const now = Date.now()
@@ -92,7 +87,7 @@ export function useNotes(
   const openOrFocusNoteTab = useCallback((
     projectId: string,
     taskId: string | null,
-    pane: Pane,
+    pane: PaneRef,
     noteId: string
   ) => {
     const project = projectsRef.current.find(p => p.id === projectId)
@@ -110,7 +105,7 @@ export function useNotes(
     const allTabs = taskTabs(task)
     const existingTab = allTabs.find(t => isNoteTab(t, noteId))
     if (existingTab) {
-      setActiveTab(projectId, targetTaskId, paneOfTab(task, existingTab), existingTab.id)
+      setActiveTab(projectId, targetTaskId, existingTab.id)
       return
     }
 

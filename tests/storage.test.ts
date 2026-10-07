@@ -312,11 +312,7 @@ describe('Storage', () => {
           selectedTaskId: 'task-1',
           selectedTagIds: ['tag-1'],
           taskStates: {
-            'task-1': {
-              activeTab: { left: 'left-1', right: null },
-              splitOpen: false,
-              splitRatio: 0.5
-            }
+            'task-1': { fileBrowserOpen: true, fileBrowserActiveTab: 'git' }
           }
         }
       }]
@@ -404,10 +400,12 @@ describe('Storage', () => {
             selectedTaskId: 'missing-task',
             selectedTagIds: ['tag-1', 'missing-tag'],
             taskStates: {
+              // Pane fields an older build kept per window: dropped (the layout lives on the task).
               'task-1': {
                 activeTab: { left: 'missing-tab', right: 'right-1' },
                 splitOpen: true,
-                splitRatio: 0.75
+                splitRatio: 0.75,
+                fileBrowserOpen: true
               }
             }
           }
@@ -422,11 +420,7 @@ describe('Storage', () => {
     expect(loaded.windows[0].viewState.selectedProjectId).toBeNull()
     expect(loaded.windows[0].viewState.selectedTaskId).toBeNull()
     expect(loaded.windows[0].viewState.selectedTagIds).toEqual(['tag-1'])
-    expect(loaded.windows[0].viewState.taskStates['task-1']).toEqual({
-      activeTab: { left: 'left-1', right: 'right-1' },
-      splitOpen: true,
-      splitRatio: 0.75
-    })
+    expect(loaded.windows[0].viewState.taskStates['task-1']).toEqual({ fileBrowserOpen: true })
   })
 
   it('migrates legacy lastFocusedAt to lastInteractedAt on load', () => {

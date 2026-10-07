@@ -2,13 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { Tab } from '../src/shared/types'
 import {
   mapTaskTabs,
-  paneTabs,
   projectLastTaskId,
   removeTaskFromProject,
   resolveMainTabId,
   taskWorkspace,
   withLastTask,
-  withTabsByPane,
   workspaceReleasedBy
 } from '../src/shared/streams'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
@@ -17,22 +15,6 @@ const tab = (id: string, type: Tab['type'] = 'terminal'): Tab => ({ id, type, ti
 const workspace = { worktreePath: '/repo/.worktrees/x', branchName: 'x', baseBranch: 'main', relativeProjectPath: '' }
 
 describe('task panes', () => {
-  it('closes an emptied left pane and lets the right one take the row', () => {
-    const task = fixtureTask({ id: 't', tabs: { left: [tab('a')], right: [tab('b'), tab('c')] }, activeTab: { right: 'b' } })
-    const next = withTabsByPane(task, { left: [], right: paneTabs(task, 'right') })
-    expect(next.panes).toEqual([{ tabs: [tab('b'), tab('c')], activeTabId: 'b', width: 1 }])
-    expect(paneTabs(next, 'left').map(t => t.id)).toEqual(['b', 'c'])
-  })
-
-  it('opens a second pane at half width and keeps the active tab', () => {
-    const task = fixtureTask({ id: 't', tabs: { left: [tab('a'), tab('b')] }, activeTab: { left: 'a' } })
-    const next = withTabsByPane(task, { left: [tab('a')], right: [tab('b')] })
-    expect(next.panes).toEqual([
-      { tabs: [tab('a')], activeTabId: 'a', width: 0.5 },
-      { tabs: [tab('b')], activeTabId: 'b', width: 0.5 }
-    ])
-  })
-
   it('makes the first agent tab the main tab, and keeps it while it stays', () => {
     expect(resolveMainTabId([tab('t'), tab('c', 'claude-chat')])).toBe('c')
     expect(resolveMainTabId([tab('t'), tab('b', 'browser')])).toBe('t')

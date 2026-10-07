@@ -52,7 +52,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     setFilterQuery('')
   }, [selectedProject?.id])
 
-  const focusedPane = 'left' as const
+  const focusedPane = 'focused' as const
 
   const handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {

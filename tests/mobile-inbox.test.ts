@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildInbox, inboxContentKey, type InboxTabLookup } from '../src/main/mobile/inbox'
 import { mainStreamId, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue } from '../src/shared/types'
-import { findTaskInProject, paneTabs } from '../src/shared/streams'
-import { fixtureProject, fixtureTask, type FixtureTask } from './helpers/streams-fixtures'
+import { findTaskInProject } from '../src/shared/streams'
+import { fixtureProject, fixtureTask, type FixtureTask, paneTabsAt } from './helpers/streams-fixtures'
 import { emptyActivity, type AgentActivity } from '../src/shared/agent-activity'
 
 const DESKTOP = { id: 'd'.repeat(32), name: 'join3r-mbp' }
@@ -250,7 +250,7 @@ describe('buildInbox', () => {
     const p = project('p1', [task('t1', [tab('a', 'terminal')])])
     const inbox = buildInbox(data([p]), lookup(), DESKTOP, NOW)
     inbox.projects[0].tasks[0].tabs[0].title = 'changed'
-    expect(paneTabs(findTaskInProject(p, 't1')!, 'left')[0].title).toBe('a')
+    expect(paneTabsAt(findTaskInProject(p, 't1')!, 0)[0].title).toBe('a')
   })
 })
 

@@ -34,7 +34,8 @@ import type {
   WorkspaceConfig,
   WorkspaceDraft
 } from './types'
-import { singlePane } from './streams'
+import { mapProjectTasks, singlePane } from './streams'
+import { normalizeTaskLayout } from './panes'
 
 /** A task as builds before the streams redesign wrote it. */
 export interface LegacyTask {
@@ -291,7 +292,10 @@ export function migrateProjects(raw: unknown[]): { projects: Project[]; migrated
         .filter(stream => isRecord(stream) && typeof stream.id === 'string')
         .map(stream => (Array.isArray(stream.tasks) ? stream : { ...stream, tasks: [] }))
     }))
-    projects.push(project)
+    // Pane rows are rewritten in place by the UI; repair any that a crash, an
+    // older build or a hand edit left inconsistent (empty panes, widths, active
+    // and main tabs). Same objects back when nothing is wrong.
+    projects.push(mapProjectTasks(project, normalizeTaskLayout))
   }
   return { projects, migrated, migratedStreamIds }
 }

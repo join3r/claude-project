@@ -59,13 +59,11 @@ export interface ProjectNote {
   updatedAt: number
 }
 
+/**
+ * What one window remembers per task beyond the task itself: the file-browser
+ * sidebar. The pane layout (columns, widths, active tabs) lives on the task.
+ */
 export interface TaskViewState {
-  activeTab: {
-    left: string | null
-    right: string | null
-  }
-  splitOpen: boolean
-  splitRatio: number
   fileBrowserOpen?: boolean
   fileBrowserActiveTab?: FileBrowserTab
 }
@@ -723,33 +721,17 @@ export const DEFAULT_CONFIG: AppConfig = {
   mobile: { ...DEFAULT_MOBILE_CONFIG }
 }
 
-/**
- * A task's default view: until step 4 the window still shows at most two panes
- * (left = `panes[0]`, right = `panes[1]`), split when the task has two.
- */
-export function createTaskViewState(task: Task): TaskViewState {
-  const [left, right] = task.panes
-  const total = (left?.width ?? 0) + (right?.width ?? 0)
-  return {
-    activeTab: {
-      left: left?.activeTabId ?? null,
-      right: right?.activeTabId ?? null
-    },
-    splitOpen: !!right,
-    splitRatio: right && total > 0 ? left.width / total : 0.5
-  }
+/** A task's default view: nothing remembered yet, so the window's own sidebar shows. */
+export function createTaskViewState(_task?: Task): TaskViewState {
+  return {}
 }
 
-function createDefaultTaskStates(projects: Project[]): Record<string, TaskViewState> {
-  const taskStates: Record<string, TaskViewState> = {}
-  for (const project of projects) {
-    for (const stream of project.streams) {
-      for (const task of stream.tasks) {
-        taskStates[task.id] = createTaskViewState(task)
-      }
-    }
+/** A detached copy holding only the known fields (stored states may carry legacy ones). */
+export function cloneTaskViewState(state: TaskViewState): TaskViewState {
+  return {
+    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
+    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
   }
-  return taskStates
 }
 
 export function createDefaultWindowViewState(): WindowViewState {
@@ -777,16 +759,7 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     taskStates: Object.fromEntries(
       Object.entries(state.taskStates).map(([taskId, taskState]) => [
         taskId,
-        {
-          activeTab: {
-            left: taskState.activeTab.left,
-            right: taskState.activeTab.right
-          },
-          splitOpen: taskState.splitOpen,
-          splitRatio: taskState.splitRatio,
-          ...(taskState.fileBrowserOpen !== undefined ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
-          ...(taskState.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: taskState.fileBrowserActiveTab } : {})
-        }
+        cloneTaskViewState(taskState)
       ])
     ),
     fileBrowserOpen: state.fileBrowserOpen,
@@ -846,29 +819,8 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
   }
 }
 
-export function reconcileTaskViewState(task: Task, state?: TaskViewState): TaskViewState {
-  const fallback = createTaskViewState(task)
-  if (!state) return fallback
-
-  const leftIds = new Set((task.panes[0]?.tabs ?? []).map(tab => tab.id))
-  const rightIds = new Set((task.panes[1]?.tabs ?? []).map(tab => tab.id))
-
-  return {
-    activeTab: {
-      // A pane that holds tabs always shows one: panes collapse when one empties
-      // (`withTabsByPane`), so a remembered id can end up on the other side.
-      left: state.activeTab.left !== null && leftIds.has(state.activeTab.left)
-        ? state.activeTab.left
-        : fallback.activeTab.left,
-      right: state.activeTab.right !== null && rightIds.has(state.activeTab.right)
-        ? state.activeTab.right
-        : fallback.activeTab.right
-    },
-    splitOpen: state.splitOpen,
-    splitRatio: state.splitRatio,
-    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
-    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
-  }
+export function reconcileTaskViewState(_task: Task, state?: TaskViewState): TaskViewState {
+  return state ? cloneTaskViewState(state) : createTaskViewState()
 }
 
 export function reconcileWindowViewState(
@@ -921,19 +873,10 @@ export function buildWindowViewState(
 ): WindowViewState {
   const tagIds = new Set(tags.map(t => t.id))
   const storedSelection = resolveStoredSelection(projects, config)
-  const taskStates = createDefaultTaskStates(projects)
+  const taskStates: Record<string, TaskViewState> = {}
   if (seed?.taskStates) {
     for (const [taskId, taskState] of Object.entries(seed.taskStates)) {
-      taskStates[taskId] = {
-        activeTab: {
-          left: taskState.activeTab.left,
-          right: taskState.activeTab.right
-        },
-        splitOpen: taskState.splitOpen,
-        splitRatio: taskState.splitRatio,
-        ...(taskState.fileBrowserOpen !== undefined ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
-        ...(taskState.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: taskState.fileBrowserActiveTab } : {})
-      }
+      taskStates[taskId] = cloneTaskViewState(taskState)
     }
   }
 

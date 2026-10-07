@@ -5,7 +5,7 @@ import { render, fireEvent, screen, act, cleanup, renderHook, waitFor } from '@t
 import { DEFAULT_CONFIG, type Project, type ProjectNote, type Task } from '../src/shared/types'
 import { resolveLandingTaskId } from '../src/renderer/hooks/taskNavigation'
 import { useAppState } from '../src/renderer/hooks/useAppState'
-import { findTaskInProject, paneTabs, withLastTask } from '../src/shared/streams'
+import { findTaskInProject, withLastTask } from '../src/shared/streams'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 // React import is required by the JSX runtime under vitest's default transform.
@@ -116,13 +116,13 @@ describe('Palette note selection', () => {
     // The row is labelled with its owning project (title text is split by match highlighting).
     expect(screen.getByText('Project B')).toBeTruthy()
     await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }) })
-    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-b', null, 'left', 'note-b')
+    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-b', null, 'focused', 'note-b')
   })
 
   it('still passes the selected task id for a note in the current project', async () => {
     const input = await openPaletteAndSearch('#Alpha')
     await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }) })
-    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-a', 'task-a1', 'left', 'note-a')
+    expect(openOrFocusNoteTab).toHaveBeenCalledWith('proj-a', 'task-a1', 'focused', 'note-a')
   })
 })
 
@@ -167,9 +167,13 @@ describe('openOrFocusNoteTab navigation', () => {
     return hook
   }
 
+  function activeTabOf(state: ReturnType<typeof useAppState>, projectId: string, taskId: string) {
+    return findTaskInProject(state.projects.find(p => p.id === projectId), taskId)?.panes[0]?.activeTabId
+  }
+
   function noteTabsFor(state: ReturnType<typeof useAppState>, projectId: string, taskId: string) {
     const target = findTaskInProject(state.projects.find(p => p.id === projectId), taskId)
-    return (target ? paneTabs(target, 'left') : []).filter(tab => tab.type === 'note')
+    return (target?.panes[0]?.tabs ?? []).filter(tab => tab.type === 'note')
   }
 
   it('switches to the target project and opens a cross-project note', async () => {
@@ -179,14 +183,14 @@ describe('openOrFocusNoteTab navigation', () => {
     expect(result.current.selectedProjectId).toBe('proj-a')
 
     // The palette passes null here; a stale foreign id must be tolerated too.
-    act(() => { result.current.openOrFocusNoteTab('proj-b', null, 'left', 'note-b') })
+    act(() => { result.current.openOrFocusNoteTab('proj-b', null, 'focused', 'note-b') })
 
     expect(result.current.selectedProjectId).toBe('proj-b')
     expect(result.current.selectedTaskId).toBe('task-b1')
     const tabs = noteTabsFor(result.current, 'proj-b', 'task-b1')
     expect(tabs).toHaveLength(1)
     expect(tabs[0].noteId).toBe('note-b')
-    expect(result.current.exportWindowViewState().taskStates['task-b1'].activeTab.left).toBe(tabs[0].id)
+    expect(activeTabOf(result.current, 'proj-b', 'task-b1')).toBe(tabs[0].id)
     // Project A is untouched.
     expect(noteTabsFor(result.current, 'proj-a', 'task-a1')).toHaveLength(0)
   })
@@ -195,7 +199,7 @@ describe('openOrFocusNoteTab navigation', () => {
     const { result } = await mountState()
 
     act(() => { result.current.switchToTask('proj-a', 'task-a1') })
-    act(() => { result.current.openOrFocusNoteTab('proj-b', 'task-a1', 'left', 'note-b') })
+    act(() => { result.current.openOrFocusNoteTab('proj-b', 'task-a1', 'focused', 'note-b') })
 
     expect(result.current.selectedProjectId).toBe('proj-b')
     expect(result.current.selectedTaskId).toBe('task-b1')
@@ -206,7 +210,7 @@ describe('openOrFocusNoteTab navigation', () => {
     const { result } = await mountState()
 
     act(() => { result.current.switchToTask('proj-a', 'task-a1') })
-    act(() => { result.current.openOrFocusNoteTab('proj-a', 'deleted-task', 'left', 'note-a') })
+    act(() => { result.current.openOrFocusNoteTab('proj-a', 'deleted-task', 'focused', 'note-a') })
 
     expect(result.current.selectedProjectId).toBe('proj-a')
     expect(result.current.selectedTaskId).toBe('task-a1')
@@ -219,20 +223,20 @@ describe('openOrFocusNoteTab navigation', () => {
     const { result } = await mountState()
 
     act(() => { result.current.switchToTask('proj-a', 'task-a1') })
-    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'left', 'note-a') })
+    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'focused', 'note-a') })
 
     const tabs = noteTabsFor(result.current, 'proj-a', 'task-a1')
     expect(tabs).toHaveLength(1)
     const tabId = tabs[0].id
 
     // Move focus elsewhere, then re-open: the existing tab is focused, not cloned.
-    act(() => { result.current.addTab('proj-a', 'task-a1', 'left', 'terminal') })
-    expect(result.current.exportWindowViewState().taskStates['task-a1'].activeTab.left).not.toBe(tabId)
+    act(() => { result.current.addTab('proj-a', 'task-a1', 'focused', 'terminal') })
+    expect(activeTabOf(result.current, 'proj-a', 'task-a1')).not.toBe(tabId)
 
-    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'left', 'note-a') })
+    act(() => { result.current.openOrFocusNoteTab('proj-a', 'task-a1', 'focused', 'note-a') })
     expect(result.current.selectedProjectId).toBe('proj-a')
     expect(result.current.selectedTaskId).toBe('task-a1')
     expect(noteTabsFor(result.current, 'proj-a', 'task-a1')).toHaveLength(1)
-    expect(result.current.exportWindowViewState().taskStates['task-a1'].activeTab.left).toBe(tabId)
+    expect(activeTabOf(result.current, 'proj-a', 'task-a1')).toBe(tabId)
   })
 })

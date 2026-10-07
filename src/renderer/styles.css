@@ -147,7 +147,7 @@
 
 @layer utilities {
   .sidebar-hidden .content-toolbar { padding-left: 76px; background: var(--color-surface-2); border-bottom: none; }
-  .sidebar-hidden .tab-bar { padding-left: 76px; }
+  .sidebar-hidden .tab-bar:not([data-pane-index]), .sidebar-hidden .tab-bar[data-pane-index="0"] { padding-left: 76px; }
 
   /* Blinking status dots, ticked at 1Hz from statusPulse.ts — an infinite CSS
      animation here would keep the compositor emitting frames at 60fps while idle. */

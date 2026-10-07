@@ -13,20 +13,14 @@ import {
   findTaskInProject,
   projectTasks,
   mapTaskInProject,
-  paneSideOfTab,
-  paneTabs,
   removeTaskFromProject,
   resolveMainTabId,
   singlePane,
-  taskTabIds,
-  withPaneTabs,
-  type PaneSide
+  taskTabIds
 } from '../../../shared/streams'
+import { addTabToPane, patchTabInTask } from '../../../shared/panes'
 import { dirBasename } from '../../../shared/paths'
 import { incrementLifetimeStat } from '../lifetimeStats'
-
-/** TEMPORARY (step 4 replaces it): the window's two panes, `panes[0]` and `panes[1]`. */
-export type Pane = PaneSide
 
 /** The task literal every "add a task" path starts from. */
 export function makeTask(name: string, initialTabs: Tab[], workspaceDraft?: WorkspaceDraft): Task {
@@ -89,62 +83,41 @@ export function mapTask(
   return mapProject(data, projectId, project => mapTaskInProject(project, taskId, fn))
 }
 
-/** Replace one pane's tab list of one task. */
-export function mapPaneTabs(
-  data: ProjectsData,
-  projectId: string,
-  taskId: string,
-  pane: Pane,
-  fn: (tabs: Tab[]) => Tab[]
-): ProjectsData {
-  return mapTask(data, projectId, taskId, task => withPaneTabs(task, pane, fn(paneTabs(task, pane))))
-}
-
 /** Patch one tab in place; every other tab keeps its identity. */
 export function patchTab(
   data: ProjectsData,
   projectId: string,
   taskId: string,
-  pane: Pane,
   tabId: string,
   patch: Partial<Tab>
 ): ProjectsData {
-  return mapPaneTabs(data, projectId, taskId, pane, tabs =>
-    tabs.map(tab => (tab.id === tabId ? { ...tab, ...patch } : tab))
-  )
+  return mapTask(data, projectId, taskId, task => patchTabInTask(task, tabId, patch))
 }
 
 export function renameTabInData(
   data: ProjectsData,
   projectId: string,
   taskId: string,
-  pane: Pane,
   tabId: string,
   title: string
 ): ProjectsData {
-  return mapPaneTabs(data, projectId, taskId, pane, tabs =>
-    tabs.map(tab => (tab.id === tabId && tab.title !== title ? { ...tab, title } : tab))
-  )
+  return patchTab(data, projectId, taskId, tabId, { title })
 }
 
 /**
- * Put a tab back where it was closed from, clamped into the pane. A replay that
- * finds the tab already there is a no-op.
+ * Put a tab back where it was closed from: at `index` in pane `pane`, both clamped
+ * into the task's row as it is now. A replay that finds the tab already there is a
+ * no-op.
  */
 export function insertTabAt(
   data: ProjectsData,
   projectId: string,
   taskId: string,
-  pane: Pane,
+  pane: number,
   index: number,
   tab: Tab
 ): ProjectsData {
-  return mapTask(data, projectId, taskId, task => {
-    if (paneTabs(task, pane).some(existingTab => existingTab.id === tab.id)) return task
-    const nextTabs = [...paneTabs(task, pane)]
-    nextTabs.splice(Math.min(Math.max(index, 0), nextTabs.length), 0, tab)
-    return withPaneTabs(task, pane, nextTabs)
-  })
+  return mapTask(data, projectId, taskId, task => addTabToPane(task, pane, tab, { index }))
 }
 
 export function appendProject(data: ProjectsData, project: Project): ProjectsData {
@@ -342,9 +315,4 @@ export function togglePinnedItemInData(data: ProjectsData, item: PinnedItem): Pr
 
 export function findTask(projects: readonly Project[], projectId: string, taskId: string | null): Task | undefined {
   return findTaskInProject(projects.find(candidate => candidate.id === projectId), taskId)
-}
-
-/** The pane a tab lives in, when the task has it. */
-export function paneOfTab(task: Task, tab: Tab): Pane {
-  return paneSideOfTab(task, tab.id) ?? 'left'
 }

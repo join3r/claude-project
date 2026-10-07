@@ -1,15 +1,14 @@
 import { useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { pickAgentTarget } from '../../shared/agent-link'
-import type { Tab } from '../../shared/types'
 import { paletteEvents } from '../palette/paletteEvents'
 import { getAgentRecency } from './agentTabRecency'
-import { findTaskInProject, tabsByPane } from '../../shared/streams'
+import { findTaskInProject } from '../../shared/streams'
 
 /**
  * Links waiting for an agent tab to take them. A queue rather than a plain event:
- * the target may not be mounted yet (it sits in the right pane of a closed split,
- * which is opened for it), and it takes the queue over as soon as it subscribes.
+ * the target may not be mounted yet (a hidden tab it is switched to mounts a beat
+ * later), and it takes the queue over as soon as it subscribes.
  */
 const pending = new Map<string, string[]>()
 const receivers = new Map<string, (text: string) => void>()
@@ -47,46 +46,26 @@ export function showAgentLinkNotice(message: string): void {
   paletteEvents.emit('agent-link-notice', message)
 }
 
-export interface AgentLinkRoute {
-  tab: Tab
-  pane: 'left' | 'right'
-  /** The target is in the right pane of a closed split, which has to be opened. */
-  openSplit: boolean
-}
-
-/** Where a link for this task goes, or null when the task has no agent tab. */
-export function resolveAgentLinkRoute(
-  task: { tabs: { left: Tab[]; right: Tab[] } },
-  view: { activeTab: { left: string | null; right: string | null }; splitOpen: boolean },
-  recency: readonly string[]
-): AgentLinkRoute | null {
-  const tab = pickAgentTarget({ tabs: task.tabs, activeTab: view.activeTab }, recency)
-  if (!tab) return null
-  const pane = task.tabs.left.some(t => t.id === tab.id) ? 'left' : 'right'
-  return { tab, pane, openSplit: pane === 'right' && !view.splitOpen }
-}
-
 /**
  * Returns `(text) => boolean` that sends a link to the task's agent tab — the one
- * last typed in, else one showing in a pane — bringing it into view (opening the
- * split when it lives in a closed right pane). The tab inserts the text and takes
- * focus. False, with a notice, when the task has no agent tab.
+ * last typed in, else one showing in a pane — bringing it to the front of its
+ * pane. The tab inserts the text and takes focus. False, with a notice, when the
+ * task has no agent tab.
  */
 export function useLinkToAgent(projectId: string, taskId: string): (text: string) => boolean {
-  const { projects, getTaskViewState, setActiveTab, toggleSplit } = useApp()
+  const { projects, setActiveTab } = useApp()
   return useCallback((text: string): boolean => {
     const task = findTaskInProject(projects.find(p => p.id === projectId), taskId)
     if (!task) return false
-    const route = resolveAgentLinkRoute({ tabs: tabsByPane(task) }, getTaskViewState(task), getAgentRecency(taskId))
-    if (!route) {
+    const tab = pickAgentTarget(task, getAgentRecency(taskId))
+    if (!tab) {
       showAgentLinkNotice('No agent tab in this task. Open Pi, Claude or Codex to link to it.')
       return false
     }
-    if (route.openSplit) toggleSplit(projectId, taskId)
-    setActiveTab(projectId, taskId, route.pane, route.tab.id)
-    queueAgentInsert(route.tab.id, text)
+    setActiveTab(projectId, taskId, tab.id)
+    queueAgentInsert(tab.id, text)
     return true
-  }, [projects, getTaskViewState, setActiveTab, toggleSplit, projectId, taskId])
+  }, [projects, setActiveTab, projectId, taskId])
 }
 
 if (typeof window !== 'undefined') {

@@ -94,7 +94,7 @@ describe('domain schemas', () => {
   it('accepts a real window view state and refuses a malformed one', () => {
     const state = createDefaultWindowViewState()
     expect(windowViewState(state, 'w')).toEqual(state)
-    expect(() => windowViewState({ ...state, taskStates: { t: { splitOpen: true } } }, 'w')).toThrow(/activeTab/)
+    expect(() => windowViewState({ ...state, taskStates: { t: { fileBrowserOpen: 'yes' } } }, 'w')).toThrow(/fileBrowserOpen/)
     expect(() => windowViewState({ ...state, selectedTagIds: 'x' }, 'w')).toThrow(/selectedTagIds/)
   })
 

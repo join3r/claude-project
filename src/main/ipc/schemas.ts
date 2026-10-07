@@ -52,9 +52,6 @@ export const tunnelConfig: Validator<TunnelConfig> = v.object({
 const nullableStr = v.nullable(v.string())
 
 const taskViewState = v.object({
-  activeTab: v.object({ left: nullableStr, right: nullableStr }),
-  splitOpen: v.boolean(),
-  splitRatio: v.number(),
   fileBrowserOpen: v.optional(v.boolean()),
   fileBrowserActiveTab: v.optional(v.literal('files', 'git', 'notes'))
 }, 'passthrough')

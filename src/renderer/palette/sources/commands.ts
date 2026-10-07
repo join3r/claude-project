@@ -63,7 +63,7 @@ commandRegistry.register({
   run: ctx => {
     const { selectedProjectId, selectedTaskId } = ctx.actions
     if (!selectedProjectId || !selectedTaskId) return
-    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'terminal')
+    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', 'terminal')
   }
 })
 
@@ -75,7 +75,7 @@ commandRegistry.register({
   run: ctx => {
     const { selectedProjectId, selectedTaskId } = ctx.actions
     if (!selectedProjectId || !selectedTaskId) return
-    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'editor')
+    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', 'editor')
   }
 })
 
@@ -87,7 +87,7 @@ commandRegistry.register({
   run: ctx => {
     const { selectedProjectId, selectedTaskId } = ctx.actions
     if (!selectedProjectId || !selectedTaskId) return
-    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', 'browser')
+    ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', 'browser')
   }
 })
 
@@ -111,7 +111,7 @@ for (const aiType of AI_TAB_TYPES) {
     run: ctx => {
       const { selectedProjectId, selectedTaskId, config } = ctx.actions
       if (!selectedProjectId || !selectedTaskId) return
-      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'left', claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
+      ctx.actions.addTab(selectedProjectId, selectedTaskId, 'focused', claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
     }
   })
 }

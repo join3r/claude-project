@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { closeTask, findClosableTab, removeTabFromData, type CloseTaskDeps } from '../src/main/mobile/close-task'
 import { type ProjectsData, type Stream, type WorkspaceDeleteResult } from '../src/shared/types'
-import { findTaskInProject, paneTabs, removeTaskFromProject } from '../src/shared/streams'
-import { fixtureProject, fixtureTask, type FixtureTask } from './helpers/streams-fixtures'
+import { findTaskInProject, removeTaskFromProject } from '../src/shared/streams'
+import { fixtureProject, fixtureTask, type FixtureTask, paneTabsAt } from './helpers/streams-fixtures'
 
 const workspace = { worktreePath: '/src/api/.worktrees/fix', branchName: 'fix', baseBranch: 'main', relativeProjectPath: '' }
 
@@ -128,7 +128,7 @@ describe('tab.close helpers (SPEC.md §8.8)', () => {
     const next = removeTabFromData(data(), 't1', 'tab2')
     const task = findTaskInProject(next.projects[0], 't1')!
     // The emptied right pane closes; the left one keeps its active tab.
-    expect(paneTabs(task, 'right')).toEqual([])
+    expect(paneTabsAt(task, 1)).toEqual([])
     expect(task.panes.map(p => p.activeTabId)).toEqual(['ed1'])
     const left = findTaskInProject(removeTabFromData(data(), 't1', 'ed1').projects[0], 't1')!
     expect(left.panes.map(p => p.activeTabId)).toEqual(['tab1', 'tab2'])

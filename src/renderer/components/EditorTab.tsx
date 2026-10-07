@@ -27,7 +27,6 @@ interface Props {
   projectDir: string
   projectId: string
   taskId: string
-  pane: 'left' | 'right'
   effectiveTheme: 'dark' | 'light'
 }
 

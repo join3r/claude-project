@@ -26,7 +26,6 @@ interface Props {
   tabId: string
   visible: boolean
   sessionId?: string
-  pane: 'left' | 'right'
   projectId: string
   taskId: string
   projectDir: string
@@ -45,7 +44,7 @@ interface Props {
  * state machine as the terminal tab — main sends the SDK's in-process hooks on
  * the channels the curl hooks use.
  */
-export default function ClaudeChatTab({ tabId, visible, sessionId, pane, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
+export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
   const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab } = useApp()
   const statusStore = useTabStatusStore()
   const state = useChatState(tabId)
@@ -95,7 +94,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
       },
       onSessionStart: (body) => {
         const next = body.session_id
-        if (typeof next === 'string' && next && next !== sessionId) updateTabSessionId(projectId, taskId, pane, tabId, next)
+        if (typeof next === 'string' && next && next !== sessionId) updateTabSessionId(projectId, taskId, tabId, next)
       }
     })
     ensureHookListeners()
@@ -109,7 +108,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
         statusStore.setStatus(tabId, null, 'chat-restart')
       }
     })
-  }, [tabId, projectId, taskId, pane, sessionId, applyStatus, markTaskEvent, updateTabSessionId, statusStore])
+  }, [tabId, projectId, taskId, sessionId, applyStatus, markTaskEvent, updateTabSessionId, statusStore])
 
   // Attach once the tab is first shown; stay attached while hidden (the process runs on).
   useEffect(() => {
@@ -252,8 +251,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   }, [tabId, projectId, taskId, markTaskInteracted])
 
   const openLink = useCallback((url: string) => {
-    addTab(projectId, taskId, pane, 'browser', { url: normalizeBrowserUrl(url) })
-  }, [addTab, projectId, taskId, pane])
+    addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: normalizeBrowserUrl(url) })
+  }, [addTab, projectId, taskId, tabId])
 
   const openContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const menu = chatContextMenuAt(e.target as Element, e.currentTarget, window.getSelection(), e.clientX, e.clientY)
@@ -263,8 +262,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, pane, project
   }, [])
 
   const openInTerminal = useCallback(() => {
-    convertClaudeTab(projectId, taskId, pane, tabId, 'claude')
-  }, [convertClaudeTab, projectId, taskId, pane, tabId])
+    convertClaudeTab(projectId, taskId, tabId, 'claude')
+  }, [convertClaudeTab, projectId, taskId, tabId])
 
   const loadFiles = useCallback(
     () => window.api.chatListFiles(projectDir, sshConfig ? projectId : undefined, sshConfig),

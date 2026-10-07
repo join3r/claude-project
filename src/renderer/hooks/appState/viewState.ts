@@ -1,28 +1,15 @@
 /**
- * Pure transitions of this window's `WindowViewState`: selection, expansion,
- * per-task pane state and the file-browser sidebar. None of this is shared with
- * other windows, so these are plain `prev -> next` steps with no sync concerns.
+ * Pure transitions of this window's `WindowViewState`: selection, expansion and
+ * the file-browser sidebar (remembered per task). Pane layout lives on the task.
+ * None of this is shared with other windows, so these are plain `prev -> next`
+ * steps with no sync concerns.
  */
-import { createTaskViewState, reconcileTaskViewState } from '../../../shared/types'
-import type { FileBrowserTab, Project, Task, TaskViewState, WindowViewState } from '../../../shared/types'
-import type { Pane } from './projectsData'
-import { paneTabs, projectLastTaskId, projectTasks } from '../../../shared/streams'
+import { cloneTaskViewState, createTaskViewState, reconcileTaskViewState } from '../../../shared/types'
+import type { FileBrowserTab, Project, Task, WindowViewState } from '../../../shared/types'
+import { projectLastTaskId } from '../../../shared/streams'
 
 export function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
-}
-
-export function cloneTaskState(state: TaskViewState): TaskViewState {
-  return {
-    activeTab: {
-      left: state.activeTab.left,
-      right: state.activeTab.right
-    },
-    splitOpen: state.splitOpen,
-    splitRatio: state.splitRatio,
-    ...(state.fileBrowserOpen !== undefined ? { fileBrowserOpen: state.fileBrowserOpen } : {}),
-    ...(state.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: state.fileBrowserActiveTab } : {})
-  }
 }
 
 /** `ids` with `id` present exactly once, keeping identity when it already was. */
@@ -52,28 +39,6 @@ export function clampFileBrowserWidth(width: number): number {
 
 export function clampSidebarWidth(width: number): number {
   return Math.min(420, Math.max(180, width))
-}
-
-/** Store `state` (cloned) as the view state of `taskId`. */
-export function withTaskState(prev: WindowViewState, taskId: string, state: TaskViewState): WindowViewState {
-  return {
-    ...prev,
-    taskStates: {
-      ...prev.taskStates,
-      [taskId]: cloneTaskState(state)
-    }
-  }
-}
-
-/** `current` with `tabId` active in `pane`, as a detached copy. */
-export function withActiveTab(current: TaskViewState, pane: Pane, tabId: string | null): TaskViewState {
-  return {
-    ...cloneTaskState(current),
-    activeTab: {
-      ...current.activeTab,
-      [pane]: tabId
-    }
-  }
 }
 
 /**
@@ -193,7 +158,7 @@ export function writeSidebarToTask(prev: WindowViewState, task: Task | null, pat
   next.taskStates = {
     ...prev.taskStates,
     [taskId]: {
-      ...cloneTaskState(currentState),
+      ...cloneTaskViewState(currentState),
       ...(patch.fileBrowserOpen !== undefined ? { fileBrowserOpen: patch.fileBrowserOpen } : {}),
       ...(patch.fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab: patch.fileBrowserActiveTab } : {})
     }
@@ -215,38 +180,4 @@ export function sidebarForTask(
     ? saved.fileBrowserActiveTab
     : view.fileBrowserActiveTab
   return { fileBrowserOpen, fileBrowserActiveTab }
-}
-
-/**
- * After a note is deleted, move every pane that was showing one of its tabs onto
- * the last remaining tab in that pane.
- */
-export function reassignActiveTabsAfterNoteDelete(
-  prev: WindowViewState,
-  project: Project,
-  noteId: string
-): WindowViewState {
-  const isDoomed = (tab: { type: string; noteId?: string }) => tab.type === 'note' && tab.noteId === noteId
-  const nextTaskStates = { ...prev.taskStates }
-  for (const task of projectTasks(project)) {
-    const currentState = reconcileTaskViewState(task, prev.taskStates[task.id])
-    const nextActiveTab = { ...currentState.activeTab }
-    let changed = false
-    for (const pane of ['left', 'right'] as const) {
-      const activeId = currentState.activeTab[pane]
-      const activeTab = paneTabs(task, pane).find(tab => tab.id === activeId)
-      if (activeTab && isDoomed(activeTab)) {
-        const remaining = paneTabs(task, pane).filter(tab => !isDoomed(tab))
-        nextActiveTab[pane] = remaining[remaining.length - 1]?.id ?? null
-        changed = true
-      }
-    }
-    if (changed) {
-      nextTaskStates[task.id] = {
-        ...cloneTaskState(currentState),
-        activeTab: nextActiveTab
-      }
-    }
-  }
-  return { ...prev, taskStates: nextTaskStates }
 }

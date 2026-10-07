@@ -11,11 +11,10 @@ interface Props {
   initialUrl?: string
   projectId: string
   taskId: string
-  pane: 'left' | 'right'
   sshConfig?: SshConfig
 }
 
-export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, pane, sshConfig }: Props): React.ReactElement {
+export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, sshConfig }: Props): React.ReactElement {
   const { updateTabUrl, browserZoomFactor, markTaskInteracted, addTab } = useApp()
   const [url, setUrl] = useState(initialUrl || BLANK_BROWSER_URL)
   const [inputUrl, setInputUrl] = useState(url)
@@ -31,8 +30,8 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   if (visible && !activated) setActivated(true)
 
   const handleOpenLinkInApp = useCallback((targetUrl: string) => {
-    addTab(projectId, taskId, pane, 'browser', { url: targetUrl })
-  }, [addTab, projectId, taskId, pane])
+    addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: targetUrl })
+  }, [addTab, projectId, taskId, tabId])
 
   const isRemote = !!sshConfig
   const partition = isRemote ? `persist:browser-${projectId}` : undefined
@@ -50,7 +49,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
       const newUrl = webview.getURL()
       setUrl(newUrl)
       setInputUrl(newUrl)
-      updateTabUrl(projectId, taskId, pane, tabId, newUrl)
+      updateTabUrl(projectId, taskId, tabId, newUrl)
     }
 
     webview.addEventListener('did-navigate', handleNavigation)
@@ -70,7 +69,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
       webview.removeEventListener('did-navigate-in-page', handleNavigation)
       webview.removeEventListener('context-menu', handleContextMenu)
     }
-  }, [webviewMounted, projectId, taskId, pane, tabId, updateTabUrl, markTaskInteracted])
+  }, [webviewMounted, projectId, taskId, tabId, updateTabUrl, markTaskInteracted])
 
   useEffect(() => {
     const handleReload = (e: Event) => {
@@ -176,7 +175,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     const normalized = normalizeBrowserUrl(targetUrl)
     setUrl(normalized)
     setInputUrl(normalized)
-    updateTabUrl(projectId, taskId, pane, tabId, normalized)
+    updateTabUrl(projectId, taskId, tabId, normalized)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

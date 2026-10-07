@@ -28,7 +28,7 @@ function makeEntry(id: string, projectId = 'project-1', taskId = 'task-1'): Rece
   return {
     projectId,
     taskId,
-    pane: 'left',
+    pane: 0,
     index: 0,
     tab: makeTab(id)
   }

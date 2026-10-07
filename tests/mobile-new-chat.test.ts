@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { addChatTab } from '../src/main/mobile/new-chat'
 import { type Project, type ProjectsData } from '../src/shared/types'
-import { findTaskInProject, paneTabs } from '../src/shared/streams'
-import { fixtureProject } from './helpers/streams-fixtures'
+import { findTaskInProject } from '../src/shared/streams'
+import { fixtureProject, paneTabsAt } from './helpers/streams-fixtures'
 
 function data(extra: Partial<Project> = {}): ProjectsData {
   return {
@@ -31,15 +31,15 @@ describe('addChatTab (SPEC.md §8.2)', () => {
     if (!result.ok) return
     const task = findTaskInProject(result.data.projects[0], 't1')!
     const old = findTaskInProject(before.projects[0], 't1')!
-    expect(paneTabs(task, 'left')).toEqual([
+    expect(paneTabsAt(task, 0)).toEqual([
       { id: 'tab-term', type: 'terminal', title: 'zsh' },
       { id: 'id-1', type: 'claude-chat', title: 'Claude', sessionId: 'id-2' }
     ])
-    expect(paneTabs(task, 'right')).toBe(paneTabs(old, 'right'))
+    expect(paneTabsAt(task, 1)).toBe(paneTabsAt(old, 1))
     // The desktop's own view isn't switched to the new tab.
     expect(task.panes.map(pane => pane.activeTabId)).toEqual(['tab-term', 'tab-r'])
     // The input is not mutated.
-    expect(paneTabs(old, 'left')).toHaveLength(1)
+    expect(paneTabsAt(old, 0)).toHaveLength(1)
   })
 
   it('refuses unknown tasks, hidden projects and shell-command projects', () => {

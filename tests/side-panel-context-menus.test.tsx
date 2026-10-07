@@ -40,7 +40,7 @@ describe('notes right-click menu', () => {
     render(<NotesList />)
     fireEvent.contextMenu(screen.getByText('Ideas'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Open' }))
-    expect(app.openOrFocusNoteTab).toHaveBeenCalledWith('p1', 't1', 'left', 'n1')
+    expect(app.openOrFocusNoteTab).toHaveBeenCalledWith('p1', 't1', 'focused', 'n1')
 
     fireEvent.contextMenu(screen.getByText('Ideas'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))

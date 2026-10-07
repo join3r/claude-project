@@ -474,22 +474,18 @@ export class Storage {
     const taskStates: Record<string, TaskViewState> = {}
     for (const [taskId, taskState] of Object.entries(value)) {
       if (!isRecord(taskState)) continue
-      const activeTab = isRecord(taskState.activeTab) ? taskState.activeTab : {}
       const fileBrowserActiveTab = (taskState.fileBrowserActiveTab === 'files'
         || taskState.fileBrowserActiveTab === 'git'
         || taskState.fileBrowserActiveTab === 'notes')
         ? taskState.fileBrowserActiveTab
         : undefined
-      taskStates[taskId] = {
-        activeTab: {
-          left: typeof activeTab.left === 'string' ? activeTab.left : null,
-          right: typeof activeTab.right === 'string' ? activeTab.right : null
-        },
-        splitOpen: typeof taskState.splitOpen === 'boolean' ? taskState.splitOpen : false,
-        splitRatio: isFiniteNumber(taskState.splitRatio) ? taskState.splitRatio : 0.5,
+      // Older builds also kept `activeTab.left|right`, `splitOpen` and `splitRatio`
+      // here; the pane layout now lives on the task, so those are dropped.
+      const next: TaskViewState = {
         ...(typeof taskState.fileBrowserOpen === 'boolean' ? { fileBrowserOpen: taskState.fileBrowserOpen } : {}),
         ...(fileBrowserActiveTab !== undefined ? { fileBrowserActiveTab } : {})
       }
+      if (Object.keys(next).length > 0) taskStates[taskId] = next
     }
 
     return taskStates

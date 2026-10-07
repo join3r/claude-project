@@ -1,20 +1,10 @@
 /**
  * Pure helpers over the Project › Stream › Task model: finding and mapping tasks
- * across a project's streams, and a task's tabs and panes.
- *
- * The `left`/`right` pane helpers are a TEMPORARY shim (removed in step 4): the
- * window still draws at most two panes, `panes[0]` on the left and `panes[1]` on
- * the right, while the data already holds a row of columns.
+ * across a project's streams, and a task's tabs. Pane layout operations (split,
+ * move, resize) live in `panes.ts`.
  */
 import { isAgentTabType } from './types'
 import type { Project, Stream, Tab, Task, TaskPane, WorkspaceConfig } from './types'
-
-export type PaneSide = 'left' | 'right'
-
-export interface TabsByPane {
-  left: Tab[]
-  right: Tab[]
-}
 
 // --- Tasks across a project's streams ---------------------------------------
 
@@ -140,21 +130,6 @@ export function taskTabIds(task: Task): string[] {
   return taskTabs(task).map(tab => tab.id)
 }
 
-export function paneTabs(task: Task, side: PaneSide): Tab[] {
-  return task.panes[side === 'left' ? 0 : 1]?.tabs ?? []
-}
-
-export function tabsByPane(task: Task): TabsByPane {
-  return { left: paneTabs(task, 'left'), right: paneTabs(task, 'right') }
-}
-
-/** The side a tab is on, or null when the task does not hold it. */
-export function paneSideOfTab(task: Task, tabId: string): PaneSide | null {
-  if (paneTabs(task, 'left').some(tab => tab.id === tabId)) return 'left'
-  if (paneTabs(task, 'right').some(tab => tab.id === tabId)) return 'right'
-  return null
-}
-
 /**
  * The agent tab, else the terminal, that a task is about. Keeps `current` while
  * the task still holds it.
@@ -162,46 +137,6 @@ export function paneSideOfTab(task: Task, tabId: string): PaneSide | null {
 export function resolveMainTabId(tabs: readonly Tab[], current?: string): string | undefined {
   if (current && tabs.some(tab => tab.id === current)) return current
   return (tabs.find(tab => isAgentTabType(tab.type)) ?? tabs.find(tab => tab.type === 'terminal'))?.id
-}
-
-function buildPane(tabs: Tab[], previous: TaskPane | undefined): TaskPane {
-  const activeTabId = previous && tabs.some(tab => tab.id === previous.activeTabId)
-    ? previous.activeTabId
-    : tabs[tabs.length - 1].id
-  return { tabs, activeTabId, width: previous?.width ?? 0.5 }
-}
-
-/** The pane row for these tabs, keeping widths and active tabs from `previous`. */
-export function panesFromTabs(previous: readonly TaskPane[], tabs: TabsByPane): TaskPane[] {
-  const panes: TaskPane[] = []
-  if (tabs.left.length > 0) panes.push(buildPane(tabs.left, previous[0]))
-  // An emptied left pane closes, and the right one takes the row.
-  if (tabs.right.length > 0) panes.push(buildPane(tabs.right, panes.length === 0 ? previous[1] ?? previous[0] : previous[1]))
-  if (panes.length === 1) return [{ ...panes[0], width: 1 }]
-  // A pane opened: split the row evenly rather than squeezing the new one.
-  if (panes.length > previous.length) return panes.map(pane => ({ ...pane, width: 1 / panes.length }))
-  if (panes.length === 2) {
-    const total = panes[0].width + panes[1].width
-    if (!(total > 0) || Math.abs(total - 1) > 1e-9) {
-      return panes.map(pane => ({ ...pane, width: total > 0 ? pane.width / total : 0.5 }))
-    }
-  }
-  return panes
-}
-
-/** The task with these tabs on its two sides; empty panes close, `mainTabId` follows. */
-export function withTabsByPane(task: Task, tabs: TabsByPane): Task {
-  const panes = panesFromTabs(task.panes, tabs)
-  const mainTabId = resolveMainTabId([...tabs.left, ...tabs.right], task.mainTabId)
-  const next: Task = { ...task, panes }
-  if (mainTabId) next.mainTabId = mainTabId
-  else delete next.mainTabId
-  return next
-}
-
-export function withPaneTabs(task: Task, side: PaneSide, tabs: Tab[]): Task {
-  const current = tabsByPane(task)
-  return withTabsByPane(task, { ...current, [side]: tabs })
 }
 
 /**

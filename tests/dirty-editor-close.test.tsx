@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { DEFAULT_CONFIG, type Project, type Tab } from '../src/shared/types'
-import { findTaskInProject, paneTabs, projectTasks } from '../src/shared/streams'
+import { findTaskInProject, projectTasks } from '../src/shared/streams'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { formatShortcutForApp } from '../src/shared/shortcut-label'
 
@@ -132,7 +132,7 @@ async function type(index: number, value: string): Promise<void> {
 
 function tabsOf(taskId: string) {
   const task = findTaskInProject(app.projects.find(p => p.id === 'p1'), taskId)
-  return task ? paneTabs(task, 'left') : []
+  return task?.panes[0]?.tabs ?? []
 }
 
 function dialog(): HTMLElement | null {
@@ -169,9 +169,9 @@ async function mountApp(): Promise<void> {
 
 /** Reveal the second editor so both tabs hold a live buffer, then re-select the first. */
 async function revealBothEditors(): Promise<void> {
-  await act(async () => { app.setActiveTab('p1', 't1', 'left', 'tab-b') })
+  await act(async () => { app.setActiveTab('p1', 't1', 'tab-b') })
   await waitFor(() => expect(editors()).toHaveLength(2))
-  await act(async () => { app.setActiveTab('p1', 't1', 'left', 'tab-a') })
+  await act(async () => { app.setActiveTab('p1', 't1', 'tab-a') })
   await flush()
 }
 
@@ -237,7 +237,7 @@ describe('closing an editor with unsaved changes', () => {
     await mountApp()
     const close = `Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`
     const terminal = `New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`
-    const split = `Open right pane (${formatShortcutForApp('CmdOrCtrl+D')})`
+    const split = `Split right (${formatShortcutForApp('CmdOrCtrl+D')})`
     expect(close).not.toContain('⌘')
     expect(screen.getAllByTitle(close).length).toBeGreaterThan(0)
     expect(screen.getAllByTitle(terminal).length).toBeGreaterThan(0)

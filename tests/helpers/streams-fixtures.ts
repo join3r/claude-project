@@ -80,3 +80,8 @@ export function fixtureProject(spec: FixtureProject): Project {
     streams: all
   }
 }
+
+/** The tabs of pane `index` (empty when the task has no such pane). */
+export function paneTabsAt(task: Task, index: number): Tab[] {
+  return task.panes[index]?.tabs ?? []
+}

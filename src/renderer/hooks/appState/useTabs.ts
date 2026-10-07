@@ -1,17 +1,21 @@
 import { useCallback, useRef } from 'react'
 import { isNotebookFile } from '../../../shared/notebook'
 import { v4 as uuid } from 'uuid'
+import { AI_TAB_META, CLAUDE_CHAT_LABEL } from '../../../shared/types'
+import type { Tab, TabType } from '../../../shared/types'
+import { findTaskInProject, taskTabs } from '../../../shared/streams'
 import {
-  AI_TAB_META,
-  CLAUDE_CHAT_LABEL,
-  createTaskViewState,
-  reconcileTaskViewState
-} from '../../../shared/types'
-import type { Tab, TabType, Task, TaskViewState } from '../../../shared/types'
-import { findTaskInProject, paneTabs, tabsByPane, taskTabs, withTabsByPane } from '../../../shared/streams'
+  addTabToPane,
+  findTabLocation,
+  moveTabInTask,
+  removeTabFromTask,
+  setActiveTabInTask,
+  setPaneWidths as setPaneWidthsInTask,
+  type PaneDropTarget
+} from '../../../shared/panes'
 import { markClaudeHandoff } from '../../components/claudeTabHandoff'
 import { createTab, type CreateTabOptions } from '../../components/newTaskTabs'
-import { moveTaskTab } from '../../tabMove'
+import { resolvePaneRef, setFocusedPane, type PaneRef } from '../../components/paneFocus'
 import {
   pushRecentlyClosedTab,
   shiftRestorableClosedTab,
@@ -19,42 +23,27 @@ import {
 } from '../../recentlyClosedTabs'
 import type { AppStateCore } from './useAppStateCore'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
-import {
-  findTask,
-  insertTabAt,
-  mapPaneTabs,
-  mapTask,
-  paneOfTab,
-  patchTab,
-  renameTabInData,
-  type Pane
-} from './projectsData'
-import { cloneTaskState, withActiveTab, withTaskState } from './viewState'
+import { findTask, insertTabAt, mapTask, patchTab, renameTabInData } from './projectsData'
 
 export interface TabsActions {
-  addTab: (projectId: string, taskId: string, pane: Pane, type: TabType, arg?: string | CreateTabOptions) => Tab
-  removeTab: (projectId: string, taskId: string, pane: Pane, tabId: string) => Promise<void>
-  renameTab: (projectId: string, taskId: string, pane: Pane, tabId: string, title: string) => void
+  addTab: (projectId: string, taskId: string, pane: PaneRef, type: TabType, arg?: string | CreateTabOptions) => Tab
+  removeTab: (projectId: string, taskId: string, tabId: string) => Promise<void>
+  renameTab: (projectId: string, taskId: string, tabId: string, title: string) => void
   /** Restore the most recently closed tab that still has a home; returns the pane it went to. */
-  reopenClosedTab: () => Pane | null
-  updateTabUrl: (projectId: string, taskId: string, pane: Pane, tabId: string, url: string) => void
-  updateTabSessionId: (projectId: string, taskId: string, pane: Pane, tabId: string, sessionId: string) => void
-  convertClaudeTab: (projectId: string, taskId: string, pane: Pane, tabId: string, to: 'claude' | 'claude-chat') => void
-  setActiveTab: (projectId: string, taskId: string, pane: Pane, tabId: string) => void
-  moveTab: (projectId: string, taskId: string, fromPane: Pane, tabId: string, toPane: Pane, toIndex: number) => void
-  getTaskViewState: (task: Task) => TaskViewState
-  toggleSplit: (projectId: string, taskId: string) => void
-  setSplitRatio: (projectId: string, taskId: string, ratio: number) => void
-  openOrFocusDiffTab: (projectId: string, taskId: string, pane: Pane, filePath: string) => void
-  openOrFocusEditorTab: (projectId: string, taskId: string, pane: Pane, filePath: string) => void
+  reopenClosedTab: () => number | null
+  updateTabUrl: (projectId: string, taskId: string, tabId: string, url: string) => void
+  updateTabSessionId: (projectId: string, taskId: string, tabId: string, sessionId: string) => void
+  convertClaudeTab: (projectId: string, taskId: string, tabId: string, to: 'claude' | 'claude-chat') => void
+  setActiveTab: (projectId: string, taskId: string, tabId: string) => void
+  moveTab: (projectId: string, taskId: string, tabId: string, target: PaneDropTarget) => void
+  /** Move the tab into a new pane to the right of its own. */
+  splitTabRight: (projectId: string, taskId: string, tabId: string) => void
+  setPaneWidths: (projectId: string, taskId: string, widths: number[]) => void
+  openOrFocusDiffTab: (projectId: string, taskId: string, pane: PaneRef, filePath: string) => void
+  openOrFocusEditorTab: (projectId: string, taskId: string, pane: PaneRef, filePath: string) => void
 }
 
-/** The placeholder a tab add falls back to when its task is not in `projectsRef` yet. */
-function blankTask(taskId: string): Task {
-  return { id: taskId, name: '', panes: [] }
-}
-
-/** Tabs within a task, the split between its two panes, and recently-closed history. */
+/** Tabs within a task, its pane row, and recently-closed history. */
 export function useTabs(
   core: AppStateCore,
   deps: {
@@ -62,7 +51,7 @@ export function useTabs(
     confirmDiscardDirty: (tabIds: string[]) => Promise<'proceed' | 'cancel'>
   }
 ): TabsActions {
-  const { mutateProjects, projectsRef, updateWindowViewState, getTaskViewStateForTask } = core
+  const { mutateProjects, projectsRef, updateWindowViewState } = core
   const { connectSsh, confirmDiscardDirty } = deps
   const recentlyClosedTabsRef = useRef<RecentlyClosedTab[]>([])
 
@@ -78,95 +67,59 @@ export function useTabs(
     cleanupClosedTabHistory(next.evicted)
   }, [cleanupClosedTabHistory])
 
-  const renameTab = useCallback((
-    projectId: string,
-    taskId: string,
-    pane: Pane,
-    tabId: string,
-    title: string
-  ) => {
+  const renameTab = useCallback((projectId: string, taskId: string, tabId: string, title: string) => {
     const trimmed = title.trim()
     if (!trimmed) return
-    mutateProjects(prev => renameTabInData(prev, projectId, taskId, pane, tabId, trimmed))
+    mutateProjects(prev => renameTabInData(prev, projectId, taskId, tabId, trimmed))
   }, [mutateProjects])
 
   const addTab = useCallback((
     projectId: string,
     taskId: string,
-    pane: Pane,
+    pane: PaneRef,
     type: TabType,
     arg?: string | CreateTabOptions
   ) => {
     const options = typeof arg === 'string' ? { filePath: arg } : (arg ?? {})
     const tab = createTab(type, options)
+    // Resolved once, up front, so a replayed updater lands the tab in the same column.
+    const task = findTask(projectsRef.current, projectId, taskId)
+    const paneIndex = task ? resolvePaneRef(task, pane) : 0
 
-    mutateProjects(prev => mapPaneTabs(prev, projectId, taskId, pane, tabs => [...tabs, tab]))
-
-    updateWindowViewState(prev => {
-      const task = findTask(projectsRef.current, projectId, taskId)
-      const currentState = task ? getTaskViewStateForTask(task) : createTaskViewState(blankTask(taskId))
-      return {
-        ...prev,
-        taskStates: {
-          ...prev.taskStates,
-          [taskId]: withActiveTab(currentState, pane, tab.id)
-        }
-      }
-    })
+    mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => addTabToPane(candidate, paneIndex, tab)))
+    setFocusedPane(taskId, paneIndex)
 
     return tab
-  }, [mutateProjects, updateWindowViewState, getTaskViewStateForTask])
+  }, [mutateProjects])
 
-  const removeTab = useCallback(async (projectId: string, taskId: string, pane: Pane, tabId: string) => {
+  const removeTab = useCallback(async (projectId: string, taskId: string, tabId: string) => {
     if (await confirmDiscardDirty([tabId]) === 'cancel') return
 
     const task = findTask(projectsRef.current, projectId, taskId)
-    const tabIndex = task ? paneTabs(task, pane).findIndex(tab => tab.id === tabId) : -1
-    const removedTab = task && tabIndex >= 0 ? paneTabs(task, pane)[tabIndex] ?? null : null
-
-    if (removedTab && tabIndex >= 0) {
+    const at = task ? findTabLocation(task, tabId) : null
+    if (task && at) {
       rememberClosedTab({
         projectId,
         taskId,
-        pane,
-        index: tabIndex,
-        tab: removedTab
+        pane: at.pane,
+        index: at.index,
+        tab: task.panes[at.pane].tabs[at.index]
       })
     }
 
-    updateWindowViewState(prev => {
-      if (!task) return prev
-
-      const currentState = getTaskViewStateForTask(task)
-      const nextTabs = paneTabs(task, pane).filter(tab => tab.id !== tabId)
-      const wasActive = currentState.activeTab[pane] === tabId
-
-      return {
-        ...prev,
-        taskStates: {
-          ...prev.taskStates,
-          [taskId]: withActiveTab(
-            currentState,
-            pane,
-            wasActive ? (nextTabs[nextTabs.length - 1]?.id ?? null) : currentState.activeTab[pane]
-          )
-        }
-      }
-    })
-
-    mutateProjects(prev => mapPaneTabs(prev, projectId, taskId, pane, tabs => tabs.filter(tab => tab.id !== tabId)))
+    mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => removeTabFromTask(candidate, tabId)))
 
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-  }, [confirmDiscardDirty, mutateProjects, updateWindowViewState, getTaskViewStateForTask, rememberClosedTab])
+  }, [confirmDiscardDirty, mutateProjects, rememberClosedTab])
 
-  const reopenClosedTab = useCallback((): Pane | null => {
+  const reopenClosedTab = useCallback((): number | null => {
     const next = shiftRestorableClosedTab(recentlyClosedTabsRef.current, projectsRef.current)
     recentlyClosedTabsRef.current = next.history
     cleanupClosedTabHistory(next.stale)
 
     if (!next.entry) return null
 
-    const { projectId, taskId, pane, index, tab } = next.entry
+    const { projectId, taskId, index, tab } = next.entry
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = findTaskInProject(project, taskId)
     if (!project || !task) {
@@ -174,32 +127,24 @@ export function useTabs(
       return null
     }
 
+    // Its column may have closed with it: then it opens in the nearest one left.
+    const pane = Math.max(0, Math.min(next.entry.pane, task.panes.length - 1))
     mutateProjects(prev => insertTabAt(prev, projectId, taskId, pane, index, tab))
+    setFocusedPane(taskId, pane)
 
-    updateWindowViewState(prev => {
-      const currentState = getTaskViewStateForTask(task)
-      return {
-        ...prev,
-        selectedProjectId: projectId,
-        selectedTaskId: taskId,
-        taskStates: {
-          ...prev.taskStates,
-          [taskId]: withActiveTab(currentState, pane, tab.id)
-        }
-      }
-    })
+    updateWindowViewState(prev => ({ ...prev, selectedProjectId: projectId, selectedTaskId: taskId }))
 
     ensureRemoteConnected(projectId, project, connectSsh)
 
     return pane
-  }, [cleanupClosedTabHistory, connectSsh, mutateProjects, updateWindowViewState, getTaskViewStateForTask])
+  }, [cleanupClosedTabHistory, connectSsh, mutateProjects, updateWindowViewState])
 
-  const updateTabUrl = useCallback((projectId: string, taskId: string, pane: Pane, tabId: string, url: string) => {
-    mutateProjects(prev => patchTab(prev, projectId, taskId, pane, tabId, { url }))
+  const updateTabUrl = useCallback((projectId: string, taskId: string, tabId: string, url: string) => {
+    mutateProjects(prev => patchTab(prev, projectId, taskId, tabId, { url }))
   }, [mutateProjects])
 
-  const updateTabSessionId = useCallback((projectId: string, taskId: string, pane: Pane, tabId: string, sessionId: string) => {
-    mutateProjects(prev => patchTab(prev, projectId, taskId, pane, tabId, { sessionId }))
+  const updateTabSessionId = useCallback((projectId: string, taskId: string, tabId: string, sessionId: string) => {
+    mutateProjects(prev => patchTab(prev, projectId, taskId, tabId, { sessionId }))
   }, [mutateProjects])
 
   /**
@@ -208,9 +153,9 @@ export function useTabs(
    * a close runs, which is what the mounted component listens for), so the new one
    * resumes a session nothing else is writing to.
    */
-  const convertClaudeTab = useCallback((projectId: string, taskId: string, pane: Pane, tabId: string, to: 'claude' | 'claude-chat') => {
+  const convertClaudeTab = useCallback((projectId: string, taskId: string, tabId: string, to: 'claude' | 'claude-chat') => {
     const owner = findTask(projectsRef.current, projectId, taskId)
-    const tab = owner ? paneTabs(owner, pane).find(candidate => candidate.id === tabId) : undefined
+    const tab = owner ? taskTabs(owner).find(candidate => candidate.id === tabId) : undefined
     if (!tab || tab.type === to || (tab.type !== 'claude' && tab.type !== 'claude-chat')) return
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
     void window.api.scrollbackDelete(tabId)
@@ -218,89 +163,44 @@ export function useTabs(
     const defaultTitles = [AI_TAB_META.claude.label, CLAUDE_CHAT_LABEL]
     const title = defaultTitles.includes(tab.title) ? (to === 'claude' ? AI_TAB_META.claude.label : CLAUDE_CHAT_LABEL) : tab.title
     const sessionId = tab.sessionId ?? uuid()
-    mutateProjects(prev => patchTab(prev, projectId, taskId, pane, tabId, { type: to, title, sessionId }))
+    mutateProjects(prev => patchTab(prev, projectId, taskId, tabId, { type: to, title, sessionId }))
   }, [mutateProjects])
 
-  const setActiveTab = useCallback((projectId: string, taskId: string, pane: Pane, tabId: string) => {
+  const setActiveTab = useCallback((projectId: string, taskId: string, tabId: string) => {
+    const task = findTask(projectsRef.current, projectId, taskId)
+    const at = task ? findTabLocation(task, tabId) : null
+    if (!at) return
+    setFocusedPane(taskId, at.pane)
+    mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => setActiveTabInTask(candidate, tabId)))
+  }, [mutateProjects])
+
+  const moveTab = useCallback((projectId: string, taskId: string, tabId: string, target: PaneDropTarget) => {
     const task = findTask(projectsRef.current, projectId, taskId)
     if (!task) return
+    const moved = moveTabInTask(task, tabId, target)
+    if (moved === task) return
+    const landed = findTabLocation(moved, tabId)
+    if (landed) setFocusedPane(taskId, landed.pane)
+    mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => moveTabInTask(candidate, tabId, target)))
+  }, [mutateProjects])
 
-    updateWindowViewState(prev => {
-      const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
-      return {
-        ...prev,
-        taskStates: {
-          ...prev.taskStates,
-          [taskId]: withActiveTab(currentState, pane, tabId)
-        }
-      }
-    })
-  }, [updateWindowViewState])
-
-  const moveTab = useCallback((projectId: string, taskId: string, fromPane: Pane, tabId: string, toPane: Pane, toIndex: number) => {
+  const splitTabRight = useCallback((projectId: string, taskId: string, tabId: string) => {
     const task = findTask(projectsRef.current, projectId, taskId)
-    if (!task) return
+    const at = task ? findTabLocation(task, tabId) : null
+    if (!at) return
+    moveTab(projectId, taskId, tabId, { kind: 'split', pane: at.pane, side: 'right' })
+  }, [moveTab])
 
-    const currentState = getTaskViewStateForTask(task)
-    const next = moveTaskTab({
-      tabs: tabsByPane(task),
-      taskState: currentState,
-      fromPane,
-      tabId,
-      toPane,
-      toIndex
-    })
-
-    if (!next.moved) return
-
-    updateWindowViewState(prev => withTaskState(prev, taskId, next.taskState))
-    mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => withTabsByPane(candidate, next.tabs)))
-  }, [mutateProjects, updateWindowViewState, getTaskViewStateForTask])
-
-  const toggleSplit = useCallback((projectId: string, taskId: string) => {
-    const task = findTask(projectsRef.current, projectId, taskId)
-    if (!task) return
-
-    updateWindowViewState(prev => {
-      const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
-      return {
-        ...prev,
-        taskStates: {
-          ...prev.taskStates,
-          [taskId]: {
-            ...cloneTaskState(currentState),
-            splitOpen: !currentState.splitOpen
-          }
-        }
-      }
-    })
-  }, [updateWindowViewState])
-
-  const setSplitRatio = useCallback((projectId: string, taskId: string, ratio: number) => {
-    const task = findTask(projectsRef.current, projectId, taskId)
-    if (!task) return
-
-    updateWindowViewState(prev => {
-      const currentState = reconcileTaskViewState(task, prev.taskStates[taskId])
-      return {
-        ...prev,
-        taskStates: {
-          ...prev.taskStates,
-          [taskId]: {
-            ...cloneTaskState(currentState),
-            splitRatio: ratio
-          }
-        }
-      }
-    })
-  }, [updateWindowViewState])
+  const setPaneWidths = useCallback((projectId: string, taskId: string, widths: number[]) => {
+    mutateProjects(prev => mapTask(prev, projectId, taskId, task => setPaneWidthsInTask(task, widths)))
+  }, [mutateProjects])
 
   /** Focus the task's existing tab of `type` for `filePath`, or open one in `pane`. */
   const openOrFocusFileTab = useCallback((
     type: 'diff' | 'editor',
     projectId: string,
     taskId: string,
-    pane: Pane,
+    pane: PaneRef,
     filePath: string
   ) => {
     const task = findTask(projectsRef.current, projectId, taskId)
@@ -311,18 +211,18 @@ export function useTabs(
       t => t.filePath === filePath && (t.type === type || (type === 'editor' && t.type === 'notebook'))
     )
     if (existingTab) {
-      setActiveTab(projectId, taskId, paneOfTab(task, existingTab), existingTab.id)
+      setActiveTab(projectId, taskId, existingTab.id)
       return
     }
 
     addTab(projectId, taskId, pane, type === 'editor' && isNotebookFile(filePath) ? 'notebook' : type, filePath)
   }, [addTab, setActiveTab])
 
-  const openOrFocusDiffTab = useCallback((projectId: string, taskId: string, pane: Pane, filePath: string) => {
+  const openOrFocusDiffTab = useCallback((projectId: string, taskId: string, pane: PaneRef, filePath: string) => {
     openOrFocusFileTab('diff', projectId, taskId, pane, filePath)
   }, [openOrFocusFileTab])
 
-  const openOrFocusEditorTab = useCallback((projectId: string, taskId: string, pane: Pane, filePath: string) => {
+  const openOrFocusEditorTab = useCallback((projectId: string, taskId: string, pane: PaneRef, filePath: string) => {
     openOrFocusFileTab('editor', projectId, taskId, pane, filePath)
   }, [openOrFocusFileTab])
 
@@ -336,9 +236,8 @@ export function useTabs(
     convertClaudeTab,
     setActiveTab,
     moveTab,
-    getTaskViewState: getTaskViewStateForTask,
-    toggleSplit,
-    setSplitRatio,
+    splitTabRight,
+    setPaneWidths,
     openOrFocusDiffTab,
     openOrFocusEditorTab
   }
