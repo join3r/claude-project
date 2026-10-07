@@ -24,7 +24,7 @@ public actor MockDesktopConnection: DesktopConnection {
     private var state: ConnectionState = .idle
     private var runner: Task<Void, Never>?
     private var flipIndex = 0
-    private var newChatCount = 0
+    private var newCount = 0
     private var chats: [String: MockChatTranscript]
     /// The phone's one open chat (§6.3).
     private var openTab: String?
@@ -182,14 +182,16 @@ public actor MockDesktopConnection: DesktopConnection {
             }
             resolve(prompt, answer: answer, tabId: tabId)
             return .object([:])
-        case ChatOp.new:
-            let taskId: String
+        case TaskOp.newStream:
+            let parsed: StreamNewParams
             do {
-                taskId = try ChatNewParams.parse(params).taskId
+                parsed = try StreamNewParams.parse(params)
             } catch {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
-            return ChatNewResult(tabId: try addChat(taskId: taskId)).json
+            return StreamNewResult(streamId: try addStream(parsed)).json
+        case TaskOp.listBranches:
+            return try branchList(projectId: try string("projectId")).json
         case TaskOp.new:
             let parsed: TaskNewParams
             do {
@@ -273,22 +275,57 @@ public actor MockDesktopConnection: DesktopConnection {
         }
     }
 
-    /// `chat.new`: a fresh claude-chat tab at the end of the task, with an
-    /// empty transcript. The inbox with it goes out right away (the desktop
-    /// sends it with its next throttled `inbox` event).
-    private func addChat(taskId: String) throws -> String {
-        for p in inbox.projects.indices {
-            guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == taskId }) else { continue }
-            newChatCount += 1
-            let tabId = "tab-new-\(newChatCount)"
-            let now = Date().unixMilliseconds
-            inbox.projects[p].tasks[t].tabs.append(InboxTab(id: tabId, type: .claudeChat, title: "Claude", status: .idle, since: now))
-            inbox.generatedAt = now
-            chats[tabId] = MockChatTranscript(title: "Claude", status: MockChatTranscript.freshStatus(), items: [], prompts: [], details: [:])
-            continuation.yield(.inbox(inbox))
-            return tabId
+    /// The mock's stand-in for a shell-command project: no worktrees (§8.13).
+    static let shellProjectId = "p-dotfiles"
+    static let noWorktrees = "This project runs a shell command, so it has no folder to make a worktree in"
+
+    /// `branches.list`: `main`, then every worktree stream's branch, then any
+    /// made with `stream.new`.
+    private func branchList(projectId: String) throws -> BranchesListResult {
+        guard let project = inbox.projects.first(where: { $0.id == projectId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
         }
-        throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
+        if project.id == Self.shellProjectId {
+            throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: Self.noWorktrees)
+        }
+        var branches = ["main"]
+        for branch in project.streams.compactMap(\.branch) where !branches.contains(branch) { branches.append(branch) }
+        return BranchesListResult(branches: branches, defaultBase: "main")
+    }
+
+    /// `stream.new`: an empty stream at the end of the project's list, with a
+    /// branch when it asked for a worktree. The inbox with it goes out right away.
+    private func addStream(_ params: StreamNewParams) throws -> String {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == params.projectId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        var branch: String?
+        if params.worktree {
+            // Also answers `unsupported` for the shell-command project.
+            let branches = try branchList(projectId: params.projectId).branches
+            let name = params.branch ?? Self.branchSlug(params.name)
+            guard !name.isEmpty else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "The stream needs a branch name")
+            }
+            guard !branches.contains(name) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "Branch \"\(name)\" already exists")
+            }
+            if let base = params.baseBranch, !branches.contains(base) {
+                throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "Failed to create workspace: invalid reference: \(base)")
+            }
+            branch = name
+        }
+        newCount += 1
+        let streamId = "s-new-\(newCount)"
+        inbox.projects[p].streams.append(InboxStream(id: streamId, name: params.name, branch: branch))
+        inbox.generatedAt = Date().unixMilliseconds
+        continuation.yield(.inbox(inbox))
+        return streamId
+    }
+
+    /// The desktop's `branchSlug` (`StreamNaming.branchSlug`).
+    static func branchSlug(_ name: String) -> String {
+        StreamNaming.branchSlug(name)
     }
 
     /// `task.new`: a task at the end of the stream (default: the one last
@@ -302,8 +339,8 @@ public actor MockDesktopConnection: DesktopConnection {
         guard let stream = target else {
             throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")
         }
-        newChatCount += 1
-        let tabId = "tab-new-\(newChatCount)", taskId = "task-new-\(newChatCount)"
+        newCount += 1
+        let tabId = "tab-new-\(newCount)", taskId = "task-new-\(newCount)"
         let now = Date().unixMilliseconds
         let firstLine = prompt.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
         let name = firstLine.count > 50 ? String(firstLine.prefix(49)) + "…" : firstLine
@@ -567,9 +604,10 @@ public actor MockDesktopConnection: DesktopConnection {
         }
 
         continuation.yield(.features([
-            DesktopFeature.chatNew, DesktopFeature.taskNew, DesktopFeature.chatSettings,
+            DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
+            DesktopFeature.streamNew, DesktopFeature.branchesList,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -680,6 +718,7 @@ public enum MockInbox {
         let apiBugs = InboxStream(id: "s-api-bugs", name: "bugfixes")
         let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true)
         let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign")
+        let web240 = InboxStream(id: "s-web-240", name: "2.4.0", branch: "2.4.0")
         let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
         func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
                   eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil, snoozedUntil: Int64? = nil,
@@ -713,7 +752,7 @@ public enum MockInbox {
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),
                     ]),
                 ]),
-                InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin], tasks: [
+                InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin, web240], tasks: [
                     task("t-charts", "usage-charts", webMain, lastInteractedAt: ago(25), tabs: [
                         InboxTab(id: "tab-11", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Plan ready for review", topic: "Plan the settings page redesign"),
                         InboxTab(id: "tab-7", type: .terminal, title: "vite", status: .idle, since: ago(25)),
@@ -726,14 +765,18 @@ public enum MockInbox {
                     ]),
                 ]),
                 InboxProject(id: "p-infra", name: "infra", emoji: "🛠️", remote: true, streams: [infraMain], tasks: [
-                    task("t-k8s", "k8s-upgrade", infraMain, lastInteractedAt: ago(90), eventAt: ago(15), tabs: [
-                        InboxTab(id: "tab-9", type: .claude, title: "Claude Code", status: .idle, since: ago(90)),
+                    // Your turn: the agent finished after your last word.
+                    task("t-k8s", "k8s-upgrade", infraMain, lastInteractedAt: ago(90), eventAt: ago(15), unread: true, tabs: [
+                        InboxTab(id: "tab-9", type: .claude, title: "Claude Code", status: .idle, since: ago(15), topic: "Done: upgraded the staging cluster to 1.31"),
                         InboxTab(id: "tab-10", type: .terminal, title: "ssh prod-1", status: .working, since: ago(15), activity: "kubectl rollout"),
                     ]),
                     task("t-tail", "Terminal", infraMain, lastInteractedAt: ago(50), tabs: [
                         InboxTab(id: "tab-12", type: .terminal, title: "tail -f api.log", status: .working, since: ago(50)),
                     ]),
                 ]),
+                // No open task: the desktop screen's Quiet projects.
+                InboxProject(id: "p-dotfiles", name: "dotfiles", streams: [InboxStream(id: "s-dot-main", name: "main", isMain: true)], tasks: []),
+                InboxProject(id: "p-blog", name: "blog", emoji: "📚", streams: [InboxStream(id: "s-blog-main", name: "main", isMain: true)], tasks: []),
             ],
             pinned: [
                 InboxPin(projectId: "p-web", streamId: webMain.id, taskId: "t-charts"),

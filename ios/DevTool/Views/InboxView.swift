@@ -2,15 +2,18 @@ import DevToolKit
 import SwiftUI
 
 /// Every task of every paired desktop in the desktop inbox's groups (§8.3):
-/// Needs you, the rest by last activity, then Settled and Snoozed, collapsed.
+/// Needs you, Your turn and Quiet open; Working, Settled and Snoozed folded
+/// into one-line summaries. The toolbar switches to cards by project.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: TaskRef?
+    @State private var showQuiet = true
+    @State private var showWorking = false
     @State private var showSettled = false
     @State private var showSnoozed = false
     /// The row whose Snooze swipe is asking for a preset.
     @State private var snoozing: InboxEntry?
-    @AppStorage(InboxSettings.workingLastKey) private var workingLast = false
+    @AppStorage(InboxSettings.groupedKey) private var grouped = false
     @State private var newTask: NewTaskTarget?
     @State private var closing: CloseTaskRequest?
 
@@ -23,6 +26,14 @@ struct InboxView: View {
         .navigationTitle("Inbox")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation { grouped.toggle() }
+                } label: {
+                    Label(grouped ? "Show as list" : "Group by project",
+                          systemImage: grouped ? "list.bullet" : "rectangle.stack")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NewTaskToolbarButton(desktopIds: model.desktops.map(\.id), newTask: $newTask)
             }
@@ -47,50 +58,110 @@ struct InboxView: View {
     }
 
     private func list(now: Date) -> some View {
-        let partition = model.inboxPartition(now: now, workingLast: workingLast)
+        let partition = model.inboxPartition(now: now)
         return List(selection: $selection) {
             DesktopBanners(desktops: model.desktops)
             if partition.isEmpty {
                 emptyState
             }
-            if !partition.needsYou.isEmpty {
-                Section {
-                    ForEach(partition.needsYou) { row($0, group: .needsYou, now: now) }
-                } header: {
-                    GroupHeader(title: "Needs you", count: partition.needsYou.count)
-                }
+            if grouped {
+                byProject(partition, now: now)
+            } else {
+                flat(partition, now: now)
             }
-            if !partition.active.isEmpty {
-                Section {
-                    ForEach(partition.active) { row($0, group: .active, now: now) }
-                }
+            folded(partition, now: now)
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
+        .refreshable {
+            await model.refresh(model.desktops.map(\.id))
+        }
+    }
+
+    @ViewBuilder
+    private func flat(_ partition: InboxPartition, now: Date) -> some View {
+        if !partition.needsYou.isEmpty {
+            Section {
+                ForEach(partition.needsYou) { row($0, group: .needsYou, now: now) }
+            } header: {
+                GroupHeader(title: "Needs you", count: partition.needsYou.count, tint: .orange)
             }
-            if !partition.settled.isEmpty {
-                Section {
-                    if showSettled {
-                        ForEach(partition.settled) { row($0, group: .settled, now: now) }
-                    }
-                } header: {
-                    GroupHeader(title: "Settled", count: partition.settled.count, expanded: $showSettled)
-                }
+        }
+        if !partition.yourTurn.isEmpty {
+            Section {
+                ForEach(partition.yourTurn) { row($0, group: .yourTurn, now: now) }
+            } header: {
+                GroupHeader(title: "Your turn", count: partition.yourTurn.count, tint: .primary)
             }
-            if !partition.snoozed.isEmpty {
-                Section {
-                    if showSnoozed {
-                        ForEach(partition.snoozed) { row($0, group: .snoozed, now: now) }
-                    }
-                } header: {
-                    GroupHeader(title: "Snoozed", count: partition.snoozed.count, expanded: $showSnoozed)
-                } footer: {
-                    if !showSnoozed {
-                        Text(partition.snoozed.count == 1 ? "1 task hidden until it wakes" : "\(partition.snoozed.count) tasks hidden until they wake")
-                    }
+        }
+        if !partition.quiet.isEmpty {
+            Section {
+                if showQuiet {
+                    ForEach(partition.quiet) { row($0, group: .quiet, now: now) }
+                }
+            } header: {
+                GroupHeader(title: "Quiet", count: partition.quiet.count, tint: .primary, expanded: $showQuiet)
+            }
+        }
+    }
+
+    /// One card per project (per desktop): Needs you, Your turn and Quiet
+    /// tasks, the stream as a label on each row.
+    @ViewBuilder
+    private func byProject(_ partition: InboxPartition, now: Date) -> some View {
+        let groups = partition.byProject
+        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+            Section {
+                ProjectCardHeader(
+                    group: group,
+                    desktopName: model.desktops.count > 1 ? model.desktop(group.desktopId)?.name : nil,
+                    now: now
+                )
+                ForEach(group.entries) { entry in
+                    row(entry, group: entry.task.inboxGroup(now: now), now: now, inProject: true)
+                }
+            } header: {
+                if index == 0 {
+                    Text(byProjectCaption(partition))
+                        .font(.subheadline)
+                        .foregroundStyle(Color(.secondaryLabel))
+                        .textCase(nil)
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .refreshable {
-            await model.refresh(model.desktops.map(\.id))
+    }
+
+    /// "By project · 2 need you".
+    private func byProjectCaption(_ partition: InboxPartition) -> String {
+        let count = partition.needsYou.count
+        return count == 0 ? "By project" : "By project · \(count) need\(count == 1 ? "s" : "") you"
+    }
+
+    /// Working, Settled and Snoozed: a row each with a one-line summary,
+    /// opening in place.
+    @ViewBuilder
+    private func folded(_ partition: InboxPartition, now: Date) -> some View {
+        if !partition.working.isEmpty || !partition.settled.isEmpty || !partition.snoozed.isEmpty {
+            Section {
+                if !partition.working.isEmpty {
+                    FoldedGroupRow(kind: .working, entries: partition.working, expanded: $showWorking)
+                    if showWorking {
+                        ForEach(partition.working) { row($0, group: .working, now: now) }
+                    }
+                }
+                if !partition.settled.isEmpty {
+                    FoldedGroupRow(kind: .settled, entries: partition.settled, expanded: $showSettled)
+                    if showSettled {
+                        ForEach(partition.settled) { row($0, group: .settled, now: now) }
+                    }
+                }
+                if !partition.snoozed.isEmpty {
+                    FoldedGroupRow(kind: .snoozed, entries: partition.snoozed, expanded: $showSnoozed)
+                    if showSnoozed {
+                        ForEach(partition.snoozed) { row($0, group: .snoozed, now: now) }
+                    }
+                }
+            }
         }
     }
 
@@ -110,21 +181,21 @@ struct InboxView: View {
 
     /// A task row: selects the task. Swipe right to mark it read or unread,
     /// left to settle or snooze it; long-press for the rest.
-    private func row(_ entry: InboxEntry, group: InboxGroup, now: Date) -> some View {
+    private func row(_ entry: InboxEntry, group: InboxGroup, now: Date, inProject: Bool = false) -> some View {
         let ref = TaskRef(desktopId: entry.desktopId, taskId: entry.task.id)
         let offline = model.isOffline(entry.desktopId)
         let canTriage = model.supports(DesktopFeature.taskTriage, on: entry.desktopId) && !offline
         let unread = entry.task.unread
-        // The agent has the ball: nothing for you to do yet, so the row recedes.
-        let working = group != .snoozed && entry.task.status == .working
         return InboxRow(
             entry: entry,
             group: group,
-            desktopName: model.desktops.count > 1 ? model.desktop(entry.desktopId)?.name : nil,
+            inProject: inProject,
+            desktopName: !inProject && model.desktops.count > 1 ? model.desktop(entry.desktopId)?.name : nil,
             now: now
         )
         .tag(ref)
-        .opacity(offline || working ? 0.5 : 1)
+        // The agent has the ball: nothing for you to do yet, so the row recedes.
+        .opacity(offline || group == .working ? 0.5 : 1)
         .swipeActions(edge: .leading) {
             if canTriage {
                 Button {
@@ -154,7 +225,7 @@ struct InboxView: View {
                     }
                     .tint(.indigo)
                     settleButton(entry)
-                case .needsYou, .active:
+                case .needsYou, .yourTurn, .working, .quiet:
                     settleButton(entry)
                     snoozeButton(entry)
                 }
@@ -244,76 +315,249 @@ struct TriageMenuItems: View {
     }
 }
 
+/// An Inbox task, project first (Design › Rules): tile, **project** stream
+/// (left out on `main`), age; the task's name; what it needs. In a project's
+/// card (`inProject`) the tile and project go and the stream is a label.
 struct InboxRow: View {
     let entry: InboxEntry
     let group: InboxGroup
+    var inProject = false
     /// Set when more than one desktop is paired.
     let desktopName: String?
     let now: Date
 
     var body: some View {
-        let task = entry.task
-        let status = task.status
-        let activity = task.lastActivityAt
-        // A working task drops its dot, as on the desktop: the agent has the ball.
-        let showDot = task.unread && status != .working
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            UnreadDot()
-                .opacity(showDot ? 1 : 0)
-                .accessibilityHidden(!showDot)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(task.name)
-                        .font(.body.weight(task.unread ? .semibold : .regular))
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if activity > 0 {
-                        Text(InboxClock.age(now.unixMilliseconds - activity))
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Text(place)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    if group != .snoozed, status == .attention {
-                        Image(systemName: status.symbol)
-                            .foregroundStyle(status.color)
-                    }
-                    Text(InboxClock.subtitle(task, group: group, now: now))
-                        .foregroundStyle(status == .attention && group == .needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                        .lineLimit(1)
-                }
-                .font(.caption)
+        Group {
+            if inProject {
+                projectCardRow
+            } else {
+                flatRow
             }
         }
         .padding(.vertical, 2)
-        .alignmentGuide(.listRowSeparatorLeading) { d in d[.leading] }
         .accessibilityElement(children: .combine)
     }
 
-    /// "🚀 api-server · 0.5.0 · join3r-mbp" (`Project · Stream`), the desktop
-    /// only when several are paired.
-    private var place: String {
-        var parts: [String] = []
-        if let emoji = entry.project.emoji, !emoji.isEmpty {
-            parts.append("\(emoji) \(entry.project.name)")
-        } else {
-            parts.append(entry.project.name)
+    private var flatRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ProjectTileView(tile: entry.project.tile, size: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if showDot { UnreadDot().alignmentGuide(.firstTextBaseline) { $0[.bottom] } }
+                    Text(entry.project.name)
+                        .font(.body.weight(.bold))
+                        .layoutPriority(1)
+                    if let place = streamAndDesktop {
+                        Text(place)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    ageText
+                }
+                .lineLimit(1)
+                Text(entry.task.name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                needLine
+            }
         }
-        if !entry.task.streamName.isEmpty { parts.append(entry.task.streamName) }
-        if let desktopName { parts.append(desktopName) }
-        return parts.joined(separator: " · ")
+        .alignmentGuide(.listRowSeparatorLeading) { d in d[.leading] + 48 }
+    }
+
+    private var projectCardRow: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if showDot { UnreadDot().alignmentGuide(.firstTextBaseline) { $0[.bottom] } }
+                if let stream = streamName {
+                    Text(stream)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                } else {
+                    taskName
+                }
+                Spacer(minLength: 4)
+                ageText
+            }
+            .lineLimit(1)
+            if streamName != nil { taskName }
+            needLine
+        }
+    }
+
+    private var taskName: some View {
+        Text(entry.task.name)
+            .font(.body.weight(entry.task.unread ? .semibold : .regular))
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var ageText: some View {
+        if let age {
+            Text(age)
+                .font(.footnote)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var needLine: some View {
+        Text(need)
+            .font(.subheadline)
+            .foregroundStyle(group == .needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            .lineLimit(1)
+    }
+
+    /// A working task drops its dot, as on the desktop: the agent has the ball.
+    private var showDot: Bool {
+        entry.task.unread && group != .working
+    }
+
+    /// How long it has waited when it needs you, else since anything happened.
+    private var age: String? {
+        let task = entry.task
+        let at = (group == .needsYou ? task.since : nil) ?? task.lastActivityAt
+        return at > 0 ? InboxClock.age(now.unixMilliseconds - at) : nil
+    }
+
+    private var need: String {
+        group == .snoozed ? InboxClock.snoozed(entry.task, now: now) : TaskText.line(entry.task, now: now)
+    }
+
+    /// The stream, unless it is `main`.
+    private var streamName: String? {
+        let task = entry.task
+        let stream = entry.project.streams.first { $0.id == task.streamId }
+        if stream?.isMain == true { return nil }
+        let name = stream?.name ?? task.streamName
+        return name.isEmpty ? nil : name
+    }
+
+    private var streamAndDesktop: String? {
+        let parts = [streamName, desktopName].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// A project card's header in the grouped Inbox: tile, name, and a dot when
+/// a task needs you (orange) or is unread (blue).
+struct ProjectCardHeader: View {
+    let group: InboxProjectGroup
+    let desktopName: String?
+    let now: Date
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProjectTileView(tile: group.project.tile, size: 28)
+            Text(group.project.name)
+                .font(.headline)
+                .lineLimit(1)
+            if let desktopName {
+                Text(desktopName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if let dot {
+                Circle().fill(dot).frame(width: 8, height: 8)
+            }
+        }
+        .listRowBackground(Color(.secondarySystemGroupedBackground).opacity(0.6))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var dot: Color? {
+        if group.entries.contains(where: { $0.task.inboxGroup(now: now) == .needsYou }) { return .orange }
+        if group.entries.contains(where: \.task.unread) { return .accentColor }
+        return nil
+    }
+}
+
+/// Working, Settled or Snoozed folded to one row: its name, count and a
+/// one-line summary ("claude-project · DevTool Streams Redesign, …"). Tap to
+/// open the group in place.
+struct FoldedGroupRow: View {
+    enum Kind {
+        case working, settled, snoozed
+
+        var title: String {
+            switch self {
+            case .working: "Working"
+            case .settled: "Settled"
+            case .snoozed: "Snoozed"
+            }
+        }
+    }
+
+    let kind: Kind
+    let entries: [InboxEntry]
+    @Binding var expanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation { expanded.toggle() }
+        } label: {
+            HStack(spacing: 10) {
+                icon
+                    .frame(width: 14)
+                if kind == .working {
+                    VStack(alignment: .leading, spacing: 1) {
+                        titleLine
+                        Text(InboxPartition.summary(entries))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    (Text(kind.title) + Text("  \(entries.count) · \(InboxPartition.summary(entries))").foregroundStyle(.secondary))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+            }
+            .frame(minHeight: kind == .working ? 44 : 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(kind.title), \(entries.count)")
+        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+    }
+
+    private var titleLine: some View {
+        Text(kind.title) + Text("  \(entries.count)").foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        switch kind {
+        case .working:
+            Circle().fill(Color.accentColor.opacity(0.6)).frame(width: 8, height: 8)
+        case .settled:
+            Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+        case .snoozed:
+            Image(systemName: "moon.zzz").font(.footnote).foregroundStyle(.secondary)
+        }
     }
 }
 
 /// Phone-only Inbox preferences (the phone merges several desktops, so it
 /// does not follow any one desktop's setting).
 enum InboxSettings {
-    static let workingLastKey = "inboxWorkingLast"
+    /// Cards by project instead of the flat groups.
+    static let groupedKey = "inboxGroupedByProject"
+
+    /// "Move working tasks to the end": Working is its own folded group now.
+    static func dropRetiredKeys() {
+        UserDefaults.standard.removeObject(forKey: "inboxWorkingLast")
+    }
 }
 
 /// The blue dot of an unread task.
@@ -327,10 +571,11 @@ struct UnreadDot: View {
 }
 
 /// A group's section header with its count. With `expanded` it opens and
-/// closes the section, as the desktop's Settled and Snoozed groups do.
+/// closes the section, as the desktop's Quiet group does.
 struct GroupHeader: View {
     let title: String
     let count: Int
+    var tint: Color?
     var expanded: Binding<Bool>?
 
     var body: some View {
@@ -358,8 +603,9 @@ struct GroupHeader: View {
                     .rotationEffect(.degrees(open ? 90 : 0))
             }
             Text(title)
+                .foregroundStyle(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
             Text("\(count)")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             Spacer()
         }
         .font(.subheadline.weight(.semibold))
@@ -375,7 +621,7 @@ extension SnoozePreset {
     }
 }
 
-/// The desktop inbox's row text (`rowSubtitle`, `formatWaitTime`).
+/// The desktop inbox's clock text (`formatWaitTime`).
 enum InboxClock {
     /// "45s", "4m", "2h", "3d".
     static func wait(_ ms: Int64) -> String {
@@ -393,31 +639,11 @@ enum InboxClock {
         ms < 60_000 ? "now" : wait(ms)
     }
 
-    /// What the task is doing or asking, how long it has waited, or when it wakes.
-    static func subtitle(_ task: InboxTask, group: InboxGroup, now: Date) -> String {
-        let nowMs = now.unixMilliseconds
-        if group == .snoozed {
-            if task.snoozeUntilAttention { return "Snoozed until it needs you" }
-            if let until = task.snoozedUntil { return "Snoozed for \(wait(until - nowMs))" }
-            return "Snoozed"
-        }
-        let status = task.status
-        let line = activity(task)
-        switch status {
-        case .attention:
-            let label = line ?? "Needs you"
-            return task.since.map { "\(label) · waiting \(wait(nowMs - $0))" } ?? label
-        case .working:
-            let label = line ?? "Working"
-            return task.since.map { "\(label) · \(wait(nowMs - $0))" } ?? label
-        case .exited:
-            return "Exited"
-        default:
-            if let line { return line }
-            let last = task.lastActivityAt
-            guard last > 0 else { return "No activity yet" }
-            return nowMs - last < 60_000 ? "Last activity just now" : "Last activity \(wait(nowMs - last)) ago"
-        }
+    /// A snoozed row's line: when it wakes.
+    static func snoozed(_ task: InboxTask, now: Date) -> String {
+        if task.snoozeUntilAttention { return "Snoozed until it needs you" }
+        if let until = task.snoozedUntil { return "Snoozed for \(wait(until - now.unixMilliseconds))" }
+        return "Snoozed"
     }
 
     /// What the task is doing: the desktop picks it from the tab that sets the

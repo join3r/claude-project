@@ -105,6 +105,21 @@ describe('adding, activating and removing tabs', () => {
     expect(addTabToPane(once, 1, tab('z'))).toBe(once)
   })
 
+  it('refuses a second agent tab, chat or terminal: a task has one agent', () => {
+    const base = task([{ tabs: ['agent', 'b'] }], { mainTabId: 'agent' })
+    for (const type of ['claude', 'claude-chat', 'codex', 'pi'] as const) {
+      expect(addTabToPane(base, 0, tab('z', type))).toBe(base)
+    }
+    expect(ids(addTabToPane(base, 0, tab('z', 'browser')))).toEqual([['agent', 'b', 'z']])
+    // A terminal task can still take its first agent.
+    expect(ids(addTabToPane(task([{ tabs: ['a'] }]), 0, tab('z', 'claude-chat')))).toEqual([['a', 'z']])
+  })
+
+  it('never inserts ahead of the main tab', () => {
+    const base = task([{ tabs: ['agent', 'b'] }], { mainTabId: 'agent' })
+    expect(ids(addTabToPane(base, 0, tab('z'), { index: 0 }))).toEqual([['agent', 'z', 'b']])
+  })
+
   it('auto-closes a pane when its last tab closes', () => {
     const base = task([{ tabs: ['a'], width: 0.2 }, { tabs: ['b'], width: 0.3 }, { tabs: ['c'], width: 0.5 }])
     const next = removeTabFromTask(base, 'b')
@@ -226,5 +241,18 @@ describe('resizing', () => {
     expect(widths(next)).toEqual([0.75, 0.25])
     expect(setPaneWidths(next, [0.75, 0.25])).toBe(next)
     expect(setPaneWidths(base, [1])).toBe(base)
+  })
+})
+
+describe('the main tab stays first', () => {
+  const base = task([{ tabs: ['agent', 'b', 'c'] }, { tabs: ['d'] }], { mainTabId: 'agent' })
+
+  it('keeps other tabs from being dropped ahead of it', () => {
+    expect(ids(moveTabInTask(base, 'c', { kind: 'tab', pane: 0, index: 0 }))).toEqual([['agent', 'c', 'b'], ['d']])
+  })
+
+  it('does not move it back within its pane, and puts it first in another', () => {
+    expect(ids(moveTabInTask(base, 'agent', { kind: 'tab', pane: 0, index: 3 }))).toEqual(ids(base))
+    expect(ids(moveTabInTask(base, 'agent', { kind: 'tab', pane: 1, index: 1 }))).toEqual([['b', 'c'], ['agent', 'd']])
   })
 })

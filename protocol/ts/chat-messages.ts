@@ -21,20 +21,10 @@ export type ChatOpName = (typeof ChatOp)[keyof typeof ChatOp]
 export const CHAT_OPS: readonly string[] = Object.values(ChatOp)
 
 /**
- * `chat.new` (SPEC.md §8.2). Kept out of {@link ChatOp}: it names a task, not a
- * chat tab, so it doesn't go through {@link parseChatParams}.
- */
-export const CHAT_NEW_OP = 'chat.new'
-/** The handshake feature (§8.1) a desktop lists when it answers `chat.new`. */
-export const CHAT_NEW_FEATURE = 'chat.new'
-
-export interface ChatNewParams { taskId: string }
-export interface ChatNewResult { tabId: string }
-
-/**
  * `task.new` (SPEC.md §8.4): a new task in one of a project's streams (absent: the
  * stream the project was last used in), with one claude-chat tab that starts on
- * `prompt`. Like `chat.new` it names no tab, so it has parsers of its own.
+ * `prompt`. It names no tab, so it has parsers of its own. (It replaced `chat.new`,
+ * §8.2, which is retired.)
  */
 export const TASK_NEW_OP = 'task.new'
 /** The handshake feature (§8.1) a desktop lists when it answers `task.new`. */
@@ -90,6 +80,30 @@ export type TaskTriageAction = (typeof TASK_TRIAGE_ACTIONS)[number]
 
 /** A `snooze` carries exactly one of `until` and `untilAttention`; the other actions carry neither. */
 export interface TaskTriageParams { taskId: string; action: TaskTriageAction; until?: number; untilAttention?: true }
+
+/**
+ * `stream.new` (SPEC.md §8.12): a new stream at the end of a project's list, as the
+ * desktop's New stream dialog makes it: on a new worktree (`worktree: true`, branch
+ * `branch` forked from `baseBranch`) or in the project folder.
+ */
+export const STREAM_NEW_OP = 'stream.new'
+/** The handshake feature (§8.1) a desktop lists when it answers `stream.new`. */
+export const STREAM_NEW_FEATURE = 'stream.new'
+
+/** `branch` and `baseBranch` are only kept with `worktree: true`. */
+export interface StreamNewParams { projectId: string; name: string; worktree: boolean; branch?: string; baseBranch?: string }
+export interface StreamNewResult { streamId: string }
+
+/**
+ * `branches.list` (SPEC.md §8.13): a project's local branches, for the New stream
+ * sheet's From picker, and the one the desktop's dialog picks first.
+ */
+export const BRANCHES_LIST_OP = 'branches.list'
+/** The handshake feature (§8.1) a desktop lists when it answers `branches.list`. */
+export const BRANCHES_LIST_FEATURE = 'branches.list'
+
+export interface BranchesListParams { projectId: string }
+export interface BranchesListResult { branches: string[]; defaultBase: string }
 
 /**
  * `chat.settings` (SPEC.md §8.5): change an open chat's permission mode, model or
@@ -618,11 +632,6 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
   }
 }
 
-/** `chat.new` params (the desktop's side). Throws ProtocolError on a missing `taskId`. */
-export function parseChatNewParams(params: unknown): ChatNewParams {
-  return { taskId: str(obj(params, 'params'), 'taskId') }
-}
-
 /**
  * `task.new` params (the desktop's side). Throws ProtocolError — `bad-request` — on
  * a missing `projectId`, a blank prompt or one over {@link ChatLimits.send}
@@ -748,9 +757,51 @@ export function parseTaskNewResult(value: unknown): TaskNewResult {
   return { taskId: str(o, 'taskId'), tabId: str(o, 'tabId') }
 }
 
-/** `chat.new` result (the phone's side). */
-export function parseChatNewResult(value: unknown): ChatNewResult {
-  return { tabId: str(obj(value, 'result'), 'tabId') }
+/**
+ * `stream.new` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `projectId`, a blank `name`, a `worktree` that isn't a boolean, or a blank
+ * `branch` or `baseBranch` with `worktree: true`. `name` and `branch` come back
+ * trimmed; without a worktree `branch` and `baseBranch` are dropped.
+ */
+export function parseStreamNewParams(params: unknown): StreamNewParams {
+  const o = obj(params, 'params')
+  const projectId = str(o, 'projectId')
+  const name = str(o, 'name').trim()
+  if (!name) fail('name is empty')
+  const worktree = bool(o, 'worktree')
+  const out: StreamNewParams = { projectId, name, worktree }
+  if (!worktree) return out
+  const branch = optStr(o, 'branch')?.trim()
+  if (branch !== undefined) {
+    if (!branch) fail('branch is empty')
+    out.branch = branch
+  }
+  const baseBranch = optStr(o, 'baseBranch')
+  if (baseBranch !== undefined) {
+    if (!baseBranch.trim()) fail('baseBranch is empty')
+    out.baseBranch = baseBranch
+  }
+  return out
+}
+
+/** `stream.new` result (the phone's side). */
+export function parseStreamNewResult(value: unknown): StreamNewResult {
+  return { streamId: str(obj(value, 'result'), 'streamId') }
+}
+
+/** `branches.list` params (the desktop's side). Throws ProtocolError on a missing `projectId`. */
+export function parseBranchesListParams(params: unknown): BranchesListParams {
+  return { projectId: str(obj(params, 'params'), 'projectId') }
+}
+
+/** `branches.list` result (the phone's side). A branch that isn't a string throws. */
+export function parseBranchesListResult(value: unknown): BranchesListResult {
+  const o = obj(value, 'result')
+  const branches = arr(o, 'branches').map((branch) => {
+    if (typeof branch !== 'string') fail('branches must be strings')
+    return branch
+  })
+  return { branches, defaultBase: str(o, 'defaultBase') }
 }
 
 export function parseChatOpenResult(value: unknown): ChatOpenResult {

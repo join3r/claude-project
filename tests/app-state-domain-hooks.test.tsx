@@ -131,7 +131,7 @@ describe('useTabs', () => {
     await loaded(hook)
 
     let tabId = ''
-    act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal').id })
+    act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal')!.id })
 
     const task = workTask(hook.result.current.core.projectsData)
     expect(task.panes).toHaveLength(1)
@@ -139,20 +139,39 @@ describe('useTabs', () => {
     expect(task.panes[0].activeTabId).toBe(tabId)
   })
 
+  it('refuses a second agent tab: a task has one agent', async () => {
+    const hook = mountTabs()
+    await loaded(hook)
+
+    let first: ReturnType<typeof hook.result.current.tabs.addTab> = null
+    act(() => { first = hook.result.current.tabs.addTab('p1', 't1', 0, 'claude-chat') })
+    expect(first).not.toBeNull()
+    for (const type of ['claude-chat', 'claude', 'codex', 'pi'] as const) {
+      let second: ReturnType<typeof hook.result.current.tabs.addTab> = null
+      act(() => { second = hook.result.current.tabs.addTab('p1', 't1', 0, type) })
+      expect(second).toBeNull()
+    }
+    // Everything else still opens next to the agent.
+    act(() => { hook.result.current.tabs.addTab('p1', 't1', 0, 'browser') })
+    const types = taskTabs(workTask(hook.result.current.core.projectsData)).map(t => t.type)
+    expect(types).toEqual(['terminal', 'claude-chat', 'browser'])
+  })
+
   it('splits a tab off to the right, then closes the pane its last tab leaves', async () => {
     const hook = mountTabs()
     await loaded(hook)
 
     let tabId = ''
-    act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal').id })
+    act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal')!.id })
     act(() => { hook.result.current.tabs.splitTabRight('p1', 't1', tabId) })
     let task = workTask(hook.result.current.core.projectsData)
     expect(task.panes.map(pane => pane.tabs.map(t => t.id))).toEqual([['a'], [tabId]])
     expect(task.panes.map(pane => pane.width)).toEqual([0.5, 0.5])
 
+    // Dropped ahead of the main tab, it lands just after it: the main tab stays first.
     act(() => { hook.result.current.tabs.moveTab('p1', 't1', tabId, { kind: 'tab', pane: 0, index: 0 }) })
     task = workTask(hook.result.current.core.projectsData)
-    expect(task.panes.map(pane => pane.tabs.map(t => t.id))).toEqual([[tabId, 'a']])
+    expect(task.panes.map(pane => pane.tabs.map(t => t.id))).toEqual([['a', tabId]])
     expect(task.panes[0]).toMatchObject({ activeTabId: tabId, width: 1 })
   })
 
@@ -161,7 +180,7 @@ describe('useTabs', () => {
     await loaded(hook)
 
     let added = ''
-    act(() => { added = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal').id })
+    act(() => { added = hook.result.current.tabs.addTab('p1', 't1', 0, 'terminal')!.id })
     // The main tab closes only with its task.
     expect(workTask(hook.result.current.core.projectsData).mainTabId).toBe('a')
     await act(async () => { await hook.result.current.tabs.removeTab('p1', 't1', 'a') })

@@ -44,7 +44,7 @@ import Testing
         let events = EventRecorder(mock)
         await mock.start()
         try await events.waitFor(RelayConnectionTests.isInbox)
-        let tabId = try await mock.newChat(taskId: "t-auth")
+        let tabId = "tab-1"
         let opened = try await mock.openChat(tabId: tabId)
         #expect(opened.view.status.settings?.models.isEmpty == false)
         let stream = await mock.chatEvents()

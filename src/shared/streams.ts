@@ -4,7 +4,7 @@
  * move, resize) live in `panes.ts`.
  */
 import { isAgentTabType } from './types'
-import type { Project, Stream, Tab, Task, TaskPane, WorkspaceConfig } from './types'
+import type { Project, Stream, Tab, TabType, Task, TaskPane, WorkspaceConfig } from './types'
 import { joinWorkspaceDir, retargetPath } from './workspace-path'
 
 // --- Tasks across a project's streams ---------------------------------------
@@ -107,6 +107,26 @@ export function addTaskToStream(project: Project, streamId: string | null, task:
   }
 }
 
+/**
+ * The stream the New stream dialog (and a phone's `stream.new`) creates: a worktree,
+ * or the project folder when `workspace` is absent.
+ */
+export function makeStreamWithId(id: string, name: string, workspace?: WorkspaceConfig): Stream {
+  return { id, name, ...(workspace ? { workspace } : {}), tasks: [] }
+}
+
+/** Add `stream` at the end of the project's list. One already there is left alone. */
+export function addStreamToProject(project: Project, stream: Stream): Project {
+  return project.streams.some(candidate => candidate.id === stream.id)
+    ? project
+    : { ...project, streams: [...project.streams, stream] }
+}
+
+/** Whether a stream may offer a worktree: not for a shell-command project. */
+export function streamWorktreeSupported(project: Project): boolean {
+  return !project.shellCommand
+}
+
 /** The task the project was last left on, when it still exists. */
 export function projectLastTaskId(project: Project): string | undefined {
   const stream = project.streams.find(candidate => candidate.id === project.lastStreamId)
@@ -136,6 +156,15 @@ export function taskTabs(task: Task): Tab[] {
 /** The task's main tab (its agent or terminal) closes only with the task. */
 export function isMainTab(task: Task, tabId: string): boolean {
   return task.mainTabId === tabId
+}
+
+/**
+ * Whether `type` may join `task`: a task has one agent (Claude chat or a terminal
+ * agent), so an agent tab is refused when the task already holds one. A second
+ * agent is a new task.
+ */
+export function canAddTabType(task: Task, type: TabType): boolean {
+  return !isAgentTabType(type) || !taskTabs(task).some(tab => isAgentTabType(tab.type))
 }
 
 export function taskTabIds(task: Task): string[] {

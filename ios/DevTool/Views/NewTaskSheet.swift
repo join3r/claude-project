@@ -83,8 +83,9 @@ struct NewTaskToolbarButton: View {
     }
 }
 
-/// "New task" (§8.3, §8.4): the project, its stream, the first prompt and a
-/// permission mode. The stream defaults to the one the project was last used
+/// "New task" (§8.3, §8.4), project first: the project, its stream, the
+/// agent (a Claude chat: what `task.new` starts), a permission mode and the
+/// first prompt. The stream defaults to the one the project was last used
 /// in. The desktop names the task after the prompt and starts Claude on it in
 /// the stream's folder; the chat opens as soon as the task shows up in the inbox.
 struct NewTaskSheet: View {
@@ -116,27 +117,7 @@ struct NewTaskSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("What should Claude work on?", text: $prompt, axis: .vertical)
-                        .lineLimit(4...12)
-                        .focused($focused)
-                        .disabled(sending)
-                } footer: {
-                    Text("The task is named after the prompt's first line.")
-                }
-                Section {
-                    Picker("Project", selection: $selection) {
-                        if desktops.count > 1 {
-                            ForEach(desktops, id: \.desktop.id) { entry in
-                                Section(entry.desktop.name) {
-                                    projectRows(entry.projects, desktopId: entry.desktop.id)
-                                }
-                            }
-                        } else if let entry = desktops.first {
-                            projectRows(entry.projects, desktopId: entry.desktop.id)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    .disabled(sending)
+                    projectRow(desktops)
                     let streams = selectedProject?.streams ?? []
                     if streams.count > 1 {
                         Picker("Stream", selection: $streamId) {
@@ -147,6 +128,23 @@ struct NewTaskSheet: View {
                         }
                         .pickerStyle(.navigationLink)
                         .disabled(sending)
+                    } else if let stream = selectedStream ?? streams.first {
+                        LabeledContent("Stream") { StreamLabel(stream: stream) }
+                    }
+                } footer: {
+                    if let selection, model.isOffline(selection.desktopId) {
+                        Text("\(model.desktop(selection.desktopId)?.name ?? "This desktop") is offline.")
+                    } else if let stream = selectedStream, let branch = stream.branch {
+                        Text("Works in the \(stream.name) worktree, on \(branch).")
+                    }
+                }
+                Section {
+                    // `task.new` starts a Claude chat; other agents start on the desktop.
+                    LabeledContent("Agent") {
+                        HStack(spacing: 6) {
+                            Image(systemName: "bubble.left")
+                            Text("Claude chat")
+                        }
                     }
                     Picker("Mode", selection: $mode) {
                         Text("Default").tag("")
@@ -155,12 +153,16 @@ struct NewTaskSheet: View {
                         }
                     }
                     .disabled(sending)
+                }
+                Section {
+                    TextField("What should Claude work on?", text: $prompt, axis: .vertical)
+                        .lineLimit(5...12)
+                        .focused($focused)
+                        .disabled(sending)
+                } header: {
+                    Text("What should it do?")
                 } footer: {
-                    if let selection, model.isOffline(selection.desktopId) {
-                        Text("\(model.desktop(selection.desktopId)?.name ?? "This desktop") is offline.")
-                    } else if let stream = selectedStream, stream.branch != nil {
-                        Text("Claude works in the \(stream.name) worktree.")
-                    }
+                    Text("The task is named from this prompt.")
                 }
                 if let error {
                     Section {
@@ -197,9 +199,32 @@ struct NewTaskSheet: View {
         }
     }
 
+    /// The project, first and bold with its tile: fixed when the sheet came
+    /// from a project or stream, else a picker.
+    @ViewBuilder
+    private func projectRow(_ desktops: [(desktop: DesktopRecord, projects: [InboxProject])]) -> some View {
+        if target.project != nil, let project = selectedProject {
+            LabeledContent("Project") { ProjectNameLabel(project: project) }
+        } else {
+            Picker("Project", selection: $selection) {
+                if desktops.count > 1 {
+                    ForEach(desktops, id: \.desktop.id) { entry in
+                        Section(entry.desktop.name) {
+                            projectRows(entry.projects, desktopId: entry.desktop.id)
+                        }
+                    }
+                } else if let entry = desktops.first {
+                    projectRows(entry.projects, desktopId: entry.desktop.id)
+                }
+            }
+            .pickerStyle(.navigationLink)
+            .disabled(sending)
+        }
+    }
+
     private func projectRows(_ projects: [InboxProject], desktopId: String) -> some View {
         ForEach(projects) { project in
-            ProjectHeader(project: project, desktopName: nil)
+            ProjectNameLabel(project: project)
                 .tag(Optional(NewTaskProject(desktopId: desktopId, projectId: project.id)))
         }
     }
@@ -243,5 +268,25 @@ struct NewTaskSheet: View {
             self.error = error.localizedDescription
             sending = false
         }
+    }
+}
+
+/// A project's tile and bold name, as the New task sheet leads with it.
+struct ProjectNameLabel: View {
+    let project: InboxProject
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProjectTileView(tile: project.tile, size: 22)
+            Text(project.name)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+            if project.remote {
+                Image(systemName: "network")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Remote")
+            }
+        }
+        .lineLimit(1)
     }
 }

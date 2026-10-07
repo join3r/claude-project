@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { CHAT_IMAGE_OP, CHAT_NEW_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_IMAGE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent } from './chat-messages.ts'
 import type { ChatViewEvent } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -183,12 +183,13 @@ export const AppOp = {
   ChatAnswer: ChatOp.Answer,
   ChatInterrupt: ChatOp.Interrupt,
   ChatDetail: ChatOp.Detail,
-  ChatNew: CHAT_NEW_OP,
   TaskNew: TASK_NEW_OP,
   TaskClose: TASK_CLOSE_OP,
   TabClose: TAB_CLOSE_OP,
   PinSet: PIN_SET_OP,
   TaskTriage: TASK_TRIAGE_OP,
+  StreamNew: STREAM_NEW_OP,
+  BranchesList: BRANCHES_LIST_OP,
   ChatSettings: CHAT_SETTINGS_OP,
   ChatImage: CHAT_IMAGE_OP,
   PushRegister: PushOp.Register,

@@ -32,14 +32,11 @@ describe('window view state', () => {
   it('builds an initial window view state from stored selection', () => {
     const state = buildWindowViewState(
       projects,
-      { ...DEFAULT_CONFIG, lastProjectId: 'project-1', lastTaskId: 'task-1' },
-      { selectedTagIds: ['tag-1', 'missing-tag'] },
-      [{ id: 'tag-1', name: 'work' }]
+      { ...DEFAULT_CONFIG, lastProjectId: 'project-1', lastTaskId: 'task-1' }
     )
 
     expect(state.selectedProjectId).toBe('project-1')
     expect(state.selectedTaskId).toBe('task-1')
-    expect(state.selectedTagIds).toEqual(['tag-1'])
   })
 
   it('prefers a seeded view state when opening a second window', () => {
@@ -54,11 +51,11 @@ describe('window view state', () => {
     expect(state.taskStates['task-1']).toEqual({ fileBrowserOpen: true, fileBrowserActiveTab: 'git' })
   })
 
-  it('drops the pane fields older builds kept per window, and states of deleted tasks', () => {
+  it('drops the pane fields older builds kept per window, the old tag filter, and states of deleted tasks', () => {
     const state = {
       selectedProjectId: 'project-1',
       selectedTaskId: 'task-1',
-      selectedTagIds: [],
+      selectedTagIds: ['tag-1'],
       expandedProjectIds: [],
       taskStates: {
         'task-1': {
@@ -75,6 +72,7 @@ describe('window view state', () => {
 
     expect(next.taskStates['task-1']).toEqual({ fileBrowserOpen: false })
     expect(next.taskStates['deleted-task']).toBeUndefined()
+    expect(next).not.toHaveProperty('selectedTagIds')
   })
 
   it('seeds expandedProjectIds from the resolved selection when seed has none', () => {
@@ -102,7 +100,6 @@ describe('window view state', () => {
       {
         selectedProjectId: 'project-1',
         selectedTaskId: null,
-        selectedTagIds: [],
         expandedProjectIds: ['project-1', 'missing-project'],
         taskStates: {},
         fileBrowserOpen: false,

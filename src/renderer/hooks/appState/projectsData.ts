@@ -8,9 +8,11 @@ import { v4 as uuid } from 'uuid'
 import { createMainStream, pinnedItemKey } from '../../../shared/types'
 import type { PinnedItem, Project, ProjectsData, Stream, Tab, Tag, Task, WorkspaceConfig } from '../../../shared/types'
 import {
+  addStreamToProject,
   addTaskToStream,
   findStreamOfTask,
   findTaskInProject,
+  makeStreamWithId,
   mapTaskInProject,
   resolveMainTabId,
   singlePane,
@@ -36,7 +38,7 @@ export function makeTask(name: string, initialTabs: Tab[]): Task {
 
 /** The stream literal the new-stream dialog creates: a worktree, or the project folder. */
 export function makeStream(name: string, workspace?: WorkspaceConfig): Stream {
-  return { id: uuid(), name, ...(workspace ? { workspace } : {}), tasks: [] }
+  return makeStreamWithId(uuid(), name, workspace)
 }
 
 export function tabIdsOfTask(task: Task): string[] {
@@ -148,11 +150,7 @@ export function appendTaskToProject(data: ProjectsData, projectId: string, task:
 
 /** Add a stream at the end of the project's list. A replay that finds it there is a no-op. */
 export function addStreamInData(data: ProjectsData, projectId: string, stream: Stream): ProjectsData {
-  return mapProject(data, projectId, project => (
-    project.streams.some(candidate => candidate.id === stream.id)
-      ? project
-      : { ...project, streams: [...project.streams, stream] }
-  ))
+  return mapProject(data, projectId, project => addStreamToProject(project, stream))
 }
 
 /**

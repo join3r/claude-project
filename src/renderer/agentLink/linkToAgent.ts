@@ -59,7 +59,7 @@ export function useLinkToAgent(projectId: string, taskId: string): (text: string
     if (!task) return false
     const tab = pickAgentTarget(task, getAgentRecency(taskId))
     if (!tab) {
-      showAgentLinkNotice('No agent tab in this task. Open Pi, Claude or Codex to link to it.')
+      showAgentLinkNotice('This task has no agent. Start a Claude, Codex or Pi task to link to it.')
       return false
     }
     setActiveTab(projectId, taskId, tab.id)

@@ -35,7 +35,7 @@ export function registerWorkspaceHandlers(ipc: IpcRegistrar, deps: WorkspaceDeps
 
 type WorkspaceGit = Pick<WorkspaceDeps, 'workspaceManager' | 'remoteWorkspaceManager' | 'ensureSshConnected' | 'socketPath'>
 
-/** The repository's local branches, over SSH for a remote project. Also used by the phone's `task.new`. */
+/** The repository's local branches, over SSH for a remote project. Also used by the phone's `branches.list` and `stream.new`. */
 export async function listWorkspaceBranches(deps: WorkspaceGit, request: WorkspaceTarget): Promise<string[]> {
   if (request.sshConfig && request.projectId) {
     await deps.ensureSshConnected(request.projectId, request.sshConfig)
@@ -48,7 +48,7 @@ export async function listWorkspaceBranches(deps: WorkspaceGit, request: Workspa
   return deps.workspaceManager.listBranches(request.projectDir)
 }
 
-/** A worktree on a new branch, over SSH for a remote project. Also used by the phone's `task.new`. */
+/** A worktree on a new branch, over SSH for a remote project. Also used by the phone's `stream.new`. */
 export async function createWorkspace(deps: WorkspaceGit, request: WorkspaceCreateRequest) {
   const { projectId, sshConfig } = request
   const result = sshConfig && projectId

@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -155,10 +155,14 @@ describe('M2 vectors', () => {
     for (const s of file.invalid.params) expect(() => parseChatParams(s.op, JSON.parse(s.json)), s.json).toThrow()
     for (const s of file.invalid.results) expect(() => parseChatResult(s.op, JSON.parse(s.json)), s.json).toThrow()
     for (const s of file.invalid.events) expect(() => parseAppMessage(s), s).toThrow()
-    for (const s of file.new.params) expect(parseChatNewParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
-    for (const s of file.new.results) expect(parseChatNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
-    for (const s of file.new.invalid.params) expect(() => parseChatNewParams(JSON.parse(s)), s).toThrow()
-    for (const s of file.new.invalid.results) expect(() => parseChatNewResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.streamNew.params) expect(parseStreamNewParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.streamNew.results) expect(parseStreamNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.streamNew.invalid.params) expect(() => parseStreamNewParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.streamNew.invalid.results) expect(() => parseStreamNewResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.branchesList.params) expect(parseBranchesListParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.branchesList.results) expect(parseBranchesListResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.branchesList.invalid.params) expect(() => parseBranchesListParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.branchesList.invalid.results) expect(() => parseBranchesListResult(JSON.parse(s)), s).toThrow()
     for (const s of file.taskNew.params) expect(parseTaskNewParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.taskNew.results) expect(parseTaskNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.taskNew.invalid.params) expect(() => parseTaskNewParams(JSON.parse(s)), s).toThrow()

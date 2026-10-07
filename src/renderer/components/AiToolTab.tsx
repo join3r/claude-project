@@ -778,7 +778,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
     const off = onAgentInsert(tabId, (text) => {
       pendingInsertsRef.current.push(text)
       if (requiresActivation && !userActivatedRef.current) {
-        showAgentLinkNotice('Link queued. Resume the agent tab to send it.')
+        showAgentLinkNotice('Link queued. Resume the task to send it.')
       }
       flushAgentInserts()
     })

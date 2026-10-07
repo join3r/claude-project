@@ -1,19 +1,18 @@
 /**
  * The effects that tie this window's view state to the world around it: the OS
  * theme and focus, main's own task removals, and the selection-driven syncs
- * (tag filter pruning, `lastTaskId` stamping, SSH auto-connect, per-task
+ * (`lastTaskId` stamping, SSH auto-connect, per-task
  * file-browser restore). Each is its own hook so `useAppState` can keep them in
  * their original order.
  */
 import { useState, useEffect, useRef } from 'react'
-import { reconcileWindowViewState } from '../../../shared/types'
 import type { Project, Task } from '../../../shared/types'
 import { persistSelectionState } from '../stateHydration'
 import type { AppStateCore, UpdateWindowViewState } from './useAppStateCore'
 import { forgetRemovedTaskView, sidebarForTask } from './viewState'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { buildWindowTitle } from './windowTitle'
-import { findTaskInProject } from '../../../shared/streams'
+import { findStreamOfTask, findTaskInProject } from '../../../shared/streams'
 
 export function useNativeTheme(): 'dark' | 'light' {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -95,20 +94,7 @@ export function useSelectionSync(core: AppStateCore, windowFocused: boolean, con
     projectsData, config, setConfig, windowViewState,
     projectsLoadedRef, configLoadedRef, mutateProjects, updateWindowViewState
   } = core
-  const { projects, tags } = projectsData
-
-  useEffect(() => {
-    const tagIds = new Set(tags.map(tag => tag.id))
-    updateWindowViewState((prev) => {
-      const filtered = prev.selectedTagIds.filter(id => tagIds.has(id))
-      if (filtered.length === prev.selectedTagIds.length) return prev
-      return reconcileWindowViewState(
-        { ...prev, selectedTagIds: filtered },
-        projects,
-        tagIds
-      )
-    })
-  }, [tags, projects, updateWindowViewState])
+  const { projects } = projectsData
 
   useEffect(() => {
     if (!projectsLoadedRef.current || !configLoadedRef.current || !config) return
@@ -168,7 +154,11 @@ export function useSelectionSync(core: AppStateCore, windowFocused: boolean, con
 }
 
 export function useWindowTitle(selectedProject: Project | null, selectedTask: Task | null): void {
+  const stream = selectedTask ? findStreamOfTask(selectedProject ?? undefined, selectedTask.id) : undefined
+  const streamName = stream?.name
+  const streamIsMain = stream?.isMain
   useEffect(() => {
-    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
-  }, [selectedProject?.name, selectedTask?.name])
+    const place = streamName === undefined ? null : { name: streamName, isMain: streamIsMain }
+    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null, place)
+  }, [selectedProject?.name, selectedTask?.name, streamName, streamIsMain])
 }

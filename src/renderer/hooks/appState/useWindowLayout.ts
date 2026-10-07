@@ -15,10 +15,7 @@ import { findTaskInProject } from '../../../shared/streams'
 const EMPTY_EXPANSION: Record<string, boolean> = {}
 
 export interface WindowLayoutActions {
-  selectedTagIds: string[]
   expandedProjectIds: string[]
-  toggleTagFilter: (tagId: string) => void
-  clearTagFilters: () => void
   toggleProjectExpansion: (projectId: string) => void
   setProjectExpanded: (projectId: string, expanded: boolean) => void
   /** Streams opened or closed by hand in this window; see `WindowViewState.streamExpansion`. */
@@ -43,19 +40,9 @@ export interface WindowLayoutActions {
   setSidebarTab: (tab: SidebarTab) => void
 }
 
-/** Window chrome: tag filters, sidebar expansion and widths, the file browser. */
+/** Window chrome: sidebar expansion and widths, the file browser. */
 export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
   const { windowViewState, windowViewStateRef, projectsRef, updateWindowViewState } = core
-
-  const toggleTagFilter = useCallback((tagId: string) => {
-    updateWindowViewState(prev => ({ ...prev, selectedTagIds: toggleId(prev.selectedTagIds, tagId) }))
-  }, [updateWindowViewState])
-
-  const clearTagFilters = useCallback(() => {
-    updateWindowViewState(prev => (
-      prev.selectedTagIds.length === 0 ? prev : { ...prev, selectedTagIds: [] }
-    ))
-  }, [updateWindowViewState])
 
   const toggleProjectExpansion = useCallback((projectId: string) => {
     updateWindowViewState(prev => ({ ...prev, expandedProjectIds: toggleId(prev.expandedProjectIds, projectId) }))
@@ -119,10 +106,7 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
   }, [updateWindowViewState, writeSidebarToCurrentTask])
 
   return {
-    selectedTagIds: windowViewState.selectedTagIds,
     expandedProjectIds: windowViewState.expandedProjectIds,
-    toggleTagFilter,
-    clearTagFilters,
     toggleProjectExpansion,
     setProjectExpanded,
     streamExpansion: windowViewState.streamExpansion ?? EMPTY_EXPANSION,

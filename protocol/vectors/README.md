@@ -95,8 +95,6 @@ Each sample is `{ json, expected }` (plus `op` where the parser needs it). Parse
 | `events[]` | transport message: `evt chat` |
 | `invalid.params[]`, `invalid.results[]` | `{ op, json }` that must fail to parse |
 | `invalid.events[]` | JSON strings that must fail to parse |
-| `new.params[]`, `new.results[]` | `{ json, expected }` for `chat.new` (§8.2): its params `{ taskId }` and result `{ tabId }`. Extra fields are dropped. |
-| `new.invalid.params[]`, `new.invalid.results[]` | JSON strings that must fail to parse |
 | `taskNew.params[]`, `taskNew.results[]` | `{ json, expected }` for `task.new` (§8.4): its params `{ projectId, streamId?, prompt, mode? }` and result `{ taskId, tabId }`. Extra fields (version 1's `workspace` among them) are dropped, and `streamId: null` and `mode: null` are absent. |
 | `taskNew.invalid.params[]`, `taskNew.invalid.results[]` | JSON strings that must fail to parse (a blank prompt, an unknown `mode` and a non-string `streamId` among them) |
 | `taskClose.params[]`, `taskClose.results[]` | `{ json, expected }` for `task.close` (§8.7): params `{ taskId, stopWorking?, discardUnsaved? }` (flags kept only when `true`), results `{ closed: true }` or `{ closed: false, blocker: "working" \| "unsaved" }`. |
@@ -104,6 +102,9 @@ Each sample is `{ json, expected }` (plus `op` where the parser needs it). Parse
 | `tabClose.params[]`, `tabClose.invalid.params[]` | `{ json, expected }` for `tab.close` (§8.8) params `{ tabId }`, and JSON strings that must fail to parse |
 | `pinSet.params[]`, `pinSet.invalid.params[]` | `{ json, expected }` for `pin.set` (§8.10) params `{ projectId, streamId?, taskId?, pinned }` (`streamId: null` and `taskId: null` are absent), and JSON strings that must fail to parse |
 | `taskTriage.params[]`, `taskTriage.invalid.params[]` | `{ json, expected }` for `task.triage` (§8.11) params `{ taskId, action, until?, untilAttention? }` (`until` and `untilAttention` are kept only on `snooze`, which needs exactly one of them), and JSON strings that must fail to parse |
+| `streamNew.params[]`, `streamNew.results[]` | `{ json, expected }` for `stream.new` (§8.12): params `{ projectId, name, worktree, branch?, baseBranch? }` (`name` and `branch` trimmed; `branch` and `baseBranch` kept only with `worktree: true`; `null` is absent) and result `{ streamId }` |
+| `streamNew.invalid.params[]`, `streamNew.invalid.results[]` | JSON strings that must fail to parse (a blank `name`, a missing or non-boolean `worktree`, and a blank `branch` or `baseBranch` with a worktree among them) |
+| `branchesList.params[]`, `branchesList.results[]`, `branchesList.invalid.params[]`, `branchesList.invalid.results[]` | `{ json, expected }` for `branches.list` (§8.13) params `{ projectId }` and results `{ branches, defaultBase }` (`defaultBase` is `""` when there is no branch), and JSON strings that must fail to parse |
 | `image.params[]`, `image.results[]`, `image.invalid.params[]`, `image.invalid.results[]` | `{ json, expected }` for `chat.image` (§8.9) params `{ tabId, itemId, index, maxSide? }` (`maxSide` clamped to 64…4096) and results `{ mediaType, data }`, and JSON strings that must fail to parse |
 | `settings.params[]` | `{ json, expected }` for `chat.settings` (§8.5) params `{ tabId, mode?, model?, effort? }`. `""` is kept (it means the default); `null` is absent. |
 | `settings.invalid.params[]` | JSON strings that must fail to parse (no field to change and an unknown `mode` among them) |
@@ -125,3 +126,11 @@ Hex fields are lowercase hex. Strings that go on the wire (`cap`, `data`, `sig`)
 | `cap` | `{ sealKey, nonce, payload, cap }`: sealing `payload` (as `{"d","g","t","e"}` JSON in that key order) with `sealKey` and the fixed `nonce` gives exactly `cap`; opening `cap` gives `payload`. |
 | `payload` | `{ key, keyId, nonce, cases[] }`. Each case is `{ name, input, data, opened }`: the desktop seals `input` with `key`, `keyId` and the fixed `nonce` to exactly `data`; the phone opens `data` to `opened`. `opened` shows the cuts: title and body end in "…" at 120 and 400 characters, and the last case's body was shortened further so `data` fits in 3072 characters. |
 | `params[]` | `{ op, params, parsed }`: the desktop's `push.*` params parser. Unknown `kinds` are dropped. |
+
+## `project-tile.json` (§10)
+
+| field | meaning |
+|---|---|
+| `palette[]` | `{ name, light: { bg, fg }, dark: { bg, fg } }` in palette order, colours as `#rrggbb` |
+| `tiles[]` | `{ id, name, emoji?, fnv1a32, text, hue }`: `fnv1a32` is the hash of `id`'s UTF-8 bytes, `hue` the palette index, `text` the initials of `name`. The output `emoji` is the input one (trimmed), absent when there is none. Covers separators, camelCase, digits, a one-letter name, case mapping that grows (`ß`), a name with no letters, and an empty name. |
+| `places[]` | `{ project, stream?: { name, isMain? }, place }` |

@@ -145,7 +145,7 @@ export default function Composer(props: Props): React.ReactElement {
       .map((command) => ({
         value: command.name,
         label: `/${command.name}${command.argumentHint ? ` ${command.argumentHint}` : ''}`,
-        description: TERMINAL_ONLY_COMMANDS.has(command.name) && command.name !== PERMISSIONS_COMMAND.name ? 'Terminal only — opens this session in a terminal tab' : command.description
+        description: TERMINAL_ONLY_COMMANDS.has(command.name) && command.name !== PERMISSIONS_COMMAND.name ? 'Terminal only — continues this task in a terminal' : command.description
       }))
   }, [suggest, files, commands])
 
@@ -331,7 +331,7 @@ export default function Composer(props: Props): React.ReactElement {
         <UsageMeter usage={usage ?? {}} />
         <button
           type="button"
-          title="Open this session in a terminal tab"
+          title="Continue this task in a terminal"
           onClick={onOpenInTerminal}
           className="w-6 h-6 inline-flex items-center justify-center rounded-md border-0 bg-transparent text-text-subtle cursor-pointer hover:bg-surface-3 hover:text-text"
         >

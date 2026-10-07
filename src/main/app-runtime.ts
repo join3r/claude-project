@@ -34,7 +34,7 @@ import { registerWindowHandlers } from './ipc/window'
 import { registerSshHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/ssh'
 import { registerAgentHandlers } from './ipc/agents'
 import { registerTerminalHandlers } from './ipc/terminals'
-import { registerWorkspaceHandlers } from './ipc/workspaces'
+import { createWorkspace, listWorkspaceBranches, registerWorkspaceHandlers } from './ipc/workspaces'
 import { registerArchiveHandlers } from './ipc/archive'
 import { readLocalTranscript, readRemoteTranscript } from './claude-chat/transcript'
 import { registerFileBrowserHandlers } from './ipc/file-browser'
@@ -67,17 +67,18 @@ import { createNoiseChannelFactory } from './mobile/channel'
 import { ChatBridge } from './mobile/chat-bridge'
 import { nativeImageCodec } from './mobile/image-codec'
 import { PushEmitter } from './mobile/push-emitter'
-import { addChatTab } from './mobile/new-chat'
+import { createStream, listProjectBranches, type StreamGit } from './mobile/new-stream'
 import { addTaskWithChat } from './mobile/new-task'
 import { closeTask, findClosableTab, removeTabFromData } from './mobile/close-task'
 import { setPinInData } from './mobile/pin'
 import { triageTaskInData } from './mobile/triage'
 import {
   AppErrorCode,
+  BRANCHES_LIST_FEATURE,
   CHAT_IMAGE_FEATURE,
-  CHAT_NEW_FEATURE,
   CHAT_SETTINGS_FEATURE,
   PIN_FEATURE,
+  STREAM_NEW_FEATURE,
   TAB_CLOSE_FEATURE,
   TASK_CLOSE_FEATURE,
   TASK_NEW_FEATURE,
@@ -347,22 +348,13 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [CHAT_NEW_FEATURE, TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
       broadcastState: (state) => this.broadcastToAllWindows('mobile-state-changed', state),
       log,
       chat: bridge,
-      newChat: (taskId) => {
-        if (!this.config.enableClaude) {
-          return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
-        }
-        const added = addChatTab(this.projectsStore.peek(), taskId)
-        if (!added.ok) return added
-        this.commitProjects(added.data)
-        return { ok: true, tabId: added.tabId }
-      },
       newTask: async (phoneId, { projectId, streamId, prompt, mode }) => {
         if (!this.config.enableClaude) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
@@ -388,7 +380,7 @@ export class AppRuntime {
       }, params),
       closeTab: async (tabId) => {
         const found = findClosableTab(this.projectsStore.peek(), tabId)
-        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab, or the task\'s main tab (it closes with the task)' }
+        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab. A task\'s own agent or terminal closes with the task.' }
         await this.removeTabFromMain(found.project, found.task, found.tab)
         return { ok: true }
       },
@@ -403,7 +395,16 @@ export class AppRuntime {
         if (!outcome.ok) return outcome
         if (outcome.changed) this.commitProjects(outcome.data)
         return { ok: true }
-      }
+      },
+      newStream: (params) => createStream({
+        ...this.streamGit(),
+        peek: () => this.projectsStore.peek(),
+        commit: (data) => this.commitProjects(data)
+      }, params),
+      listBranches: (projectId) => listProjectBranches({
+        ...this.streamGit(),
+        peek: () => this.projectsStore.peek()
+      }, projectId)
     })
     return service
   }
@@ -835,10 +836,7 @@ export class AppRuntime {
     registerTerminalHandlers(ipc, { ptySessions: this.ptySessions, log })
 
     registerWorkspaceHandlers(ipc, {
-      workspaceManager: this.workspaceManager,
-      remoteWorkspaceManager: this.remoteWorkspaceManager,
-      ensureSshConnected: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
-      socketPath: (projectId) => this.sshManager.getSocketPath(projectId),
+      ...this.workspaceGit(),
       deleteWorkspace: (request) => this.deleteWorkspace(request)
     })
 
@@ -900,6 +898,25 @@ export class AppRuntime {
   }
 
   /** Behind the `workspace-delete` IPC; without `force` it is the pre-flight. */
+  /** What the workspace IPC handlers need for git, local or over SSH. */
+  private workspaceGit() {
+    return {
+      workspaceManager: this.workspaceManager,
+      remoteWorkspaceManager: this.remoteWorkspaceManager,
+      ensureSshConnected: (projectId: string, sshConfig: SshConfig) => this.ensureSshConnected(projectId, sshConfig),
+      socketPath: (projectId: string) => this.sshManager.getSocketPath(projectId)
+    }
+  }
+
+  /** The New stream dialog's git calls, for a phone's `stream.new` and `branches.list`: the same functions its IPC runs. */
+  private streamGit(): StreamGit {
+    const git = this.workspaceGit()
+    return {
+      listBranches: (target) => listWorkspaceBranches(git, target),
+      createWorkspace: (request) => createWorkspace(git, request)
+    }
+  }
+
   private async deleteWorkspace(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> {
     if (request.sshConfig && request.projectId) {
       await this.ensureSshConnected(request.projectId, request.sshConfig)

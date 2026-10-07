@@ -92,27 +92,30 @@ export interface InboxEntry extends InboxSource {
 }
 
 export interface InboxPartition {
+  /** Blocked on you: a question, a permission prompt, a terminal bell. */
   needsYou: InboxEntry[]
-  active: InboxEntry[]
+  /** The agent finished and you haven't answered (`isYourTurn`, not attention). */
+  yourTurn: InboxEntry[]
+  /** The agent is running: nothing for you to do yet. */
+  working: InboxEntry[]
+  /** Nothing pending either way: you had the last word, or nothing has happened yet. */
+  quiet: InboxEntry[]
   settled: InboxEntry[]
   snoozed: InboxEntry[]
 }
 
 /**
- * Splits tasks into the four inbox groups. Snooze wins over settle: an explicitly
- * snoozed task stays hidden even if it was settled earlier.
+ * Splits tasks into the inbox groups. Snooze wins over settle (an explicitly
+ * snoozed task stays hidden even if it was settled earlier), and both win over
+ * the live split, so a task you put away stays put away while its agent runs.
  */
 export function partitionInbox(
   entries: readonly InboxSource[],
   allStatuses: Record<string, TabStatusValue>,
   statusSince: Record<string, number>,
-  now: number,
-  { workingLast = false }: { workingLast?: boolean } = {}
+  now: number
 ): InboxPartition {
-  const needsYou: InboxEntry[] = []
-  const active: InboxEntry[] = []
-  const settled: InboxEntry[] = []
-  const snoozed: InboxEntry[] = []
+  const partition: InboxPartition = { needsYou: [], yourTurn: [], working: [], quiet: [], settled: [], snoozed: [] }
 
   for (const { task, project, stream } of entries) {
     const status = taskStatus(task, allStatuses)
@@ -125,24 +128,27 @@ export function partitionInbox(
       unread: isUnread(task),
       yourTurn: false
     }
-    if (isSnoozed(task, now)) snoozed.push(entry)
-    else if (isSettled(task)) settled.push(entry)
+    if (isSnoozed(task, now)) partition.snoozed.push(entry)
+    else if (isSettled(task)) partition.settled.push(entry)
     else {
       entry.yourTurn = isYourTurn(task, status)
-      if (status === 'attention') needsYou.push(entry)
-      else active.push(entry)
+      if (status === 'attention') partition.needsYou.push(entry)
+      else if (status === 'working') partition.working.push(entry)
+      else if (entry.yourTurn) partition.yourTurn.push(entry)
+      else partition.quiet.push(entry)
     }
   }
 
+  const byRecency = (a: InboxEntry, b: InboxEntry): number => lastActivityAt(b.task) - lastActivityAt(a.task)
   // Longest wait first — the point of the tier is surfacing what has been blocked longest.
-  needsYou.sort((a, b) => (a.since ?? now) - (b.since ?? now))
-  active.sort((a, b) => lastActivityAt(b.task) - lastActivityAt(a.task))
-  // Stable sort: working rows keep their recency order among themselves.
-  if (workingLast) active.sort((a, b) => Number(a.status === 'working') - Number(b.status === 'working'))
-  settled.sort((a, b) => (inboxState(b.task).settledAt ?? 0) - (inboxState(a.task).settledAt ?? 0))
-  snoozed.sort((a, b) => wakeAt(a.task) - wakeAt(b.task))
+  partition.needsYou.sort((a, b) => (a.since ?? now) - (b.since ?? now))
+  partition.yourTurn.sort(byRecency)
+  partition.working.sort(byRecency)
+  partition.quiet.sort(byRecency)
+  partition.settled.sort((a, b) => (inboxState(b.task).settledAt ?? 0) - (inboxState(a.task).settledAt ?? 0))
+  partition.snoozed.sort((a, b) => wakeAt(a.task) - wakeAt(b.task))
 
-  return { needsYou, active, settled, snoozed }
+  return partition
 }
 
 /**
@@ -160,31 +166,24 @@ export function inboxSources(projects: readonly Project[]): InboxSource[] {
   return sources
 }
 
-/** The row's second line: `Project · Stream`. */
-export function inboxLocation(entry: { project: Project; stream: Stream }): string {
-  return `${entry.project.name} · ${entry.stream.name}`
-}
-
-export interface InboxStreamGroup {
+export interface InboxProjectGroup {
   project: Project
-  stream: Stream
   entries: InboxEntry[]
 }
 
 /**
- * The live rows (needs you, then the rest) gathered by stream for the grouped
- * Inbox layout. A group sits where its most urgent row would sit in the flat
- * list, and keeps that list's order inside, so grouping never buries a task
- * that needs you under a busier stream.
+ * Rows gathered by project for the grouped Inbox layout (the stream is a label on
+ * each row). A group sits where its most urgent row would sit in the flat list
+ * and keeps that list's order inside, so grouping never buries a task that needs
+ * you under a busier project.
  */
-export function groupInboxByStream(entries: readonly InboxEntry[]): InboxStreamGroup[] {
-  const groups = new Map<string, InboxStreamGroup>()
+export function groupInboxByProject(entries: readonly InboxEntry[]): InboxProjectGroup[] {
+  const groups = new Map<string, InboxProjectGroup>()
   for (const entry of entries) {
-    const key = `${entry.project.id}\u0000${entry.stream.id}`
-    let group = groups.get(key)
+    let group = groups.get(entry.project.id)
     if (!group) {
-      group = { project: entry.project, stream: entry.stream, entries: [] }
-      groups.set(key, group)
+      group = { project: entry.project, entries: [] }
+      groups.set(entry.project.id, group)
     }
     group.entries.push(entry)
   }

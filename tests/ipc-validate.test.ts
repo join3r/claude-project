@@ -95,7 +95,7 @@ describe('domain schemas', () => {
     const state = createDefaultWindowViewState()
     expect(windowViewState(state, 'w')).toEqual(state)
     expect(() => windowViewState({ ...state, taskStates: { t: { fileBrowserOpen: 'yes' } } }, 'w')).toThrow(/fileBrowserOpen/)
-    expect(() => windowViewState({ ...state, selectedTagIds: 'x' }, 'w')).toThrow(/selectedTagIds/)
+    expect(() => windowViewState({ ...state, expandedProjectIds: 'x' }, 'w')).toThrow(/expandedProjectIds/)
   })
 
   it('checks the directories main reads out of a projects save', () => {

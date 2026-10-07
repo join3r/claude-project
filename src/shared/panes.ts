@@ -8,7 +8,7 @@
  * no empty pane, every `activeTabId` names a tab of its pane, widths are positive
  * and add up to 1, and `mainTabId` names a tab of the task (or is absent).
  */
-import { resolveMainTabId, taskTabs } from './streams'
+import { canAddTabType, resolveMainTabId, taskTabs } from './streams'
 import type { Tab, Task, TaskPane } from './types'
 
 /** The smallest share of the row a column can be resized down to. */
@@ -101,9 +101,19 @@ function clampPane(task: Task, pane: number): number {
 }
 
 /**
- * `tab` added to pane `pane` (clamped into the row), at `index` or the end. It
- * becomes that pane's active tab unless `activate` is false. A task with no pane
- * gets one. A replay that finds the tab already in the task is a no-op.
+ * The lowest index a tab other than the main one may take in pane `pane`: the
+ * main (agent) tab stays first in its pane.
+ */
+function firstFreeIndex(task: Task, pane: number, tabId: string): number {
+  if (!task.mainTabId || task.mainTabId === tabId) return 0
+  return (task.panes[pane]?.tabs.findIndex(tab => tab.id === task.mainTabId) ?? -1) + 1
+}
+
+/**
+ * `tab` added to pane `pane` (clamped into the row), at `index` or the end, never
+ * ahead of the main tab. It becomes that pane's active tab unless `activate` is
+ * false. A task with no pane gets one. A replay that finds the tab already in the
+ * task is a no-op, and so is a second agent tab (`canAddTabType`).
  */
 export function addTabToPane(
   task: Task,
@@ -111,7 +121,7 @@ export function addTabToPane(
   tab: Tab,
   options: { index?: number; activate?: boolean } = {}
 ): Task {
-  if (findTabLocation(task, tab.id)) return task
+  if (findTabLocation(task, tab.id) || !canAddTabType(task, tab.type)) return task
   const activate = options.activate ?? true
   if (task.panes.length === 0) {
     return withPaneRow(task, [{ tabs: [tab], activeTabId: tab.id, width: 1 }])
@@ -120,7 +130,9 @@ export function addTabToPane(
   return withPaneRow(task, task.panes.map((candidate, i) => {
     if (i !== target) return candidate
     const tabs = [...candidate.tabs]
-    const index = options.index === undefined ? tabs.length : Math.max(0, Math.min(tabs.length, options.index))
+    const index = options.index === undefined
+      ? tabs.length
+      : Math.max(firstFreeIndex(task, i, tab.id), Math.min(tabs.length, options.index))
     tabs.splice(index, 0, tab)
     return { ...candidate, tabs, activeTabId: activate ? tab.id : candidate.activeTabId }
   }))
@@ -172,8 +184,12 @@ export function moveTabInTask(task: Task, tabId: string, target: PaneDropTarget)
 
   if (target.kind === 'tab') {
     const destination = task.panes[target.pane]
+    // The main tab goes first wherever it lands; nothing else goes ahead of it.
+    const landAt = (length: number): number => (
+      tabId === task.mainTabId ? 0 : Math.max(firstFreeIndex(task, target.pane, tabId), Math.min(length, target.index))
+    )
     if (target.pane === from.pane) {
-      const insert = Math.max(0, Math.min(destination.tabs.length, target.index))
+      const insert = landAt(destination.tabs.length)
       const nextIndex = insert > from.index ? insert - 1 : insert
       if (nextIndex === from.index) {
         return destination.activeTabId === tabId ? task : setActiveTabInTask(task, tabId)
@@ -186,7 +202,7 @@ export function moveTabInTask(task: Task, tabId: string, target: PaneDropTarget)
       if (i === from.pane) return { ...pane, tabs: pane.tabs.filter(candidate => candidate.id !== tabId) }
       if (i !== target.pane) return pane
       const tabs = [...pane.tabs]
-      tabs.splice(Math.max(0, Math.min(tabs.length, target.index)), 0, tab)
+      tabs.splice(landAt(tabs.length), 0, tab)
       return { ...pane, tabs, activeTabId: tabId }
     }))
   }

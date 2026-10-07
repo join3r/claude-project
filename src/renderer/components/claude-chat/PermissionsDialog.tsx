@@ -95,12 +95,12 @@ export default function PermissionsDialog({ cwd, permissionMode, onClose, onOpen
         footer={
           <>
             <LinkBtn onClick={onClose}>Close</LinkBtn>
-            <PrimaryButton onClick={() => { onClose(); onOpenInTerminal() }}>Open in terminal</PrimaryButton>
+            <PrimaryButton onClick={() => { onClose(); onOpenInTerminal() }}>Switch to terminal</PrimaryButton>
           </>
         }
       >
         <HelperText>
-          This project's Claude settings live on the remote host. Open the session in a terminal tab and run /permissions there.
+          This project's Claude settings live on the remote host. Continue this task in a terminal and run /permissions there.
         </HelperText>
       </Modal>
     )

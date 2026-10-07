@@ -92,6 +92,7 @@ export default function TaskPromptBox({ project, taskId, taskName, projectDir, v
     const text = draft.trim()
     if (!text) return
     const tab = addTab(project.id, taskId, 0, agent)
+    if (!tab) return
     setPendingPrompt(tab.id, {
       text,
       ...(takesMode && currentMode ? { mode: currentMode } : {}),

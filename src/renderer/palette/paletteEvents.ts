@@ -2,6 +2,12 @@
 type EventMap = {
   'open-settings': void
   'open-project-settings': void
+  /** The New Task composer, on the current project and stream (what ⌘N opens). */
+  'open-new-task': void
+  /** The New Task composer on a given project, and stream when named (Project Home's buttons). */
+  'open-new-task-in': { projectId: string; streamId?: string }
+  /** The New stream dialog for a project (Project Home's button). */
+  'open-new-stream': string
   'toggle-sidebar': void
   'toggle-file-browser': void
   'reload-window': void

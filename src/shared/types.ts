@@ -385,20 +385,6 @@ export function normalizePinnedItems(items: unknown, projects: readonly Project[
   return result
 }
 
-/** OR filter: empty selection shows all; otherwise project must have at least one selected tag. */
-export function projectMatchesTagFilter(project: Project, selectedTagIds: readonly string[]): boolean {
-  if (selectedTagIds.length === 0) return true
-  const projectTags = project.tagIds ?? []
-  return selectedTagIds.some(tagId => projectTags.includes(tagId))
-}
-
-export function filterProjectsByTags<T extends Project>(
-  projects: readonly T[],
-  selectedTagIds: readonly string[]
-): T[] {
-  return projects.filter(p => projectMatchesTagFilter(p, selectedTagIds))
-}
-
 export function pruneUnusedTags(data: ProjectsData): ProjectsData {
   const usedTagIds = new Set<string>()
   for (const project of data.projects) {
@@ -465,9 +451,7 @@ export interface AppConfig {
   lastProjectId: string | null
   lastTaskId: string | null
   defaultSidebarTab: SidebarTab
-  /** Inbox: sink tasks whose agent is working to the bottom of their group. */
-  inboxWorkingLast: boolean
-  /** Inbox rows as one list, or under a heading per stream. */
+  /** Inbox rows as one list, or the open ones under a heading per project. */
   inboxLayout: 'flat' | 'grouped'
   /** Sidebar: fold streams where no task needs you, runs or has news. */
   autoCollapseQuietStreams: boolean
@@ -620,7 +604,6 @@ export interface GitOperationResult {
 export interface WindowViewState {
   selectedProjectId: string | null
   selectedTaskId: string | null
-  selectedTagIds: string[]
   expandedProjectIds: string[]
   /**
    * Streams opened or closed by hand (chevron), by stream id. A stream not listed
@@ -687,7 +670,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastProjectId: null,
   lastTaskId: null,
   defaultSidebarTab: 'inbox',
-  inboxWorkingLast: false,
   inboxLayout: 'flat',
   autoCollapseQuietStreams: true,
   promptBoxAgent: 'claude-chat',
@@ -723,7 +705,6 @@ export function createDefaultWindowViewState(): WindowViewState {
   return {
     selectedProjectId: null,
     selectedTaskId: null,
-    selectedTagIds: [],
     expandedProjectIds: [],
     taskStates: {},
     fileBrowserOpen: false,
@@ -739,7 +720,6 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
   return {
     selectedProjectId: state.selectedProjectId,
     selectedTaskId: state.selectedTaskId,
-    selectedTagIds: [...state.selectedTagIds],
     expandedProjectIds: [...state.expandedProjectIds],
     ...(state.streamExpansion ? { streamExpansion: { ...state.streamExpansion } } : {}),
     taskStates: Object.fromEntries(
@@ -811,8 +791,7 @@ export function reconcileTaskViewState(_task: Task, state?: TaskViewState): Task
 
 export function reconcileWindowViewState(
   state: WindowViewState,
-  projects: Project[],
-  tagIds?: Set<string>
+  projects: Project[]
 ): WindowViewState {
   const projectById = new Map(projects.map(project => [project.id, project]))
   const selectedProject = state.selectedProjectId ? projectById.get(state.selectedProjectId) ?? null : null
@@ -836,13 +815,9 @@ export function reconcileWindowViewState(
     Object.entries(state.streamExpansion ?? {}).filter(([id, open]) => streamIds.has(id) && typeof open === 'boolean')
   )
 
-  const validTagIds = tagIds ?? new Set<string>()
-  const selectedTagIds = (state.selectedTagIds ?? []).filter(id => validTagIds.has(id))
-
   return {
     selectedProjectId: selectedProject?.id ?? null,
     selectedTaskId: selectedTask?.id ?? null,
-    selectedTagIds,
     expandedProjectIds,
     ...(Object.keys(streamExpansion).length > 0 ? { streamExpansion } : {}),
     taskStates,
@@ -859,10 +834,8 @@ export function reconcileWindowViewState(
 export function buildWindowViewState(
   projects: Project[],
   config: AppConfig,
-  seed?: Partial<WindowViewState> | null,
-  tags: readonly Tag[] = []
+  seed?: Partial<WindowViewState> | null
 ): WindowViewState {
-  const tagIds = new Set(tags.map(t => t.id))
   const storedSelection = resolveStoredSelection(projects, config)
   const taskStates: Record<string, TaskViewState> = {}
   if (seed?.taskStates) {
@@ -881,7 +854,6 @@ export function buildWindowViewState(
   return reconcileWindowViewState({
     selectedProjectId,
     selectedTaskId,
-    selectedTagIds: seed?.selectedTagIds ? [...seed.selectedTagIds] : [],
     expandedProjectIds,
     ...(seed?.streamExpansion ? { streamExpansion: { ...seed.streamExpansion } } : {}),
     taskStates,
@@ -891,5 +863,5 @@ export function buildWindowViewState(
     sidebarWidth: seed?.sidebarWidth ?? 240,
     sidebarProjectsCollapsed: seed?.sidebarProjectsCollapsed ?? false,
     sidebarTab: seed?.sidebarTab ?? config.defaultSidebarTab
-  }, projects, tagIds)
+  }, projects)
 }

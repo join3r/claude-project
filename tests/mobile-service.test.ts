@@ -141,7 +141,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -189,7 +189,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
     broadcastState: (s) => states.push(s),
     log: () => {},
     timers,
-    newChat: options.newChat,
+    newStream: options.newStream,
+    listBranches: options.listBranches,
     newTask: options.newTask,
     closeTask: options.closeTask,
     closeTab: options.closeTab,
@@ -213,7 +214,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   }
 }
 
-function pairedSetup(options: { newChat?: MobileServiceDeps['newChat']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -586,28 +587,62 @@ describe('MobileService chat.image (SPEC.md §8.9)', () => {
   })
 })
 
-describe('MobileService chat.new (SPEC.md §8.2)', () => {
-  it('answers with the new tab, passes errors through, and rejects a missing taskId', () => {
-    const calls: string[] = []
-    const env = pairedSetup({
-      newChat: (taskId) => {
-        calls.push(taskId)
-        return taskId === 't1' ? { ok: true, tabId: 'tab-new' } : { ok: false, code: 'not-found', message: 'No such task' }
-      }
-    })
-    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.new', params: { taskId: 't1' } })
-    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { tabId: 'tab-new' } })
-    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'chat.new', params: { taskId: 'nope' } })
-    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such task' } })
-    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'chat.new', params: {} })
-    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
-    expect(calls).toEqual(['t1', 'nope'])
-  })
-
-  it('is unsupported without the dependency', () => {
+describe('MobileService chat.new (retired, SPEC.md §8.2)', () => {
+  it('answers unsupported like any unknown op', () => {
     const env = pairedSetup()
     env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.new', params: { taskId: 't1' } })
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: false, error: { code: 'unsupported', message: 'Unknown op chat.new' } })
+  })
+})
+
+describe('MobileService stream.new and branches.list (SPEC.md §8.12, §8.13)', () => {
+  it('passes the parsed params through, answers with the result, and rejects bad params', async () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      newStream: async (params) => {
+        calls.push(params)
+        return params.projectId === 'p1' ? { ok: true, streamId: 's-new' } : { ok: false, code: 'not-found', message: 'No such project' }
+      },
+      listBranches: async (projectId) => projectId === 'p1'
+        ? { ok: true, branches: ['main', 'dev'], defaultBase: 'main' }
+        : { ok: false, code: 'unsupported', message: 'No worktrees here' }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'stream.new', params: { projectId: 'p1', name: ' 0.6.0 ', worktree: true, baseBranch: 'main' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { streamId: 's-new' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'stream.new', params: { projectId: 'nope', name: 'x', worktree: false } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such project' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'stream.new', params: { projectId: 'p1', name: 'x' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([
+      { projectId: 'p1', name: '0.6.0', worktree: true, baseBranch: 'main' },
+      { projectId: 'nope', name: 'x', worktree: false }
+    ])
+
+    env.channel.hooks.onAppMessage({ t: 'req', id: 4, op: 'branches.list', params: { projectId: 'p1' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 4, ok: true, result: { branches: ['main', 'dev'], defaultBase: 'main' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 5, op: 'branches.list', params: { projectId: 'p2' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 5, ok: false, error: { code: 'unsupported', message: 'No worktrees here' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'branches.list', params: {} })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 6, ok: false, error: { code: 'bad-request' } })
+  })
+
+  it('answers internal when git throws', async () => {
+    const env = pairedSetup({ newStream: async () => { throw new Error('Branch "0.6.0" already exists') } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'stream.new', params: { projectId: 'p1', name: '0.6.0', worktree: true } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: false, error: { code: 'internal', message: 'Branch "0.6.0" already exists' } })
+  })
+
+  it('is unsupported without the dependencies', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'stream.new', params: { projectId: 'p1', name: 'x', worktree: false } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'branches.list', params: { projectId: 'p1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
   })
 })
 

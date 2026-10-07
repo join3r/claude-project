@@ -209,6 +209,9 @@ beforeEach(() => {
     scrollbackDelete: vi.fn().mockResolvedValue(undefined),
     workspaceDelete: vi.fn().mockResolvedValue({ status: 'ok' }),
     fbGitStatus: vi.fn().mockResolvedValue(null),
+    gitProjectPosture: vi.fn().mockResolvedValue({ isGitRepo: false, branch: null, upstream: null, ahead: 0, behind: 0, dirtyCount: 0, lastCommit: null }),
+    onAgentActivity: vi.fn().mockReturnValue(() => {}),
+    getAgentActivity: vi.fn().mockResolvedValue({}),
     fbReadFile: vi.fn((_dir: string, filePath: string) => Promise.resolve(DISK[filePath] ?? '')),
     fbWriteFile: vi.fn().mockResolvedValue(undefined),
     onMenuCloseTab: vi.fn((cb: () => void) => {
@@ -230,6 +233,7 @@ afterEach(() => {
   process.off('unhandledRejection', recordRejection)
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('closing an editor with unsaved changes', () => {
@@ -237,12 +241,16 @@ describe('closing an editor with unsaved changes', () => {
     ;(window as any).api.platform = 'win32'
     await mountApp()
     const close = `Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`
-    const terminal = `New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`
     const split = `Split right (${formatShortcutForApp('CmdOrCtrl+D')})`
     expect(close).not.toContain('⌘')
     expect(screen.getAllByTitle(close).length).toBeGreaterThan(0)
-    expect(screen.getAllByTitle(terminal).length).toBeGreaterThan(0)
     expect(screen.getByTitle(split)).toBeTruthy()
+    // The + menu lists Terminal with its shortcut.
+    vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect(): void {} })
+    fireEvent.click(screen.getAllByTitle('New tab or task')[0])
+    const terminal = within(screen.getByRole('menu')).getByRole('menuitem', { name: /Terminal/ })
+    expect(terminal.textContent).toContain(formatShortcutForApp('CmdOrCtrl+T'))
+    expect(terminal.textContent).not.toContain('⌘')
   })
 
   it('prompts on ⌘W and leaves the tab and its buffer alone on Cancel', async () => {

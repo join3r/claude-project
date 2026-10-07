@@ -776,49 +776,6 @@
       "{\"t\":\"evt\",\"e\":\"chat\",\"tabId\":\"tab-chat\",\"seq\":12,\"upserts\":[{\"kind\":\"tool\",\"id\":\"x\",\"name\":\"Read\",\"summary\":\"s\",\"status\":\"done\",\"hasDetail\":true,\"images\":\"two\"}],\"removes\":[],\"prompts\":[{\"kind\":\"permission\",\"id\":\"req-1\",\"toolName\":\"Bash\",\"title\":\"Claude wants to run a command\",\"summary\":\"Bash · rm -rf dist\",\"detail\":\"rm -rf dist\\n\\nClean the build output\",\"canAlwaysAllow\":true}],\"busy\":true,\"turnStartedAt\":1790000000000,\"process\":\"running\",\"permissionMode\":\"default\",\"model\":\"claude-opus-4-5\"}"
     ]
   },
-  "new": {
-    "params": [
-      {
-        "json": "{\"taskId\":\"t1\"}",
-        "expected": {
-          "taskId": "t1"
-        }
-      },
-      {
-        "json": "{\"taskId\":\"t1\",\"pane\":\"right\"}",
-        "expected": {
-          "taskId": "t1"
-        }
-      }
-    ],
-    "results": [
-      {
-        "json": "{\"tabId\":\"tab-new\"}",
-        "expected": {
-          "tabId": "tab-new"
-        }
-      },
-      {
-        "json": "{\"tabId\":\"tab-new\",\"seq\":0}",
-        "expected": {
-          "tabId": "tab-new"
-        }
-      }
-    ],
-    "invalid": {
-      "params": [
-        "{}",
-        "{\"taskId\":7}",
-        "{\"tabId\":\"tab-chat\"}",
-        "null"
-      ],
-      "results": [
-        "{}",
-        "{\"tabId\":null}",
-        "[]"
-      ]
-    }
-  },
   "taskNew": {
     "params": [
       {
@@ -1083,6 +1040,135 @@
         "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":-1}",
         "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":\"1790003600000\"}",
         "null"
+      ]
+    }
+  },
+  "streamNew": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\",\"name\":\"0.6.0\",\"worktree\":true}",
+        "expected": {
+          "projectId": "p1",
+          "name": "0.6.0",
+          "worktree": true
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"name\":\" Chapter 2 \",\"worktree\":true,\"branch\":\" chapter-2 \",\"baseBranch\":\"main\",\"extra\":1}",
+        "expected": {
+          "projectId": "p1",
+          "name": "Chapter 2",
+          "worktree": true,
+          "branch": "chapter-2",
+          "baseBranch": "main"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"name\":\"Docs\",\"worktree\":false,\"branch\":\"docs\",\"baseBranch\":\"main\"}",
+        "expected": {
+          "projectId": "p1",
+          "name": "Docs",
+          "worktree": false
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"name\":\"0.6.0\",\"worktree\":true,\"branch\":null,\"baseBranch\":null}",
+        "expected": {
+          "projectId": "p1",
+          "name": "0.6.0",
+          "worktree": true
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"streamId\":\"s-060\"}",
+        "expected": {
+          "streamId": "s-060"
+        }
+      },
+      {
+        "json": "{\"streamId\":\"s-060\",\"branch\":\"0.6.0\"}",
+        "expected": {
+          "streamId": "s-060"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"name\":\"0.6.0\",\"worktree\":true}",
+        "{\"projectId\":\"p1\",\"worktree\":true}",
+        "{\"projectId\":\"p1\",\"name\":\"   \",\"worktree\":false}",
+        "{\"projectId\":\"p1\",\"name\":\"0.6.0\"}",
+        "{\"projectId\":\"p1\",\"name\":\"0.6.0\",\"worktree\":\"yes\"}",
+        "{\"projectId\":\"p1\",\"name\":\"0.6.0\",\"worktree\":true,\"branch\":\"  \"}",
+        "{\"projectId\":\"p1\",\"name\":\"0.6.0\",\"worktree\":true,\"baseBranch\":\"\"}",
+        "{\"projectId\":\"p1\",\"name\":\"0.6.0\",\"worktree\":true,\"branch\":7}",
+        "null"
+      ],
+      "results": [
+        "{}",
+        "{\"streamId\":7}",
+        "[]"
+      ]
+    }
+  },
+  "branchesList": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\"}",
+        "expected": {
+          "projectId": "p1"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"extra\":true}",
+        "expected": {
+          "projectId": "p1"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"branches\":[\"main\",\"0.5.0\",\"fix/login\"],\"defaultBase\":\"main\"}",
+        "expected": {
+          "branches": [
+            "main",
+            "0.5.0",
+            "fix/login"
+          ],
+          "defaultBase": "main"
+        }
+      },
+      {
+        "json": "{\"branches\":[],\"defaultBase\":\"\"}",
+        "expected": {
+          "branches": [],
+          "defaultBase": ""
+        }
+      },
+      {
+        "json": "{\"branches\":[\"develop\"],\"defaultBase\":\"develop\",\"remote\":\"origin\"}",
+        "expected": {
+          "branches": [
+            "develop"
+          ],
+          "defaultBase": "develop"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{}",
+        "{\"projectId\":7}",
+        "null"
+      ],
+      "results": [
+        "{\"branches\":[\"main\"]}",
+        "{\"defaultBase\":\"main\"}",
+        "{\"branches\":[\"main\",7],\"defaultBase\":\"main\"}",
+        "{\"branches\":\"main\",\"defaultBase\":\"main\"}",
+        "[]"
       ]
     }
   },

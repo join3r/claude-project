@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
-import { NEW_TASK_NAME, isEphemeralProject, isRemoteProject, isShellCommandProject, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import { NEW_TASK_NAME, isEphemeralProject, isRemoteProject, isShellCommandProject, pinnedItemKey } from '../../shared/types'
 import type { Task, Project, PinnedItem, Stream } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -21,7 +21,7 @@ import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from
 import { isSettled, isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
 import { useResizeHandle } from '../hooks/useResizeHandle'
-import { ChevronRight, Filter, GitBranch, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
+import { ChevronRight, GitBranch, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
 import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
@@ -39,8 +39,9 @@ import {
 import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
 import { confirmWorktreeRemoval, forceRemoveWorktree } from './sidebar/workspaceRemoval'
-import { streamCloseQuestion, taskCloseQuestion } from './sidebar/closeRules'
+import { streamCloseQuestion } from './sidebar/closeRules'
 import { useWorktreeChoice } from './sidebar/WorktreeChoiceDialog'
+import { useCloseTask } from './sidebar/useCloseTask'
 import { ProjectDoneGroup, StreamDoneRow, type DoneRowActions } from './sidebar/DoneRows'
 import { closeArchivedView, getArchivedView } from './archivedViewTarget'
 import {
@@ -66,21 +67,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const {
     projects, tags, projectOrder,
     pinnedItems, togglePinnedItem, setPinnedOrder,
-    selectedProjectId, selectedTaskId, selectedTagIds,
+    selectedProjectId, selectedTaskId,
     switchToTask, selectProjectHome, showArchived,
     addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
-    addTask, addTaskInDirectory, addStream, archiveTask, renameTask,
+    addTask, addTaskInDirectory, addStream, renameTask,
     moveTask, archiveStream, renameStream, reopenTask, reopenStream, deleteArchived,
     reorderProjects, getProjectDir,
     config, updateConfig,
-    toggleTagFilter, clearTagFilters,
     expandedProjectIds, toggleProjectExpansion, setProjectExpanded,
     streamExpansion, setStreamExpanded,
     effectiveTheme,
     sidebarWidth, setSidebarWidth,
     sidebarProjectsCollapsed, toggleSidebarProjectsCollapsed,
     sidebarTab, setSidebarTab,
-    settleTask, unsettleTask
+    settleTask, unsettleTask, unsnoozeTask
   } = useApp()
   const resizeHandle = useResizeHandle({ width: sidebarWidth, onWidthChange: setSidebarWidth, edge: 'right' })
   const allStatuses = useAllTabStatuses()
@@ -152,7 +152,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
-  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
   const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null)
@@ -162,24 +161,22 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [editValue, setEditValue] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  // Where the composer opens when something other than the selection chose it.
+  const [newTaskWhere, setNewTaskWhere] = useState<{ projectId: string; streamId?: string } | null>(null)
   // The project the New stream dialog is open for.
   const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
   const worktreeChoice = useWorktreeChoice()
+  const closeTaskFlow = useCloseTask()
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const expandedProjects = new Set(expandedProjectIds)
   const projectsById = React.useMemo(() => new Map(projects.map(p => [p.id, p])), [projects])
-  const visibleProjectIds = React.useMemo(() => {
-    const filterActive = selectedTagIds.length > 0
-    return projectOrder.filter(id => {
-      const project = projectsById.get(id)
-      if (!project) return false
-      return filterActive ? projectMatchesTagFilter(project, selectedTagIds) : true
-    })
-  }, [projectOrder, projectsById, selectedTagIds])
-  // The inbox honours the same tag filter as the tree, so the chips row means the
-  // same thing in both tabs. Unlike the tree it *keeps* ad-hoc projects: their
-  // tasks are real work, and the inbox is the only place they surface.
+  const visibleProjectIds = React.useMemo(
+    () => projectOrder.filter(id => projectsById.has(id)),
+    [projectOrder, projectsById]
+  )
+  // Unlike the tree, the inbox *keeps* ad-hoc projects: their tasks are real
+  // work, and the inbox is the only place they surface.
   const inboxProjects = React.useMemo(
     () => visibleProjectIds.map(id => projectsById.get(id)).filter((p): p is Project => !!p),
     [visibleProjectIds, projectsById]
@@ -193,18 +190,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     }),
     [visibleProjectIds, projectsById]
   )
-  // The composer deliberately ignores the tag filter: filtering the destination
-  // list would make projects you can see in the tree un-creatable-in from here.
-  // Ad-hoc projects stay out — you reach one again by picking its directory.
+  // Ad-hoc projects stay out of the composer's destinations — you reach one again by picking its directory.
   const orderedProjects = React.useMemo(
     () => projectOrder
       .map(id => projectsById.get(id))
       .filter((p): p is Project => !!p && !isEphemeralProject(p)),
     [projectOrder, projectsById]
-  )
-  const sortedTags = React.useMemo(
-    () => [...tags].sort((a, b) => a.name.localeCompare(b.name)),
-    [tags]
   )
   // Drop pins whose project/stream/task no longer exists; storage prunes them on the next save.
   const resolvedPins = React.useMemo(() => {
@@ -251,7 +242,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   useEffect(() => {
-    const dismiss = () => { closeContextMenu(); setAddMenuOpen(false); setFilterMenuOpen(false) }
+    const dismiss = () => { closeContextMenu(); setAddMenuOpen(false) }
     window.addEventListener('mousedown', dismiss)
     return () => window.removeEventListener('mousedown', dismiss)
   }, [closeContextMenu])
@@ -266,6 +257,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     return window.api.onMenuNewTask(() => {
       setNewTaskOpen(true)
     })
+  }, [])
+
+  useEffect(() => {
+    return paletteEvents.on('open-new-task', () => setNewTaskOpen(true))
+  }, [])
+
+  useEffect(() => {
+    return paletteEvents.on('open-new-task-in', (where) => { setNewTaskWhere(where); setNewTaskOpen(true) })
+  }, [])
+
+  useEffect(() => {
+    return paletteEvents.on('open-new-stream', (projectId) => setNewStreamProjectId(projectId))
   }, [])
 
   useEffect(() => {
@@ -398,6 +401,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (streamId) setStreamExpanded(streamId, true)
     }
     setNewTaskOpen(false)
+    setNewTaskWhere(null)
   }
 
   const statusOf = useCallback((tabId: string) => tabStatusStore.getStatus(tabId), [tabStatusStore])
@@ -420,36 +424,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     return true
   }
 
-  /**
-   * Hover ✕ on a task row: the task is archived to its stream's `Done (N)`.
-   * Asks only when its agent is working (unsaved editors ask in `archiveTask`).
-   * Its stream stays, even emptied.
-   */
-  const handleCloseTask = async (projectId: string, taskId: string) => {
-    const project = projects.find(p => p.id === projectId)
-    const task = findTaskInProject(project, taskId)
-    if (!project || !task) return
-    const question = taskCloseQuestion(task, statusOf)
-    if (question && !window.confirm(question)) return
-    // The last task of a hidden ad-hoc project takes the project with it, and any
-    // worktree stream it still has: that gets the stream's pre-flight first.
-    const retiring = isEphemeralProject(project) && projectTasks(project).every(candidate => candidate.id === taskId)
-    const worktrees = retiring ? project.streams.filter(stream => stream.workspace) : []
-    if (worktrees.length === 0) {
-      void archiveTask(projectId, taskId)
-      return
-    }
-    const answers = []
-    for (const stream of worktrees) {
-      const answer = await confirmWorktreeRemoval(project, stream.name, stream.workspace!, worktreeChoice.ask)
-      if (!answer) return
-      answers.push({ stream, answer })
-    }
-    if (!await archiveTask(projectId, taskId)) return
-    for (const { stream, answer } of answers) {
-      if (!answer.done) await forceRemoveWorktree(project, stream.workspace!, answer.keepBranch)
-    }
-  }
+  /** Hover ✕ on a task row, and the menu's Close task (see `useCloseTask`). */
+  const handleCloseTask = closeTaskFlow.closeTask
 
   /**
    * Hover ✕ on a stream row (never `main`): the stream is archived with its
@@ -543,6 +519,18 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       ...(type === 'stream' ? { streamId: id } : type === 'task' ? { taskId: id } : {})
     })
   }
+
+  /** The row's clock: wake a snoozed task, else open the snooze presets at the click. */
+  const handleSnoozeFromRow = useCallback((e: React.MouseEvent, projectId: string, taskId: string) => {
+    const task = findTask(projectId, taskId)
+    if (!task) return
+    if (isSnoozed(task, Date.now())) {
+      unsnoozeTask(projectId, taskId)
+      return
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'task', projectId, taskId })
+    setSnoozeSubmenu(true)
+  }, [findTask, unsnoozeTask])
 
   const handleTaskContextMenu = useCallback((e: React.MouseEvent, projectId: string, taskId: string) => {
     e.preventDefault()
@@ -1050,56 +1038,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             onClick={() => setSwitcherActive(true)}
             title={`Quick switch (${formatShortcutForApp('CmdOrCtrl+P')})`}
           ><Search size={14} /></button>
-          {sortedTags.length > 0 && (
-            <div className="relative">
-              <button
-                className={`${headerIconCls} ${selectedTagIds.length > 0 ? 'text-accent' : ''}`}
-                onClick={(e) => { e.stopPropagation(); setFilterMenuOpen(!filterMenuOpen); setAddMenuOpen(false) }}
-                title={selectedTagIds.length > 0 ? `Filtered by ${selectedTagIds.length} tag(s)` : 'Filter by tag'}
-              >
-                <Filter size={14} />
-                {selectedTagIds.length > 0 && (
-                  <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-accent" />
-                )}
-              </button>
-              {filterMenuOpen && (
-                <div
-                  className={`absolute top-full right-0 mt-1 z-(--z-menu) w-[200px] ${menuCls}`}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  <div className="flex flex-wrap gap-1 p-1">
-                    {sortedTags.map(tag => {
-                      const isSelected = selectedTagIds.includes(tag.id)
-                      return (
-                        <button
-                          key={tag.id}
-                          type="button"
-                          onClick={() => toggleTagFilter(tag.id)}
-                          className={[
-                            'px-2 py-0.5 rounded-full text-xs border cursor-pointer transition-colors duration-(--motion-fast)',
-                            isSelected
-                              ? 'bg-sel border-transparent text-text'
-                              : 'bg-field border-border text-text-muted hover:text-text hover:bg-surface-3',
-                          ].join(' ')}
-                        >
-                          {tag.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {selectedTagIds.length > 0 && (
-                    <div className="border-t border-hair mt-1 pt-1">
-                      <button className={menuItemCls} onClick={() => clearTagFilters()}>Clear filter</button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
           <div className="relative">
             <button
               className={headerIconCls}
-              onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen); setFilterMenuOpen(false) }}
+              onClick={(e) => { e.stopPropagation(); setAddMenuOpen(!addMenuOpen) }}
               title="Add"
             ><Plus size={14} /></button>
             {addMenuOpen && (
@@ -1126,13 +1068,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onSelectTask={handleSelectTask}
           onTaskContextMenu={handleTaskContextMenu}
           onSettle={handleToggleSettled}
+          onSnooze={handleSnoozeFromRow}
           onClose={(projectId, taskId) => void handleCloseTask(projectId, taskId)}
           onNewTask={() => setNewTaskOpen(true)}
           allStatuses={allStatuses}
           statusSince={statusSince}
           activities={agentActivities}
           now={now}
-          workingLast={config?.inboxWorkingLast ?? false}
+          theme={effectiveTheme}
           layout={config?.inboxLayout ?? 'flat'}
         />
       ) : (
@@ -1305,19 +1248,21 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       })()}
 
       {worktreeChoice.dialog}
+      {closeTaskFlow.dialog}
 
       {newTaskOpen && config && (
         <NewTaskModal
           projects={orderedProjects}
-          defaultProjectId={selectedProjectId}
+          defaultProjectId={newTaskWhere?.projectId ?? selectedProjectId}
           selectedTaskId={selectedTaskId}
+          defaultStreamId={newTaskWhere?.streamId ?? null}
           getProjectDir={getProjectDir}
           config={config}
           allTags={tags}
           onEnsureTag={addTag}
           onAddProject={addProject}
           onCreate={handleComposedTask}
-          onClose={() => setNewTaskOpen(false)}
+          onClose={() => { setNewTaskOpen(false); setNewTaskWhere(null) }}
         />
       )}
 

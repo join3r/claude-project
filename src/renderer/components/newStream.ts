@@ -40,7 +40,4 @@ export function defaultStreamBranch(name: string): string {
   return branchSlug(name)
 }
 
-/** Whether a stream may offer a worktree: not for a shell-command project. */
-export function streamWorktreeSupported(project: Project): boolean {
-  return !project.shellCommand
-}
+export { streamWorktreeSupported } from '../../shared/streams'

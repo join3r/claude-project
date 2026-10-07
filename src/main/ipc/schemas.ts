@@ -60,7 +60,6 @@ const taskViewState = v.object({
 export const windowViewState: Validator<WindowViewState> = v.object({
   selectedProjectId: nullableStr,
   selectedTaskId: nullableStr,
-  selectedTagIds: stringList,
   expandedProjectIds: stringList,
   streamExpansion: v.optional(v.record(v.boolean())),
   taskStates: v.record(taskViewState),

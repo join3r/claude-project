@@ -20,7 +20,10 @@ import {
   b64uEncode,
   constantTimeEqual,
   deviceId,
-  parseChatNewParams,
+  parseStreamNewParams,
+  parseBranchesListParams,
+  type StreamNewParams,
+  type BranchesListResult,
   parseTaskNewParams,
   parseTaskCloseParams,
   parseTabCloseParams,
@@ -194,8 +197,6 @@ export interface MobileServiceDeps {
   timers?: MobileTimers
   /** Claude chat tabs (`chat.*`, SPEC.md §6). Without it those ops answer `unsupported`. */
   chat?: Pick<ChatBridge, 'request' | 'dropPhone' | 'dropAll' | 'projectsChanged'>
-  /** `chat.new` (SPEC.md §8.2): adds a chat tab to a task. Without it the op answers `unsupported`. */
-  newChat?(taskId: string): { ok: true; tabId: string } | { ok: false; code: string; message: string }
   /** `task.new` (SPEC.md §8.4): a task with a chat started on a prompt. Without it the op answers `unsupported`. */
   newTask?(phoneId: string, params: TaskNewParams): Promise<{ ok: true; taskId: string; tabId: string } | { ok: false; code: string; message: string }>
   /** `task.close` (SPEC.md §8.7). Without it the op answers `unsupported`. */
@@ -206,6 +207,10 @@ export interface MobileServiceDeps {
   setPin?(params: PinSetParams): { ok: true } | { ok: false; code: string; message: string }
   /** `task.triage` (SPEC.md §8.11). Without it the op answers `unsupported`. */
   triageTask?(params: TaskTriageParams): { ok: true } | { ok: false; code: string; message: string }
+  /** `stream.new` (SPEC.md §8.12). Without it the op answers `unsupported`. */
+  newStream?(params: StreamNewParams): Promise<{ ok: true; streamId: string } | { ok: false; code: string; message: string }>
+  /** `branches.list` (SPEC.md §8.13). Without it the op answers `unsupported`. */
+  listBranches?(projectId: string): Promise<({ ok: true } & BranchesListResult) | { ok: false; code: string; message: string }>
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -824,22 +829,6 @@ export class MobileService {
       return
     }
     if (this.handlePushOp(session, id, message.op, message.params)) return
-    if (message.op === AppOp.ChatNew && this.deps.newChat) {
-      let taskId: string
-      try {
-        taskId = parseChatNewParams(message.params).taskId
-      } catch (err) {
-        if (!(err instanceof ProtocolError)) throw err
-        session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })
-        return
-      }
-      const outcome = this.deps.newChat(taskId)
-      this.log(`chat.new task=${taskId} phone=${session.phoneId} ${outcome.ok ? `tab=${outcome.tabId}` : `error=${outcome.code}`}`)
-      session.channel.send(outcome.ok
-        ? { t: 'res', id, ok: true, result: { tabId: outcome.tabId } }
-        : { t: 'res', id, ok: false, error: { code: outcome.code, message: outcome.message } })
-      return
-    }
     if (message.op === AppOp.TaskNew && this.deps.newTask) {
       let params: TaskNewParams
       try {
@@ -873,6 +862,26 @@ export class MobileService {
       this.answerLater(session, id, message.op, () => parseTabCloseParams(message.params), async ({ tabId }) => {
         const outcome = await closeTab(tabId)
         return outcome.ok ? { ok: true, result: {}, log: `tab=${tabId}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.StreamNew && this.deps.newStream) {
+      const newStream = this.deps.newStream
+      this.answerLater(session, id, message.op, () => parseStreamNewParams(message.params), async (params) => {
+        const outcome = await newStream(params)
+        return outcome.ok
+          ? { ok: true, result: { streamId: outcome.streamId }, log: `project=${params.projectId} worktree=${params.worktree} stream=${outcome.streamId}` }
+          : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.BranchesList && this.deps.listBranches) {
+      const listBranches = this.deps.listBranches
+      this.answerLater(session, id, message.op, () => parseBranchesListParams(message.params), async ({ projectId }) => {
+        const outcome = await listBranches(projectId)
+        return outcome.ok
+          ? { ok: true, result: { branches: outcome.branches, defaultBase: outcome.defaultBase }, log: `project=${projectId} branches=${outcome.branches.length}` }
+          : outcome
       })
       return
     }

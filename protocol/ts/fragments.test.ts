@@ -16,9 +16,10 @@ import {
 import {
   ChatLimits,
   capText,
-  parseChatNewParams,
+  parseBranchesListParams,
+  parseBranchesListResult,
+  parseStreamNewParams,
   parseTaskNewParams,
-  parseChatNewResult,
   parseChatParams,
   parseChatResult,
   parseChatViewItem,
@@ -157,12 +158,23 @@ describe('chat parsers', () => {
     expect(parseChatParams('task.new', { projectId: 'p1', prompt: 'Go' })).toBeNull()
   })
 
-  it('parses chat.new (§8.2), which names a task and not a tab', () => {
+  it('parses stream.new (§8.12): trims, drops branch fields without a worktree, names no tab', () => {
+    expect(parseStreamNewParams({ projectId: 'p1', name: ' 0.6.0 ', worktree: true, branch: ' 0.6.0 ', baseBranch: 'main' }))
+      .toEqual({ projectId: 'p1', name: '0.6.0', worktree: true, branch: '0.6.0', baseBranch: 'main' })
+    expect(parseStreamNewParams({ projectId: 'p1', name: 'Docs', worktree: false, branch: 'docs', baseBranch: 'main' }))
+      .toEqual({ projectId: 'p1', name: 'Docs', worktree: false })
+    expect(() => parseStreamNewParams({ projectId: 'p1', name: '  ', worktree: false })).toThrow(ProtocolError)
+    expect(() => parseStreamNewParams({ projectId: 'p1', name: 'x', worktree: 'yes' })).toThrow(ProtocolError)
+    expect(() => parseStreamNewParams({ projectId: 'p1', name: 'x', worktree: true, branch: ' ' })).toThrow(ProtocolError)
+    expect(parseChatParams('stream.new', { projectId: 'p1', name: 'x', worktree: false })).toBeNull()
+  })
+
+  it('parses branches.list (§8.13)', () => {
+    expect(parseBranchesListParams({ projectId: 'p1', extra: 1 })).toEqual({ projectId: 'p1' })
+    expect(() => parseBranchesListParams({})).toThrow(ProtocolError)
+    expect(parseBranchesListResult({ branches: ['main', 'dev'], defaultBase: 'main' })).toEqual({ branches: ['main', 'dev'], defaultBase: 'main' })
+    expect(() => parseBranchesListResult({ branches: [1], defaultBase: '' })).toThrow(ProtocolError)
     expect(parseChatParams('chat.new', { taskId: 't1' })).toBeNull()
-    expect(parseChatNewParams({ taskId: 't1', extra: true })).toEqual({ taskId: 't1' })
-    expect(() => parseChatNewParams({ tabId: 't1' })).toThrow(ProtocolError)
-    expect(parseChatNewResult({ tabId: 'tab-2' })).toEqual({ tabId: 'tab-2' })
-    expect(() => parseChatNewResult({})).toThrow(ProtocolError)
   })
 
   it('capText cuts to the limit with an ellipsis and never splits a surrogate pair', () => {

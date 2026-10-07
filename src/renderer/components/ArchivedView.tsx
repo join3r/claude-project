@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, RotateCcw } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import type { Project, Tab, Task } from '../../shared/types'
+import { isAgentTabType, type Project, type Tab, type Task } from '../../shared/types'
 import { visibleArchive, type ArchivedTask } from '../../shared/archive'
 import { emptyChatState, reduceChat } from '../../shared/claude-chat'
 import { taskTabs } from '../../shared/streams'
@@ -105,7 +105,7 @@ function TabList({ task }: { task: Task }): React.ReactElement {
           <span>{tab.title || TAB_LABEL[tab.type]}</span>
           <span className="text-xs text-text-subtle">
             {TAB_LABEL[tab.type]}
-            {tab.id === task.mainTabId ? ' · main' : ''}
+            {tab.id === task.mainTabId ? (isAgentTabType(tab.type) ? ' · the task\'s agent' : ' · main') : ''}
             {tab.sessionId ? ` · session ${tab.sessionId.slice(0, 8)}` : ''}
             {tab.url ? ` · ${tab.url}` : ''}
             {tab.filePath ? ` · ${tab.filePath}` : ''}
