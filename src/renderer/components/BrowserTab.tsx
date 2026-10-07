@@ -25,6 +25,10 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   const [proxyReady, setProxyReady] = useState(!sshConfig)
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const webviewRef = useRef<Electron.WebviewTag>(null)
+  // Lazy like terminals: hidden tabs (e.g. restored at startup) don't load their page
+  // until first shown, then stay mounted so the page keeps its state.
+  const [activated, setActivated] = useState(visible)
+  if (visible && !activated) setActivated(true)
 
   const handleOpenLinkInApp = useCallback((targetUrl: string) => {
     addTab(projectId, taskId, pane, 'browser', { url: targetUrl })
@@ -33,9 +37,13 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   const isRemote = !!sshConfig
   const partition = isRemote ? `persist:browser-${projectId}` : undefined
 
+  // The webview mounts late (first view, or once a remote proxy is ready), so
+  // effects that bind to it re-run on `webviewMounted`.
+  const webviewMounted = activated && proxyReady
+
   useEffect(() => {
     const webview = webviewRef.current
-    if (!webview) return
+    if (!webviewMounted || !webview) return
 
     const handleNavigation = () => {
       markTaskInteracted(projectId, taskId)
@@ -62,7 +70,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
       webview.removeEventListener('did-navigate-in-page', handleNavigation)
       webview.removeEventListener('context-menu', handleContextMenu)
     }
-  }, [projectId, taskId, pane, tabId, updateTabUrl, markTaskInteracted])
+  }, [webviewMounted, projectId, taskId, pane, tabId, updateTabUrl, markTaskInteracted])
 
   useEffect(() => {
     const handleReload = (e: Event) => {
@@ -78,18 +86,18 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   // Apply browser zoom factor
   useEffect(() => {
     const webview = webviewRef.current
-    if (!webview) return
+    if (!webviewMounted || !webview) return
     const applyZoom = () => {
       try { webview.setZoomFactor(browserZoomFactor) } catch {}
     }
     applyZoom()
     webview.addEventListener('dom-ready', applyZoom)
     return () => { webview.removeEventListener('dom-ready', applyZoom) }
-  }, [browserZoomFactor])
+  }, [webviewMounted, browserZoomFactor])
 
-  // Initialize SOCKS proxy for remote projects
+  // Initialize SOCKS proxy for remote projects, on first view only
   useEffect(() => {
-    if (!isRemote) return
+    if (!isRemote || !activated) return
 
     let cancelled = false
 
@@ -149,7 +157,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
 
     void initProxy()
     return () => { cancelled = true }
-  }, [isRemote, projectId])
+  }, [isRemote, activated, projectId])
 
   // Listen for proxy status changes (cross-tab sync)
   useEffect(() => {
@@ -236,7 +244,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
         </button>
       </div>
       <div className="flex-1 flex flex-col overflow-hidden">
-        {proxyReady ? (
+        {!activated ? null : proxyReady ? (
           <webview
             ref={webviewRef}
             src={url}
