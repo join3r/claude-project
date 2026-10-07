@@ -1,20 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { addChatTab } from '../src/main/mobile/new-chat'
-import { createHomeTask, type ProjectsData } from '../src/shared/types'
+import { createHomeTask, type Project, type ProjectsData } from '../src/shared/types'
+import { findTaskInProject, paneTabs, projectTasks } from '../src/shared/streams'
+import { fixtureProject } from './helpers/streams-fixtures'
 
-function data(extra: Partial<ProjectsData['projects'][number]> = {}): ProjectsData {
+function data(extra: Partial<Project> = {}): ProjectsData {
   const home = createHomeTask('p1').task
   return {
-    projects: [{
+    projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/src/api', ...extra,
       tasks: [home, {
         id: 't1', name: 'fix-auth',
         tabs: { left: [{ id: 'tab-term', type: 'terminal', title: 'zsh' }], right: [{ id: 'tab-r', type: 'browser', title: 'Browser' }] },
-        activeTab: { left: 'tab-term', right: 'tab-r' }, splitOpen: true, splitRatio: 0.5
+        activeTab: { left: 'tab-term', right: 'tab-r' }
       }]
-    }],
+    })],
     tags: [], projectOrder: ['p1'], pinnedItems: []
-  } as ProjectsData
+  }
 }
 
 function counter(): () => string {
@@ -28,20 +30,21 @@ describe('addChatTab (SPEC.md §8.2)', () => {
     const result = addChatTab(before, 't1', counter())
     expect(result).toMatchObject({ ok: true, tabId: 'id-1' })
     if (!result.ok) return
-    const task = result.data.projects[0].tasks[1]
-    expect(task.tabs.left).toEqual([
+    const task = findTaskInProject(result.data.projects[0], 't1')!
+    const old = findTaskInProject(before.projects[0], 't1')!
+    expect(paneTabs(task, 'left')).toEqual([
       { id: 'tab-term', type: 'terminal', title: 'zsh' },
       { id: 'id-1', type: 'claude-chat', title: 'Claude', sessionId: 'id-2' }
     ])
-    expect(task.tabs.right).toBe(before.projects[0].tasks[1].tabs.right)
+    expect(paneTabs(task, 'right')).toBe(paneTabs(old, 'right'))
     // The desktop's own view isn't switched to the new tab.
-    expect(task.activeTab).toEqual({ left: 'tab-term', right: 'tab-r' })
+    expect(task.panes.map(pane => pane.activeTabId)).toEqual(['tab-term', 'tab-r'])
     // The input is not mutated.
-    expect(before.projects[0].tasks[1].tabs.left).toHaveLength(1)
+    expect(paneTabs(old, 'left')).toHaveLength(1)
   })
 
   it('refuses unknown and home tasks, hidden projects and shell-command projects', () => {
-    const home = data().projects[0].tasks[0].id
+    const home = projectTasks(data().projects[0])[0].id
     expect(addChatTab(data(), 'nope')).toMatchObject({ ok: false, code: 'not-found' })
     expect(addChatTab(data(), home)).toMatchObject({ ok: false, code: 'not-found' })
     expect(addChatTab(data({ hideFromMobile: true }), 't1')).toMatchObject({ ok: false, code: 'not-found' })

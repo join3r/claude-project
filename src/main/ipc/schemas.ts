@@ -80,21 +80,40 @@ const workspaceConfig = v.object({
   relativeProjectPath: v.optional(v.string())
 }, 'passthrough')
 
+const projectFields = {
+  id: v.string({ nonEmpty: true }),
+  directory: v.optional(v.string()),
+  ssh: v.optional(v.plainObject())
+}
+
+const taskShape = v.object({ id: v.string({ nonEmpty: true }) }, 'passthrough')
+
 /**
  * Structural check only: `Storage.normalizeProjectsData` does the semantic
  * clean-up on commit. The fields checked are the ones main itself reads —
  * in particular directories and worktree paths, which feed the file-browser
  * allow-list.
+ *
+ * A project holds `streams` (each owning its worktree); the older shape with
+ * `tasks` (each owning its worktree) still passes, since storage migrates it.
  */
-const projectShape = v.object({
-  id: v.string({ nonEmpty: true }),
-  directory: v.optional(v.string()),
-  ssh: v.optional(v.plainObject()),
-  tasks: v.array(v.object({
-    id: v.string({ nonEmpty: true }),
-    workspace: v.optional(workspaceConfig)
-  }, 'passthrough'))
-}, 'passthrough')
+const projectShape = v.union(
+  v.object({
+    ...projectFields,
+    streams: v.array(v.object({
+      id: v.string({ nonEmpty: true }),
+      workspace: v.optional(workspaceConfig),
+      tasks: v.array(taskShape)
+    }, 'passthrough'))
+  }, 'passthrough'),
+  v.object({
+    ...projectFields,
+    tasks: v.array(v.object({
+      id: v.string({ nonEmpty: true }),
+      workspace: v.optional(workspaceConfig)
+    }, 'passthrough'))
+  }, 'passthrough')
+)
 
 export const revisionSave = <T>(data: Validator<T>): Validator<{ baseRevision: number; data: T }> =>
   v.object({ baseRevision: v.number({ int: true, min: 0 }), data }) as Validator<{ baseRevision: number; data: T }>

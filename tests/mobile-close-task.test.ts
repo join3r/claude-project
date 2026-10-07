@@ -1,26 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import { closeTask, findClosableTab, removeTabFromData, type CloseTaskDeps } from '../src/main/mobile/close-task'
-import { createHomeTask, type ProjectsData, type Task, type WorkspaceDeleteResult } from '../src/shared/types'
+import { createHomeTask, type ProjectsData, type Stream, type WorkspaceDeleteResult } from '../src/shared/types'
+import { findTaskInProject, paneTabs, projectTasks, removeTaskFromProject } from '../src/shared/streams'
+import { fixtureProject, fixtureTask, type FixtureTask } from './helpers/streams-fixtures'
 
 const workspace = { worktreePath: '/src/api/.worktrees/fix', branchName: 'fix', baseBranch: 'main', relativeProjectPath: '' }
 
-function data(task: Partial<Task> = {}, hidden = false): ProjectsData {
+/** `t1` with a `workspace` sits alone in a worktree stream; without one, in `main`. */
+function data(task: Partial<FixtureTask> = {}, hidden = false, streams: Stream[] = []): ProjectsData {
   const home = createHomeTask('p1').task
   return {
-    projects: [{
-      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hidden,
+    projects: [fixtureProject({
+      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hidden || undefined,
       tasks: [home, {
         id: 't1', name: 'fix',
         tabs: {
           left: [{ id: 'tab1', type: 'claude-chat', title: 'Claude', sessionId: 's1' }, { id: 'ed1', type: 'editor', title: 'a.ts' }],
           right: [{ id: 'tab2', type: 'terminal', title: 'zsh' }]
         },
-        activeTab: { left: 'ed1', right: 'tab2' }, splitOpen: true, splitRatio: 0.5,
+        activeTab: { left: 'ed1', right: 'tab2' },
         ...task
-      }]
-    }],
+      }],
+      streams
+    })],
     tags: [], projectOrder: ['p1'], pinnedItems: []
-  } as ProjectsData
+  }
+}
+
+/** A worktree stream holding `t2` and `t3`. */
+function sharedStream(): Stream {
+  return { id: 's-fix', name: 'fix', workspace, tasks: [fixtureTask({ id: 't2' }), fixtureTask({ id: 't3' })] }
 }
 
 function deps(projects: ProjectsData, options: { dirty?: string[]; check?: WorkspaceDeleteResult | Error; force?: WorkspaceDeleteResult } = {}) {
@@ -50,7 +59,7 @@ describe('closeTask (SPEC.md §8.7)', () => {
   })
 
   it('refuses unknown, home and hidden tasks', async () => {
-    const home = data().projects[0].tasks[0].id
+    const home = projectTasks(data().projects[0])[0].id
     expect(await closeTask(deps(data()).d, { taskId: 'nope' })).toMatchObject({ ok: false, code: 'not-found' })
     expect(await closeTask(deps(data()).d, { taskId: home })).toMatchObject({ ok: false, code: 'not-found' })
     expect(await closeTask(deps(data({}, true)).d, { taskId: 't1' })).toMatchObject({ ok: false, code: 'not-found' })
@@ -91,6 +100,23 @@ describe('closeTask (SPEC.md §8.7)', () => {
     expect(await closeTask(invalid.d, { taskId: 't1' })).toEqual({ ok: true, result: { closed: true, warning: 'left on disk' } })
     expect(invalid.calls).toEqual(['check', 'remove t1'])
   })
+
+  it('leaves the worktree to the other tasks of its stream, and takes it with the last one', async () => {
+    const shared = deps(data({}, false, [sharedStream()]), { dirty: [] })
+    // Neither a pre-flight nor a forced removal: the worktree stays for t3.
+    expect(await closeTask(shared.d, { taskId: 't2' })).toEqual({ ok: true, result: { closed: true } })
+    expect(await closeTask(shared.d, { taskId: 't2', discardWorkspace: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(shared.calls).toEqual(['remove t2', 'remove t2'])
+
+    const afterT2 = data({}, false, [sharedStream()])
+    afterT2.projects[0] = removeTaskFromProject(afterT2.projects[0], 't2')
+    const last = deps(afterT2, { check: { status: 'uncommitted', baseBranch: 'main' } })
+    expect(await closeTask(last.d, { taskId: 't3' })).toEqual({
+      ok: true, result: { closed: false, blocker: 'uncommitted', branch: 'fix', baseBranch: 'main' }
+    })
+    expect(await closeTask(last.d, { taskId: 't3', discardWorkspace: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(last.calls).toEqual(['check', 'remove t3', 'force keepBranch=false'])
+  })
 })
 
 describe('tab.close helpers (SPEC.md §8.8)', () => {
@@ -103,10 +129,11 @@ describe('tab.close helpers (SPEC.md §8.8)', () => {
 
   it('drops the tab and moves the active tab of its pane', () => {
     const next = removeTabFromData(data(), 't1', 'tab2')
-    const task = next.projects[0].tasks[1]
-    expect(task.tabs.right).toEqual([])
-    expect(task.activeTab).toEqual({ left: 'ed1', right: null })
-    const left = removeTabFromData(data({ activeTab: { left: 'ed1', right: 'tab2' } }), 't1', 'ed1').projects[0].tasks[1]
-    expect(left.activeTab.left).toBe('tab1')
+    const task = findTaskInProject(next.projects[0], 't1')!
+    // The emptied right pane closes; the left one keeps its active tab.
+    expect(paneTabs(task, 'right')).toEqual([])
+    expect(task.panes.map(p => p.activeTabId)).toEqual(['ed1'])
+    const left = findTaskInProject(removeTabFromData(data(), 't1', 'ed1').projects[0], 't1')!
+    expect(left.panes.map(p => p.activeTabId)).toEqual(['tab1', 'tab2'])
   })
 })

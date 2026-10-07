@@ -6,6 +6,7 @@ import { createHomeTask, type ProjectsData } from '../src/shared/types'
 import type { ChatPrompt } from '../src/shared/claude-chat'
 import { b64uDecode, b64uEncode, openPushPayload, type PushPayload } from '../protocol/ts/index.ts'
 import { FakeChats } from './helpers/fake-chats'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 const DESKTOP = 'd'.repeat(32)
 
@@ -15,16 +16,16 @@ function registration(seed: number, kinds: MobilePushRegistration['kinds']): Mob
 
 function projects(hide = false): ProjectsData {
   return {
-    projects: [{
-      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hide,
+    projects: [fixtureProject({
+      id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hide || undefined,
       tasks: [createHomeTask('p1').task, {
         id: 't1', name: 'fix-auth',
-        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 's' }, { id: 'tab-term', type: 'terminal', title: 'zsh' }], right: [] },
-        activeTab: { left: 'tab-chat', right: null }, splitOpen: false, splitRatio: 0.5
+        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 's' }, { id: 'tab-term', type: 'terminal', title: 'zsh' }] },
+        activeTab: { left: 'tab-chat' }
       }]
-    }],
+    })],
     tags: [], projectOrder: ['p1'], pinnedItems: []
-  } as ProjectsData
+  }
 }
 
 const bash: ChatPrompt = { id: 'pr1', kind: 'permission', toolName: 'Bash', input: { command: 'npm test' } }

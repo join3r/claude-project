@@ -6,6 +6,7 @@
 import { createTaskViewState, reconcileTaskViewState } from '../../../shared/types'
 import type { FileBrowserTab, Project, Task, TaskViewState, WindowViewState } from '../../../shared/types'
 import type { Pane } from './projectsData'
+import { paneTabs, projectLastTaskId, projectTasks } from '../../../shared/streams'
 
 export function areWindowStatesEqual(a: WindowViewState, b: WindowViewState): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
@@ -83,9 +84,7 @@ export function selectProjectView(prev: WindowViewState, id: string | null, proj
   if (!id) {
     return { ...prev, selectedProjectId: null, selectedTaskId: null }
   }
-  const restoredTaskId = project?.lastTaskId && project.tasks.some(task => task.id === project.lastTaskId)
-    ? project.lastTaskId
-    : null
+  const restoredTaskId = (project && projectLastTaskId(project)) ?? null
   return {
     ...prev,
     selectedProjectId: id,
@@ -96,7 +95,7 @@ export function selectProjectView(prev: WindowViewState, id: string | null, proj
 
 /** Land on the project's home task with its home tab in front. */
 export function selectProjectHomeView(prev: WindowViewState, projectId: string, homeTask: Task): WindowViewState {
-  const homeTab = homeTask.tabs.left.find(t => t.system === 'home') ?? null
+  const homeTab = paneTabs(homeTask, 'left').find(t => t.system === 'home') ?? null
   const prevTaskState = prev.taskStates[homeTask.id] ?? createTaskViewState(homeTask)
   return {
     ...prev,
@@ -243,15 +242,15 @@ export function reassignActiveTabsAfterNoteDelete(
 ): WindowViewState {
   const isDoomed = (tab: { type: string; noteId?: string }) => tab.type === 'note' && tab.noteId === noteId
   const nextTaskStates = { ...prev.taskStates }
-  for (const task of project.tasks) {
+  for (const task of projectTasks(project)) {
     const currentState = reconcileTaskViewState(task, prev.taskStates[task.id])
     const nextActiveTab = { ...currentState.activeTab }
     let changed = false
     for (const pane of ['left', 'right'] as const) {
       const activeId = currentState.activeTab[pane]
-      const activeTab = task.tabs[pane].find(tab => tab.id === activeId)
+      const activeTab = paneTabs(task, pane).find(tab => tab.id === activeId)
       if (activeTab && isDoomed(activeTab)) {
-        const remaining = task.tabs[pane].filter(tab => !isDoomed(tab))
+        const remaining = paneTabs(task, pane).filter(tab => !isDoomed(tab))
         nextActiveTab[pane] = remaining[remaining.length - 1]?.id ?? null
         changed = true
       }

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { taskWorkspace } from '../../shared/streams'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
 import FileTree, { type FileTreeHandle } from './FileTree'
@@ -31,8 +32,9 @@ export default function FileBrowserPanel(): React.ReactElement | null {
   const fileTreeRef = useRef<FileTreeHandle>(null)
   const [filterQuery, setFilterQuery] = useState('')
 
-  const effectiveDir = selectedTask?.workspace
-    ? joinWorkspaceDir(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
+  const selectedWorkspace = taskWorkspace(selectedProject, selectedTask?.id)
+  const effectiveDir = selectedWorkspace
+    ? joinWorkspaceDir(selectedWorkspace.worktreePath, selectedWorkspace.relativeProjectPath)
     : selectedProject?.directory ?? ''
 
   const isLocalProject = !!selectedProject

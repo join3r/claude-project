@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { Project } from '../src/shared/types'
+import { createMainStream, type Project } from '../src/shared/types'
 
 void React
 
@@ -27,7 +27,7 @@ function localProject(patch: Partial<Project> = {}): Project {
     id: 'p1',
     name: 'Demo',
     directory: 'C:\\Repos\\demo',
-    tasks: [],
+    streams: [createMainStream('p1')],
     ...patch
   }
 }

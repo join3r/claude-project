@@ -8,6 +8,8 @@ import {
   type WindowSessionState,
   type WindowViewState
 } from '../src/shared/types'
+import { projectTasks } from '../src/shared/streams'
+import { fixtureProject } from './helpers/streams-fixtures'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -112,7 +114,7 @@ describe('Storage', () => {
   it('saves and loads projects', () => {
     const projects = {
       projects: [{
-        id: '1', name: 'Test', directory: '/tmp', tasks: []
+        id: '1', name: 'Test', directory: '/tmp', streams: []
       }]
     }
     storage.saveProjects(projects as unknown as ProjectsData)
@@ -127,7 +129,7 @@ describe('Storage', () => {
         id: '1',
         name: 'ML',
         directory: 'C:\\Repos\\ml',
-        tasks: [],
+        streams: [],
         condaEnvName: 'ml',
         condaEnvPrefix: 'C:\\Users\\me\\miniconda3\\envs\\ml'
       }],
@@ -154,7 +156,7 @@ describe('Storage', () => {
   it('saves and loads projects with ssh config', () => {
     const projects = {
       projects: [{
-        id: '1', name: 'Remote', directory: '', tasks: [],
+        id: '1', name: 'Remote', directory: '', streams: [],
         ssh: { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/home/deploy/app' }
       }]
     }
@@ -171,7 +173,7 @@ describe('Storage', () => {
   it('saves and loads projects with ssh keyFile', () => {
     const projects = {
       projects: [{
-        id: '1', name: 'Remote Key', directory: '', tasks: [],
+        id: '1', name: 'Remote Key', directory: '', streams: [],
         ssh: { host: 'dev.example.com', port: 2222, username: 'deploy', keyFile: '/home/user/.ssh/id_ed25519', remoteDir: '/opt/app' }
       }]
     }
@@ -187,7 +189,7 @@ describe('Storage', () => {
         id: '1',
         name: 'Remote Tunnel',
         directory: '',
-        tasks: [],
+        streams: [],
         ssh: { host: 'dev.example.com', port: 22, username: 'deploy', remoteDir: '/opt/app' },
         tunnel: { host: 'localhost', sourcePort: 3000, destinationPort: 8080 }
       }]
@@ -202,15 +204,15 @@ describe('Storage', () => {
   })
 
   it('isRemoteProject returns true for projects with ssh config', () => {
-    expect(isRemoteProject({ id: '1', name: 'R', directory: '', tasks: [], ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/d' } })).toBe(true)
-    expect(isRemoteProject({ id: '2', name: 'L', directory: '/local', tasks: [] })).toBe(false)
+    expect(isRemoteProject({ id: '1', name: 'R', directory: '', streams: [], ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/d' } })).toBe(true)
+    expect(isRemoteProject({ id: '2', name: 'L', directory: '/local', streams: [] })).toBe(false)
   })
 
   it('defaults projectOrder from projects when missing', () => {
     const legacyData = {
       projects: [
-        { id: 'p1', name: 'Project 1', directory: '/tmp/p1', tasks: [] },
-        { id: 'p2', name: 'Project 2', directory: '/tmp/p2', tasks: [] }
+        { id: 'p1', name: 'Project 1', directory: '/tmp/p1', streams: [] },
+        { id: 'p2', name: 'Project 2', directory: '/tmp/p2', streams: [] }
       ]
     }
     fs.writeFileSync(path.join(testDir, 'projects.json'), JSON.stringify(legacyData))
@@ -227,7 +229,7 @@ describe('Storage', () => {
 
   it('ignores legacy folders and rootOrder', () => {
     const data = {
-      projects: [{ id: 'p1', name: 'P1', directory: '/tmp', tasks: [] }],
+      projects: [{ id: 'p1', name: 'P1', directory: '/tmp', streams: [] }],
       folders: [{ id: 'f1', name: 'Folder', projectIds: ['p1'] }],
       rootOrder: ['f1']
     }
@@ -239,7 +241,7 @@ describe('Storage', () => {
 
   it('prunes orphan projectOrder and tagIds', () => {
     const data = {
-      projects: [{ id: 'p1', name: 'P1', directory: '/tmp', tasks: [], tagIds: ['t1', 'missing'] }],
+      projects: [{ id: 'p1', name: 'P1', directory: '/tmp', streams: [], tagIds: ['t1', 'missing'] }],
       tags: [{ id: 't1', name: 'work' }, { id: 'orphan', name: 'unused' }],
       projectOrder: ['p1', 'deleted']
     }
@@ -253,8 +255,8 @@ describe('Storage', () => {
   it('appends unplaced projects to projectOrder', () => {
     const data = {
       projects: [
-        { id: 'p1', name: 'P1', directory: '/tmp', tasks: [] },
-        { id: 'p2', name: 'P2', directory: '/tmp', tasks: [] }
+        { id: 'p1', name: 'P1', directory: '/tmp', streams: [] },
+        { id: 'p2', name: 'P2', directory: '/tmp', streams: [] }
       ],
       tags: [],
       projectOrder: ['p1']
@@ -265,26 +267,27 @@ describe('Storage', () => {
   })
 
   it('preserves sessionId on tabs', () => {
-    const projects = {
-      projects: [{
+    const projects: ProjectsData = {
+      projects: [fixtureProject({
         id: '1', name: 'Test', directory: '/tmp', tasks: [{
-          id: 't1', name: 'Task', splitOpen: false, splitRatio: 0.5,
-          activeTab: { left: 'tab1', right: null },
+          id: 't1', name: 'Task',
           tabs: {
-            left: [{ id: 'tab1', type: 'claude' as const, title: 'Claude Code', sessionId: 'sess-abc-123' }],
-            right: []
+            left: [{ id: 'tab1', type: 'claude' as const, title: 'Claude Code', sessionId: 'sess-abc-123' }]
           }
         }]
-      }]
+      })],
+      tags: [],
+      projectOrder: ['1'],
+      pinnedItems: []
     }
-    storage.saveProjects(projects as unknown as ProjectsData)
+    storage.saveProjects(projects)
     const loaded = storage.loadProjects()
-    expect(loaded.projects[0].tasks[0].tabs.left[0].sessionId).toBe('sess-abc-123')
+    expect(projectTasks(loaded.projects[0])[0].panes[0].tabs[0].sessionId).toBe('sess-abc-123')
   })
 
   it('saves and loads window session state', () => {
     const projectsData: ProjectsData = {
-      projects: [{
+      projects: [fixtureProject({
         id: 'project-1',
         name: 'Project 1',
         directory: '/tmp/project-1',
@@ -292,14 +295,11 @@ describe('Storage', () => {
           id: 'task-1',
           name: 'Task 1',
           tabs: {
-            left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
-            right: []
+            left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }]
           },
-          activeTab: { left: 'left-1', right: null },
-          splitOpen: false,
-          splitRatio: 0.5
+          activeTab: { left: 'left-1' }
         }]
-      }],
+      })],
       tags: [{ id: 'tag-1', name: 'work' }],
       projectOrder: ['project-1'],
       pinnedItems: []
@@ -367,7 +367,7 @@ describe('Storage', () => {
 
   it('normalizes persisted window sessions against current projects and tags', () => {
     const projectsData: ProjectsData = {
-      projects: [{
+      projects: [fixtureProject({
         id: 'project-1',
         name: 'Project 1',
         directory: '/tmp/project-1',
@@ -378,11 +378,9 @@ describe('Storage', () => {
             left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
             right: [{ id: 'right-1', type: 'browser', title: 'Browser', url: 'https://example.com' }]
           },
-          activeTab: { left: 'left-1', right: 'right-1' },
-          splitOpen: true,
-          splitRatio: 0.6
+          activeTab: { left: 'left-1', right: 'right-1' }
         }]
-      }],
+      })],
       tags: [{ id: 'tag-1', name: 'work' }],
       projectOrder: ['project-1'],
       pinnedItems: []
@@ -460,7 +458,9 @@ describe('Storage', () => {
     }
 
     const normalized = Storage.normalizeProjectsData(legacy as Record<string, unknown>)
-    const tasks = normalized.projects[0].tasks
+    // Through the streams migration: each legacy task with no tabs is one task of the same id.
+    const tasks = projectTasks(normalized.projects[0])
+    expect(tasks.map(t => t.id)).toEqual(['t1', 't2'])
     expect(tasks[0].lastInteractedAt).toBe(12345)
     expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
     // t2 has no stamp of any kind — it gets one now rather than reading as infinitely idle.
@@ -487,7 +487,7 @@ describe('Storage', () => {
     }
 
     const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
-    const stamp = normalized.projects[0].tasks[0].lastInteractedAt
+    const stamp = projectTasks(normalized.projects[0])[0].lastInteractedAt
     expect(stamp).toBeGreaterThanOrEqual(before)
     expect(stamp).toBeLessThanOrEqual(Date.now())
   })
@@ -512,7 +512,7 @@ describe('Storage', () => {
     }
 
     const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
-    expect(normalized.projects[0].tasks[0].lastInteractedAt).toBeUndefined()
+    expect(projectTasks(normalized.projects[0])[0].lastInteractedAt).toBeUndefined()
   })
 
   it('does not overwrite existing lastInteractedAt', () => {
@@ -538,19 +538,15 @@ describe('Storage', () => {
     }
 
     const normalized = Storage.normalizeProjectsData(data as Record<string, unknown>)
-    const tasks = normalized.projects[0].tasks
+    const tasks = projectTasks(normalized.projects[0])
     expect(tasks[0].lastInteractedAt).toBe(999)
     expect((tasks[0] as any).lastFocusedAt).toBeUndefined()
   })
 
   describe('ad-hoc (ephemeral) projects', () => {
-    const task = (id: string, system?: 'home'): Record<string, unknown> => ({
+    const task = (id: string, system?: 'home') => ({
       id,
       name: id,
-      tabs: { left: [], right: [] },
-      activeTab: { left: null, right: null },
-      splitOpen: false,
-      splitRatio: 0.5,
       lastInteractedAt: 1,
       ...(system ? { system } : {})
     })
@@ -558,8 +554,8 @@ describe('Storage', () => {
     it('drops one whose last real task is gone, order entry included', () => {
       const data = {
         projects: [
-          { id: 'p1', name: 'P1', directory: '/tmp/p1', tasks: [task('t1')] },
-          { id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home')] }
+          fixtureProject({ id: 'p1', name: 'P1', directory: '/tmp/p1', tasks: [task('t1')] }),
+          fixtureProject({ id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home')] })
         ],
         projectOrder: ['p1', 'adhoc'],
         tags: [],
@@ -574,7 +570,7 @@ describe('Storage', () => {
     it('keeps one that still holds a real task', () => {
       const data = {
         projects: [
-          { id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home'), task('t1')] }
+          fixtureProject({ id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home'), task('t1')] })
         ],
         projectOrder: ['adhoc'],
         tags: [],
@@ -588,7 +584,7 @@ describe('Storage', () => {
 
     it('leaves an ordinary empty project alone', () => {
       const data = {
-        projects: [{ id: 'p1', name: 'P1', directory: '/tmp/p1', tasks: [task('home', 'home')] }],
+        projects: [fixtureProject({ id: 'p1', name: 'P1', directory: '/tmp/p1', tasks: [task('home', 'home')] })],
         projectOrder: ['p1'],
         tags: [],
         pinnedItems: []
@@ -601,7 +597,7 @@ describe('Storage', () => {
     it('prunes pins that pointed at the project it dropped', () => {
       const data = {
         projects: [
-          { id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home')] }
+          fixtureProject({ id: 'adhoc', name: 'scratch', directory: '/tmp/scratch', ephemeral: true, tasks: [task('home', 'home')] })
         ],
         projectOrder: ['adhoc'],
         tags: [],
@@ -661,7 +657,7 @@ describe('Storage', () => {
     const projectsFile = () => path.join(testDir, 'projects.json')
     const backupsDir = () => path.join(testDir, 'backups')
     const sampleProjects = (name: string): ProjectsData => ({
-      projects: [{ id: 'p1', name, path: '/tmp/p1', tasks: [], tagIds: [] } as unknown as ProjectsData['projects'][number]],
+      projects: [{ id: 'p1', name, path: '/tmp/p1', streams: [], tagIds: [] } as unknown as ProjectsData['projects'][number]],
       tags: [],
       projectOrder: ['p1'],
       pinnedItems: []

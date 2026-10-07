@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildInbox, inboxContentKey, type InboxTabLookup } from '../src/main/mobile/inbox'
-import { createHomeTask, type Project, type ProjectsData, type Tab, type TabStatusValue, type Task } from '../src/shared/types'
+import { createHomeTask, mainStreamId, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue } from '../src/shared/types'
+import { findTaskInProject, paneTabs, projectTasks } from '../src/shared/streams'
+import { fixtureProject, fixtureTask, type FixtureTask } from './helpers/streams-fixtures'
 import { emptyActivity, type AgentActivity } from '../src/shared/agent-activity'
 
 const DESKTOP = { id: 'd'.repeat(32), name: 'join3r-mbp' }
@@ -10,20 +12,13 @@ function tab(id: string, type: Tab['type'], title = id): Tab {
   return { id, type, title }
 }
 
-function task(id: string, tabs: Tab[], extra: Partial<Task> = {}): Task {
-  return {
-    id,
-    name: `task ${id}`,
-    tabs: { left: tabs, right: [] },
-    activeTab: { left: tabs[0]?.id ?? null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
-    ...extra
-  }
+function task(id: string, tabs: Tab[], extra: Omit<FixtureTask, 'id'> = {}): FixtureTask {
+  return { id, name: `task ${id}`, tabs: { left: tabs, right: [] }, ...extra }
 }
 
-function project(id: string, tasks: Task[], extra: Partial<Project> = {}): Project {
-  return { id, name: `project ${id}`, directory: `/src/${id}`, tasks: [createHomeTask(id).task, ...tasks], ...extra }
+/** A project whose `main` stream holds its Home task first; workspace tasks get streams of their own. */
+function project(id: string, tasks: FixtureTask[], extra: Partial<Project> & { streams?: Stream[] } = {}): Project {
+  return fixtureProject({ id, name: `project ${id}`, directory: `/src/${id}`, tasks: [createHomeTask(id).task, ...tasks], ...extra })
 }
 
 function data(projects: Project[], projectOrder = projects.map(p => p.id)): ProjectsData {
@@ -91,10 +86,12 @@ describe('buildInbox', () => {
   })
 
   it('keeps only agent and terminal tabs, left pane then right', () => {
-    const t = task('t1', [
-      tab('chat', 'claude-chat'), tab('cc', 'claude'), tab('browser', 'browser'), tab('ed', 'editor')
-    ])
-    t.tabs.right = [tab('cx', 'codex'), tab('pi', 'pi'), tab('diff', 'diff'), tab('note', 'note'), tab('sh', 'terminal')]
+    const t = task('t1', [], {
+      tabs: {
+        left: [tab('chat', 'claude-chat'), tab('cc', 'claude'), tab('browser', 'browser'), tab('ed', 'editor')],
+        right: [tab('cx', 'codex'), tab('pi', 'pi'), tab('diff', 'diff'), tab('note', 'note'), tab('sh', 'terminal')]
+      }
+    })
     const inbox = buildInbox(data([project('p1', [t])]), lookup(), DESKTOP, NOW)
     expect(inbox.projects[0].tasks[0].tabs.map(x => x.id)).toEqual(['chat', 'cc', 'cx', 'pi', 'sh'])
   })
@@ -177,11 +174,11 @@ describe('buildInbox', () => {
     const d: ProjectsData = {
       ...data([p1, hidden]),
       pinnedItems: [
-        { type: 'task', projectId: 'p1', taskId: 't2' },
+        { type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 't2' },
         { type: 'project', projectId: 'hidden' },
-        { type: 'task', projectId: 'hidden', taskId: 'h1' },
-        { type: 'task', projectId: 'p1', taskId: 'gone' },
-        { type: 'task', projectId: 'p1', taskId: p1.tasks[0].id },
+        { type: 'task', projectId: 'hidden', streamId: mainStreamId('hidden'), taskId: 'h1' },
+        { type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 'gone' },
+        { type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: projectTasks(p1)[0].id },
         { type: 'project', projectId: 'p1' }
       ]
     }
@@ -221,11 +218,46 @@ describe('buildInbox', () => {
     })
   })
 
+  it('sends each task of a stream as its own wire task, all on the stream\'s branch', () => {
+    const workspace = { worktreePath: '/src/p1/.worktrees/rel', branchName: 'rel-0.5', baseBranch: 'main', relativeProjectPath: '' }
+    const stream: Stream = {
+      id: 's-rel',
+      name: '0.5.0',
+      workspace,
+      tasks: [fixtureTask(task('a1', [tab('x', 'claude')])), fixtureTask(task('a2', [tab('y', 'terminal')]))]
+    }
+    const inbox = buildInbox(data([project('p1', [task('plain', [])], { streams: [stream] })]), lookup(), DESKTOP, NOW)
+    const tasks = inbox.projects[0].tasks
+    expect(tasks.map(t => [t.id, t.branch])).toEqual([['plain', undefined], ['a1', 'rel-0.5'], ['a2', 'rel-0.5']])
+    expect(tasks[1].tabs.map(t => t.id)).toEqual(['x'])
+    expect(tasks[2].tabs.map(t => t.id)).toEqual(['y'])
+  })
+
+  it('sends a stream pin as one task pin per task in it, deduplicated', () => {
+    const stream: Stream = { id: 's1', name: 'bugfixes', tasks: [fixtureTask(task('a1', [])), fixtureTask(task('a2', []))] }
+    const p1 = project('p1', [task('t1', [])], { streams: [stream] })
+    const d: ProjectsData = {
+      ...data([p1]),
+      pinnedItems: [
+        { type: 'task', projectId: 'p1', streamId: 's1', taskId: 'a2' },
+        { type: 'stream', projectId: 'p1', streamId: 's1' },
+        // main holds the Home task, which never goes out.
+        { type: 'stream', projectId: 'p1', streamId: mainStreamId('p1') },
+        { type: 'stream', projectId: 'p1', streamId: 'gone' }
+      ]
+    }
+    expect(buildInbox(d, lookup(), DESKTOP, NOW).pinned).toEqual([
+      { projectId: 'p1', taskId: 'a2' },
+      { projectId: 'p1', taskId: 'a1' },
+      { projectId: 'p1', taskId: 't1' }
+    ])
+  })
+
   it('does not share structure with the input', () => {
     const p = project('p1', [task('t1', [tab('a', 'terminal')])])
     const inbox = buildInbox(data([p]), lookup(), DESKTOP, NOW)
     inbox.projects[0].tasks[0].tabs[0].title = 'changed'
-    expect(p.tasks[1].tabs.left[0].title).toBe('a')
+    expect(paneTabs(findTaskInProject(p, 't1')!, 'left')[0].title).toBe('a')
   })
 })
 

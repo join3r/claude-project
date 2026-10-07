@@ -2,13 +2,18 @@ import { describe, it, expect } from 'vitest'
 import {
   createDefaultWindowViewState,
   createHomeTask,
+  createMainStream,
+  createTaskViewState,
   type PinnedItem,
   type Project,
   type ProjectsData,
   type Tab,
   type Task,
+  type TaskViewState,
   type WindowViewState
 } from '../src/shared/types'
+import { findMainStream, findStreamOfTask, paneTabs, projectTasks, tabsByPane } from '../src/shared/streams'
+import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import {
   addTaskInDirectoryData,
   appendProject,
@@ -60,15 +65,18 @@ function tab(id: string, extra: Partial<Tab> = {}): Tab {
 }
 
 function task(id: string, left: Tab[] = [], right: Tab[] = []): Task {
-  return {
-    id,
-    name: id,
-    tabs: { left, right },
-    activeTab: { left: left[0]?.id ?? null, right: right[0]?.id ?? null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }
+  return fixtureTask({ id, tabs: { left, right }, activeTab: { left: left[0]?.id ?? null, right: right[0]?.id ?? null } })
 }
+
+function taskState(t: Task): TaskViewState {
+  return createTaskViewState(t)
+}
+
+function project(id: string, tasks: Task[], extra: Partial<Project> = {}): Project {
+  return { ...fixtureProject({ id, directory: '/d' }), ...extra, streams: [createMainStream(id, tasks)] }
+}
+
+const WORKSPACE = { worktreePath: '/wt', branchName: 'b', baseBranch: 'main', relativeProjectPath: '' }
 
 function data(projects: Project[]): ProjectsData {
   return { projects, tags: [], projectOrder: projects.map(p => p.id), pinnedItems: [] }
@@ -88,21 +96,23 @@ describe('projectsData', () => {
 
   it('makeTask starts on its last initial tab and stamps an interaction', () => {
     const t = makeTask('New', [tab('a'), tab('b')])
-    expect(t.activeTab).toEqual({ left: 'b', right: null })
-    expect(t.tabs.right).toEqual([])
+    expect(t.panes).toHaveLength(1)
+    expect(t.panes[0].activeTabId).toBe('b')
+    expect(paneTabs(t, 'right')).toEqual([])
+    expect(t.mainTabId).toBe('a')
     expect(typeof t.lastInteractedAt).toBe('number')
-    expect(t.workspace).toBeUndefined()
-    expect(tabIdsOfTask({ ...t, tabs: { left: [tab('a')], right: [tab('z')] } })).toEqual(['a', 'z'])
+    expect(t.workspaceDraft).toBeUndefined()
+    expect(tabIdsOfTask(task('x', [tab('a')], [tab('z')]))).toEqual(['a', 'z'])
   })
 
   it('getProjectDir prefers the remote directory', () => {
-    const local: Project = { id: 'p', name: 'p', directory: '/local', tasks: [] }
+    const local: Project = fixtureProject({ id: 'p', directory: '/local' })
     expect(getProjectDir(local)).toBe('/local')
     expect(getProjectDir({ ...local, ssh: { host: 'h', remoteDir: '/remote' } as Project['ssh'] })).toBe('/remote')
   })
 
   it('appendProject and removeProjectFromData keep projectOrder in step', () => {
-    const p: Project = { id: 'p2', name: 'p2', directory: '/d', tasks: [] }
+    const p: Project = fixtureProject({ id: 'p2', directory: '/d' })
     const added = appendProject(data([]), p)
     expect(added.projectOrder).toEqual(['p2'])
     const removed = removeProjectFromData(added, 'p2')
@@ -111,10 +121,20 @@ describe('projectsData', () => {
   })
 
   it('appendTaskToProject counts the task in lifetime stats', () => {
-    const d = data([{ id: 'p', name: 'p', directory: '/d', tasks: [] }])
+    const d = data([fixtureProject({ id: 'p', directory: '/d' })])
     const next = appendTaskToProject(d, 'p', task('t1'))
-    expect(next.projects[0].tasks.map(t => t.id)).toEqual(['t1'])
+    expect(findMainStream(next.projects[0])!.tasks.map(t => t.id)).toEqual(['t1'])
     expect(next.projects[0].lifetimeStats?.tasksCreated).toBe(1)
+    expect(appendTaskToProject(next, 'p', task('t1')).projects[0].streams).toEqual(next.projects[0].streams)
+  })
+
+  it('appendTaskToProject gives a task with a worktree its own stream named after it', () => {
+    const d = data([fixtureProject({ id: 'p', directory: '/d' })])
+    const next = appendTaskToProject(d, 'p', { ...task('t1'), name: 'Fix it' }, { workspace: WORKSPACE, streamId: 's1' })
+    const stream = findStreamOfTask(next.projects[0], 't1')!
+    expect(stream).toMatchObject({ id: 's1', name: 'Fix it', workspace: WORKSPACE })
+    expect(stream.isMain).toBeUndefined()
+    expect(findMainStream(next.projects[0])!.tasks).toEqual([])
   })
 
   it('addTaskInDirectoryData mints a hidden project once and reuses it', () => {
@@ -124,39 +144,49 @@ describe('projectsData', () => {
     expect(first.projectOrder).toEqual(['owner'])
     const second = addTaskInDirectoryData(first, 'owner', '/tmp/scratch', task('t2'))
     expect(second.projects).toHaveLength(1)
-    expect(second.projects[0].tasks.map(t => t.id).slice(-2)).toEqual(['t1', 't2'])
+    expect(projectTasks(second.projects[0]).map(t => t.id).slice(-2)).toEqual(['t1', 't2'])
   })
 
   it('removeTaskFromData retires a spent hidden project but keeps a normal one', () => {
     const { task: home } = createHomeTask('p')
-    const hidden: Project = { id: 'p', name: 'p', directory: '/d', ephemeral: true, tasks: [home, task('t1')] }
+    const hidden: Project = project('p', [home, task('t1')], { ephemeral: true })
     const retired = removeTaskFromData(data([hidden]), 'p', 't1')
     expect(retired.projects).toEqual([])
     expect(retired.projectOrder).toEqual([])
 
     const normal: Project = { ...hidden, ephemeral: undefined }
     const kept = removeTaskFromData(data([normal]), 'p', 't1')
-    expect(kept.projects[0].tasks).toEqual([home])
+    expect(projectTasks(kept.projects[0])).toEqual([home])
+  })
+
+  it('removeTaskFromData drops a worktree stream with its last task, never main', () => {
+    const p = fixtureProject({ id: 'p', tasks: [{ id: 'm1' }, { id: 'w1', workspace: WORKSPACE }] })
+    const withoutWorktreeTask = removeTaskFromData(data([p]), 'p', 'w1').projects[0]
+    expect(withoutWorktreeTask.streams.map(s => s.id)).toEqual([findMainStream(p)!.id])
+    const withoutMainTask = removeTaskFromData(data([p]), 'p', 'm1').projects[0]
+    expect(withoutMainTask.streams).toHaveLength(2)
+    expect(findMainStream(withoutMainTask)!.tasks).toEqual([])
   })
 
   it('tab edits touch only the target tab', () => {
     const other = tab('b')
-    const d = data([{ id: 'p', name: 'p', directory: '/d', tasks: [task('t', [tab('a'), other])] }])
+    const d = data([project('p', [task('t', [tab('a'), other])])])
     const renamed = renameTabInData(d, 'p', 't', 'left', 'a', 'Renamed')
-    expect(renamed.projects[0].tasks[0].tabs.left[0].title).toBe('Renamed')
-    expect(renamed.projects[0].tasks[0].tabs.left[1]).toBe(other)
+    expect(paneTabs(projectTasks(renamed.projects[0])[0], 'left')[0].title).toBe('Renamed')
+    expect(paneTabs(projectTasks(renamed.projects[0])[0], 'left')[1]).toBe(other)
     const patched = patchTab(d, 'p', 't', 'left', 'a', { url: 'http://x' })
-    expect(patched.projects[0].tasks[0].tabs.left[0].url).toBe('http://x')
+    expect(paneTabs(projectTasks(patched.projects[0])[0], 'left')[0].url).toBe('http://x')
   })
 
   it('insertTabAt clamps the index and is idempotent', () => {
-    const d = data([{ id: 'p', name: 'p', directory: '/d', tasks: [task('t', [tab('a')])] }])
+    const d = data([project('p', [task('t', [tab('a')])])])
+    const leftIds = (x: ProjectsData) => paneTabs(projectTasks(x.projects[0])[0], 'left').map(t => t.id)
     const once = insertTabAt(d, 'p', 't', 'left', 99, tab('z'))
-    expect(once.projects[0].tasks[0].tabs.left.map(t => t.id)).toEqual(['a', 'z'])
+    expect(leftIds(once)).toEqual(['a', 'z'])
     const twice = insertTabAt(once, 'p', 't', 'left', 0, tab('z'))
-    expect(twice.projects[0].tasks[0].tabs.left.map(t => t.id)).toEqual(['a', 'z'])
+    expect(leftIds(twice)).toEqual(['a', 'z'])
     const front = insertTabAt(d, 'p', 't', 'left', -5, tab('z'))
-    expect(front.projects[0].tasks[0].tabs.left.map(t => t.id)).toEqual(['z', 'a'])
+    expect(leftIds(front)).toEqual(['z', 'a'])
   })
 
   it('includePendingTags folds in only referenced, not-yet-present tags', () => {
@@ -220,10 +250,13 @@ describe('view state transitions', () => {
   })
 
   it('selectProjectView restores a still-existing lastTaskId and expands the project', () => {
-    const project: Project = { id: 'p', name: 'p', directory: '/d', lastTaskId: 't', tasks: [task('t')] }
-    const next = selectProjectView(view(), 'p', project)
+    const p: Project = fixtureProject({ id: 'p', lastTaskId: 't', tasks: [{ id: 't' }] })
+    const next = selectProjectView(view(), 'p', p)
     expect(next).toMatchObject({ selectedProjectId: 'p', selectedTaskId: 't', expandedProjectIds: ['p'] })
-    const stale = selectProjectView(view(), 'p', { ...project, lastTaskId: 'gone' })
+    const stale = selectProjectView(view(), 'p', {
+      ...p,
+      streams: p.streams.map(s => ({ ...s, lastTaskId: 'gone' }))
+    })
     expect(stale.selectedTaskId).toBeNull()
     expect(selectProjectView(next, null, null)).toMatchObject({ selectedProjectId: null, selectedTaskId: null })
   })
@@ -232,11 +265,11 @@ describe('view state transitions', () => {
     const { task: home } = createHomeTask('p')
     const next = selectProjectHomeView(view(), 'p', home)
     expect(next.selectedTaskId).toBe(home.id)
-    expect(next.taskStates[home.id].activeTab.left).toBe(home.tabs.left.find(t => t.system === 'home')!.id)
+    expect(next.taskStates[home.id].activeTab.left).toBe(paneTabs(home, 'left').find(t => t.system === 'home')!.id)
   })
 
   it('removeTaskView only clears the project selection when the owner retired', () => {
-    const prev = view({ selectedProjectId: 'p', selectedTaskId: 't', taskStates: { t: withActiveTab(task('t'), 'left', null) } })
+    const prev = view({ selectedProjectId: 'p', selectedTaskId: 't', taskStates: { t: withActiveTab(taskState(task('t')), 'left', null) } })
     const kept = removeTaskView(prev, 'p', 't', false)
     expect(kept).toMatchObject({ selectedProjectId: 'p', selectedTaskId: null, taskStates: {} })
     expect(removeTaskView(prev, 'p', 't', true).selectedProjectId).toBeNull()
@@ -261,15 +294,15 @@ describe('view state transitions', () => {
     const base = view({ fileBrowserOpen: false, fileBrowserActiveTab: 'files' })
     expect(sidebarForTask(base, home)).toEqual({ fileBrowserOpen: true, fileBrowserActiveTab: 'notes' })
     expect(sidebarForTask(base, task('t'))).toEqual({ fileBrowserOpen: false, fileBrowserActiveTab: 'files' })
-    const saved = { ...base, taskStates: { t: { ...withActiveTab(task('t'), 'left', null), fileBrowserOpen: true } } }
+    const saved = { ...base, taskStates: { t: { ...withActiveTab(taskState(task('t')), 'left', null), fileBrowserOpen: true } } }
     expect(sidebarForTask(saved, task('t')).fileBrowserOpen).toBe(true)
   })
 
   it('reassignActiveTabsAfterNoteDelete moves off the doomed note tab', () => {
     const noteTab = tab('n', { type: 'note', noteId: 'note1' })
-    const t = { ...task('t', [tab('a'), noteTab]), activeTab: { left: 'n', right: null } }
-    const project: Project = { id: 'p', name: 'p', directory: '/d', tasks: [t] }
-    const next = reassignActiveTabsAfterNoteDelete(view({ taskStates: { t: withActiveTab(t, 'left', 'n') } }), project, 'note1')
+    const t = task('t', [tab('a'), noteTab])
+    const p = project('p', [t])
+    const next = reassignActiveTabsAfterNoteDelete(view({ taskStates: { t: withActiveTab(taskState(t), 'left', 'n') } }), p, 'note1')
     expect(next.taskStates.t.activeTab.left).toBe('a')
   })
 })
@@ -293,11 +326,14 @@ describe('notes transitions', () => {
 
   it('note tabs are found, retitled and removed together', () => {
     const noteTab = tab('nt', { type: 'note', noteId: 'n1', title: 'old' })
-    const project: Project = { id: 'p', name: 'p', directory: '/d', tasks: [task('t', [tab('a')], [noteTab])] }
-    expect(noteTabIds(project, 'n1')).toEqual(['nt'])
-    const d = data([project])
-    expect(retitleNoteTabs(d, 'p', 'n1', 'new').projects[0].tasks[0].tabs.right[0].title).toBe('new')
-    expect(removeNoteTabs(d, 'p', 'n1').projects[0].tasks[0].tabs).toEqual({ left: [tab('a')], right: [] })
+    const p = project('p', [task('t', [tab('a')], [noteTab])])
+    expect(noteTabIds(p, 'n1')).toEqual(['nt'])
+    const d = data([p])
+    expect(paneTabs(projectTasks(retitleNoteTabs(d, 'p', 'n1', 'new').projects[0])[0], 'right')[0].title).toBe('new')
+    // The emptied right pane closes.
+    const removed = projectTasks(removeNoteTabs(d, 'p', 'n1').projects[0])[0]
+    expect(tabsByPane(removed)).toEqual({ left: [tab('a')], right: [] })
+    expect(removed.panes).toHaveLength(1)
   })
 })
 

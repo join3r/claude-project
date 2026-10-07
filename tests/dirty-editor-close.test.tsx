@@ -2,7 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { createHomeTask, DEFAULT_CONFIG, type Project, type Task } from '../src/shared/types'
+import { createHomeTask, DEFAULT_CONFIG, type Project, type Tab } from '../src/shared/types'
+import { findTaskInProject, paneTabs, projectTasks } from '../src/shared/streams'
+import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { formatShortcutForApp } from '../src/shared/shortcut-label'
 
 // React import is required by the JSX runtime under vitest's default transform.
@@ -82,24 +84,19 @@ const DISK: Record<string, string> = {
   'src/b.txt': 'contents of b\n'
 }
 
-function editorTab(id: string, filePath: string): Task['tabs']['left'][number] {
+function editorTab(id: string, filePath: string): Tab {
   return { id, type: 'editor', title: filePath.split('/').pop()!, filePath }
 }
 
 function buildProjects(): Project[] {
   const { task: home } = createHomeTask('p1')
-  const task: Task = {
+  const task = fixtureTask({
     id: 't1',
     name: 'Task One',
-    tabs: {
-      left: [editorTab('tab-a', 'src/a.txt'), editorTab('tab-b', 'src/b.txt')],
-      right: []
-    },
-    activeTab: { left: 'tab-a', right: null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }
-  return [{ id: 'p1', name: 'Project One', directory: '/project', tasks: [home, task] }]
+    tabs: { left: [editorTab('tab-a', 'src/a.txt'), editorTab('tab-b', 'src/b.txt')] },
+    activeTab: { left: 'tab-a' }
+  })
+  return [fixtureProject({ id: 'p1', name: 'Project One', directory: '/project', tasks: [home, task] })]
 }
 
 let app: AppActions
@@ -135,7 +132,8 @@ async function type(index: number, value: string): Promise<void> {
 }
 
 function tabsOf(taskId: string) {
-  return app.projects.find(p => p.id === 'p1')?.tasks.find(t => t.id === taskId)?.tabs.left ?? []
+  const task = findTaskInProject(app.projects.find(p => p.id === 'p1'), taskId)
+  return task ? paneTabs(task, 'left') : []
 }
 
 function dialog(): HTMLElement | null {
@@ -361,7 +359,7 @@ describe('closing an editor with unsaved changes', () => {
 
     await click('Cancel')
 
-    expect(app.projects[0].tasks.map(t => t.id)).toContain('t1')
+    expect(projectTasks(app.projects[0]).map(t => t.id)).toContain('t1')
     expect(tabsOf('t1').map(t => t.id)).toEqual(['tab-a', 'tab-b'])
     expect((window as any).api.fbWriteFile).not.toHaveBeenCalled()
     expect((window as any).api.workspaceDelete).not.toHaveBeenCalled()

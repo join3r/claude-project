@@ -20,6 +20,7 @@ import type { PaletteEntity, ScoredResult, Prefix, EntityKind } from './types'
 import { localProjectFolder } from '../../shared/external-editors'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
+import { findTaskInProject } from '../../shared/streams'
 
 type FooterPrefix = Prefix | '*'
 
@@ -157,7 +158,7 @@ export function Palette(): React.ReactElement | null {
       if (cmdId.startsWith('open-ide:')) {
         const editorId = cmdId.slice('open-ide:'.length)
         const project = actions.projects.find(p => p.id === actions.selectedProjectId)
-        const task = project?.tasks.find(t => t.id === actions.selectedTaskId)
+        const task = findTaskInProject(project, actions.selectedTaskId)
         const folder = localProjectFolder(project, task ?? null)
         if (folder) void openWorkspaceInIde(editorId, folder)
       } else {

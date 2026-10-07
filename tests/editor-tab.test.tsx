@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   /** What `editor.getSelection()` returns (1-based, Monaco-style). */
   selection: null as null | { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number },
   setActiveTab: (() => {}) as (...args: unknown[]) => void,
-  /** The task the editor belongs to, for agent links. */
+  /** The task the editor belongs to, for agent links, by side (turned into panes by the useApp stub). */
   task: {
     id: 't1',
     tabs: { left: [] as Array<{ id: string; type: string; title: string }>, right: [] as Array<{ id: string; type: string; title: string }> },
@@ -95,8 +95,27 @@ vi.mock('@monaco-editor/react', async () => {
 vi.mock('../src/renderer/context/AppContext', () => ({
   useApp: () => ({
     config: null,
-    projects: [{ id: 'p1', tasks: [mocks.task] }],
-    getTaskViewState: (task: typeof mocks.task) => ({ activeTab: task.activeTab, splitOpen: true }),
+    // The task as the app holds it: one pane per non-empty side, in `main`.
+    projects: [{
+      id: 'p1',
+      streams: [{
+        id: 'main-p1',
+        name: 'main',
+        isMain: true,
+        tasks: [{
+          id: mocks.task.id,
+          name: mocks.task.id,
+          panes: (['left', 'right'] as const)
+            .filter(side => mocks.task.tabs[side].length > 0)
+            .map(side => ({
+              tabs: mocks.task.tabs[side],
+              activeTabId: mocks.task.activeTab[side] ?? mocks.task.tabs[side][0].id,
+              width: 0.5
+            }))
+        }]
+      }]
+    }],
+    getTaskViewState: () => ({ activeTab: mocks.task.activeTab, splitOpen: true }),
     setActiveTab: (...args: unknown[]) => mocks.setActiveTab(...args),
     toggleSplit: () => {}
   })

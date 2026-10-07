@@ -1,6 +1,7 @@
 import { isHomeTab, isHomeTask, type Project, type ProjectsData, type Tab, type Task, type WorkspaceDeleteResult } from '../../shared/types'
 import { AppErrorCode, INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
 import type { TaskCloseParams, TaskCloseResult } from '../../../protocol/ts/index.ts'
+import { findTaskInProject, mapTaskInProject, paneTabs, projectTasks, taskTabs, withTabsByPane, workspaceReleasedBy } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 
 /**
@@ -31,7 +32,7 @@ export interface CloseTaskDeps {
 function findTask(data: ProjectsData, taskId: string): { project: Project; task: Task } | null {
   for (const project of data.projects) {
     if (!isVisibleOnMobile(project)) continue
-    const task = (project.tasks ?? []).find((t) => t.id === taskId)
+    const task = findTaskInProject(project, taskId)
     if (task) return isHomeTask(task) ? null : { project, task }
   }
   return null
@@ -45,11 +46,13 @@ export async function closeTask(deps: CloseTaskDeps, params: TaskCloseParams): P
   const found = findTask(deps.peek(), params.taskId)
   if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such task' }
   const { project, task } = found
-  const workspace = task.workspace
+  // Only the stream's last task takes the worktree with it; a task sharing the
+  // stream with others just goes.
+  const workspace = workspaceReleasedBy(project, task.id)
 
   if (!params.discardUnsaved) {
     const dirty = new Set(deps.dirtyTabIds())
-    if ([...task.tabs.left, ...task.tabs.right].some((tab) => dirty.has(tab.id))) {
+    if (taskTabs(task).some((tab) => dirty.has(tab.id))) {
       return { ok: true, result: { closed: false, blocker: 'unsaved' } }
     }
   }
@@ -107,9 +110,9 @@ export function findClosableTab(
 ): { project: Project; task: Task; tab: Tab } | null {
   for (const project of data.projects) {
     if (!isVisibleOnMobile(project)) continue
-    for (const task of project.tasks ?? []) {
+    for (const task of projectTasks(project)) {
       if (isHomeTask(task)) continue
-      const tab = [...(task.tabs?.left ?? []), ...(task.tabs?.right ?? [])].find((t) => t.id === tabId)
+      const tab = taskTabs(task).find((t) => t.id === tabId)
       if (!tab) continue
       return MOBILE_TAB_TYPES.has(tab.type) && !isHomeTab(tab) ? { project, task, tab } : null
     }
@@ -118,30 +121,18 @@ export function findClosableTab(
 }
 
 /**
- * The task without the tab. Its stored active tab moves to the last one left in that
- * pane, as a window does when the active tab closes.
+ * The task without the tab. Its pane's active tab moves to the last one left in
+ * that pane, as a window does when the active tab closes; an emptied pane closes.
  */
 export function removeTabFromData(data: ProjectsData, taskId: string, tabId: string): ProjectsData {
   return {
     ...data,
     projects: data.projects.map((project) => {
-      if (!(project.tasks ?? []).some((task) => task.id === taskId)) return project
-      return {
-        ...project,
-        tasks: project.tasks.map((task) => {
-          if (task.id !== taskId) return task
-          const left = task.tabs.left.filter((tab) => tab.id !== tabId)
-          const right = task.tabs.right.filter((tab) => tab.id !== tabId)
-          return {
-            ...task,
-            tabs: { left, right },
-            activeTab: {
-              left: task.activeTab.left === tabId ? left[left.length - 1]?.id ?? null : task.activeTab.left,
-              right: task.activeTab.right === tabId ? right[right.length - 1]?.id ?? null : task.activeTab.right
-            }
-          }
-        })
-      }
+      if (!findTaskInProject(project, taskId)) return project
+      return mapTaskInProject(project, taskId, (task) => withTabsByPane(task, {
+        left: paneTabs(task, 'left').filter((tab) => tab.id !== tabId),
+        right: paneTabs(task, 'right').filter((tab) => tab.id !== tabId)
+      }))
     })
   }
 }

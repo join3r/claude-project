@@ -2,7 +2,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { DEFAULT_CONFIG, createHomeTask, type Project, type ProjectsData } from '../src/shared/types'
+import { DEFAULT_CONFIG, createHomeTask, mainStreamId, type Project, type ProjectsData, type Task } from '../src/shared/types'
+import { projectTasks } from '../src/shared/streams'
+import { fixtureProject } from './helpers/streams-fixtures'
 import { AppProvider } from '../src/renderer/context/AppContext'
 import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
 import Sidebar from '../src/renderer/components/Sidebar'
@@ -19,15 +21,8 @@ void React
 
 function buildProjects(): Project[] {
   const { task: home } = createHomeTask('p1')
-  const work = {
-    id: 't1',
-    name: 'Fix the thing',
-    tabs: { left: [], right: [] },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }
-  return [{ id: 'p1', name: 'Alpha Project', directory: '/tmp/alpha', tasks: [home, work] }]
+  const work: Task = { id: 't1', name: 'Fix the thing', panes: [] }
+  return [fixtureProject({ id: 'p1', name: 'Alpha Project', directory: '/tmp/alpha', tasks: [home, work] })]
 }
 
 let saved: ProjectsData[]
@@ -92,7 +87,7 @@ describe('Sidebar context menu', () => {
     act(() => { fireEvent.click(settle) })
 
     await waitFor(() => {
-      const task = saved[saved.length - 1]?.projects[0].tasks.find(t => t.id === 't1')
+      const task = projectTasks(saved[saved.length - 1]?.projects[0]).find(t => t.id === 't1')
       expect(task?.inbox?.settledAt).toBeTypeOf('number')
     })
     expect(screen.queryByText('Settle', { selector: 'button' })).toBeNull()
@@ -137,7 +132,7 @@ describe('Sidebar context menu', () => {
     fireEvent.contextMenu(screen.getByText('Fix the thing'))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
     await waitFor(() => {
-      expect(saved[saved.length - 1]?.projects[0].tasks.some(t => t.id === 't1')).toBe(false)
+      expect(projectTasks(saved[saved.length - 1]?.projects[0]).some(t => t.id === 't1')).toBe(false)
     })
   })
 
@@ -149,7 +144,7 @@ describe('Sidebar context menu', () => {
     const row = document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!
     fireEvent.contextMenu(row)
     fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
-    expect(confirm.mock.calls[0][0]).toMatch(/^Delete project "Alpha Project"\?[\s\S]*Its 2 tasks close[\s\S]*not touched/)
+    expect(confirm.mock.calls[0][0]).toMatch(/^Delete project "Alpha Project"\?[\s\S]*Its task closes[\s\S]*not touched/)
     expect(screen.getByText('Alpha Project')).toBeTruthy()
 
     fireEvent.contextMenu(row)
@@ -159,7 +154,7 @@ describe('Sidebar context menu', () => {
 })
 
 describe('Sidebar pins', () => {
-  const lastTasks = () => saved[saved.length - 1]?.projects[0].tasks ?? []
+  const lastTasks = () => projectTasks(saved[saved.length - 1]?.projects[0])
 
   it('adds a task and a workspace from a pinned project', async () => {
     pinnedItems = [{ type: 'project', projectId: 'p1' }]
@@ -176,7 +171,7 @@ describe('Sidebar pins', () => {
   })
 
   it('adds a sibling task from a pinned task', async () => {
-    pinnedItems = [{ type: 'task', projectId: 'p1', taskId: 't1' }]
+    pinnedItems = [{ type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 't1' }]
     renderSidebar()
     const pinned = (await screen.findByText('Pinned')).parentElement!
     fireEvent.click(within(pinned).getByTitle('New task in Alpha Project'))
@@ -203,14 +198,14 @@ describe('Sidebar pins', () => {
 })
 
 describe('revealFolder / projectDeletePrompt', () => {
-  const project: Project = {
+  const project: Project = fixtureProject({
     id: 'p1',
     name: 'Alpha',
     directory: '/repo',
     tasks: [
-      { ...buildProjects()[0].tasks[1], id: 'w1', workspace: { worktreePath: '/wt/feat', branchName: 'feat', baseBranch: 'main', relativeProjectPath: 'pkg' } as never }
+      { ...projectTasks(buildProjects()[0])[1], id: 'w1', workspace: { worktreePath: '/wt/feat', branchName: 'feat', baseBranch: 'main', relativeProjectPath: 'pkg' } }
     ]
-  }
+  })
   it('uses the workspace for a workspace task and the project dir otherwise', () => {
     expect(revealFolder([project], 'p1')).toBe('/repo')
     expect(revealFolder([project], 'p1', 'w1')).toBe('/wt/feat/pkg')

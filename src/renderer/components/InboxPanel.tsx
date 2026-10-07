@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Check, ChevronRight, Clock, Inbox as InboxIcon, SquarePen } from 'lucide-react'
 import type { Project, Task } from '../../shared/types'
-import { isEphemeralProject, isHomeTask, isWorkspaceTask } from '../../shared/types'
+import { isEphemeralProject, isHomeTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { RowActions, RowAction } from './ui'
 import {
@@ -15,6 +15,7 @@ import {
   type TaskActivitySummary
 } from './inbox'
 import type { AgentActivity } from '../../shared/agent-activity'
+import { projectTasks, taskWorkspace } from '../../shared/streams'
 
 type Props = {
   projects: Project[]
@@ -159,7 +160,7 @@ function InboxRow({
         >
           {task.name}
         </span>
-        {isWorkspaceTask(task) && (
+        {taskWorkspace(project, task.id) && (
           <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">ws</span>
         )}
         {/* This task borrowed a directory rather than living in a project you added. */}
@@ -243,7 +244,7 @@ export default function InboxPanel({
   const partition = useMemo(() => {
     const entries: { task: Task; project: Project }[] = []
     for (const project of projects) {
-      for (const task of project.tasks) {
+      for (const task of projectTasks(project)) {
         if (isHomeTask(task)) continue
         entries.push({ task, project })
       }

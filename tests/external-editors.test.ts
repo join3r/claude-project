@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { localProjectFolder, paletteAliasesForEditor, resolveDefaultExternalEditor } from '../src/shared/external-editors'
-import type { Project, Task } from '../src/shared/types'
+import { createMainStream, type Project } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 function project(patch: Partial<Project> = {}): Project {
   return {
     id: 'p1',
     name: 'Demo',
     directory: 'C:\\Repos\\demo',
-    tasks: [],
+    streams: [createMainStream('p1')],
     ...patch
   }
 }
@@ -29,21 +30,25 @@ describe('external editor helpers', () => {
   })
 
   it('uses the worktree folder for workspace tasks', () => {
-    const task: Task = {
-      id: 't1',
-      name: 'branch',
-      tabs: { left: [], right: [] },
-      activeTab: { left: null, right: null },
-      splitOpen: false,
-      splitRatio: 0.5,
-      workspace: {
-        worktreePath: 'C:\\Repos\\demo-wt',
-        branchName: 'feat',
-        baseBranch: 'master',
-        relativeProjectPath: 'apps\\web'
-      }
-    }
-    expect(localProjectFolder(project(), task)).toBe('C:\\Repos\\demo-wt\\apps\\web')
+    const withWorktree = fixtureProject({
+      id: 'p1',
+      name: 'Demo',
+      directory: 'C:\\Repos\\demo',
+      tasks: [{
+        id: 't1',
+        name: 'branch',
+        workspace: {
+          worktreePath: 'C:\\Repos\\demo-wt',
+          branchName: 'feat',
+          baseBranch: 'master',
+          relativeProjectPath: 'apps\\web'
+        }
+      }]
+    })
+    const task = withWorktree.streams[1].tasks[0]
+    expect(localProjectFolder(withWorktree, task)).toBe('C:\\Repos\\demo-wt\\apps\\web')
+    // The same task looked up in a project where it has no worktree uses the project folder.
+    expect(localProjectFolder(project(), task)).toBe('C:\\Repos\\demo')
   })
 
   it('returns null for remote projects', () => {

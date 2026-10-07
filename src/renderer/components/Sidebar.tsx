@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
-import { NEW_TASK_NAME, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, isWorkspaceTask, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import { NEW_TASK_NAME, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
 import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -36,6 +36,23 @@ import {
 } from './sidebar/SidebarParts'
 import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
+import { findStreamOfTask, findTaskInProject, projectTasks, taskTabs, taskWorkspace, workspaceReleasedBy } from '../../shared/streams'
+
+/**
+ * TEMPORARY (step 5 replaces the tree with Project › Stream › Task): the tree
+ * lists every task flat, so a task outside `main` names its stream next to it.
+ */
+function StreamChip({ project, taskId }: { project: Project; taskId: string }): React.ReactElement | null {
+  const stream = findStreamOfTask(project, taskId)
+  if (!stream || stream.isMain) return null
+  const task = stream.tasks.find(t => t.id === taskId)
+  if (stream.tasks.length === 1 && task?.name === stream.name) return null
+  return (
+    <span className="text-2xs px-1 py-px rounded-sm text-text-subtle ml-1.5 shrink-0 max-w-[90px] overflow-hidden text-ellipsis whitespace-nowrap" title={`Stream: ${stream.name}`}>
+      {stream.name}
+    </span>
+  )
+}
 
 export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { switcherRequested?: boolean; onSwitcherConsumed?: () => void }): React.ReactElement {
   const {
@@ -68,7 +85,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const [now, setNow] = useState(() => Date.now())
   const sortedByRecency = React.useMemo(
-    () => sortTasksByRecency(projects.flatMap(p => p.tasks.filter(t => !isHomeTask(t)))),
+    () => sortTasksByRecency(projects.flatMap(p => projectTasks(p).filter(t => !isHomeTask(t)))),
     [projects]
   )
 
@@ -77,7 +94,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   // Badge count is what makes the tab worth having: attention is visible without
   // leaving the tree. Snoozed tasks are deliberately excluded — that's the point.
   const inboxUnreadCount = React.useMemo(
-    () => projects.reduce((count, project) => count + project.tasks.filter(
+    () => projects.reduce((count, project) => count + projectTasks(project).filter(
       task => !isHomeTask(task) && isUnread(task) && !isSnoozed(task, now) && !isSettled(task)
     ).length, 0),
     [projects, now]
@@ -98,7 +115,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     // Opening the task is the acknowledgement — clear attention on every tab, not
     // just the AI ones. A terminal's attention state otherwise never resets (it
     // only clears on a "ready"-shaped line), which would pin the row in Needs you.
-    const tabs = [...task.tabs.left, ...task.tabs.right]
+    const tabs = taskTabs(task)
     for (const tab of tabs) {
       if (tabStatusStore.getStatus(tab.id) === 'attention') {
         tabStatusStore.setStatus(tab.id, null)
@@ -174,7 +191,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       const project = projectsById.get(item.projectId)
       if (!project) continue
       if (item.type === 'task') {
-        const task = project.tasks.find(t => t.id === item.taskId)
+        const task = findTaskInProject(project, item.taskId)
+        if (!task) continue
+        resolved.push({ item, key: pinnedItemKey(item), project, task })
+      } else if (item.type === 'stream') {
+        // TEMPORARY (step 5 shows streams): a pinned stream shows as one row, the
+        // task it was last left on.
+        const stream = project.streams.find(candidate => candidate.id === item.streamId)
+        const tasks = (stream?.tasks ?? []).filter(t => !isHomeTask(t))
+        const task = tasks.find(t => t.id === stream?.lastTaskId) ?? tasks[0]
         if (!task) continue
         resolved.push({ item, key: pinnedItemKey(item), project, task })
       } else {
@@ -283,7 +308,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }
 
   const findTask = useCallback((projectId: string, taskId: string): Task | undefined =>
-    projects.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
+    findTaskInProject(projects.find(p => p.id === projectId), taskId)
   , [projects])
 
   /** The row's one-click gesture: settle if it isn't, put it back if it is. */
@@ -330,15 +355,17 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const handleDeleteTask = async (projectId: string, taskId: string) => {
     const project = projects.find(p => p.id === projectId)
-    const task = project?.tasks.find(t => t.id === taskId)
+    const task = findTaskInProject(project, taskId)
     if (!task) return
+    // The worktree goes only with its stream's last task (`workspaceReleasedBy`).
+    const workspace = workspaceReleasedBy(project, taskId)
     // Asked before the workspace pre-flight below: for a clean, merged workspace
     // that call already removes the worktree.
-    if (!window.confirm(task.workspace
+    if (!window.confirm(workspace
       ? `Delete task "${task.name}" and its workspace?\n\nThe worktree folder is removed from disk.`
       : `Delete task "${task.name}"? Its tabs close.`)) return
 
-    if (task?.workspace && project) {
+    if (workspace && project) {
       let keepBranch = false
       let result: WorkspaceDeleteResult
       try {
@@ -347,9 +374,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             projectDir: getProjectDir(project),
             projectId: isRemoteProject(project) ? project.id : undefined,
             sshConfig: project.ssh,
-            worktreePath: task.workspace.worktreePath,
-            branchName: task.workspace.branchName,
-            baseBranch: task.workspace.baseBranch
+            worktreePath: workspace.worktreePath,
+            branchName: workspace.branchName,
+            baseBranch: workspace.baseBranch
           }
         )
       } catch (err) {
@@ -360,22 +387,22 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (result.status === 'uncommitted') {
         if (!window.confirm('This workspace has uncommitted changes that will be lost. Delete anyway?')) return
       } else if (result.status === 'unmerged') {
-        if (!window.confirm(`Branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete workspace?`)) return
-        keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
+        if (!window.confirm(`Branch "${workspace.branchName}" has not been merged into "${workspace.baseBranch}". Delete workspace?`)) return
+        keepBranch = !window.confirm(`Also delete the unmerged branch "${workspace.branchName}"?`)
       } else if (result.status === 'uncommitted-and-unmerged') {
-        if (!window.confirm(`This workspace has uncommitted changes and branch "${task.workspace.branchName}" has not been merged into "${task.workspace.baseBranch}". Delete anyway?`)) return
-        keepBranch = !window.confirm(`Also delete the unmerged branch "${task.workspace.branchName}"?`)
+        if (!window.confirm(`This workspace has uncommitted changes and branch "${workspace.branchName}" has not been merged into "${workspace.baseBranch}". Delete anyway?`)) return
+        keepBranch = !window.confirm(`Also delete the unmerged branch "${workspace.branchName}"?`)
       } else if (result.status === 'check-failed') {
         const reason = result.reason || 'The safety checks did not complete.'
-        if (!window.confirm(`DevTool could not verify that workspace "${task.workspace.branchName}" is safe to delete.\n\n${reason}\n\nDelete anyway? Uncommitted or unmerged work may be lost.`)) return
+        if (!window.confirm(`DevTool could not verify that workspace "${workspace.branchName}" is safe to delete.\n\n${reason}\n\nDelete anyway? Uncommitted or unmerged work may be lost.`)) return
         // Merge state unknown, so keep the branch unless the user explicitly asks otherwise.
-        keepBranch = !window.confirm(`Also delete the branch "${task.workspace.branchName}"? Its merge state could not be verified.`)
+        keepBranch = !window.confirm(`Also delete the branch "${workspace.branchName}"? Its merge state could not be verified.`)
       }
       // 'invalid-worktree' is reported after step 2 instead: killing the tabs below can free
       // the worktree, and the forced pass is the one that decides whether anything is left.
 
       // Step 1: Kill all tabs/PTYs first so no process holds the worktree cwd
-      for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+      for (const tab of taskTabs(task)) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
         window.api.scrollbackDelete(tab.id)
       }
@@ -387,15 +414,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             projectDir: getProjectDir(project),
             projectId: isRemoteProject(project) ? project.id : undefined,
             sshConfig: project.ssh,
-            worktreePath: task.workspace.worktreePath,
-            branchName: task.workspace.branchName,
-            baseBranch: task.workspace.baseBranch,
+            worktreePath: workspace.worktreePath,
+            branchName: workspace.branchName,
+            baseBranch: workspace.baseBranch,
             force: true,
             keepBranch
           }
         )
         if (forced.status !== 'ok') {
-          window.alert(forced.reason || `The workspace directory "${task.workspace.worktreePath}" could not be removed and was left on disk.`)
+          window.alert(forced.reason || `The workspace directory "${workspace.worktreePath}" could not be removed and was left on disk.`)
         }
       } catch {
         // Worktree may already be cleaned up
@@ -473,10 +500,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     // visible task list), so the row needs the selection rail whenever the
     // home task is active — even when the project is expanded.
     const isHomeSelected = selectedProjectId === project.id
-      && project.tasks.some(t => t.id === selectedTaskId && isHomeTask(t))
+      && projectTasks(project).some(t => t.id === selectedTaskId && isHomeTask(t))
     const isProjectSelected = selectedProjectId === project.id && (!isExpanded || isHomeSelected)
     const isProjectDragging = dragState?.type === 'project' && dragState.id === project.id
-    const visibleTasks = project.tasks.filter(t => !isHomeTask(t))
+    const allTasks = projectTasks(project)
+    const visibleTasks = allTasks.filter(t => !isHomeTask(t))
     return (
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
@@ -539,7 +567,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             })()}
             <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {!isExpanded && (() => {
-                const projectStatus = getProjectStatus(project.tasks.filter(t => !isHomeTask(t)), allStatuses)
+                const projectStatus = getProjectStatus(visibleTasks, allStatuses)
                 if (!projectStatus) return null
                 const dotClass = projectStatus === 'working'
                   ? 'bg-status-working status-pulse'
@@ -564,7 +592,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       {isExpanded && (
         <div className="pb-1">
           {visibleTasks.map((task) => {
-            const projectTaskIndex = project.tasks.indexOf(task)
+            const projectTaskIndex = allTasks.indexOf(task)
             const isSelected = selectedTaskId === task.id
             const opacity = !isSelected && config?.taskRecencyHighlight
               ? computeTaskRecencyOpacity(task, sortedByRecency, config.taskRecencyHighlight, now)
@@ -609,7 +637,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                   ) : (
                     <>
                       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
-                      {isWorkspaceTask(task) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
+                      <StreamChip project={project} taskId={task.id} />
+                      {taskWorkspace(project, task.id) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
                       <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
                         <TaskStatusDot task={task} allStatuses={allStatuses} />
                         <RowActions>
@@ -624,7 +653,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               </React.Fragment>
             )
           })}
-          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === project.tasks.length && (
+          {dropTarget?.type === 'between-tasks' && dropTarget.projectId === project.id && dropTarget.index === allTasks.length && (
             <div className={`h-0.5 bg-accent mr-2 rounded-sm ${TASK_ROW_ML}`} />
           )}
           {renderAddTaskRow(project)}
@@ -658,11 +687,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               const isProjectPin = pin.item.type === 'project'
               const isSelected = isProjectPin
                 ? selectedProjectId === pin.project.id
-                  && pin.project.tasks.some(t => t.id === selectedTaskId && isHomeTask(t))
+                  && projectTasks(pin.project).some(t => t.id === selectedTaskId && isHomeTask(t))
                 : selectedTaskId === pin.task!.id
               const isDraggingPin = pinDragIndex === index
               const isPinExpanded = isProjectPin && expandedPinnedProjectIds.includes(pin.project.id)
-              const pinnedProjectTasks = isProjectPin ? pin.project.tasks.filter(t => !isHomeTask(t)) : []
+              const pinnedProjectTasks = isProjectPin ? projectTasks(pin.project).filter(t => !isHomeTask(t)) : []
               return (
                 <React.Fragment key={pin.key}>
                   {pinDropIndex === index && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
@@ -707,7 +736,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                         {pin.task!.name}
                       </span>
                     )}
-                    {!isProjectPin && isWorkspaceTask(pin.task!) && (
+                    {!isProjectPin && taskWorkspace(pin.project, pin.task!.id) && (
                       <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted shrink-0">ws</span>
                     )}
                     {/* Pins are the one place a hidden ad-hoc project reaches the tree. */}
@@ -719,7 +748,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                     )}
                     <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
                       {isProjectPin ? (() => {
-                        const projectStatus = getProjectStatus(pin.project.tasks.filter(t => !isHomeTask(t)), allStatuses)
+                        const projectStatus = getProjectStatus(pinnedProjectTasks, allStatuses)
                         if (!projectStatus) return null
                         const dotClass = projectStatus === 'working'
                           ? 'bg-status-working status-pulse'
@@ -760,7 +789,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                         onContextMenu={(e) => handleContextMenu(e, 'task', pin.project.id, task.id)}
                       >
                         <span className="overflow-hidden text-ellipsis whitespace-nowrap">{task.name}</span>
-                        {isWorkspaceTask(task) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
+                        <StreamChip project={pin.project} taskId={task.id} />
+                        {taskWorkspace(pin.project, task.id) && <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>}
                         <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
                           <TaskStatusDot task={task} allStatuses={allStatuses} />
                         </span>

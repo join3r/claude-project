@@ -9,6 +9,8 @@ import {
   type ProjectsData,
   type Task
 } from '../src/shared/types'
+import { findTaskInProject, paneTabs, taskTabs } from '../src/shared/streams'
+import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { useAppStateCore, usePersistence } from '../src/renderer/hooks/appState/useAppStateCore'
 import { useTaskInbox } from '../src/renderer/hooks/appState/useTaskInbox'
 import { useTabs } from '../src/renderer/hooks/appState/useTabs'
@@ -26,18 +28,22 @@ void React
  * a domain only needs the core and whatever it is handed explicitly.
  */
 
-const WORK_TASK: Task = {
+const WORK_TASK: Task = fixtureTask({
   id: 't1',
   name: 'Work',
-  tabs: { left: [{ id: 'a', type: 'terminal', title: 'A' }], right: [] },
-  activeTab: { left: 'a', right: null },
-  splitOpen: false,
-  splitRatio: 0.5
-}
+  tabs: { left: [{ id: 'a', type: 'terminal', title: 'A' }] }
+})
 
 function buildProjects(): Project[] {
   const { task: home } = createHomeTask('p1')
-  return [{ id: 'p1', name: 'Project', directory: '/tmp/p1', tasks: [home, WORK_TASK] }]
+  const project = fixtureProject({ id: 'p1', name: 'Project', directory: '/tmp/p1' })
+  project.streams[0].tasks.push(home, WORK_TASK)
+  return [project]
+}
+
+/** The work task `t1` as it stands in `data`. */
+function workTask(data: ProjectsData): Task {
+  return findTaskInProject(data.projects[0], 't1')!
 }
 
 let saved: ProjectsData[]
@@ -88,7 +94,7 @@ describe('useTaskInbox', () => {
     await loaded(hook)
 
     act(() => { hook.result.current.inbox.markTaskEvent('p1', 't1', 'attention') })
-    let inbox = hook.result.current.core.projectsData.projects[0].tasks[1].inbox
+    let inbox = workTask(hook.result.current.core.projectsData).inbox
     expect(inbox?.attentionAt).toBeTypeOf('number')
     expect(inbox?.visitedAt).toBeUndefined()
 
@@ -96,7 +102,7 @@ describe('useTaskInbox', () => {
       hook.result.current.core.updateWindowViewState(prev => ({ ...prev, selectedProjectId: 'p1', selectedTaskId: 't1' }))
     })
     act(() => { hook.result.current.inbox.markTaskEvent('p1', 't1') })
-    inbox = hook.result.current.core.projectsData.projects[0].tasks[1].inbox
+    inbox = workTask(hook.result.current.core.projectsData).inbox
     expect(inbox?.visitedAt).toBe(inbox?.eventAt)
   })
 
@@ -109,7 +115,7 @@ describe('useTaskInbox', () => {
     await loaded(hook)
     act(() => { hook.result.current.inbox.settleTask('p1', 't1') })
     await waitFor(() => expect(saved.length).toBeGreaterThan(0))
-    expect(saved[saved.length - 1].projects[0].tasks[1].inbox?.settledAt).toBeTypeOf('number')
+    expect(workTask(saved[saved.length - 1]).inbox?.settledAt).toBeTypeOf('number')
   })
 })
 
@@ -129,8 +135,8 @@ describe('useTabs', () => {
     let tabId = ''
     act(() => { tabId = hook.result.current.tabs.addTab('p1', 't1', 'right', 'terminal').id })
 
-    const task = hook.result.current.core.projectsData.projects[0].tasks[1]
-    expect(task.tabs.right.map(t => t.id)).toEqual([tabId])
+    const task = workTask(hook.result.current.core.projectsData)
+    expect(paneTabs(task, 'right').map(t => t.id)).toEqual([tabId])
     expect(hook.result.current.core.windowViewState.taskStates.t1.activeTab.right).toBe(tabId)
   })
 
@@ -140,12 +146,12 @@ describe('useTabs', () => {
 
     act(() => { hook.result.current.tabs.addTab('p1', 't1', 'left', 'terminal') })
     await act(async () => { await hook.result.current.tabs.removeTab('p1', 't1', 'left', 'a') })
-    expect(hook.result.current.core.projectsData.projects[0].tasks[1].tabs.left.map(t => t.id)).not.toContain('a')
+    expect(paneTabs(workTask(hook.result.current.core.projectsData), 'left').map(t => t.id)).not.toContain('a')
 
     let pane: 'left' | 'right' | null = null
     act(() => { pane = hook.result.current.tabs.reopenClosedTab() })
     expect(pane).toBe('left')
-    expect(hook.result.current.core.projectsData.projects[0].tasks[1].tabs.left[0].id).toBe('a')
+    expect(paneTabs(workTask(hook.result.current.core.projectsData), 'left')[0].id).toBe('a')
     expect(hook.result.current.core.windowViewState).toMatchObject({ selectedProjectId: 'p1', selectedTaskId: 't1' })
     expect(hook.result.current.core.windowViewState.taskStates.t1.activeTab.left).toBe('a')
   })
@@ -158,8 +164,8 @@ describe('useTabs', () => {
     act(() => { hook.result.current.tabs.setActiveTab('p1', 't1', 'left', 'a') })
     act(() => { hook.result.current.tabs.openOrFocusEditorTab('p1', 't1', 'right', 'src/a.ts') })
 
-    const task = hook.result.current.core.projectsData.projects[0].tasks[1]
-    const editors = [...task.tabs.left, ...task.tabs.right].filter(t => t.type === 'editor')
+    const task = workTask(hook.result.current.core.projectsData)
+    const editors = taskTabs(task).filter(t => t.type === 'editor')
     expect(editors).toHaveLength(1)
     expect(hook.result.current.core.windowViewState.taskStates.t1.activeTab.left).toBe(editors[0].id)
   })

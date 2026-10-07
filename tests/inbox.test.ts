@@ -11,7 +11,9 @@ import {
   taskStatus,
   taskStatusSince
 } from '../src/renderer/components/inbox'
+import { createMainStream } from '../src/shared/types'
 import type { Project, Task, TaskInboxState } from '../src/shared/types'
+import { projectTasks, singlePane } from '../src/shared/streams'
 import type { TabStatusValue } from '../src/renderer/context/TabStatusContext'
 
 const NOW = new Date('2026-07-28T12:00:00').getTime()
@@ -23,20 +25,14 @@ function makeTask(id: string, inbox?: TaskInboxState, opts?: {
   return {
     id,
     name: id,
-    tabs: {
-      left: (opts?.aiTabIds ?? []).map(tabId => ({ id: tabId, type: 'claude' as const, title: 'Claude' })),
-      right: []
-    },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
+    panes: singlePane((opts?.aiTabIds ?? []).map(tabId => ({ id: tabId, type: 'claude' as const, title: 'Claude' }))),
     ...(opts?.lastInteractedAt !== undefined ? { lastInteractedAt: opts.lastInteractedAt } : {}),
     ...(inbox ? { inbox } : {})
   }
 }
 
 function makeProject(id: string, tasks: Task[]): Project {
-  return { id, name: id, directory: `/tmp/${id}`, tasks }
+  return { id, name: id, directory: `/tmp/${id}`, streams: [createMainStream(id, tasks)] }
 }
 
 describe('isUnread', () => {
@@ -117,7 +113,7 @@ describe('taskStatus', () => {
 
   it('counts terminal tabs too — a failed command is worth surfacing', () => {
     const task = makeTask('t')
-    task.tabs.left = [{ id: 'term', type: 'terminal', title: 'Terminal' }]
+    task.panes = singlePane([{ id: 'term', type: 'terminal', title: 'Terminal' }])
     expect(taskStatus(task, { term: 'attention' })).toBe('attention')
   })
 
@@ -176,7 +172,7 @@ describe('partitionInbox', () => {
   const snoozedTask = makeTask('snoozed', { snoozedAt: NOW, snoozedUntil: NOW + 60_000 })
 
   const project = makeProject('p', [blockedLong, blockedShort, recent, older, settledTask, snoozedTask])
-  const entries = project.tasks.map(task => ({ task, project }))
+  const entries = projectTasks(project).map(task => ({ task, project }))
   const statuses: Record<string, TabStatusValue> = { bl: 'attention', bs: 'attention' }
   const since = { bl: NOW - 600_000, bs: NOW - 30_000 }
 

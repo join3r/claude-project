@@ -4,6 +4,7 @@ import { isAgentTabType } from '../../../shared/types'
 import type { Project, Task } from '../../../shared/types'
 import type { TabStatusValue } from '../../context/TabStatusContext'
 import { dashboardIconUrl, type DashboardIconsMetadata } from '../dashboardIcons'
+import { taskTabs } from '../../../shared/streams'
 
 export type SidebarContextMenuState = {
   x: number; y: number; type: 'project' | 'task'; projectId: string; taskId?: string
@@ -22,7 +23,7 @@ export type DropTarget =
   | null
 
 export function getTaskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const aiTabIds = [...task.tabs.left, ...task.tabs.right]
+  const aiTabIds = taskTabs(task)
     .filter((t) => isAgentTabType(t.type))
     .map((t) => t.id)
   if (aiTabIds.length === 0) return null

@@ -6,10 +6,11 @@ import {
   type Project,
   type WindowViewState
 } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 describe('window view state', () => {
   const projects: Project[] = [
-    {
+    fixtureProject({
       id: 'project-1',
       name: 'Project 1',
       directory: '/tmp/project-1',
@@ -22,12 +23,10 @@ describe('window view state', () => {
             left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
             right: [{ id: 'right-1', type: 'browser', title: 'Browser', url: 'https://example.com' }]
           },
-          activeTab: { left: 'left-1', right: 'right-1' },
-          splitOpen: true,
-          splitRatio: 0.6
+          activeTab: { left: 'left-1', right: 'right-1' }
         }
       ]
-    }
+    })
   ]
 
   it('builds an initial window view state from stored selection', () => {
@@ -59,7 +58,9 @@ describe('window view state', () => {
     expect(state.selectedProjectId).toBe('project-1')
     expect(state.selectedTaskId).toBe('task-1')
     expect(state.taskStates['task-1'].splitOpen).toBe(false)
-    expect(state.taskStates['task-1'].activeTab.right).toBeNull()
+    expect(state.taskStates['task-1'].splitRatio).toBe(0.5)
+    // A pane that holds tabs always has one active, even while the split is closed.
+    expect(state.taskStates['task-1'].activeTab.right).toBe('right-1')
   })
 
   it('reconciles stale task state against shared projects', () => {
@@ -91,7 +92,7 @@ describe('window view state', () => {
 
   it('fills in default task state for tasks missing from the persisted seed', () => {
     const nextProjects: Project[] = [
-      {
+      fixtureProject({
         id: 'project-1',
         name: 'Project 1',
         directory: '/tmp/project-1',
@@ -99,13 +100,7 @@ describe('window view state', () => {
           {
             id: 'task-1',
             name: 'Task 1',
-            tabs: {
-              left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }],
-              right: []
-            },
-            activeTab: { left: 'left-1', right: null },
-            splitOpen: false,
-            splitRatio: 0.5
+            tabs: { left: [{ id: 'left-1', type: 'terminal', title: 'Terminal' }] }
           },
           {
             id: 'task-2',
@@ -115,11 +110,14 @@ describe('window view state', () => {
               right: [{ id: 'right-2', type: 'browser', title: 'Browser', url: 'https://example.com' }]
             },
             activeTab: { left: 'left-2', right: 'right-2' },
-            splitOpen: true,
-            splitRatio: 0.7
+            // Pane widths carry the split ratio.
+            panes: [
+              { tabs: [{ id: 'left-2', type: 'terminal', title: 'Terminal' }], activeTabId: 'left-2', width: 0.7 },
+              { tabs: [{ id: 'right-2', type: 'browser', title: 'Browser', url: 'https://example.com' }], activeTabId: 'right-2', width: 0.3 }
+            ]
           }
         ]
-      }
+      })
     ]
 
     const state = buildWindowViewState(nextProjects, DEFAULT_CONFIG, {

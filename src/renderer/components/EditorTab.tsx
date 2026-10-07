@@ -14,6 +14,7 @@ import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
 import { attachAgentLinkHint } from '../agentLink/selectionHint'
 import { isAgentTabType } from '../../shared/types'
 import { paletteEvents } from '../palette/paletteEvents'
+import { findTaskInProject, taskTabs } from '../../shared/streams'
 
 // Monaco KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyL
 export const LINK_SELECTION_KEYBINDING = 2048 | 42
@@ -222,8 +223,8 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
   const linkToAgent = useLinkToAgent(projectId, taskId)
   // Whether the "Add to agent" chip may show on a selection: only when the task
   // has an agent tab to take the link.
-  const task = projects?.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
-  const hasAgentTab = !!task && [...task.tabs.left, ...task.tabs.right].some(t => isAgentTabType(t.type))
+  const task = findTaskInProject(projects?.find(p => p.id === projectId), taskId)
+  const hasAgentTab = !!task && taskTabs(task).some(t => isAgentTabType(t.type))
   const hasAgentTabRef = useRef(hasAgentTab)
   hasAgentTabRef.current = hasAgentTab
   const linkRef = useRef<(kind: 'selection' | 'file') => void>(() => {})

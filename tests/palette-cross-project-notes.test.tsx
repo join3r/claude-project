@@ -5,6 +5,8 @@ import { render, fireEvent, screen, act, cleanup, renderHook, waitFor } from '@t
 import { DEFAULT_CONFIG, createHomeTask, type Project, type ProjectNote, type Task } from '../src/shared/types'
 import { resolveLandingTaskId } from '../src/renderer/hooks/taskNavigation'
 import { useAppState } from '../src/renderer/hooks/useAppState'
+import { findTaskInProject, paneTabs, projectTasks, withLastTask } from '../src/shared/streams'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 // React import is required by the JSX runtime under vitest's default transform.
 void React
@@ -17,14 +19,7 @@ vi.mock('../src/renderer/context/AppContext', () => ({
 import { Palette } from '../src/renderer/palette/Palette'
 
 function task(id: string, name: string): Task {
-  return {
-    id,
-    name,
-    tabs: { left: [], right: [] },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }
+  return { id, name, panes: [] }
 }
 
 function note(id: string, name: string): ProjectNote {
@@ -35,20 +30,18 @@ function buildProjects(): Project[] {
   const { task: homeA } = createHomeTask('proj-a')
   const { task: homeB } = createHomeTask('proj-b')
   return [
-    {
+    withLastTask(fixtureProject({
       id: 'proj-a',
       name: 'Project A',
       directory: '/tmp/a',
-      tasks: [homeA, task('task-a1', 'Task A1')],
-      lastTaskId: 'task-a1'
-    },
-    {
+      tasks: [homeA, task('task-a1', 'Task A1')]
+    }), 'task-a1'),
+    withLastTask(fixtureProject({
       id: 'proj-b',
       name: 'Project B',
       directory: '/tmp/b',
-      tasks: [homeB, task('task-b1', 'Task B1')],
-      lastTaskId: 'task-b1'
-    }
+      tasks: [homeB, task('task-b1', 'Task B1')]
+    }), 'task-b1')
   ]
 }
 
@@ -72,8 +65,11 @@ describe('resolveLandingTaskId', () => {
 
   it('falls back to the home task when lastTaskId is stale', () => {
     const [, projectB] = buildProjects()
-    const withoutLast: Project = { ...projectB, lastTaskId: 'gone' }
-    const homeId = projectB.tasks.find(t => t.system === 'home')!.id
+    const withoutLast: Project = {
+      ...projectB,
+      streams: projectB.streams.map(stream => (stream.id === projectB.lastStreamId ? { ...stream, lastTaskId: 'gone' } : stream))
+    }
+    const homeId = projectTasks(projectB).find(t => t.system === 'home')!.id
     expect(resolveLandingTaskId(withoutLast, 'task-a1')).toBe(homeId)
   })
 
@@ -175,8 +171,8 @@ describe('openOrFocusNoteTab navigation', () => {
   }
 
   function noteTabsFor(state: ReturnType<typeof useAppState>, projectId: string, taskId: string) {
-    const target = state.projects.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
-    return (target?.tabs.left ?? []).filter(tab => tab.type === 'note')
+    const target = findTaskInProject(state.projects.find(p => p.id === projectId), taskId)
+    return (target ? paneTabs(target, 'left') : []).filter(tab => tab.type === 'note')
   }
 
   it('switches to the target project and opens a cross-project note', async () => {

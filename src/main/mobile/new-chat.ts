@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { CLAUDE_CHAT_LABEL, isHomeTask, isShellCommandProject, type ProjectsData, type Tab } from '../../shared/types'
 import { AppErrorCode } from '../../../protocol/ts/index.ts'
+import { findTaskInProject, mapTaskInProject, paneTabs, withPaneTabs } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 
 /**
@@ -15,19 +16,16 @@ export type NewChatResult =
 
 export function addChatTab(data: ProjectsData, taskId: string, ids: () => string = randomUUID): NewChatResult {
   for (const project of data.projects) {
-    const task = (project.tasks ?? []).find((t) => t.id === taskId)
+    const task = findTaskInProject(project, taskId)
     if (!task) continue
     if (!isVisibleOnMobile(project) || isHomeTask(task)) break
     // A shell-command project runs one command, not agents; its tab bar has no Claude button.
     if (isShellCommandProject(project)) return { ok: false, code: AppErrorCode.Unsupported, message: 'This project runs a shell command, not Claude' }
     const tab: Tab = { id: ids(), type: 'claude-chat', title: CLAUDE_CHAT_LABEL, sessionId: ids() }
-    const tabs = task.tabs
     const next: ProjectsData = {
       ...data,
       projects: data.projects.map((p) =>
-        p !== project
-          ? p
-          : { ...p, tasks: p.tasks.map((t) => (t !== task ? t : { ...t, tabs: { ...tabs, left: [...tabs.left, tab] } })) }
+        p !== project ? p : mapTaskInProject(p, task.id, (t) => withPaneTabs(t, 'left', [...paneTabs(t, 'left'), tab]))
       )
     }
     return { ok: true, data: next, tabId: tab.id }

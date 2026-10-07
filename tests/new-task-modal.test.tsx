@@ -8,10 +8,10 @@ void React
 
 import NewTaskModal from '../src/renderer/components/NewTaskModal'
 import type { NewTaskSubmission, NewTaskTarget } from '../src/renderer/components/newTask'
-import type { AppConfig, Project } from '../src/shared/types'
+import { createMainStream, type AppConfig, type Project } from '../src/shared/types'
 
 function project(id: string, name: string, extra: Partial<Project> = {}): Project {
-  return { id, name, directory: `/repos/${id}`, tasks: [], ...extra }
+  return { id, name, directory: `/repos/${id}`, streams: [createMainStream(id)], ...extra }
 }
 
 const PROJECTS: Project[] = [

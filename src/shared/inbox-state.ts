@@ -1,3 +1,4 @@
+import { taskTabIds } from './streams'
 import type { Task, TabStatusValue, TaskInboxState } from './types'
 
 /**
@@ -66,7 +67,7 @@ export function isSnoozed(task: Task, now: number): boolean {
  * the tab's own dot.
  */
 export function taskStatus(task: Task, allStatuses: Record<string, TabStatusValue>): TabStatusValue {
-  const tabIds = [...task.tabs.left, ...task.tabs.right].map((tab) => tab.id)
+  const tabIds = taskTabIds(task)
   if (tabIds.length === 0) return null
   const statuses = tabIds.map((id) => allStatuses[id]).filter(Boolean)
   if (statuses.includes('attention')) return 'attention'

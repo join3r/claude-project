@@ -27,6 +27,7 @@ import { useTabs, type TabsActions } from './appState/useTabs'
 import { useNotes, type NotesActions } from './appState/useNotes'
 import { useWindowLayout, type WindowLayoutActions } from './appState/useWindowLayout'
 import { useZoom, type ZoomActions } from './appState/useZoom'
+import { findTaskInProject } from '../../shared/streams'
 
 export { buildWindowTitle } from './appState/windowTitle'
 export type { DirtyClosePrompt, DirtyCloseChoice } from './appState/useDirtyClosePrompt'
@@ -96,7 +97,7 @@ export function useAppState(): AppActions {
   const selectedProjectId = windowViewState.selectedProjectId
   const selectedTaskId = windowViewState.selectedTaskId
   const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null
-  const selectedTask = selectedProject?.tasks.find(task => task.id === selectedTaskId) ?? null
+  const selectedTask = findTaskInProject(selectedProject, selectedTaskId) ?? null
 
   const effectiveTheme = config?.theme === 'system' || !config ? theme : config.theme
   const effectiveTerminalTheme = config?.terminalTheme === 'system' || !config ? theme : config.terminalTheme

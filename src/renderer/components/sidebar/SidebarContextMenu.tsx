@@ -9,6 +9,7 @@ import { menuCls, menuItemCls } from '../ui'
 import { revealInFolderLabel } from '../../utils/revealLabel'
 import { joinWorkspaceDir } from '../../../shared/workspace-path'
 import type { SidebarContextMenuState } from './SidebarParts'
+import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from '../../../shared/streams'
 
 /**
  * The local folder a project or task works in, for "Reveal in Finder": the task's
@@ -18,15 +19,15 @@ import type { SidebarContextMenuState } from './SidebarParts'
 export function revealFolder(projects: readonly Project[], projectId: string, taskId?: string): string | null {
   const project = projects.find(p => p.id === projectId)
   if (!project || isRemoteProject(project) || isShellCommandProject(project)) return null
-  const workspace = taskId ? project.tasks.find(t => t.id === taskId)?.workspace : undefined
+  const workspace = taskId ? taskWorkspace(project, taskId) : undefined
   if (workspace?.worktreePath) return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
   return project.directory || null
 }
 
 /** The confirmation for deleting a project, naming what goes with it. */
 export function projectDeletePrompt(project: Project): string {
-  const tasks = project.tasks.length
-  const workspaces = project.tasks.filter(t => t.workspace).length
+  const tasks = projectTasks(project).filter(t => t.system !== 'home').length
+  const workspaces = project.streams.filter(s => s.workspace).length
   const lines = [`Delete project "${project.name}"?`]
   if (tasks > 0) lines.push(`${tasks === 1 ? 'Its task closes' : `Its ${tasks} tasks close`}, with their tabs.`)
   if (workspaces > 0) lines.push(`${workspaces === 1 ? 'Its workspace worktree is' : `Its ${workspaces} workspace worktrees are`} removed from disk, even with uncommitted changes.`)
@@ -167,14 +168,17 @@ export default function SidebarContextMenu({
                 const id = contextMenu.type === 'project' ? contextMenu.projectId : contextMenu.taskId!
                 const item = contextMenu.type === 'project'
                   ? projects.find((p) => p.id === id)
-                  : projects.find((p) => p.id === contextMenu.projectId)?.tasks.find((t) => t.id === id)
+                  : findTaskInProject(projects.find((p) => p.id === contextMenu.projectId), id)
                 beginEdit(id, item?.name ?? '', contextMenu.type === 'task' ? contextMenu.projectId : undefined)
                 setContextMenu(null)
               }}>Rename</button>
               {(() => {
+                const streamId = contextMenu.type === 'task'
+                  ? findStreamOfTask(projects.find(p => p.id === contextMenu.projectId), contextMenu.taskId)?.id ?? ''
+                  : ''
                 const item: PinnedItem = contextMenu.type === 'project'
                   ? { type: 'project', projectId: contextMenu.projectId }
-                  : { type: 'task', projectId: contextMenu.projectId, taskId: contextMenu.taskId! }
+                  : { type: 'task', projectId: contextMenu.projectId, streamId, taskId: contextMenu.taskId! }
                 const pinned = isPinned(item)
                 const noun = contextMenu.type === 'project' ? 'project' : 'task'
                 return (

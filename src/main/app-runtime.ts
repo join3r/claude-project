@@ -39,6 +39,7 @@ import { registerFileBrowserHandlers } from './ipc/file-browser'
 import { registerGitHandlers } from './ipc/git'
 import { registerNotebookHandlers } from './ipc/notebooks'
 import { isRemoteProject, isShellCommandProject } from '../shared/types'
+import { findStreamOfTask, removeTaskFromProject, workspaceReleasedBy } from '../shared/streams'
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
@@ -414,9 +415,12 @@ export class AppRuntime {
         peek: () => this.projectsStore.peek(),
         dirtyTabIds: () => this.getDirtyTabIds(),
         checkWorkspace: (project, task) => this.deleteTaskWorkspace(project, task),
-        forceDeleteWorkspace: (project, task, keepBranch) => task.workspace
-          ? this.deleteWorkspace({ ...this.workspaceTarget(project), ...task.workspace, force: true, keepBranch })
-          : Promise.resolve({ status: 'ok' as const }),
+        forceDeleteWorkspace: (project, task, keepBranch) => {
+          const workspace = workspaceReleasedBy(project, task.id)
+          return workspace
+            ? this.deleteWorkspace({ ...this.workspaceTarget(project), ...workspace, force: true, keepBranch })
+            : Promise.resolve({ status: 'ok' as const })
+        },
         removeTask: (project, task) => this.removeTaskFromMain(project, task)
       }, params),
       closeTab: async (tabId) => {
@@ -552,15 +556,17 @@ export class AppRuntime {
     return [...ids]
   }
 
+  /** Deletes the worktree that goes away with the task (`workspaceReleasedBy`), if any. */
   private async deleteTaskWorkspace(project: Project, task: Task) {
-    if (!task.workspace) return { status: 'ok' as const }
+    const workspace = workspaceReleasedBy(project, task.id)
+    if (!workspace) return { status: 'ok' as const }
     // No `force`: this both checks that the worktree is clean and the branch merged
     // *and* performs the deletion when it is. Anything else leaves it untouched.
     return this.deleteWorkspace({
       ...this.workspaceTarget(project),
-      worktreePath: task.workspace.worktreePath,
-      branchName: task.workspace.branchName,
-      baseBranch: task.workspace.baseBranch
+      worktreePath: workspace.worktreePath,
+      branchName: workspace.branchName,
+      baseBranch: workspace.baseBranch
     })
   }
 
@@ -570,13 +576,18 @@ export class AppRuntime {
     const data = this.projectsStore.peek()
     this.commitProjects({
       ...data,
-      projects: data.projects.map(candidate => candidate.id !== project.id ? candidate : {
-        ...candidate,
-        tasks: candidate.tasks.map(existing => {
-          if (existing.id !== task.id) return existing
-          const { workspace: _gone, ...rest } = existing
-          return rest
-        })
+      projects: data.projects.map(candidate => {
+        if (candidate.id !== project.id) return candidate
+        const stream = findStreamOfTask(candidate, task.id)
+        if (!stream?.workspace) return candidate
+        return {
+          ...candidate,
+          streams: candidate.streams.map(existing => {
+            if (existing !== stream) return existing
+            const { workspace: _gone, ...rest } = existing
+            return rest
+          })
+        }
       })
     })
   }
@@ -602,7 +613,7 @@ export class AppRuntime {
       ...data,
       projects: data.projects.map(candidate =>
         candidate.id === project.id
-          ? { ...candidate, tasks: candidate.tasks.filter(existing => existing.id !== task.id) }
+          ? removeTaskFromProject(candidate, task.id)
           : candidate
       )
     })

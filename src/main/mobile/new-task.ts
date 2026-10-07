@@ -1,12 +1,14 @@
 import { randomUUID } from 'crypto'
-import { CLAUDE_CHAT_LABEL, isShellCommandProject, type Project, type ProjectsData, type Tab, type Task, type WorkspaceConfig } from '../../shared/types'
+import { CLAUDE_CHAT_LABEL, createMainStream, isShellCommandProject, type Project, type ProjectsData, type Tab, type Task, type WorkspaceConfig } from '../../shared/types'
 import { defaultBaseBranch, workspaceBranchName } from '../../shared/branch-name'
 import { taskNameFromPrompt } from '../../shared/task-name'
 import { AppErrorCode } from '../../../protocol/ts/index.ts'
+import { addTaskToStream, findMainStream, resolveMainTabId, singlePane } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 
 /**
- * `task.new` (SPEC.md §8.4): a new task at the end of a project, named after the
+ * `task.new` (SPEC.md §8.4): a new task at the end of a project's `main` stream (or,
+ * with a worktree, in a new stream of its own), named after the
  * first prompt, with one Claude chat tab in its left pane. Main commits it itself,
  * like `chat.new`, so no window has to be open and none of them switches to it;
  * sending the prompt is the caller's next step.
@@ -40,23 +42,28 @@ export function addTaskWithChat(
   if (!found.ok) return found
   const { project } = found
   const tab: Tab = { id: ids(), type: 'claude-chat', title: CLAUDE_CHAT_LABEL, sessionId: ids() }
+  const mainTabId = resolveMainTabId([tab])
   const task: Task = {
     id: ids(),
     name: taskNameFromPrompt(prompt),
-    tabs: { left: [tab], right: [] },
-    activeTab: { left: tab.id, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
-    lastInteractedAt: now,
-    ...(workspace ? { workspace } : {})
+    panes: singlePane([tab]),
+    ...(mainTabId ? { mainTabId } : {}),
+    lastInteractedAt: now
   }
+  // A task with its own worktree starts a stream of its own; any other goes into `main`.
+  const withTask: Project = workspace
+    ? {
+        ...project,
+        streams: [...project.streams, { id: ids(), name: task.name, workspace, tasks: [task], lastTaskId: task.id }]
+      }
+    : findMainStream(project)
+      ? addTaskToStream(project, null, task)
+      : { ...project, streams: [createMainStream(project.id, [task]), ...project.streams] }
   const stats = project.lifetimeStats ?? { tasksCreated: 0, notesCreated: 0 }
   const next: ProjectsData = {
     ...data,
     projects: data.projects.map((p) =>
-      p !== project
-        ? p
-        : { ...p, tasks: [...(p.tasks ?? []), task], lifetimeStats: { ...stats, tasksCreated: stats.tasksCreated + 1 } }
+      p !== project ? p : { ...withTask, lifetimeStats: { ...stats, tasksCreated: stats.tasksCreated + 1 } }
     )
   }
   return { ok: true, data: next, taskId: task.id, tabId: tab.id }

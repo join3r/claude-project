@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { isEphemeralProject, isRemoteProject, isShellCommandProject, isAgentTabType } from '../../shared/types'
 import type { Project } from '../../shared/types'
 import { useTabStatusStore } from '../context/TabStatusContext'
+import { findTaskInProject, projectTasks, taskTabs } from '../../shared/streams'
 
 interface SearchResult {
   type: 'project' | 'task'
@@ -54,7 +55,7 @@ export default function ProjectSwitcher({
           context
         })
       }
-      for (const task of project.tasks) {
+      for (const task of projectTasks(project)) {
         if (task.system === 'home') continue
         taskResults.push({
           type: 'task',
@@ -123,9 +124,9 @@ export default function ProjectSwitcher({
       switchToTask(result.projectId, result.taskId)
       // Clear attention state on target task's AI tabs
       const project = projects.find(p => p.id === result.projectId)
-      const task = project?.tasks.find(t => t.id === result.taskId)
+      const task = findTaskInProject(project, result.taskId)
       if (task) {
-        const aiTabs = [...task.tabs.left, ...task.tabs.right]
+        const aiTabs = taskTabs(task)
           .filter(t => isAgentTabType(t.type))
         for (const tab of aiTabs) {
           if (tabStatusStore.getStatus(tab.id) === 'attention') {

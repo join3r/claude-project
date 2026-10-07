@@ -11,11 +11,11 @@ const win = { platform: 'win32' as const, path: path.win32 }
 const posix = { platform: 'linux' as const, path: path.posix }
 
 describe('notebookAllowedCwdRoots', () => {
-  it('includes the project directory and each task worktree', () => {
+  it('includes the project directory and each stream worktree', () => {
     expect(
       notebookAllowedCwdRoots({
         directory: 'C:\\proj',
-        tasks: [
+        streams: [
           { workspace: { worktreePath: 'C:\\proj\\.worktrees\\t1' } },
           { workspace: { worktreePath: 'C:\\proj\\.worktrees\\t1' } },
           {}

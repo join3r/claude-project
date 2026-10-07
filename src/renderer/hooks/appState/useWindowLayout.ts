@@ -10,6 +10,7 @@ import {
   writeSidebarToTask,
   type SidebarPatch
 } from './viewState'
+import { findTaskInProject } from '../../../shared/streams'
 
 export interface WindowLayoutActions {
   selectedTagIds: string[]
@@ -61,8 +62,8 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
 
   const writeSidebarToCurrentTask = useCallback((prev: WindowViewState, patch: SidebarPatch): WindowViewState => {
     const taskId = prev.selectedTaskId
-    const project = taskId ? projectsRef.current.find(p => p.tasks.some(t => t.id === taskId)) : null
-    const task = project && taskId ? project.tasks.find(t => t.id === taskId) ?? null : null
+    const project = taskId ? projectsRef.current.find(p => !!findTaskInProject(p, taskId)) : null
+    const task = project && taskId ? findTaskInProject(project, taskId) ?? null : null
     return writeSidebarToTask(prev, task, patch)
   }, [])
 

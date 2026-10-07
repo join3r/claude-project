@@ -5,6 +5,7 @@ import {
   type RecentlyClosedTab
 } from '../src/renderer/recentlyClosedTabs'
 import type { Project, Tab } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 function makeTab(id: string): Tab {
   return {
@@ -15,22 +16,12 @@ function makeTab(id: string): Tab {
 }
 
 function makeProject(tabIds: string[] = []): Project {
-  return {
+  return fixtureProject({
     id: 'project-1',
     name: 'Project',
     directory: '/tmp/project',
-    tasks: [{
-      id: 'task-1',
-      name: 'Task',
-      tabs: {
-        left: tabIds.map(makeTab),
-        right: []
-      },
-      activeTab: { left: tabIds[tabIds.length - 1] ?? null, right: null },
-      splitOpen: false,
-      splitRatio: 0.5
-    }]
-  }
+    tasks: [{ id: 'task-1', name: 'Task', tabs: { left: tabIds.map(makeTab) } }]
+  })
 }
 
 function makeEntry(id: string, projectId = 'project-1', taskId = 'task-1'): RecentlyClosedTab {

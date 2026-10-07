@@ -9,6 +9,7 @@ import {
   reconcileTaskViewState
 } from '../../../shared/types'
 import type { Tab, TabType, Task, TaskViewState } from '../../../shared/types'
+import { findTaskInProject, paneTabs, tabsByPane, taskTabs, withTabsByPane } from '../../../shared/streams'
 import { markClaudeHandoff } from '../../components/claudeTabHandoff'
 import { createTab, type CreateTabOptions } from '../../components/newTaskTabs'
 import { moveTaskTab } from '../../tabMove'
@@ -51,14 +52,7 @@ export interface TabsActions {
 
 /** The placeholder a tab add falls back to when its task is not in `projectsRef` yet. */
 function blankTask(taskId: string): Task {
-  return {
-    id: taskId,
-    name: '',
-    tabs: { left: [], right: [] },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5
-  }
+  return { id: taskId, name: '', panes: [] }
 }
 
 /** Tabs within a task, the split between its two panes, and recently-closed history. */
@@ -128,8 +122,8 @@ export function useTabs(
     if (await confirmDiscardDirty([tabId]) === 'cancel') return
 
     const task = findTask(projectsRef.current, projectId, taskId)
-    const tabIndex = task?.tabs[pane].findIndex(tab => tab.id === tabId) ?? -1
-    const removedTab = tabIndex >= 0 ? task?.tabs[pane][tabIndex] ?? null : null
+    const tabIndex = task ? paneTabs(task, pane).findIndex(tab => tab.id === tabId) : -1
+    const removedTab = task && tabIndex >= 0 ? paneTabs(task, pane)[tabIndex] ?? null : null
     if (removedTab && isHomeTab(removedTab)) return
 
     if (removedTab && tabIndex >= 0) {
@@ -146,7 +140,7 @@ export function useTabs(
       if (!task) return prev
 
       const currentState = getTaskViewStateForTask(task)
-      const nextTabs = task.tabs[pane].filter(tab => tab.id !== tabId)
+      const nextTabs = paneTabs(task, pane).filter(tab => tab.id !== tabId)
       const wasActive = currentState.activeTab[pane] === tabId
 
       return {
@@ -176,7 +170,7 @@ export function useTabs(
 
     const { projectId, taskId, pane, index, tab } = next.entry
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
-    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    const task = findTaskInProject(project, taskId)
     if (!project || !task) {
       cleanupClosedTabHistory([next.entry])
       return null
@@ -217,7 +211,8 @@ export function useTabs(
    * resumes a session nothing else is writing to.
    */
   const convertClaudeTab = useCallback((projectId: string, taskId: string, pane: Pane, tabId: string, to: 'claude' | 'claude-chat') => {
-    const tab = findTask(projectsRef.current, projectId, taskId)?.tabs[pane].find(candidate => candidate.id === tabId)
+    const owner = findTask(projectsRef.current, projectId, taskId)
+    const tab = owner ? paneTabs(owner, pane).find(candidate => candidate.id === tabId) : undefined
     if (!tab || tab.type === to || (tab.type !== 'claude' && tab.type !== 'claude-chat')) return
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
     void window.api.scrollbackDelete(tabId)
@@ -250,7 +245,7 @@ export function useTabs(
 
     const currentState = getTaskViewStateForTask(task)
     const next = moveTaskTab({
-      tabs: task.tabs,
+      tabs: tabsByPane(task),
       taskState: currentState,
       fromPane,
       tabId,
@@ -261,7 +256,7 @@ export function useTabs(
     if (!next.moved) return
 
     updateWindowViewState(prev => withTaskState(prev, taskId, next.taskState))
-    mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => ({ ...candidate, tabs: next.tabs })))
+    mutateProjects(prev => mapTask(prev, projectId, taskId, candidate => withTabsByPane(candidate, next.tabs)))
   }, [mutateProjects, updateWindowViewState, getTaskViewStateForTask])
 
   const toggleSplit = useCallback((projectId: string, taskId: string) => {
@@ -314,7 +309,7 @@ export function useTabs(
     if (!task) return
 
     // An .ipynb opens as (and matches) a native notebook tab, not a text editor.
-    const existingTab = [...task.tabs.left, ...task.tabs.right].find(
+    const existingTab = taskTabs(task).find(
       t => t.filePath === filePath && (t.type === type || (type === 'editor' && t.type === 'notebook'))
     )
     if (existingTab) {

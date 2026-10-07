@@ -9,6 +9,7 @@ import {
   inboxVisited
 } from '../../shared/inbox-transitions'
 import { AppErrorCode, type TaskTriageParams } from '../../../protocol/ts/index.ts'
+import { findTaskInProject, mapTaskInProject } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 
 /**
@@ -42,7 +43,7 @@ function nextInbox(task: Task, params: TaskTriageParams, now: number): TaskInbox
 
 export function triageTaskInData(data: ProjectsData, params: TaskTriageParams, now: number): TaskTriageResult {
   for (const project of data.projects) {
-    const task = (project.tasks ?? []).find((t) => t.id === params.taskId)
+    const task = findTaskInProject(project, params.taskId)
     if (!task) continue
     if (!isVisibleOnMobile(project) || isHomeTask(task)) break
     const inbox = nextInbox(task, params, now)
@@ -50,7 +51,7 @@ export function triageTaskInData(data: ProjectsData, params: TaskTriageParams, n
     const next: ProjectsData = {
       ...data,
       projects: data.projects.map((p) =>
-        p !== project ? p : { ...p, tasks: p.tasks.map((t) => (t !== task ? t : { ...t, inbox })) }
+        p !== project ? p : mapTaskInProject(p, task.id, (t) => ({ ...t, inbox }))
       )
     }
     return { ok: true, data: next, changed: true }

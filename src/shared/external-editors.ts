@@ -1,4 +1,5 @@
 import { isRemoteProject, isShellCommandProject, type ExternalEditor, type ExternalEditorsConfig, type Project, type Task } from './types'
+import { taskWorkspace } from './streams'
 import { joinWorkspaceDir } from './workspace-path'
 
 export function resolveDefaultExternalEditor(config: ExternalEditorsConfig): ExternalEditor | null {
@@ -26,8 +27,9 @@ export function paletteAliasesForEditor(name: string): string[] {
 export function localProjectFolder(project: Project | null | undefined, task: Task | null | undefined): string | null {
   if (!project) return null
   if (isRemoteProject(project) || isShellCommandProject(project)) return null
-  if (task?.workspace) {
-    return joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath)
+  const workspace = taskWorkspace(project, task?.id)
+  if (workspace) {
+    return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
   }
   const dir = (project.directory ?? '').trim()
   return dir || null

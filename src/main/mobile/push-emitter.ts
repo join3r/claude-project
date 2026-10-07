@@ -3,6 +3,7 @@ import type { ChatEvent, ChatItem, ChatPrompt, ChatState } from '../../shared/cl
 import { promptQuestions } from '../../shared/chat-prompts'
 import { summarizeTool } from '../../shared/agent-activity'
 import { b64uDecode, sealPushPayload, type PushPayload, type PushPayloadKind } from '../../../protocol/ts/index.ts'
+import { projectTasks, taskTabs } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 import type { MobilePushRegistration } from './pairings-store'
 import type { PushOutcome } from './mobile-service'
@@ -138,9 +139,9 @@ export class PushEmitter {
 function findChatTab(data: ProjectsData, tabId: string): { project: Project; task: Task } | null {
   for (const project of data.projects) {
     if (!isVisibleOnMobile(project)) continue
-    for (const task of project.tasks ?? []) {
+    for (const task of projectTasks(project)) {
       if (isHomeTask(task)) continue
-      const tab = [...(task.tabs?.left ?? []), ...(task.tabs?.right ?? [])].find((t) => t.id === tabId)
+      const tab = taskTabs(task).find((t) => t.id === tabId)
       if (tab) return tab.type === 'claude-chat' ? { project, task } : null
     }
   }

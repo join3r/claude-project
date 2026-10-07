@@ -3,15 +3,16 @@ import { v4 as uuid } from 'uuid'
 import { isEphemeralProject, isHomeTask } from '../../../shared/types'
 import type { Tab, Task, WorkspaceConfig, WorkspaceDraft } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
+import { findTaskInProject, projectTasks, taskTabs, workspaceReleasedBy } from '../../../shared/streams'
 import {
   addTaskInDirectoryData,
   appendTaskToProject,
+  attachWorkspaceInData,
   getProjectDir,
   makeTask,
-  mapProject,
   mapTask,
   removeTaskFromData,
-  reorderList,
+  reorderTaskInData,
   tabIdsOfTask
 } from './projectsData'
 import { removeTaskView, selectNewTaskView } from './viewState'
@@ -25,7 +26,7 @@ export interface TasksActions {
   addPendingWorkspaceTask: (projectId: string, name: string, draft?: WorkspaceDraft) => Task
   /** Change a pending workspace task's draft; null turns it into a plain task. */
   setWorkspaceDraft: (projectId: string, taskId: string, draft: WorkspaceDraft | null) => void
-  /** Point a task at the worktree just created for it, ending its draft. */
+  /** Point a task's stream at the worktree just created for it, ending its draft. */
   attachWorkspace: (projectId: string, taskId: string, workspace: WorkspaceConfig) => void
   removeTask: (projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => Promise<void>
   renameTask: (projectId: string, taskId: string, name: string) => void
@@ -56,8 +57,9 @@ export function useTasks(
     workspace: WorkspaceConfig,
     initialTabs: Tab[] = []
   ) => {
-    const task = makeTask(name, initialTabs, workspace)
-    mutateProjects(prev => appendTaskToProject(prev, projectId, task))
+    const task = makeTask(name, initialTabs)
+    const placement = { workspace, streamId: uuid() }
+    mutateProjects(prev => appendTaskToProject(prev, projectId, task, placement))
     updateWindowViewState(prev => selectNewTaskView(prev, projectId, task))
     return task
   }, [mutateProjects, updateWindowViewState])
@@ -75,41 +77,42 @@ export function useTasks(
     workspace?: WorkspaceConfig,
     workspaceDraft?: WorkspaceDraft
   ) => {
-    const task: Task = { ...makeTask(name, initialTabs, workspace), ...(workspaceDraft ? { workspaceDraft } : {}) }
+    const task: Task = makeTask(name, initialTabs, workspaceDraft)
     // Resolved before the mutation, not inside it: the updater is replayed against
     // the synced snapshot as well as local state, so it has to be idempotent.
     const existing = projectsRef.current.find(p => isEphemeralProject(p) && p.directory === directory)
     const ownerId = existing?.id ?? uuid()
-    mutateProjects(prev => addTaskInDirectoryData(prev, ownerId, directory, task))
+    const placement = { workspace, ownStream: !!workspaceDraft, streamId: uuid() }
+    mutateProjects(prev => addTaskInDirectoryData(prev, ownerId, directory, task, placement))
     updateWindowViewState(prev => selectNewTaskView(prev, ownerId, task))
     return task
   }, [mutateProjects, updateWindowViewState])
 
   const removeTask = useCallback(async (projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => {
-    const doomed = projectsRef.current
-      .find(candidate => candidate.id === projectId)?.tasks
-      .find(candidate => candidate.id === taskId)
+    const doomed = findTaskInProject(projectsRef.current.find(candidate => candidate.id === projectId), taskId)
     if (doomed && isHomeTask(doomed)) return
     // One dialog for every unsaved editor under the task, not one per tab.
     if (doomed && await confirmDiscardDirty(tabIdsOfTask(doomed)) === 'cancel') return
 
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
-    const task = project?.tasks.find(candidate => candidate.id === taskId)
+    const task = findTaskInProject(project, taskId)
     if (task && isHomeTask(task)) return
     if (task) {
-      for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+      for (const tab of taskTabs(task)) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
         void window.api.scrollbackDelete(tab.id)
       }
-      if (task.workspace && project && !skipWorkspaceCleanup) {
+      // The worktree goes only with its stream's last task.
+      const workspace = workspaceReleasedBy(project, taskId)
+      if (workspace && project && !skipWorkspaceCleanup) {
         void window.api.workspaceDelete(
           {
             projectDir: getProjectDir(project),
             projectId: project.ssh ? projectId : undefined,
             sshConfig: project.ssh,
-            worktreePath: task.workspace.worktreePath,
-            branchName: task.workspace.branchName,
-            baseBranch: task.workspace.baseBranch,
+            worktreePath: workspace.worktreePath,
+            branchName: workspace.branchName,
+            baseBranch: workspace.baseBranch,
             force: true
           }
         ).then(reportRefusedWorkspaceDelete).catch(() => {})
@@ -121,14 +124,15 @@ export function useTasks(
     // no empty record is ever written out.
     const ownerRetired = !!project
       && isEphemeralProject(project)
-      && !project.tasks.some(candidate => candidate.id !== taskId && !isHomeTask(candidate))
+      && !projectTasks(project).some(candidate => candidate.id !== taskId && !isHomeTask(candidate))
     mutateProjects(prev => removeTaskFromData(prev, projectId, taskId))
     updateWindowViewState(prev => removeTaskView(prev, projectId, taskId, ownerRetired))
   }, [confirmDiscardDirty, mutateProjects, updateWindowViewState])
 
   const addPendingWorkspaceTask = useCallback((projectId: string, name: string, draft: WorkspaceDraft = {}) => {
-    const task: Task = { ...makeTask(name, []), workspaceDraft: draft }
-    mutateProjects(prev => appendTaskToProject(prev, projectId, task))
+    const task: Task = makeTask(name, [], draft)
+    const placement = { ownStream: true, streamId: uuid() }
+    mutateProjects(prev => appendTaskToProject(prev, projectId, task, placement))
     updateWindowViewState(prev => selectNewTaskView(prev, projectId, task))
     return task
   }, [mutateProjects, updateWindowViewState])
@@ -140,7 +144,8 @@ export function useTasks(
   }, [mutateProjects])
 
   const attachWorkspace = useCallback((projectId: string, taskId: string, workspace: WorkspaceConfig) => {
-    mutateProjects(prev => mapTask(prev, projectId, taskId, ({ workspaceDraft: _draft, ...task }) => ({ ...task, workspace })))
+    const streamId = uuid()
+    mutateProjects(prev => attachWorkspaceInData(prev, projectId, taskId, workspace, streamId))
   }, [mutateProjects])
 
   const renameTask = useCallback((projectId: string, taskId: string, name: string) => {
@@ -148,10 +153,7 @@ export function useTasks(
   }, [mutateProjects])
 
   const reorderTasks = useCallback((projectId: string, fromIndex: number, toIndex: number) => {
-    mutateProjects(prev => mapProject(prev, projectId, project => ({
-      ...project,
-      tasks: reorderList(project.tasks, fromIndex, toIndex)
-    })))
+    mutateProjects(prev => reorderTaskInData(prev, projectId, fromIndex, toIndex))
   }, [mutateProjects])
 
   return { addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, setWorkspaceDraft, attachWorkspace, removeTask, renameTask, reorderTasks }

@@ -16,6 +16,7 @@ import {
 } from './notesData'
 import { reassignActiveTabsAfterNoteDelete } from './viewState'
 import type { TabsActions } from './useTabs'
+import { findTaskInProject, taskTabs } from '../../../shared/streams'
 
 export interface NotesActions {
   notes: NotesRecord
@@ -102,7 +103,7 @@ export function useNotes(
     // palette can surface notes from any project). Fall back to the project's
     // own landing task instead of silently doing nothing.
     const targetTaskId = resolveLandingTaskId(project, taskId)
-    const task = targetTaskId ? project.tasks.find(t => t.id === targetTaskId) : null
+    const task = targetTaskId ? findTaskInProject(project, targetTaskId) : null
     if (!task || !targetTaskId) return
 
     const view = windowViewStateRef.current
@@ -110,7 +111,7 @@ export function useNotes(
       switchToTask(projectId, targetTaskId)
     }
 
-    const allTabs = [...task.tabs.left, ...task.tabs.right]
+    const allTabs = taskTabs(task)
     const existingTab = allTabs.find(t => isNoteTab(t, noteId))
     if (existingTab) {
       setActiveTab(projectId, targetTaskId, paneOfTab(task, existingTab), existingTab.id)

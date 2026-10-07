@@ -15,6 +15,9 @@ import type {
   TaskInboxState,
   WorkspaceDeleteResult
 } from '../src/shared/types'
+import { mainStreamId } from '../src/shared/types'
+import { findStreamOfTask, mapProjectTasks, projectTasks, removeTaskFromProject, taskWorkspace } from '../src/shared/streams'
+import { fixtureProject, fixtureTask, type FixtureTask } from './helpers/streams-fixtures'
 
 const NOW = new Date('2026-08-04T12:00:00').getTime()
 const DAY = 86_400_000
@@ -25,7 +28,7 @@ function makeTask(id: string, opts?: {
   workspace?: boolean
   aiTabIds?: string[]
   home?: boolean
-}): Task {
+}): FixtureTask {
   return {
     id,
     name: id,
@@ -33,9 +36,6 @@ function makeTask(id: string, opts?: {
       left: (opts?.aiTabIds ?? []).map(tabId => ({ id: tabId, type: 'claude' as const, title: 'Claude' })),
       right: []
     },
-    activeTab: { left: null, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
     lastInteractedAt: NOW - (opts?.daysIdle ?? 0) * DAY,
     // Settled by default so the default settledOnly config doesn't mask every other case.
     inbox: opts?.inbox ?? { settledAt: NOW - (opts?.daysIdle ?? 0) * DAY },
@@ -53,8 +53,14 @@ function makeTask(id: string, opts?: {
   }
 }
 
-function makeProject(tasks: Task[]): Project {
-  return { id: 'p1', name: 'Project One', directory: '/tmp/p1', tasks }
+/** A workspace task gets a stream of its own (`stream-<id>`); the rest share `main`. */
+function makeProject(tasks: FixtureTask[], id = 'p1', name = 'Project One'): Project {
+  return fixtureProject({ id, name, directory: `/tmp/${id}`, tasks })
+}
+
+/** The tasks of the harness's single project. */
+function tasksOf(data: ProjectsData): Task[] {
+  return projectTasks(data.projects[0])
 }
 
 function config(overrides?: Partial<IdleTaskCleanupConfig>): IdleTaskCleanupConfig {
@@ -70,7 +76,7 @@ function config(overrides?: Partial<IdleTaskCleanupConfig>): IdleTaskCleanupConf
 }
 
 function run(
-  tasks: Task[],
+  tasks: FixtureTask[],
   cfg?: Partial<IdleTaskCleanupConfig>,
   extra?: Partial<IdleCleanupInput>
 ): string[] {
@@ -195,7 +201,12 @@ describe('protections', () => {
   })
 
   it('keeps a pinned task', () => {
-    const pinnedItems: PinnedItem[] = [{ type: 'task', projectId: 'p1', taskId: 'stale' }]
+    const pinnedItems: PinnedItem[] = [{ type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 'stale' }]
+    expect(run(stale(), or, { pinnedItems })).toEqual([])
+  })
+
+  it('keeps a task whose stream is pinned', () => {
+    const pinnedItems: PinnedItem[] = [{ type: 'stream', projectId: 'p1', streamId: mainStreamId('p1') }]
     expect(run(stale(), or, { pinnedItems })).toEqual([])
   })
 
@@ -321,8 +332,8 @@ describe('live processes and unsaved buffers', () => {
 describe('scoping', () => {
   it('applies the cap per project rather than globally', () => {
     const projects: Project[] = [
-      { id: 'a', name: 'A', directory: '/tmp/a', tasks: [makeTask('a1'), makeTask('a2', { daysIdle: 30 })] },
-      { id: 'b', name: 'B', directory: '/tmp/b', tasks: [makeTask('b1', { daysIdle: 30 })] }
+      makeProject([makeTask('a1'), makeTask('a2', { daysIdle: 30 })], 'a', 'A'),
+      makeProject([makeTask('b1', { daysIdle: 30 })], 'b', 'B')
     ]
     const candidates = findIdleCleanupCandidates({
       projects,
@@ -346,7 +357,8 @@ interface SweepHarness {
   env: IdleCleanupEnvironment
   /** Canonical state, mutable exactly as main's store is. */
   data: () => ProjectsData
-  setTasks: (tasks: Task[]) => void
+  /** Change the project behind the sweep's back, as another window would. */
+  updateProject: (fn: (project: Project) => Project) => void
   activity: {
     openTaskIds: string[]
     statuses: Record<string, TabStatusValue>
@@ -362,7 +374,7 @@ interface SweepHarness {
 }
 
 function harness(options: {
-  tasks: Task[]
+  tasks: FixtureTask[]
   cfg?: Partial<IdleTaskCleanupConfig>
   backupProjects?: () => boolean
   deleteWorkspace?: (project: Project, task: Task) => Promise<WorkspaceDeleteResult>
@@ -377,8 +389,8 @@ function harness(options: {
   const state: SweepHarness = {
     env: null as unknown as IdleCleanupEnvironment,
     data: () => data,
-    setTasks: (tasks) => {
-      data = { ...data, projects: [{ ...data.projects[0], tasks }] }
+    updateProject: (fn) => {
+      data = { ...data, projects: [fn(data.projects[0])] }
     },
     activity: { openTaskIds: [], statuses: {}, liveTabIds: [], dirtyTabIds: [] },
     // `or` + 30-day-idle tasks is the simplest way to make a candidate.
@@ -416,19 +428,22 @@ function harness(options: {
       options.onRemove?.(task)
       data = {
         ...data,
-        projects: data.projects.map(candidate => candidate.id !== project.id ? candidate : {
-          ...candidate,
-          tasks: candidate.tasks.filter(existing => existing.id !== task.id)
-        })
+        projects: data.projects.map(candidate => candidate.id !== project.id ? candidate : removeTaskFromProject(candidate, task.id))
       }
     },
     forgetWorkspace: (_project, task) => {
       state.forgotten.push(task.id)
-      state.setTasks(data.projects[0].tasks.map(existing => {
-        if (existing.id !== task.id) return existing
-        const { workspace: _gone, ...rest } = existing
-        return rest
-      }))
+      state.updateProject(current => {
+        const stream = findStreamOfTask(current, task.id)
+        return {
+          ...current,
+          streams: current.streams.map(candidate => {
+            if (candidate !== stream) return candidate
+            const { workspace: _gone, ...rest } = candidate
+            return rest
+          })
+        }
+      })
     },
     log: (message) => state.logs.push(message)
   }
@@ -450,7 +465,7 @@ describe('sweep', () => {
 
     expect(result.deleted).toEqual([{ projectId: 'p1', taskId: 'stale' }])
     expect(h.removed).toEqual(['stale'])
-    expect(h.data().projects[0].tasks).toEqual([])
+    expect(tasksOf(h.data())).toEqual([])
     expect(h.backups).toBe(1)
   })
 
@@ -484,7 +499,7 @@ describe('sweep', () => {
     expect(h.removed).toEqual([])
     // Not even the workspace pre-flight ran: that deletes a worktree of its own.
     expect(h.workspaceDeletes).toEqual([])
-    expect(h.data().projects[0].tasks).toHaveLength(2)
+    expect(tasksOf(h.data())).toHaveLength(2)
     expect(h.logs).toContain('idleCleanupAborted reason=backup-failed')
   })
 
@@ -500,7 +515,7 @@ describe('sweep', () => {
 
     expect(h.removed).toEqual(['first'])
     expect(result.aborted).toBe('disabled')
-    expect(h.data().projects[0].tasks.map(t => t.id)).toEqual(['second'])
+    expect(tasksOf(h.data()).map(t => t.id)).toEqual(['second'])
   })
 
   it('leaves a workspace alone unless it is clean and merged', async () => {
@@ -540,15 +555,16 @@ describe('sweep revalidation (finding #8)', () => {
     const sweep = runIdleCleanupSweep(h.env)
     await Promise.resolve()
     // The user pins it while the sweep is still awaiting git.
-    h.setTasks(h.data().projects[0].tasks)
-    ;(h.data().pinnedItems as PinnedItem[]).push({ type: 'task', projectId: 'p1', taskId: 'ws' })
+    h.updateProject(project => mapProjectTasks(project, task => ({ ...task })))
+    ;(h.data().pinnedItems as PinnedItem[]).push({ type: 'task', projectId: 'p1', streamId: 'stream-ws', taskId: 'ws' })
     gate.resolve({ status: 'ok' })
     const result = await sweep
 
     expect(h.removed).toEqual([])
     // The worktree is gone, so the record that pointed at it had to go too.
     expect(h.forgotten).toEqual(['ws'])
-    expect(h.data().projects[0].tasks[0].workspace).toBeUndefined()
+    expect(tasksOf(h.data()).map(t => t.id)).toContain('ws')
+    expect(taskWorkspace(h.data().projects[0], 'ws')).toBeUndefined()
     expect(result.skipped[0].reason).toBe('no-longer-eligible-after-workspace-delete')
   })
 
@@ -571,7 +587,7 @@ describe('sweep revalidation (finding #8)', () => {
     await sweep
 
     expect(h.removed).toEqual(['ws'])
-    expect(h.data().projects[0].tasks.map(t => t.id)).toEqual(['plain'])
+    expect(tasksOf(h.data()).map(t => t.id)).toEqual(['plain'])
   })
 
   it('keeps a task whose agent starts working mid-sweep', async () => {
@@ -629,7 +645,7 @@ describe('sweep revalidation (finding #8)', () => {
 
     const sweep = runIdleCleanupSweep(h.env)
     await Promise.resolve()
-    h.setTasks(h.data().projects[0].tasks.filter(task => task.id !== 'plain'))
+    h.updateProject(project => removeTaskFromProject(project, 'plain'))
     gate.resolve({ status: 'ok' })
     const result = await sweep
 
@@ -639,9 +655,7 @@ describe('sweep revalidation (finding #8)', () => {
 })
 
 describe('task teardown', () => {
-  const project: Project = { id: 'p1', name: 'Project One', directory: '/tmp/p1', tasks: [] }
-
-  function task(): Task {
+  function taskSpec(): FixtureTask {
     return {
       ...makeTask('doomed', { daysIdle: 30 }),
       tabs: {
@@ -660,7 +674,8 @@ describe('task teardown', () => {
     const forgetActivity = vi.fn()
     const releaseHooks = vi.fn()
 
-    const tabIds = await tearDownTaskTabs(project, task(), {
+    const project = makeProject([taskSpec()])
+    const tabIds = await tearDownTaskTabs(project, projectTasks(project)[0], {
       killPty, deleteScrollback, forgetActivity, releaseHooks
     })
 
@@ -675,17 +690,19 @@ describe('task teardown', () => {
 
   it('releases hooks from the worktree a workspace task actually ran in', async () => {
     const releaseHooks = vi.fn()
-    const workspaceTask: Task = {
-      ...task(),
+    const project = makeProject([{
+      ...taskSpec(),
       workspace: {
         worktreePath: '/tmp/p1/.worktrees/feature',
         branchName: 'feature',
         baseBranch: 'main',
         relativeProjectPath: 'packages/app'
       }
-    }
+    }])
+    // The worktree lives on the task's stream, not on the task.
+    expect(project.streams[1].tasks[0].id).toBe('doomed')
 
-    await tearDownTaskTabs(project, workspaceTask, {
+    await tearDownTaskTabs(project, fixtureTask(taskSpec()), {
       killPty: vi.fn(), deleteScrollback: vi.fn(), forgetActivity: vi.fn(), releaseHooks
     })
 
@@ -719,10 +736,7 @@ describe('deletion reaches the other windows', () => {
       const data = store.peek()
       store.commit({
         ...data,
-        projects: data.projects.map(candidate => candidate.id !== project.id ? candidate : {
-          ...candidate,
-          tasks: candidate.tasks.filter(existing => existing.id !== task.id)
-        })
+        projects: data.projects.map(candidate => candidate.id !== project.id ? candidate : removeTaskFromProject(candidate, task.id))
       })
     }
 
@@ -731,7 +745,7 @@ describe('deletion reaches the other windows', () => {
     expect(store.getRevision()).toBe(1)
     expect(broadcasts).toHaveLength(1)
     expect(broadcasts[0].revision).toBe(1)
-    expect(broadcasts[0].data.projects[0].tasks.map(t => t.id)).toEqual(['fresh'])
-    expect(persisted[0].projects[0].tasks.map(t => t.id)).toEqual(['fresh'])
+    expect(tasksOf(broadcasts[0].data).map(t => t.id)).toEqual(['fresh'])
+    expect(tasksOf(persisted[0]).map(t => t.id)).toEqual(['fresh'])
   })
 })

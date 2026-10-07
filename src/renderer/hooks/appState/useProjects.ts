@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
-import { createHomeTask } from '../../../shared/types'
+import { createHomeTask, createMainStream } from '../../../shared/types'
+import { projectTasks, taskTabs } from '../../../shared/streams'
 import type {
   AiTabType,
   PinnedItem,
@@ -86,7 +87,7 @@ export function useProjects(
       id,
       name,
       directory,
-      tasks: [homeTask],
+      streams: [createMainStream(id, [homeTask])],
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
     mutateProjects(prev => appendProject(includePendingTags(prev, tagIds), project))
@@ -107,7 +108,7 @@ export function useProjects(
       name,
       directory: '',
       ssh: sshConfig,
-      tasks: [homeTask],
+      streams: [createMainStream(id, [homeTask])],
       ...(aiToolArgs ? { aiToolArgs } : {}),
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
@@ -125,7 +126,7 @@ export function useProjects(
       name,
       directory: '',
       shellCommand: { command },
-      tasks: [homeTask],
+      streams: [createMainStream(id, [homeTask])],
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
     mutateProjects(prev => appendProject(includePendingTags(prev, tagIds), project))
@@ -137,26 +138,28 @@ export function useProjects(
     const doomed = projectsRef.current.find(p => p.id === id)
     // One dialog for the whole project, asked before anything is torn down.
     if (doomed) {
-      const tabIds = doomed.tasks.flatMap(tabIdsOfTask)
+      const tabIds = projectTasks(doomed).flatMap(tabIdsOfTask)
       if (await confirmDiscardDirty(tabIds) === 'cancel') return
     }
 
     const project = projectsRef.current.find(p => p.id === id)
     if (project) {
-      for (const task of project.tasks) {
-        for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+      for (const task of projectTasks(project)) {
+        for (const tab of taskTabs(task)) {
           window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
           void window.api.scrollbackDelete(tab.id)
         }
-        if (task.workspace) {
+      }
+      for (const { workspace } of project.streams) {
+        if (workspace) {
           await window.api.workspaceDelete(
             {
               projectDir: getProjectDir(project),
               projectId: project.ssh ? id : undefined,
               sshConfig: project.ssh,
-              worktreePath: task.workspace.worktreePath,
-              branchName: task.workspace.branchName,
-              baseBranch: task.workspace.baseBranch,
+              worktreePath: workspace.worktreePath,
+              branchName: workspace.branchName,
+              baseBranch: workspace.baseBranch,
               force: true
             }
           ).then(reportRefusedWorkspaceDelete).catch(() => {})

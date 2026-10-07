@@ -18,6 +18,7 @@ import type { MobilePairing, MobilePushRegistration } from '../src/main/mobile/p
 import { b64uEncode, deviceId, type PhoneHello } from '../protocol/ts/index.ts'
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig, type MobileState } from '../src/shared/mobile'
 import { createHomeTask, type ProjectsData, type TabStatusValue } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 // ---- fakes -------------------------------------------------------------------
 
@@ -144,13 +145,13 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
-    projects: [{
+    projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/x',
       tasks: [createHomeTask('p1').task, {
-        id: 't1', name: 'fix', tabs: { left: [{ id: 'tab1', type: 'claude', title: 'Claude' }], right: [] },
-        activeTab: { left: 'tab1', right: null }, splitOpen: false, splitRatio: 0.5
+        id: 't1', name: 'fix', tabs: { left: [{ id: 'tab1', type: 'claude', title: 'Claude' }] },
+        activeTab: { left: 'tab1' }
       }]
-    }],
+    })],
     tags: [], projectOrder: ['p1'], pinnedItems: []
   }
   const statuses: Record<string, TabStatusValue> = {}

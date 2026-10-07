@@ -2,6 +2,7 @@ import type { Project, Task } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { inboxState, isSettled, isSnoozed, isUnread, isYourTurn, lastActivityAt, taskStatus } from '../../shared/inbox-state'
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
+import { taskTabs } from '../../shared/streams'
 
 // The triage predicates themselves moved to shared/inbox-state.ts when idle
 // cleanup moved into main — both processes must answer them identically. They
@@ -16,7 +17,7 @@ export function taskStatusSince(
 ): number | null {
   const status = taskStatus(task, allStatuses)
   if (!status) return null
-  const stamps = [...task.tabs.left, ...task.tabs.right]
+  const stamps = taskTabs(task)
     .filter((tab) => allStatuses[tab.id] === status)
     .map((tab) => statusSince[tab.id])
     .filter((stamp): stamp is number => typeof stamp === 'number')
@@ -44,7 +45,7 @@ export function taskActivity(
   activities: Record<string, AgentActivity>
 ): TaskActivitySummary {
   let best: { activity: AgentActivity; status: TabStatusValue; rank: number } | null = null
-  for (const tab of [...task.tabs.left, ...task.tabs.right]) {
+  for (const tab of taskTabs(task)) {
     const activity = activities[tab.id]
     if (!activity) continue
     const status = allStatuses[tab.id] ?? null

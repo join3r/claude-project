@@ -4,6 +4,7 @@ import { pickAgentTarget } from '../../shared/agent-link'
 import type { Tab } from '../../shared/types'
 import { paletteEvents } from '../palette/paletteEvents'
 import { getAgentRecency } from './agentTabRecency'
+import { findTaskInProject, tabsByPane } from '../../shared/streams'
 
 /**
  * Links waiting for an agent tab to take them. A queue rather than a plain event:
@@ -74,9 +75,9 @@ export function resolveAgentLinkRoute(
 export function useLinkToAgent(projectId: string, taskId: string): (text: string) => boolean {
   const { projects, getTaskViewState, setActiveTab, toggleSplit } = useApp()
   return useCallback((text: string): boolean => {
-    const task = projects.find(p => p.id === projectId)?.tasks.find(t => t.id === taskId)
+    const task = findTaskInProject(projects.find(p => p.id === projectId), taskId)
     if (!task) return false
-    const route = resolveAgentLinkRoute(task, getTaskViewState(task), getAgentRecency(taskId))
+    const route = resolveAgentLinkRoute({ tabs: tabsByPane(task) }, getTaskViewState(task), getAgentRecency(taskId))
     if (!route) {
       showAgentLinkNotice('No agent tab in this task. Open Pi, Claude or Codex to link to it.')
       return false

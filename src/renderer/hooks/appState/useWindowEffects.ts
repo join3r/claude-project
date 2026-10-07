@@ -13,6 +13,7 @@ import type { AppStateCore, UpdateWindowViewState } from './useAppStateCore'
 import { forgetRemovedTaskView, sidebarForTask } from './viewState'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { buildWindowTitle } from './windowTitle'
+import { findTaskInProject } from '../../../shared/streams'
 
 export function useNativeTheme(): 'dark' | 'light' {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -139,8 +140,8 @@ export function useSelectionSync(core: AppStateCore, windowFocused: boolean, con
       return
     }
     if (lastSyncedSidebarTaskIdRef.current === taskId) return
-    const project = projects.find(p => p.tasks.some(t => t.id === taskId))
-    const task = project?.tasks.find(t => t.id === taskId) ?? null
+    const project = projects.find(p => !!findTaskInProject(p, taskId))
+    const task = findTaskInProject(project, taskId) ?? null
     if (!task) return
     lastSyncedSidebarTaskIdRef.current = taskId
 

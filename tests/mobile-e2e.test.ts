@@ -17,6 +17,7 @@ import { MemoryStore } from '../relay/src/store.ts'
 import { RelayPhone, waitFor } from './helpers/relay-phone'
 import { ChatBridge } from '../src/main/mobile/chat-bridge'
 import { FakeChats } from './helpers/fake-chats'
+import { fixtureProject } from './helpers/streams-fixtures'
 import type { ChatViewEvent } from '../protocol/ts/index.ts'
 
 /**
@@ -36,15 +37,15 @@ const encryptor: SecretEncryptor = {
 
 const PROJECTS: ProjectsData = {
   projects: [
-    {
+    fixtureProject({
       id: 'p1', name: 'api-server', emoji: '🚀', directory: '/src/api',
       tasks: [createHomeTask('p1').task, {
         id: 't1', name: 'fix-auth',
-        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 'sess-e2e' }, { id: 'tab-web', type: 'browser', title: 'Docs' }], right: [] },
-        activeTab: { left: 'tab-chat', right: null }, splitOpen: false, splitRatio: 0.5
+        tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 'sess-e2e' }, { id: 'tab-web', type: 'browser', title: 'Docs' }] },
+        activeTab: { left: 'tab-chat' }
       }]
-    },
-    { id: 'p2', name: 'secret', directory: '/src/secret', hideFromMobile: true, tasks: [createHomeTask('p2').task] }
+    }),
+    fixtureProject({ id: 'p2', name: 'secret', directory: '/src/secret', hideFromMobile: true, tasks: [createHomeTask('p2').task] })
   ],
   tags: [],
   projectOrder: ['p1', 'p2'],

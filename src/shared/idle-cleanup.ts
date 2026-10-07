@@ -1,5 +1,6 @@
 import type { IdleTaskCleanupConfig, PinnedItem, Project, TabStatusValue, Task } from './types'
 import { isHomeTask, pinnedItemKey } from './types'
+import { findStreamOfTask, projectTasks, taskTabIds, workspaceReleasedBy } from './streams'
 import { isSettled, isSnoozed, isUnread, lastActivityAt, taskStatus } from './inbox-state'
 
 const DAY_MS = 86_400_000
@@ -65,7 +66,7 @@ export function findIdleCleanupCandidates(input: IdleCleanupInput): IdleCleanupC
   for (const project of projects) {
     // Exempt tasks still occupy a slot: the cap means "at most N tasks in this project",
     // which is what the sidebar actually shows.
-    const pool = (project.tasks ?? [])
+    const pool = projectTasks(project)
       .filter(task => !isHomeTask(task))
       .sort((a, b) => lastActivityAt(b) - lastActivityAt(a))
 
@@ -85,7 +86,7 @@ export function findIdleCleanupCandidates(input: IdleCleanupInput): IdleCleanupC
         projectName: project.name,
         taskId: task.id,
         taskName: task.name,
-        workspace: !!task.workspace,
+        workspace: !!workspaceReleasedBy(project, task.id),
         lastActivityAt: lastActivityAt(task)
       })
     })
@@ -125,10 +126,14 @@ function isProtected(task: Task, ctx: ProtectionContext): boolean {
   if (isUnread(task)) return true
   // An explicit "wake me later" must outlive the janitor, or snoozing would be a trap.
   if (isSnoozed(task, now)) return true
-  if (pinnedKeys.has(pinnedItemKey({ type: 'task', projectId: project.id, taskId: task.id }))) return true
+  const stream = findStreamOfTask(project, task.id)
+  if (stream) {
+    if (pinnedKeys.has(pinnedItemKey({ type: 'task', projectId: project.id, streamId: stream.id, taskId: task.id }))) return true
+    if (pinnedKeys.has(pinnedItemKey({ type: 'stream', projectId: project.id, streamId: stream.id }))) return true
+  }
   if (openIds.has(task.id)) return true
 
-  const tabIds = [...task.tabs.left, ...task.tabs.right].map(tab => tab.id)
+  const tabIds = taskTabIds(task)
   // A running process is the ground truth the status dots are only a view of: a
   // non-hook tool (Codex) reports 'attention' through renderer-only heuristics
   // main never sees, and a hidden hook tab keeps its PTY without any window
@@ -143,7 +148,9 @@ function isProtected(task: Task, ctx: ProtectionContext): boolean {
   if (status === 'working' || status === 'attention') return true
 
   if (config.settledOnly && !isSettled(task)) return true
-  if (task.workspace && !config.includeCleanWorkspaces) return true
+  // A task sharing its stream's worktree with other tasks can go on its own: the
+  // worktree stays with them. Only the stream's last task takes the worktree along.
+  if (workspaceReleasedBy(project, task.id) && !config.includeCleanWorkspaces) return true
 
   return false
 }

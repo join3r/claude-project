@@ -91,29 +91,55 @@ export interface TaskInboxState {
   forcedUnread?: boolean
 }
 
+/**
+ * One column of a task's pane row. Never empty: a pane exists only while it holds a tab.
+ * `width` is the pane's share of the row (the shares of a task's panes add up to 1).
+ */
+export interface TaskPane {
+  tabs: Tab[]
+  activeTabId: string
+  width: number
+}
+
+/**
+ * One agent session (or one terminal) and the tabs that came with it. Lives in a
+ * stream; the stream owns the worktree.
+ */
 export interface Task {
   id: string
   name: string
-  tabs: {
-    left: Tab[]
-    right: Tab[]
-  }
-  activeTab: {
-    left: string | null
-    right: string | null
-  }
-  splitOpen: boolean
-  splitRatio: number
-  workspace?: WorkspaceConfig
   /**
-   * A workspace task whose worktree doesn't exist yet: + Workspace opens it on the
-   * prompt box, and the worktree is created (branch named after the first prompt)
-   * when the first tab opens. Cleared once `workspace` is set.
+   * The agent (or terminal) tab the task is about. Absent while the task has no tab
+   * yet (a new task on its prompt box) or holds neither an agent nor a terminal.
+   */
+  mainTabId?: string
+  /** One row of columns, left to right. Empty only while the task has no tab. */
+  panes: TaskPane[]
+  /**
+   * TEMPORARY (removed in step 6): a task whose stream has no worktree yet. The
+   * worktree is created (branch named after the first prompt) when the first tab
+   * opens, and lands on the task's stream.
    */
   workspaceDraft?: WorkspaceDraft
   lastInteractedAt?: number
   inbox?: TaskInboxState
+  /** TEMPORARY (removed in step 3): the project's Home, kept as a task in its `main` stream. */
   system?: 'home'
+}
+
+/**
+ * A line of work: a release (`0.5.0`) or anything else (`bugfixes`). Owns the
+ * worktree, or works in the project folder when `workspace` is absent.
+ */
+export interface Stream {
+  id: string
+  /** Free text, e.g. "0.5.0". */
+  name: string
+  /** The project's default project-folder stream; every project has exactly one. */
+  isMain?: true
+  workspace?: WorkspaceConfig
+  tasks: Task[]
+  lastTaskId?: string
 }
 
 export interface WorkspaceDraft {
@@ -171,10 +197,6 @@ export interface WorkspaceDeleteResult {
   reason?: string
 }
 
-export function isWorkspaceTask(task: Task): boolean {
-  return !!task.workspace
-}
-
 export function isHomeTask(task: Task): boolean {
   return task.system === 'home'
 }
@@ -190,6 +212,7 @@ export function isRenamableTab(tab: Tab): boolean {
   return RENAMABLE_TAB_TYPES.includes(tab.type)
 }
 
+/** TEMPORARY (removed in step 3): the Home task, which lives in the project's `main` stream. */
 export function createHomeTask(projectId: string): { task: Task; tab: Tab } {
   const tabId = `home-tab-${projectId}`
   const tab: Tab = {
@@ -201,22 +224,39 @@ export function createHomeTask(projectId: string): { task: Task; tab: Tab } {
   const task: Task = {
     id: `home-task-${projectId}`,
     name: 'Home',
-    tabs: { left: [tab], right: [] },
-    activeTab: { left: tabId, right: null },
-    splitOpen: false,
-    splitRatio: 0.5,
+    panes: [{ tabs: [tab], activeTabId: tabId, width: 1 }],
     system: 'home'
   }
   return { task, tab }
 }
 
+/** The `main` stream's id for a project. */
+export function mainStreamId(projectId: string): string {
+  return `main-${projectId}`
+}
+
+export const MAIN_STREAM_NAME = 'main'
+
+export function createMainStream(projectId: string, tasks: Task[] = []): Stream {
+  return { id: mainStreamId(projectId), name: MAIN_STREAM_NAME, isMain: true, tasks }
+}
+
+/**
+ * TEMPORARY (removed in step 3): every project has a `main` stream, and its Home
+ * task sits first in it.
+ */
 export function ensureHomeTasks(projects: Project[]): { projects: Project[]; changed: boolean } {
   let changed = false
   const next = projects.map((project) => {
-    if (project.tasks.some((t) => t.system === 'home')) return project
+    if (project.streams.some(stream => stream.tasks.some(t => t.system === 'home'))) return project
     changed = true
     const { task } = createHomeTask(project.id)
-    return { ...project, tasks: [task, ...project.tasks] }
+    const main = project.streams.find(stream => stream.isMain)
+    if (!main) return { ...project, streams: [createMainStream(project.id, [task]), ...project.streams] }
+    return {
+      ...project,
+      streams: project.streams.map(stream => (stream === main ? { ...stream, tasks: [task, ...stream.tasks] } : stream))
+    }
   })
   return { projects: changed ? next : projects, changed }
 }
@@ -227,8 +267,9 @@ export interface Project {
   emoji?: string
   icon?: string
   directory: string
-  tasks: Task[]
-  lastTaskId?: string
+  /** Lines of work. The first is always the `main` stream (`isMain`). */
+  streams: Stream[]
+  lastStreamId?: string
   ssh?: SshConfig
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
@@ -263,7 +304,8 @@ export function isEphemeralProject(project: Project): boolean {
 
 /** A hidden ad-hoc project is spent once nothing but its home task is left. */
 export function isSpentEphemeralProject(project: Project): boolean {
-  return isEphemeralProject(project) && !project.tasks.some(task => !isHomeTask(task))
+  return isEphemeralProject(project)
+    && !(project.streams ?? []).some(stream => stream.tasks.some(task => !isHomeTask(task)))
 }
 
 export interface SshConfig {
@@ -332,12 +374,21 @@ export type NotesSaveResult = RevisionSaveResult<NotesRecord>
 
 export type PinnedItem =
   | { type: 'project'; projectId: string }
-  | { type: 'task'; projectId: string; taskId: string }
+  | { type: 'stream'; projectId: string; streamId: string }
+  | { type: 'task'; projectId: string; streamId: string; taskId: string }
 
 export function pinnedItemKey(item: PinnedItem): string {
-  return item.type === 'project' ? `project:${item.projectId}` : `task:${item.projectId}:${item.taskId}`
+  switch (item.type) {
+    case 'project': return `project:${item.projectId}`
+    case 'stream': return `stream:${item.projectId}:${item.streamId}`
+    case 'task': return `task:${item.projectId}:${item.taskId}`
+  }
 }
 
+/**
+ * Drop pins whose target is gone, and duplicates. A task pin follows its task:
+ * `streamId` is rewritten to the stream that holds the task now.
+ */
 export function normalizePinnedItems(items: unknown, projects: readonly Project[]): PinnedItem[] {
   if (!Array.isArray(items)) return []
   const projectById = new Map(projects.map(p => [p.id, p]))
@@ -345,17 +396,22 @@ export function normalizePinnedItems(items: unknown, projects: readonly Project[
   const result: PinnedItem[] = []
   for (const raw of items) {
     if (typeof raw !== 'object' || raw === null) continue
-    const item = raw as Partial<PinnedItem> & { projectId?: unknown; taskId?: unknown }
+    const item = raw as { type?: unknown; projectId?: unknown; streamId?: unknown; taskId?: unknown }
     if (typeof item.projectId !== 'string') continue
     const project = projectById.get(item.projectId)
     if (!project) continue
+    const streams = Array.isArray(project.streams) ? project.streams : []
     let normalized: PinnedItem
     if (item.type === 'project') {
       normalized = { type: 'project', projectId: item.projectId }
+    } else if (item.type === 'stream' && typeof item.streamId === 'string') {
+      if (!streams.some(s => s.id === item.streamId)) continue
+      normalized = { type: 'stream', projectId: item.projectId, streamId: item.streamId }
     } else if (item.type === 'task' && typeof item.taskId === 'string') {
-      const tasks = Array.isArray(project.tasks) ? project.tasks : []
-      if (!tasks.some(t => t.id === item.taskId)) continue
-      normalized = { type: 'task', projectId: item.projectId, taskId: item.taskId }
+      const taskId = item.taskId
+      const stream = streams.find(s => s.tasks.some(t => t.id === taskId))
+      if (!stream) continue
+      normalized = { type: 'task', projectId: item.projectId, streamId: stream.id, taskId }
     } else {
       continue
     }
@@ -717,22 +773,30 @@ export const DEFAULT_CONFIG: AppConfig = {
   mobile: { ...DEFAULT_MOBILE_CONFIG }
 }
 
+/**
+ * A task's default view: until step 4 the window still shows at most two panes
+ * (left = `panes[0]`, right = `panes[1]`), split when the task has two.
+ */
 export function createTaskViewState(task: Task): TaskViewState {
+  const [left, right] = task.panes
+  const total = (left?.width ?? 0) + (right?.width ?? 0)
   return {
     activeTab: {
-      left: task.activeTab.left ?? task.tabs.left[task.tabs.left.length - 1]?.id ?? null,
-      right: task.activeTab.right ?? task.tabs.right[task.tabs.right.length - 1]?.id ?? null
+      left: left?.activeTabId ?? null,
+      right: right?.activeTabId ?? null
     },
-    splitOpen: task.splitOpen,
-    splitRatio: task.splitRatio
+    splitOpen: !!right,
+    splitRatio: right && total > 0 ? left.width / total : 0.5
   }
 }
 
 function createDefaultTaskStates(projects: Project[]): Record<string, TaskViewState> {
   const taskStates: Record<string, TaskViewState> = {}
   for (const project of projects) {
-    for (const task of project.tasks) {
-      taskStates[task.id] = createTaskViewState(task)
+    for (const stream of project.streams) {
+      for (const task of stream.tasks) {
+        taskStates[task.id] = createTaskViewState(task)
+      }
     }
   }
   return taskStates
@@ -815,12 +879,14 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
     return { selectedProjectId: null, selectedTaskId: null }
   }
 
-  const candidateTaskId = config.lastTaskId ?? project.lastTaskId ?? null
-  const remembered = candidateTaskId && project.tasks.some((task) => task.id === candidateTaskId)
+  const tasks = project.streams.flatMap(stream => stream.tasks)
+  const lastStream = project.streams.find(stream => stream.id === project.lastStreamId)
+  const candidateTaskId = config.lastTaskId ?? lastStream?.lastTaskId ?? null
+  const remembered = candidateTaskId && tasks.some((task) => task.id === candidateTaskId)
     ? candidateTaskId
     : null
 
-  const homeTask = project.tasks.find((task) => task.system === 'home') ?? null
+  const homeTask = tasks.find((task) => task.system === 'home') ?? null
   const taskId = remembered ?? homeTask?.id ?? null
 
   return {
@@ -830,37 +896,22 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
 }
 
 export function reconcileTaskViewState(task: Task, state?: TaskViewState): TaskViewState {
-  // For home tasks, ensure the home tab exists in the left pane and is active by default.
-  if (task.system === 'home') {
-    const hasHomeTab = task.tabs.left.some((tab) => tab.system === 'home')
-    if (!hasHomeTab) {
-      const projectId = task.id.startsWith('home-task-')
-        ? task.id.slice('home-task-'.length)
-        : task.id
-      const { tab } = createHomeTask(projectId)
-      task.tabs.left.unshift(tab)
-      if (!task.activeTab.left) task.activeTab.left = tab.id
-    }
-  }
-
   const fallback = createTaskViewState(task)
   if (!state) return fallback
 
-  const leftIds = new Set(task.tabs.left.map(tab => tab.id))
-  const rightIds = new Set(task.tabs.right.map(tab => tab.id))
+  const leftIds = new Set((task.panes[0]?.tabs ?? []).map(tab => tab.id))
+  const rightIds = new Set((task.panes[1]?.tabs ?? []).map(tab => tab.id))
 
   return {
     activeTab: {
-      left: state.activeTab.left === null
-        ? null
-        : leftIds.has(state.activeTab.left)
-          ? state.activeTab.left
-          : fallback.activeTab.left,
-      right: state.activeTab.right === null
-        ? null
-        : rightIds.has(state.activeTab.right)
-          ? state.activeTab.right
-          : fallback.activeTab.right
+      // A pane that holds tabs always shows one: panes collapse when one empties
+      // (`withTabsByPane`), so a remembered id can end up on the other side.
+      left: state.activeTab.left !== null && leftIds.has(state.activeTab.left)
+        ? state.activeTab.left
+        : fallback.activeTab.left,
+      right: state.activeTab.right !== null && rightIds.has(state.activeTab.right)
+        ? state.activeTab.right
+        : fallback.activeTab.right
     },
     splitOpen: state.splitOpen,
     splitRatio: state.splitRatio,
@@ -877,12 +928,12 @@ export function reconcileWindowViewState(
   const projectById = new Map(projects.map(project => [project.id, project]))
   const selectedProject = state.selectedProjectId ? projectById.get(state.selectedProjectId) ?? null : null
   const selectedTask = selectedProject && state.selectedTaskId
-    ? selectedProject.tasks.find(task => task.id === state.selectedTaskId) ?? null
+    ? selectedProject.streams.flatMap(stream => stream.tasks).find(task => task.id === state.selectedTaskId) ?? null
     : null
 
   const taskStates: Record<string, TaskViewState> = {}
   for (const project of projects) {
-    for (const task of project.tasks) {
+    for (const task of project.streams.flatMap(stream => stream.tasks)) {
       const nextState = state.taskStates[task.id]
       if (nextState) {
         taskStates[task.id] = reconcileTaskViewState(task, nextState)

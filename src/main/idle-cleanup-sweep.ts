@@ -1,4 +1,5 @@
 import { findIdleCleanupCandidates, isIdleCleanupCandidate } from '../shared/idle-cleanup'
+import { findTaskInProject, workspaceReleasedBy } from '../shared/streams'
 import type {
   IdleTaskCleanupConfig,
   PinnedItem,
@@ -27,11 +28,14 @@ export interface IdleCleanupEnvironment {
   now(): number
   /** Snapshot projects.json. `false` means nothing was written. */
   backupProjects(): boolean
-  /** Non-force delete: it is both the clean-and-merged pre-flight and the deletion. */
+  /**
+   * Non-force delete of the worktree the task takes with it (`workspaceReleasedBy`):
+   * it is both the clean-and-merged pre-flight and the deletion.
+   */
   deleteWorkspace(project: Project, task: Task): Promise<WorkspaceDeleteResult>
   /** Tear the task down (PTYs, scrollback, hooks) and commit its removal. */
   removeTask(project: Project, task: Task): Promise<void> | void
-  /** Drop a workspace record whose worktree is already gone but whose task survives. */
+  /** Drop a workspace record (on the task's stream) whose worktree is already gone but whose task survives. */
   forgetWorkspace(project: Project, task: Task): void
   log(message: string): void
 }
@@ -50,7 +54,7 @@ function findTask(
   taskId: string
 ): { project: Project; task: Task } | null {
   const project = env.readProjects().projects.find(candidate => candidate.id === projectId)
-  const task = project?.tasks.find(candidate => candidate.id === taskId)
+  const task = findTaskInProject(project, taskId)
   return project && task ? { project, task } : null
 }
 
@@ -125,7 +129,7 @@ export async function runIdleCleanupSweep(env: IdleCleanupEnvironment): Promise<
     }
     // The workspace on record may not be the one selected — a task can be pointed
     // at a different worktree while the sweep runs.
-    if (candidate.workspace && !found.task.workspace) {
+    if (candidate.workspace && !workspaceReleasedBy(found.project, found.task.id)) {
       skip(candidate.taskId, 'workspace-changed')
       continue
     }
@@ -136,7 +140,7 @@ export async function runIdleCleanupSweep(env: IdleCleanupEnvironment): Promise<
       return result
     }
 
-    if (found.task.workspace) {
+    if (workspaceReleasedBy(found.project, found.task.id)) {
       let deleteResult: WorkspaceDeleteResult
       try {
         deleteResult = await env.deleteWorkspace(found.project, found.task)

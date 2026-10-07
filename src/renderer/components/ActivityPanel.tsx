@@ -1,9 +1,10 @@
 import React, { useState, useRef, useCallback } from 'react'
 import { ChevronRight } from 'lucide-react'
-import type { Project, AppConfig, TabType } from '../../shared/types'
-import { isAgentTabType, isEphemeralProject, isHomeTask, isWorkspaceTask } from '../../shared/types'
+import type { Project, AppConfig, TabType, Task } from '../../shared/types'
+import { isAgentTabType, isEphemeralProject, isHomeTask } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
+import { projectTasks, taskTabs, taskWorkspace } from '../../shared/streams'
 
 type Props = {
   projects: Project[]
@@ -19,10 +20,10 @@ type Props = {
 }
 
 function getTaskStatus(
-  task: { tabs: { left: { id: string; type: string }[]; right: { id: string; type: string }[] } },
+  task: Task,
   allStatuses: Record<string, TabStatusValue>
 ): TabStatusValue {
-  const aiTabIds = [...task.tabs.left, ...task.tabs.right]
+  const aiTabIds = taskTabs(task)
     .filter((t) => isAgentTabType(t.type as TabType))
     .map((t) => t.id)
   if (aiTabIds.length === 0) return null
@@ -60,14 +61,14 @@ export default function ActivityPanel({
   const [lastExpandedHeight, setLastExpandedHeight] = useState<number>(() => heightPx > 0 ? heightPx : 160)
 
   const sortedByRecency = React.useMemo(
-    () => sortTasksByRecency(projects.flatMap(p => p.tasks.filter(t => !isHomeTask(t)))),
+    () => sortTasksByRecency(projects.flatMap(p => projectTasks(p).filter(t => !isHomeTask(t)))),
     [projects]
   )
 
   const projectByTaskId = React.useMemo(() => {
     const map = new Map<string, Project>()
     for (const project of projects) {
-      for (const task of project.tasks.filter(t => !isHomeTask(t))) {
+      for (const task of projectTasks(project).filter(t => !isHomeTask(t))) {
         map.set(task.id, project)
       }
     }
@@ -159,7 +160,7 @@ export default function ActivityPanel({
                   >
                     <span className="text-text-muted text-xs shrink-0 max-w-[80px] overflow-hidden text-ellipsis whitespace-nowrap">{project.name}</span>
                     <span className="overflow-hidden text-ellipsis whitespace-nowrap flex-1">{task.name}</span>
-                    {isWorkspaceTask(task) && (
+                    {taskWorkspace(project, task.id) && (
                       <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">ws</span>
                     )}
                     {isEphemeralProject(project) && (

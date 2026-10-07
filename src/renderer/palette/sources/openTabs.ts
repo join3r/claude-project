@@ -1,16 +1,17 @@
 // src/renderer/palette/sources/openTabs.ts
 import type { AppActions } from '../../hooks/useAppState'
 import type { PaletteEntity } from '../types'
+import { paneTabs, projectTasks } from '../../../shared/streams'
 
 export function openTabsToEntities(actions: AppActions, opts: { allProjects: boolean }): PaletteEntity[] {
   const out: PaletteEntity[] = []
   const activeId = actions.selectedProjectId
   for (const p of actions.projects) {
     if (!opts.allProjects && p.id !== activeId) continue
-    for (const t of p.tasks) {
+    for (const t of projectTasks(p)) {
       if (t.system === 'home') continue
       for (const pane of ['left', 'right'] as const) {
-        for (const tab of t.tabs[pane]) {
+        for (const tab of paneTabs(t, pane)) {
           if (tab.system === 'home') continue
           out.push({
             kind: 'tab',

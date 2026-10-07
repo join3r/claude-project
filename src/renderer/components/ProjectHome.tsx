@@ -8,6 +8,7 @@ import { CommitHeatmap } from './CommitHeatmap'
 import { CommitSparkline } from './CommitSparkline'
 import { formatRelativeTime } from './projectStats'
 import type { Tab, TabType } from '../../shared/types'
+import { projectTasks, taskTabs } from '../../shared/streams'
 
 interface Props { projectId: string }
 
@@ -28,8 +29,8 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
 
   if (!project) return null
 
-  const visibleTasks = project.tasks.filter(t => t.system !== 'home')
-  const allTabs: Tab[] = visibleTasks.flatMap(t => [...t.tabs.left, ...t.tabs.right]).filter(tab => tab.system !== 'home')
+  const visibleTasks = projectTasks(project).filter(t => t.system !== 'home')
+  const allTabs: Tab[] = visibleTasks.flatMap(t => taskTabs(t)).filter(tab => tab.system !== 'home')
   const tabsByType = new Map<TabType, number>()
   for (const tab of allTabs) tabsByType.set(tab.type, (tabsByType.get(tab.type) ?? 0) + 1)
   const tabBreakdown = TAB_TYPE_ORDER

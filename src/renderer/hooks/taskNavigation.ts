@@ -1,5 +1,6 @@
 // src/renderer/hooks/taskNavigation.ts
 import type { Project } from '../../shared/types'
+import { findTaskInProject, projectLastTaskId, projectTasks } from '../../shared/streams'
 
 /**
  * Which task should we land on inside `project`?
@@ -16,11 +17,13 @@ export function resolveLandingTaskId(
 ): string | null {
   if (!project) return null
   const belongs = (id: string | null | undefined): boolean =>
-    !!id && project.tasks.some(task => task.id === id)
+    !!findTaskInProject(project, id)
 
   if (belongs(preferredTaskId)) return preferredTaskId!
-  if (belongs(project.lastTaskId)) return project.lastTaskId!
-  const homeTask = project.tasks.find(task => task.system === 'home')
+  const lastTaskId = projectLastTaskId(project)
+  if (lastTaskId) return lastTaskId
+  const tasks = projectTasks(project)
+  const homeTask = tasks.find(task => task.system === 'home')
   if (homeTask) return homeTask.id
-  return project.tasks[0]?.id ?? null
+  return tasks[0]?.id ?? null
 }

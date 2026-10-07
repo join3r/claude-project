@@ -2,7 +2,6 @@ import { describeActivity, type AgentActivity } from '../../shared/agent-activit
 import { isSettled, isSnoozed, isUnread } from '../../shared/inbox-state'
 import {
   isHomeTask,
-  pinnedItemKey,
   isSpentEphemeralProject,
   type Project,
   type ProjectsData,
@@ -10,6 +9,7 @@ import {
   type TabStatusValue,
   type Task
 } from '../../shared/types'
+import { findTaskInProject, projectTasks, taskTabs, taskWorkspace } from '../../shared/streams'
 import { INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
 import type {
   Inbox as MobileInbox,
@@ -75,15 +75,17 @@ function addTriage(out: MobileInboxTask, task: Task, now: number): void {
   }
 }
 
-function buildTask(task: Task, lookup: InboxTabLookup, now: number): MobileInboxTask {
-  const tabs = [...(task.tabs?.left ?? []), ...(task.tabs?.right ?? [])]
+function buildTask(project: Project, task: Task, lookup: InboxTabLookup, now: number): MobileInboxTask {
+  const tabs = taskTabs(task)
     .filter(isMobileTab)
     .map((tab) => buildTab(tab, lookup))
   const out: MobileInboxTask = { id: task.id, name: task.name, tabs }
   if (task.lastInteractedAt !== undefined) out.lastInteractedAt = task.lastInteractedAt
   if (task.inbox?.attentionAt !== undefined) out.attentionAt = task.inbox.attentionAt
   addTriage(out, task, now)
-  if (task.workspace) out.branch = task.workspace.branchName
+  // The wire still carries the worktree per task: it is the task's stream's.
+  const workspace = taskWorkspace(project, task.id)
+  if (workspace) out.branch = workspace.branchName
   return out
 }
 
@@ -97,7 +99,7 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number): Mo
     id: project.id,
     name: project.name,
     remote: !!project.ssh,
-    tasks: (project.tasks ?? []).filter((task) => !isHomeTask(task)).map((task) => buildTask(task, lookup, now))
+    tasks: projectTasks(project).filter((task) => !isHomeTask(task)).map((task) => buildTask(project, task, lookup, now))
   }
   if (project.emoji) out.emoji = project.emoji
   return out
@@ -123,22 +125,31 @@ function orderedProjects(data: ProjectsData): Project[] {
 /**
  * The sidebar's Pinned list, in its order, cut to what the phone sees: a pin whose
  * project is hidden or spent, or whose task is gone or a home task, is left out.
+ * The wire has no streams yet: a stream pin goes out as one task pin per task in it.
  */
 function buildPinned(data: ProjectsData, visible: readonly Project[]): MobileInboxPin[] {
   const byId = new Map(visible.map((project) => [project.id, project]))
   const seen = new Set<string>()
   const out: MobileInboxPin[] = []
+  const push = (pin: MobileInboxPin): void => {
+    const key = pin.taskId === undefined ? `project:${pin.projectId}` : `task:${pin.projectId}:${pin.taskId}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(pin)
+  }
   for (const item of data.pinnedItems ?? []) {
     const project = byId.get(item.projectId)
     if (!project) continue
-    if (item.type === 'task') {
-      const task = (project.tasks ?? []).find((t) => t.id === item.taskId)
-      if (!task || isHomeTask(task)) continue
+    if (item.type === 'project') {
+      push({ projectId: item.projectId })
+      continue
     }
-    const key = pinnedItemKey(item)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(item.type === 'task' ? { projectId: item.projectId, taskId: item.taskId } : { projectId: item.projectId })
+    const tasks = item.type === 'task'
+      ? [findTaskInProject(project, item.taskId)]
+      : project.streams.find((stream) => stream.id === item.streamId)?.tasks ?? []
+    for (const task of tasks) {
+      if (task && !isHomeTask(task)) push({ projectId: item.projectId, taskId: task.id })
+    }
   }
   return out
 }

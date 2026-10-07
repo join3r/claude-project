@@ -21,6 +21,8 @@ import {
   type WindowViewState
 } from '../shared/types'
 import { normalizeMobileConfig } from '../shared/mobile'
+import { migratePinnedItems, migrateProjects } from '../shared/streams-migration'
+import { projectTasks } from '../shared/streams'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
@@ -282,7 +284,10 @@ export class Storage {
   }
 
   static normalizeProjectsData(data: Record<string, unknown>): ProjectsData {
-    const allProjects: Project[] = Array.isArray(data.projects) ? data.projects : []
+    // Pre-streams data (Project › Task › Tab) is converted here, once: the result is
+    // in the new shape, so the next save writes it and later loads skip this.
+    const migration = migrateProjects(Array.isArray(data.projects) ? data.projects : [])
+    const allProjects: Project[] = migration.projects
     // A hidden ad-hoc project is only ever a home for tasks; once the last real
     // one is gone it has no reason to exist. Dropping it here catches every
     // writer at once — including main's idle-cleanup sweep, which removes tasks
@@ -321,8 +326,7 @@ export class Storage {
 
     const now = Date.now()
     for (const project of normalizedProjects) {
-      if (!Array.isArray(project.tasks)) continue
-      for (const task of project.tasks) {
+      for (const task of projectTasks(project)) {
         const legacy = (task as { lastFocusedAt?: unknown }).lastFocusedAt
         if (typeof legacy === 'number' && task.lastInteractedAt === undefined) {
           task.lastInteractedAt = legacy
@@ -341,7 +345,7 @@ export class Storage {
       projects: normalizedProjects,
       tags,
       projectOrder,
-      pinnedItems: normalizePinnedItems(data.pinnedItems, normalizedProjects)
+      pinnedItems: normalizePinnedItems(migratePinnedItems(data.pinnedItems, migration.migratedStreamIds), normalizedProjects)
     })
   }
 

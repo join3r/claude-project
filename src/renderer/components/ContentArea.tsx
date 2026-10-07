@@ -19,6 +19,7 @@ import type { TunnelConfig, TunnelState } from '../../shared/types'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { paletteEvents } from '../palette/paletteEvents'
+import { findTaskInProject, paneTabs, projectTasks, taskWorkspace } from '../../shared/streams'
 
 function FileBrowserTabButton({
   icon,
@@ -173,12 +174,12 @@ export default function ContentArea(): React.ReactElement {
       if (!digit) return
 
       const project = projects.find(p => p.id === selectedProjectId)
-      const task = project?.tasks.find(t => t.id === selectedTaskId)
+      const task = findTaskInProject(project, selectedTaskId)
       if (!task) return
 
       const index = parseInt(digit, 10) - 1
       const pane: 'left' | 'right' = e.shiftKey ? 'right' : 'left'
-      const tabs = task.tabs[pane]
+      const tabs = paneTabs(task, pane)
       const tab = tabs[index]
 
       if (tab) {
@@ -200,7 +201,7 @@ export default function ContentArea(): React.ReactElement {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
 
       const project = projects.find(p => p.id === selectedProjectId)
-      const task = project?.tasks.find(t => t.id === selectedTaskId)
+      const task = findTaskInProject(project, selectedTaskId)
       if (!task) return
       const taskView = getTaskViewState(task)
 
@@ -212,7 +213,7 @@ export default function ContentArea(): React.ReactElement {
 
       const activeTabId = taskView.activeTab[pane]
       if (!activeTabId) return
-      const activeTab = task.tabs[pane].find(t => t.id === activeTabId)
+      const activeTab = paneTabs(task, pane).find(t => t.id === activeTabId)
       if (!activeTab || !isRenamableTab(activeTab)) return
 
       e.preventDefault()
@@ -244,12 +245,12 @@ export default function ContentArea(): React.ReactElement {
     const getActiveTabInfo = () => {
       if (!selectedProjectId || !selectedTaskId) return null
       const project = projects.find(p => p.id === selectedProjectId)
-      const task = project?.tasks.find(t => t.id === selectedTaskId)
+      const task = findTaskInProject(project, selectedTaskId)
       if (!task) return null
       const taskView = getTaskViewState(task)
       const pane = resolvePaneForMenuAction(taskView.splitOpen, getActivePaneFromDom(), getRememberedPane())
       const activeTabId = taskView.activeTab[pane]
-      const activeTab = activeTabId ? task.tabs[pane].find(t => t.id === activeTabId) : null
+      const activeTab = activeTabId ? paneTabs(task, pane).find(t => t.id === activeTabId) : null
       return { project, task, pane, activeTabId, activeTab }
     }
 
@@ -366,8 +367,9 @@ export default function ContentArea(): React.ReactElement {
     selectedTask?.name ?? null,
     selectedTask?.system === 'home'
   )
-  const selectedProjectDir = selectedTask?.workspace
-    ? joinWorkspaceDir(selectedTask.workspace.worktreePath, selectedTask.workspace.relativeProjectPath)
+  const selectedWorkspace = taskWorkspace(selectedProject, selectedTask?.id)
+  const selectedProjectDir = selectedWorkspace
+    ? joinWorkspaceDir(selectedWorkspace.worktreePath, selectedWorkspace.relativeProjectPath)
     : selectedProject?.directory ?? ''
   const canShowLocalTabs = !!selectedProject
     && !isRemoteProject(selectedProject)
@@ -510,13 +512,14 @@ export default function ContentArea(): React.ReactElement {
         <div className="flex-1 flex items-center justify-center text-text-muted text-md">Select or create a task to get started</div>
       )}
       {projects.flatMap((project) =>
-        project.tasks.map((task) => {
+        projectTasks(project).map((task) => {
           const isVisible = project.id === selectedProjectId && task.id === selectedTaskId
           const taskView = getTaskViewState(task)
           const isSplitOpen = taskView.splitOpen
           const ratio = dragRatio ?? taskView.splitRatio ?? 0.5
-          const effectiveDir = task.workspace
-            ? joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath)
+          const workspace = taskWorkspace(project, task.id)
+          const effectiveDir = workspace
+            ? joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
             : getProjectDir(project)
           return (
             <div
@@ -545,7 +548,7 @@ export default function ContentArea(): React.ReactElement {
                   </div>
                 )}
                 <Pane
-                  tabs={task.tabs.left}
+                  tabs={paneTabs(task, 'left')}
                   activeTabId={taskView.activeTab.left}
                   taskVisible={isVisible}
                   pane="left"
@@ -555,7 +558,7 @@ export default function ContentArea(): React.ReactElement {
                   sshConfig={project.ssh}
                   shellCommand={project.shellCommand}
                   aiToolArgs={project.aiToolArgs}
-                  promptBox={task.tabs.left.length === 0 && task.tabs.right.length === 0 ? { project, taskName: task.name, workspaceDraft: task.workspaceDraft } : undefined}
+                  promptBox={task.panes.length === 0 ? { project, taskName: task.name, workspaceDraft: task.workspaceDraft } : undefined}
                   style={isSplitOpen ? { flex: 'none', width: `calc(${ratio * 100}% - 1.5px)` } : undefined}
                   onPaneFocus={rememberFocusedPane}
                   tabDragState={tabDragState}
@@ -571,7 +574,7 @@ export default function ContentArea(): React.ReactElement {
                       onMouseDown={handleDividerMouseDown(project.id, task.id)}
                     />
                     <Pane
-                      tabs={task.tabs.right}
+                      tabs={paneTabs(task, 'right')}
                       activeTabId={taskView.activeTab.right}
                       taskVisible={isVisible}
                       pane="right"
