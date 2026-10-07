@@ -20,7 +20,6 @@ describe('zoomTargetForTabType', () => {
     expect(zoomTargetForTabType('claude')).toBe('terminal')
     expect(zoomTargetForTabType('codex')).toBe('terminal')
     expect(zoomTargetForTabType('pi')).toBe('terminal')
-    expect(zoomTargetForTabType('home')).toBe('terminal')
     expect(zoomTargetForTabType(undefined)).toBe('terminal')
     expect(zoomTargetForTabType(null)).toBe('terminal')
   })

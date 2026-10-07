@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
-import { createHomeTask, createMainStream } from '../../../shared/types'
+import { createMainStream } from '../../../shared/types'
 import { projectTasks, taskTabs } from '../../../shared/streams'
 import type {
   AiTabType,
@@ -82,12 +82,11 @@ export function useProjects(
 
   const addProject = useCallback((name: string, directory: string, tagIds?: string[]) => {
     const id = uuid()
-    const { task: homeTask } = createHomeTask(id)
     const project: Project = {
       id,
       name,
       directory,
-      streams: [createMainStream(id, [homeTask])],
+      streams: [createMainStream(id)],
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
     mutateProjects(prev => appendProject(includePendingTags(prev, tagIds), project))
@@ -102,13 +101,12 @@ export function useProjects(
     tagIds?: string[]
   ) => {
     const id = uuid()
-    const { task: homeTask } = createHomeTask(id)
     const project: Project = {
       id,
       name,
       directory: '',
       ssh: sshConfig,
-      streams: [createMainStream(id, [homeTask])],
+      streams: [createMainStream(id)],
       ...(aiToolArgs ? { aiToolArgs } : {}),
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
@@ -120,13 +118,12 @@ export function useProjects(
 
   const addShellCommandProject = useCallback((name: string, command: string, tagIds?: string[]) => {
     const id = uuid()
-    const { task: homeTask } = createHomeTask(id)
     const project: Project = {
       id,
       name,
       directory: '',
       shellCommand: { command },
-      streams: [createMainStream(id, [homeTask])],
+      streams: [createMainStream(id)],
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
     mutateProjects(prev => appendProject(includePendingTags(prev, tagIds), project))

@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { setPinInData } from '../src/main/mobile/pin'
-import { createHomeTask, mainStreamId, type Project, type ProjectsData } from '../src/shared/types'
-import { projectTasks } from '../src/shared/streams'
+import { mainStreamId, type Project, type ProjectsData } from '../src/shared/types'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 
 function project(id: string, extra: Partial<Project> = {}): Project {
   return fixtureProject({
     id,
     directory: `/src/${id}`,
-    tasks: [createHomeTask(id).task, { id: `${id}-t1` }],
+    tasks: [{ id: `${id}-t1` }],
     // A stream of two tasks, which the phone sees as two tasks.
     streams: [{ id: `${id}-s`, name: 'bugfixes', tasks: [fixtureTask({ id: `${id}-s1` }), fixtureTask({ id: `${id}-s2` })] }],
     ...extra
@@ -45,8 +44,6 @@ describe('setPinInData (SPEC.md §8.10)', () => {
     expect(setPinInData(start, { projectId: 'nope', pinned: true })).toMatchObject({ ok: false, code: 'not-found' })
     expect(setPinInData(start, { projectId: 'hidden', pinned: true })).toMatchObject({ ok: false, code: 'not-found' })
     expect(setPinInData(start, { projectId: 'p1', taskId: 'nope', pinned: true })).toMatchObject({ ok: false, code: 'not-found' })
-    const home = projectTasks(start.projects[0])[0].id
-    expect(setPinInData(start, { projectId: 'p1', taskId: home, pinned: true })).toMatchObject({ ok: false, code: 'not-found' })
   })
 
   it('pins a task of a stream with its stream id', () => {

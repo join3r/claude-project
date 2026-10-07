@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
-import { isEphemeralProject, isHomeTask } from '../../../shared/types'
+import { isEphemeralProject } from '../../../shared/types'
 import type { Tab, Task, WorkspaceConfig, WorkspaceDraft } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
 import { findTaskInProject, projectTasks, taskTabs, workspaceReleasedBy } from '../../../shared/streams'
@@ -17,6 +17,7 @@ import {
 } from './projectsData'
 import { removeTaskView, selectNewTaskView } from './viewState'
 import { reportRefusedWorkspaceDelete } from './useProjects'
+import { resolveLandingTaskId } from '../taskNavigation'
 
 export interface TasksActions {
   addTask: (projectId: string, name: string, initialTabs?: Tab[]) => Task
@@ -31,15 +32,26 @@ export interface TasksActions {
   removeTask: (projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => Promise<void>
   renameTask: (projectId: string, taskId: string, name: string) => void
   reorderTasks: (projectId: string, fromIndex: number, toIndex: number) => void
+  /**
+   * The task a tab opened with no task selected (the project's Home page) lands in:
+   * `taskId` when it is one of the project's tasks, else the `main` stream's task
+   * it was last on (`resolveLandingTaskId`), which the window switches to. An empty
+   * `main` gets a new task named `name` and holding `makeTab()`; then the result is
+   * null, since the tab is already open.
+   */
+  taskForTab: (projectId: string, taskId: string | null, makeTab: () => Tab, name: string) => string | null
 }
 
 /** Creating, removing, renaming and ordering tasks. */
 export function useTasks(
   core: AppStateCore,
-  deps: { confirmDiscardDirty: (tabIds: string[]) => Promise<'proceed' | 'cancel'> }
+  deps: {
+    confirmDiscardDirty: (tabIds: string[]) => Promise<'proceed' | 'cancel'>
+    switchToTask: (projectId: string, taskId: string) => void
+  }
 ): TasksActions {
   const { mutateProjects, projectsRef, updateWindowViewState } = core
-  const { confirmDiscardDirty } = deps
+  const { confirmDiscardDirty, switchToTask } = deps
 
   // `initialTabs` exists so a task can be born with its tabs: calling `addTab` right
   // after this would read a `projectsRef` that hasn't seen the task yet and clobber
@@ -90,13 +102,11 @@ export function useTasks(
 
   const removeTask = useCallback(async (projectId: string, taskId: string, skipWorkspaceCleanup?: boolean) => {
     const doomed = findTaskInProject(projectsRef.current.find(candidate => candidate.id === projectId), taskId)
-    if (doomed && isHomeTask(doomed)) return
     // One dialog for every unsaved editor under the task, not one per tab.
     if (doomed && await confirmDiscardDirty(tabIdsOfTask(doomed)) === 'cancel') return
 
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = findTaskInProject(project, taskId)
-    if (task && isHomeTask(task)) return
     if (task) {
       for (const tab of taskTabs(task)) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId: tab.id } }))
@@ -124,7 +134,7 @@ export function useTasks(
     // no empty record is ever written out.
     const ownerRetired = !!project
       && isEphemeralProject(project)
-      && !projectTasks(project).some(candidate => candidate.id !== taskId && !isHomeTask(candidate))
+      && !projectTasks(project).some(candidate => candidate.id !== taskId)
     mutateProjects(prev => removeTaskFromData(prev, projectId, taskId))
     updateWindowViewState(prev => removeTaskView(prev, projectId, taskId, ownerRetired))
   }, [confirmDiscardDirty, mutateProjects, updateWindowViewState])
@@ -156,5 +166,18 @@ export function useTasks(
     mutateProjects(prev => reorderTaskInData(prev, projectId, fromIndex, toIndex))
   }, [mutateProjects])
 
-  return { addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, setWorkspaceDraft, attachWorkspace, removeTask, renameTask, reorderTasks }
+  const taskForTab = useCallback((projectId: string, taskId: string | null, makeTab: () => Tab, name: string) => {
+    const project = projectsRef.current.find(candidate => candidate.id === projectId)
+    if (!project) return null
+    if (taskId && findTaskInProject(project, taskId)) return taskId
+    const landing = resolveLandingTaskId(project)
+    if (landing) {
+      switchToTask(projectId, landing)
+      return landing
+    }
+    addTask(projectId, name, [makeTab()])
+    return null
+  }, [addTask, switchToTask])
+
+  return { addTask, addWorkspaceTask, addTaskInDirectory, addPendingWorkspaceTask, setWorkspaceDraft, attachWorkspace, removeTask, renameTask, reorderTasks, taskForTab }
 }

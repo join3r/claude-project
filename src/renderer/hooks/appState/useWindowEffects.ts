@@ -157,10 +157,6 @@ export function useSelectionSync(core: AppStateCore, windowFocused: boolean, con
 
 export function useWindowTitle(selectedProject: Project | null, selectedTask: Task | null): void {
   useEffect(() => {
-    document.title = buildWindowTitle(
-      selectedProject?.name ?? null,
-      selectedTask?.name ?? null,
-      selectedTask?.system === 'home'
-    )
-  }, [selectedProject?.name, selectedTask?.name, selectedTask?.system])
+    document.title = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
+  }, [selectedProject?.name, selectedTask?.name])
 }

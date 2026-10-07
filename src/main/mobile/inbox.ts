@@ -1,7 +1,6 @@
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
 import { isSettled, isSnoozed, isUnread } from '../../shared/inbox-state'
 import {
-  isHomeTask,
   isSpentEphemeralProject,
   type Project,
   type ProjectsData,
@@ -99,7 +98,7 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number): Mo
     id: project.id,
     name: project.name,
     remote: !!project.ssh,
-    tasks: projectTasks(project).filter((task) => !isHomeTask(task)).map((task) => buildTask(project, task, lookup, now))
+    tasks: projectTasks(project).map((task) => buildTask(project, task, lookup, now))
   }
   if (project.emoji) out.emoji = project.emoji
   return out
@@ -124,7 +123,7 @@ function orderedProjects(data: ProjectsData): Project[] {
 
 /**
  * The sidebar's Pinned list, in its order, cut to what the phone sees: a pin whose
- * project is hidden or spent, or whose task is gone or a home task, is left out.
+ * project is hidden or spent, or whose task is gone, is left out.
  * The wire has no streams yet: a stream pin goes out as one task pin per task in it.
  */
 function buildPinned(data: ProjectsData, visible: readonly Project[]): MobileInboxPin[] {
@@ -148,7 +147,7 @@ function buildPinned(data: ProjectsData, visible: readonly Project[]): MobileInb
       ? [findTaskInProject(project, item.taskId)]
       : project.streams.find((stream) => stream.id === item.streamId)?.tasks ?? []
     for (const task of tasks) {
-      if (task && !isHomeTask(task)) push({ projectId: item.projectId, taskId: task.id })
+      if (task) push({ projectId: item.projectId, taskId: task.id })
     }
   }
   return out

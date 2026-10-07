@@ -2,11 +2,11 @@ import { useCallback } from 'react'
 import type { AppStateCore } from './useAppStateCore'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { selectProjectHomeView, selectProjectView, switchToTaskView } from './viewState'
-import { projectTasks } from '../../../shared/streams'
 
 export interface SelectionActions {
   /** Select a project (restoring its last task), or clear the selection with `null`. */
   setSelectedProjectId: (id: string | null) => void
+  /** Open the project's Home page (the project with no task selected). */
   selectProjectHome: (projectId: string) => void
   setSelectedTaskId: (id: string | null) => void
   switchToTask: (projectId: string, taskId: string) => void
@@ -32,14 +32,10 @@ export function useSelection(
 
   const selectProjectHome = useCallback((projectId: string) => {
     const project = projectsRef.current.find(p => p.id === projectId) ?? null
-    const homeTask = projectTasks(project).find(t => t.system === 'home') ?? null
-    if (!project || !homeTask) {
-      selectProject(projectId)
-      return
-    }
-    updateWindowViewState(prev => selectProjectHomeView(prev, projectId, homeTask))
+    if (!project) return
+    updateWindowViewState(prev => selectProjectHomeView(prev, projectId))
     ensureRemoteConnected(projectId, project, connectSsh)
-  }, [connectSsh, selectProject, updateWindowViewState])
+  }, [connectSsh, updateWindowViewState])
 
   const selectTask = useCallback((id: string | null) => {
     updateWindowViewState(prev => ({ ...prev, selectedTaskId: id }))

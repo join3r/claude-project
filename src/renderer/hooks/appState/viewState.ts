@@ -93,25 +93,18 @@ export function selectProjectView(prev: WindowViewState, id: string | null, proj
   }
 }
 
-/** Land on the project's home task with its home tab in front. */
-export function selectProjectHomeView(prev: WindowViewState, projectId: string, homeTask: Task): WindowViewState {
-  const homeTab = paneTabs(homeTask, 'left').find(t => t.system === 'home') ?? null
-  const prevTaskState = prev.taskStates[homeTask.id] ?? createTaskViewState(homeTask)
+/**
+ * Land on the project's Home page: the project selected with no task. The file
+ * browser opens on the project's notes, as Home always has.
+ */
+export function selectProjectHomeView(prev: WindowViewState, projectId: string): WindowViewState {
   return {
     ...prev,
     selectedProjectId: projectId,
-    selectedTaskId: homeTask.id,
+    selectedTaskId: null,
     expandedProjectIds: withId(prev.expandedProjectIds, projectId),
-    taskStates: {
-      ...prev.taskStates,
-      [homeTask.id]: {
-        ...prevTaskState,
-        activeTab: {
-          ...prevTaskState.activeTab,
-          left: homeTab?.id ?? prevTaskState.activeTab.left
-        }
-      }
-    }
+    fileBrowserOpen: true,
+    fileBrowserActiveTab: 'notes'
   }
 }
 
@@ -210,24 +203,17 @@ export function writeSidebarToTask(prev: WindowViewState, task: Task | null, pat
 
 /**
  * The file-browser state to show on landing on `task`: what was saved for it,
- * else open-on-notes for a home task, else whatever the window already shows.
+ * else whatever the window already shows.
  */
 export function sidebarForTask(
   view: Pick<WindowViewState, 'taskStates' | 'fileBrowserOpen' | 'fileBrowserActiveTab'>,
   task: Task
 ): { fileBrowserOpen: boolean; fileBrowserActiveTab: FileBrowserTab } {
   const saved = view.taskStates[task.id]
-  const isHome = task.system === 'home'
-  const fileBrowserOpen = saved?.fileBrowserOpen !== undefined
-    ? saved.fileBrowserOpen
-    : isHome
-      ? true
-      : view.fileBrowserOpen
+  const fileBrowserOpen = saved?.fileBrowserOpen !== undefined ? saved.fileBrowserOpen : view.fileBrowserOpen
   const fileBrowserActiveTab: FileBrowserTab = saved?.fileBrowserActiveTab !== undefined
     ? saved.fileBrowserActiveTab
-    : isHome
-      ? 'notes'
-      : view.fileBrowserActiveTab
+    : view.fileBrowserActiveTab
   return { fileBrowserOpen, fileBrowserActiveTab }
 }
 

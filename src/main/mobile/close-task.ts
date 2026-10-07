@@ -1,4 +1,4 @@
-import { isHomeTab, isHomeTask, type Project, type ProjectsData, type Tab, type Task, type WorkspaceDeleteResult } from '../../shared/types'
+import type { Project, ProjectsData, Tab, Task, WorkspaceDeleteResult } from '../../shared/types'
 import { AppErrorCode, INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
 import type { TaskCloseParams, TaskCloseResult } from '../../../protocol/ts/index.ts'
 import { findTaskInProject, mapTaskInProject, paneTabs, projectTasks, taskTabs, withTabsByPane, workspaceReleasedBy } from '../../shared/streams'
@@ -33,7 +33,7 @@ function findTask(data: ProjectsData, taskId: string): { project: Project; task:
   for (const project of data.projects) {
     if (!isVisibleOnMobile(project)) continue
     const task = findTaskInProject(project, taskId)
-    if (task) return isHomeTask(task) ? null : { project, task }
+    if (task) return { project, task }
   }
   return null
 }
@@ -103,7 +103,7 @@ export async function closeTask(deps: CloseTaskDeps, params: TaskCloseParams): P
 
 const MOBILE_TAB_TYPES: ReadonlySet<string> = new Set<string>(INBOX_TAB_TYPES)
 
-/** A tab the phone sees in its inbox (§4.4), with its task; never a home tab. */
+/** A tab the phone sees in its inbox (§4.4), with its task. */
 export function findClosableTab(
   data: ProjectsData,
   tabId: string
@@ -111,10 +111,9 @@ export function findClosableTab(
   for (const project of data.projects) {
     if (!isVisibleOnMobile(project)) continue
     for (const task of projectTasks(project)) {
-      if (isHomeTask(task)) continue
       const tab = taskTabs(task).find((t) => t.id === tabId)
       if (!tab) continue
-      return MOBILE_TAB_TYPES.has(tab.type) && !isHomeTab(tab) ? { project, task, tab } : null
+      return MOBILE_TAB_TYPES.has(tab.type) ? { project, task, tab } : null
     }
   }
   return null

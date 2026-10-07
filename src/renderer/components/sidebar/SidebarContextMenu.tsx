@@ -26,7 +26,7 @@ export function revealFolder(projects: readonly Project[], projectId: string, ta
 
 /** The confirmation for deleting a project, naming what goes with it. */
 export function projectDeletePrompt(project: Project): string {
-  const tasks = projectTasks(project).filter(t => t.system !== 'home').length
+  const tasks = projectTasks(project).length
   const workspaces = project.streams.filter(s => s.workspace).length
   const lines = [`Delete project "${project.name}"?`]
   if (tasks > 0) lines.push(`${tasks === 1 ? 'Its task closes' : `Its ${tasks} tasks close`}, with their tabs.`)

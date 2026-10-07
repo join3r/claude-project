@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { addTaskWithChat, makeTaskWorkspace, type WorkspaceGit } from '../src/main/mobile/new-task'
-import { createHomeTask, mainStreamId, type Project, type ProjectsData } from '../src/shared/types'
+import { mainStreamId, type Project, type ProjectsData } from '../src/shared/types'
 import { findStreamOfTask, projectTasks } from '../src/shared/streams'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 function data(extra: Partial<Project> = {}): ProjectsData {
-  const home = createHomeTask('p1').task
   return {
     projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/src/api', ...extra,
-      tasks: [home, { id: 't1', name: 'fix-auth' }]
+      tasks: [{ id: 't1', name: 'fix-auth' }]
     })],
     tags: [], projectOrder: ['p1'], pinnedItems: []
   }
@@ -28,9 +27,9 @@ describe('addTaskWithChat (SPEC.md §8.4)', () => {
     if (!result.ok) return
     const project = result.data.projects[0]
     const tasks = projectTasks(project)
-    expect(tasks).toHaveLength(3)
-    expect(tasks[1]).toBe(projectTasks(before.projects[0])[1])
-    expect(tasks[2]).toEqual({
+    expect(tasks).toHaveLength(2)
+    expect(tasks[0]).toBe(projectTasks(before.projects[0])[0])
+    expect(tasks[1]).toEqual({
       id: 'id-3',
       name: 'Fix the login redirect',
       mainTabId: 'id-1',
@@ -41,12 +40,12 @@ describe('addTaskWithChat (SPEC.md §8.4)', () => {
     expect(findStreamOfTask(project, 'id-3')?.id).toBe(mainStreamId('p1'))
     expect(project.streams).toHaveLength(1)
     expect(project.lifetimeStats).toEqual({ tasksCreated: 1, notesCreated: 0 })
-    expect(projectTasks(before.projects[0])).toHaveLength(2)
+    expect(projectTasks(before.projects[0])).toHaveLength(1)
   })
 
   it('cuts a long first line to fit the sidebar', () => {
     const result = addTaskWithChat(data(), 'p1', 'x'.repeat(80), counter())
-    expect(result.ok && projectTasks(result.data.projects[0])[2].name).toBe('x'.repeat(49) + '…')
+    expect(result.ok && projectTasks(result.data.projects[0])[1].name).toBe('x'.repeat(49) + '…')
   })
 
   it('refuses unknown and hidden projects, and shell-command projects', () => {

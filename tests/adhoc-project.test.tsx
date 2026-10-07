@@ -4,9 +4,7 @@ import React from 'react'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import {
   DEFAULT_CONFIG,
-  createHomeTask,
   isEphemeralProject,
-  isHomeTask,
   isSpentEphemeralProject,
   type Project,
   type ProjectsData
@@ -26,8 +24,7 @@ void React
  */
 
 function buildProjects(): Project[] {
-  const { task: home } = createHomeTask('p1')
-  return [fixtureProject({ id: 'p1', name: 'Project', directory: '/tmp/p1', tasks: [home] })]
+  return [fixtureProject({ id: 'p1', name: 'Project', directory: '/tmp/p1' })]
 }
 
 let saved: ProjectsData[]
@@ -88,14 +85,11 @@ describe('dirBasename', () => {
 })
 
 describe('isSpentEphemeralProject', () => {
-  const home = createHomeTask('x').task
-  const real = { ...home, id: 't1', system: undefined }
-
-  it('only claims a hidden project with nothing but its home task', () => {
-    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true, tasks: [home] }))).toBe(true)
-    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true, tasks: [home, real] }))).toBe(false)
+  it('only claims a hidden project with no task left', () => {
+    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true }))).toBe(true)
+    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d', ephemeral: true, tasks: [{ id: 't1' }] }))).toBe(false)
     // An ordinary empty project is the user's to keep.
-    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d', tasks: [home] }))).toBe(false)
+    expect(isSpentEphemeralProject(fixtureProject({ id: 'x', name: 'x', directory: '/d' }))).toBe(false)
   })
 })
 
@@ -117,7 +111,7 @@ describe('addTaskInDirectory', () => {
     await waitFor(() => expect(saved.length).toBeGreaterThan(0))
     for (const snapshot of saved) {
       for (const p of snapshot.projects.filter(isEphemeralProject)) {
-        expect(projectTasks(p).some(t => !isHomeTask(t))).toBe(true)
+        expect(projectTasks(p).length).toBeGreaterThan(0)
       }
     }
   })
@@ -132,7 +126,7 @@ describe('addTaskInDirectory', () => {
     expect(result.current.projects.filter(isEphemeralProject)).toHaveLength(1)
     const project = adhoc(result.current)!
     expect(project.id).toBe(firstId)
-    expect(projectTasks(project).filter(t => !isHomeTask(t)).map(t => t.name)).toEqual(['First', 'Second'])
+    expect(projectTasks(project).map(t => t.name)).toEqual(['First', 'Second'])
   })
 
   it('gives a different directory its own hidden project', async () => {
@@ -157,7 +151,7 @@ describe('addTaskInDirectory', () => {
     })
 
     const project = adhoc(result.current)!
-    const task = projectTasks(project).find(t => !isHomeTask(t))!
+    const task = projectTasks(project)[0]
     expect(taskWorkspace(project, task.id)?.branchName).toBe('isolated')
   })
 })
@@ -168,7 +162,7 @@ describe('removeTask on an ad-hoc project', () => {
 
     act(() => { result.current.addTaskInDirectory('/tmp/scratch', 'Poke at it') })
     const project = adhoc(result.current)!
-    const taskId = projectTasks(project).find(t => !isHomeTask(t))!.id
+    const taskId = projectTasks(project)[0].id
 
     await act(async () => { await result.current.removeTask(project.id, taskId) })
 
@@ -189,14 +183,14 @@ describe('removeTask on an ad-hoc project', () => {
 
     const still = adhoc(result.current)
     expect(still).toBeDefined()
-    expect(projectTasks(still).filter(t => !isHomeTask(t)).map(t => t.name)).toEqual(['Second'])
+    expect(projectTasks(still).map(t => t.name)).toEqual(['Second'])
   })
 
   it('leaves an ordinary project standing when its last task goes', async () => {
     const { result } = await mountState()
 
     act(() => { result.current.addTask('p1', 'Only task') })
-    const taskId = projectTasks(result.current.projects[0]).find(t => !isHomeTask(t))!.id
+    const taskId = projectTasks(result.current.projects[0])[0].id
 
     await act(async () => { await result.current.removeTask('p1', taskId) })
 

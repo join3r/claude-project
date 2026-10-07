@@ -5,7 +5,6 @@ import {
   AI_TAB_META,
   CLAUDE_CHAT_LABEL,
   createTaskViewState,
-  isHomeTab,
   reconcileTaskViewState
 } from '../../../shared/types'
 import type { Tab, TabType, Task, TaskViewState } from '../../../shared/types'
@@ -124,7 +123,6 @@ export function useTabs(
     const task = findTask(projectsRef.current, projectId, taskId)
     const tabIndex = task ? paneTabs(task, pane).findIndex(tab => tab.id === tabId) : -1
     const removedTab = task && tabIndex >= 0 ? paneTabs(task, pane)[tabIndex] ?? null : null
-    if (removedTab && isHomeTab(removedTab)) return
 
     if (removedTab && tabIndex >= 0) {
       rememberClosedTab({

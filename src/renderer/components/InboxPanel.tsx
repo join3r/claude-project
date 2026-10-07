@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Check, ChevronRight, Clock, Inbox as InboxIcon, SquarePen } from 'lucide-react'
 import type { Project, Task } from '../../shared/types'
-import { isEphemeralProject, isHomeTask } from '../../shared/types'
+import { isEphemeralProject } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { RowActions, RowAction } from './ui'
 import {
@@ -245,7 +245,6 @@ export default function InboxPanel({
     const entries: { task: Task; project: Project }[] = []
     for (const project of projects) {
       for (const task of projectTasks(project)) {
-        if (isHomeTask(task)) continue
         entries.push({ task, project })
       }
     }

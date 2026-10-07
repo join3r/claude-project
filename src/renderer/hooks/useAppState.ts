@@ -82,12 +82,12 @@ export function useAppState(): AppActions {
     confirmDiscardDirty: dirty.confirmDiscardDirty,
     selectProject: selection.setSelectedProjectId
   })
-  const tasks = useTasks(core, { confirmDiscardDirty: dirty.confirmDiscardDirty })
+  const tasks = useTasks(core, { confirmDiscardDirty: dirty.confirmDiscardDirty, switchToTask: selection.switchToTask })
   const tabs = useTabs(core, { connectSsh, confirmDiscardDirty: dirty.confirmDiscardDirty })
   const notes = useNotes(core, {
     addTab: tabs.addTab,
     setActiveTab: tabs.setActiveTab,
-    switchToTask: selection.switchToTask
+    taskForTab: tasks.taskForTab
   })
   const layout = useWindowLayout(core)
   const { config, projectsData, windowViewState } = core

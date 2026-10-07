@@ -4,7 +4,6 @@ import React from 'react'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import {
   DEFAULT_CONFIG,
-  createHomeTask,
   type Project,
   type ProjectsData,
   type Task
@@ -35,9 +34,8 @@ const WORK_TASK: Task = fixtureTask({
 })
 
 function buildProjects(): Project[] {
-  const { task: home } = createHomeTask('p1')
   const project = fixtureProject({ id: 'p1', name: 'Project', directory: '/tmp/p1' })
-  project.streams[0].tasks.push(home, WORK_TASK)
+  project.streams[0].tasks.push(WORK_TASK)
   return [project]
 }
 

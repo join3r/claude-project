@@ -1,7 +1,6 @@
 import { useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import type { NotesRecord, ProjectNote } from '../../../shared/types'
-import { resolveLandingTaskId } from '../taskNavigation'
 import { incrementLifetimeStat } from '../lifetimeStats'
 import type { AppStateCore } from './useAppStateCore'
 import { mapProject, paneOfTab, type Pane } from './projectsData'
@@ -16,6 +15,8 @@ import {
 } from './notesData'
 import { reassignActiveTabsAfterNoteDelete } from './viewState'
 import type { TabsActions } from './useTabs'
+import type { TasksActions } from './useTasks'
+import { createTab } from '../../components/newTaskTabs'
 import { findTaskInProject, taskTabs } from '../../../shared/streams'
 
 export interface NotesActions {
@@ -31,12 +32,10 @@ export interface NotesActions {
 /** Project notes and the note tabs that show them. */
 export function useNotes(
   core: AppStateCore,
-  deps: Pick<TabsActions, 'addTab' | 'setActiveTab'> & {
-    switchToTask: (projectId: string, taskId: string) => void
-  }
+  deps: Pick<TabsActions, 'addTab' | 'setActiveTab'> & Pick<TasksActions, 'taskForTab'>
 ): NotesActions {
-  const { notes, notesRef, mutateNotes, mutateProjects, projectsRef, windowViewStateRef, updateWindowViewState } = core
-  const { addTab, setActiveTab, switchToTask } = deps
+  const { notes, notesRef, mutateNotes, mutateProjects, projectsRef, updateWindowViewState } = core
+  const { addTab, setActiveTab, taskForTab } = deps
 
   const createNote = useCallback((projectId: string, name: string): ProjectNote => {
     const note: ProjectNote = {
@@ -97,19 +96,16 @@ export function useNotes(
     noteId: string
   ) => {
     const project = projectsRef.current.find(p => p.id === projectId)
-    if (!project) return
+    const note = notesRef.current[projectId]?.find(n => n.id === noteId)
+    if (!project || !note) return
 
-    // `taskId` may be missing, stale, or belong to a different project (the
-    // palette can surface notes from any project). Fall back to the project's
-    // own landing task instead of silently doing nothing.
-    const targetTaskId = resolveLandingTaskId(project, taskId)
+    // `taskId` may be missing (the Home page), stale, or belong to a different
+    // project (the palette can surface notes from any project). Fall back to the
+    // project's own landing task (switched to), or a new task holding the note when
+    // it has none.
+    const targetTaskId = taskForTab(projectId, taskId, () => createTab('note', { noteId, noteName: note.name }), note.name)
     const task = targetTaskId ? findTaskInProject(project, targetTaskId) : null
     if (!task || !targetTaskId) return
-
-    const view = windowViewStateRef.current
-    if (view.selectedProjectId !== projectId || view.selectedTaskId !== targetTaskId) {
-      switchToTask(projectId, targetTaskId)
-    }
 
     const allTabs = taskTabs(task)
     const existingTab = allTabs.find(t => isNoteTab(t, noteId))
@@ -118,11 +114,8 @@ export function useNotes(
       return
     }
 
-    const note = notesRef.current[projectId]?.find(n => n.id === noteId)
-    if (!note) return
-
     addTab(projectId, targetTaskId, pane, 'note', { noteId, noteName: note.name })
-  }, [addTab, setActiveTab, switchToTask])
+  }, [addTab, setActiveTab, taskForTab])
 
   return { notes, createNote, renameNote, deleteNote, updateNoteContent, openOrFocusNoteTab }
 }

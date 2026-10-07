@@ -1,5 +1,5 @@
 import type { IdleTaskCleanupConfig, PinnedItem, Project, TabStatusValue, Task } from './types'
-import { isHomeTask, pinnedItemKey } from './types'
+import { pinnedItemKey } from './types'
 import { findStreamOfTask, projectTasks, taskTabIds, workspaceReleasedBy } from './streams'
 import { isSettled, isSnoozed, isUnread, lastActivityAt, taskStatus } from './inbox-state'
 
@@ -67,7 +67,6 @@ export function findIdleCleanupCandidates(input: IdleCleanupInput): IdleCleanupC
     // Exempt tasks still occupy a slot: the cap means "at most N tasks in this project",
     // which is what the sidebar actually shows.
     const pool = projectTasks(project)
-      .filter(task => !isHomeTask(task))
       .sort((a, b) => lastActivityAt(b) - lastActivityAt(a))
 
     pool.forEach((task, index) => {

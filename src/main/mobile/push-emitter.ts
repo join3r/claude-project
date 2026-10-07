@@ -1,4 +1,4 @@
-import { isHomeTask, type Project, type ProjectsData, type Task } from '../../shared/types'
+import type { Project, ProjectsData, Task } from '../../shared/types'
 import type { ChatEvent, ChatItem, ChatPrompt, ChatState } from '../../shared/claude-chat'
 import { promptQuestions } from '../../shared/chat-prompts'
 import { summarizeTool } from '../../shared/agent-activity'
@@ -140,7 +140,6 @@ function findChatTab(data: ProjectsData, tabId: string): { project: Project; tas
   for (const project of data.projects) {
     if (!isVisibleOnMobile(project)) continue
     for (const task of projectTasks(project)) {
-      if (isHomeTask(task)) continue
       const tab = taskTabs(task).find((t) => t.id === tabId)
       if (tab) return tab.type === 'claude-chat' ? { project, task } : null
     }

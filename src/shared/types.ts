@@ -1,6 +1,6 @@
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig } from './mobile'
 
-export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note' | 'home'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -47,7 +47,6 @@ export interface Tab {
   sessionId?: string
   filePath?: string
   noteId?: string
-  system?: 'home'
   /** Terminal spawn directory; when omitted, the task/project directory is used. */
   cwd?: string
 }
@@ -123,8 +122,6 @@ export interface Task {
   workspaceDraft?: WorkspaceDraft
   lastInteractedAt?: number
   inbox?: TaskInboxState
-  /** TEMPORARY (removed in step 3): the project's Home, kept as a task in its `main` stream. */
-  system?: 'home'
 }
 
 /**
@@ -197,37 +194,10 @@ export interface WorkspaceDeleteResult {
   reason?: string
 }
 
-export function isHomeTask(task: Task): boolean {
-  return task.system === 'home'
-}
-
-export function isHomeTab(tab: Tab): boolean {
-  return tab.system === 'home'
-}
-
 const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'claude-chat', 'codex', 'pi']
 
 export function isRenamableTab(tab: Tab): boolean {
-  if (isHomeTab(tab)) return false
   return RENAMABLE_TAB_TYPES.includes(tab.type)
-}
-
-/** TEMPORARY (removed in step 3): the Home task, which lives in the project's `main` stream. */
-export function createHomeTask(projectId: string): { task: Task; tab: Tab } {
-  const tabId = `home-tab-${projectId}`
-  const tab: Tab = {
-    id: tabId,
-    type: 'home',
-    title: 'Home',
-    system: 'home'
-  }
-  const task: Task = {
-    id: `home-task-${projectId}`,
-    name: 'Home',
-    panes: [{ tabs: [tab], activeTabId: tabId, width: 1 }],
-    system: 'home'
-  }
-  return { task, tab }
 }
 
 /** The `main` stream's id for a project. */
@@ -239,26 +209,6 @@ export const MAIN_STREAM_NAME = 'main'
 
 export function createMainStream(projectId: string, tasks: Task[] = []): Stream {
   return { id: mainStreamId(projectId), name: MAIN_STREAM_NAME, isMain: true, tasks }
-}
-
-/**
- * TEMPORARY (removed in step 3): every project has a `main` stream, and its Home
- * task sits first in it.
- */
-export function ensureHomeTasks(projects: Project[]): { projects: Project[]; changed: boolean } {
-  let changed = false
-  const next = projects.map((project) => {
-    if (project.streams.some(stream => stream.tasks.some(t => t.system === 'home'))) return project
-    changed = true
-    const { task } = createHomeTask(project.id)
-    const main = project.streams.find(stream => stream.isMain)
-    if (!main) return { ...project, streams: [createMainStream(project.id, [task]), ...project.streams] }
-    return {
-      ...project,
-      streams: project.streams.map(stream => (stream === main ? { ...stream, tasks: [task, ...stream.tasks] } : stream))
-    }
-  })
-  return { projects: changed ? next : projects, changed }
 }
 
 export interface Project {
@@ -302,10 +252,10 @@ export function isEphemeralProject(project: Project): boolean {
   return !!project.ephemeral
 }
 
-/** A hidden ad-hoc project is spent once nothing but its home task is left. */
+/** A hidden ad-hoc project is spent once it has no task left. */
 export function isSpentEphemeralProject(project: Project): boolean {
   return isEphemeralProject(project)
-    && !(project.streams ?? []).some(stream => stream.tasks.some(task => !isHomeTask(task)))
+    && !(project.streams ?? []).some(stream => stream.tasks.length > 0)
 }
 
 export interface SshConfig {
@@ -879,15 +829,16 @@ export function resolveStoredSelection(projects: Project[], config: AppConfig): 
     return { selectedProjectId: null, selectedTaskId: null }
   }
 
+  // No remembered task means the window was on the project's Home page; a stale
+  // one falls back to the task the project was last left on.
   const tasks = project.streams.flatMap(stream => stream.tasks)
-  const lastStream = project.streams.find(stream => stream.id === project.lastStreamId)
-  const candidateTaskId = config.lastTaskId ?? lastStream?.lastTaskId ?? null
-  const remembered = candidateTaskId && tasks.some((task) => task.id === candidateTaskId)
-    ? candidateTaskId
-    : null
-
-  const homeTask = tasks.find((task) => task.system === 'home') ?? null
-  const taskId = remembered ?? homeTask?.id ?? null
+  const streamLastTaskId = project.streams.find(stream => stream.id === project.lastStreamId)?.lastTaskId
+  const exists = (id: string | null | undefined): id is string => !!id && tasks.some((task) => task.id === id)
+  const taskId = config.lastTaskId === null
+    ? null
+    : exists(config.lastTaskId)
+      ? config.lastTaskId
+      : exists(streamLastTaskId) ? streamLastTaskId : null
 
   return {
     selectedProjectId: project.id,

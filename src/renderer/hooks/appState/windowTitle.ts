@@ -1,5 +1,5 @@
-export function buildWindowTitle(projectName: string | null, taskName: string | null, taskIsHome?: boolean): string {
-  if (projectName && taskName && !taskIsHome) {
+export function buildWindowTitle(projectName: string | null, taskName: string | null): string {
+  if (projectName && taskName) {
     return `${projectName} / ${taskName}`
   }
   if (projectName) {

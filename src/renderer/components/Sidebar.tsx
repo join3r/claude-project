@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
-import { NEW_TASK_NAME, isEphemeralProject, isHomeTask, isRemoteProject, isShellCommandProject, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
+import { NEW_TASK_NAME, isEphemeralProject, isRemoteProject, isShellCommandProject, pinnedItemKey, projectMatchesTagFilter } from '../../shared/types'
 import type { Task, Project, PinnedItem, WorkspaceDeleteResult } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
@@ -85,7 +85,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const [now, setNow] = useState(() => Date.now())
   const sortedByRecency = React.useMemo(
-    () => sortTasksByRecency(projects.flatMap(p => projectTasks(p).filter(t => !isHomeTask(t)))),
+    () => sortTasksByRecency(projects.flatMap(p => projectTasks(p))),
     [projects]
   )
 
@@ -95,7 +95,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   // leaving the tree. Snoozed tasks are deliberately excluded — that's the point.
   const inboxUnreadCount = React.useMemo(
     () => projects.reduce((count, project) => count + projectTasks(project).filter(
-      task => !isHomeTask(task) && isUnread(task) && !isSnoozed(task, now) && !isSettled(task)
+      task => isUnread(task) && !isSnoozed(task, now) && !isSettled(task)
     ).length, 0),
     [projects, now]
   )
@@ -198,7 +198,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         // TEMPORARY (step 5 shows streams): a pinned stream shows as one row, the
         // task it was last left on.
         const stream = project.streams.find(candidate => candidate.id === item.streamId)
-        const tasks = (stream?.tasks ?? []).filter(t => !isHomeTask(t))
+        const tasks = stream?.tasks ?? []
         const task = tasks.find(t => t.id === stream?.lastTaskId) ?? tasks[0]
         if (!task) continue
         resolved.push({ item, key: pinnedItemKey(item), project, task })
@@ -496,15 +496,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   const renderProject = (project: Project) => {
     const isExpanded = expandedProjects.has(project.id)
-    // Project home lives on the project row itself (it's filtered out of the
-    // visible task list), so the row needs the selection rail whenever the
-    // home task is active — even when the project is expanded.
+    // Project Home lives on the project row itself, so the row needs the
+    // selection rail whenever Home is showing — even when the project is expanded.
     const isHomeSelected = selectedProjectId === project.id
-      && projectTasks(project).some(t => t.id === selectedTaskId && isHomeTask(t))
+      && !projectTasks(project).some(t => t.id === selectedTaskId)
     const isProjectSelected = selectedProjectId === project.id && (!isExpanded || isHomeSelected)
     const isProjectDragging = dragState?.type === 'project' && dragState.id === project.id
     const allTasks = projectTasks(project)
-    const visibleTasks = allTasks.filter(t => !isHomeTask(t))
     return (
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
@@ -567,7 +565,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             })()}
             <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {!isExpanded && (() => {
-                const projectStatus = getProjectStatus(visibleTasks, allStatuses)
+                const projectStatus = getProjectStatus(allTasks, allStatuses)
                 if (!projectStatus) return null
                 const dotClass = projectStatus === 'working'
                   ? 'bg-status-working status-pulse'
@@ -591,7 +589,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {isExpanded && (
         <div className="pb-1">
-          {visibleTasks.map((task) => {
+          {allTasks.map((task) => {
             const projectTaskIndex = allTasks.indexOf(task)
             const isSelected = selectedTaskId === task.id
             const opacity = !isSelected && config?.taskRecencyHighlight
@@ -687,11 +685,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               const isProjectPin = pin.item.type === 'project'
               const isSelected = isProjectPin
                 ? selectedProjectId === pin.project.id
-                  && projectTasks(pin.project).some(t => t.id === selectedTaskId && isHomeTask(t))
+                  && !projectTasks(pin.project).some(t => t.id === selectedTaskId)
                 : selectedTaskId === pin.task!.id
               const isDraggingPin = pinDragIndex === index
               const isPinExpanded = isProjectPin && expandedPinnedProjectIds.includes(pin.project.id)
-              const pinnedProjectTasks = isProjectPin ? projectTasks(pin.project).filter(t => !isHomeTask(t)) : []
+              const pinnedProjectTasks = isProjectPin ? projectTasks(pin.project) : []
               return (
                 <React.Fragment key={pin.key}>
                   {pinDropIndex === index && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}

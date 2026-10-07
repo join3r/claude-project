@@ -56,7 +56,6 @@ export default function ProjectSwitcher({
         })
       }
       for (const task of projectTasks(project)) {
-        if (task.system === 'home') continue
         taskResults.push({
           type: 'task',
           projectId: project.id,

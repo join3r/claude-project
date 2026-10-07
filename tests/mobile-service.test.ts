@@ -17,7 +17,7 @@ import {
 import type { MobilePairing, MobilePushRegistration } from '../src/main/mobile/pairings-store'
 import { b64uEncode, deviceId, type PhoneHello } from '../protocol/ts/index.ts'
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig, type MobileState } from '../src/shared/mobile'
-import { createHomeTask, type ProjectsData, type TabStatusValue } from '../src/shared/types'
+import type { ProjectsData, TabStatusValue } from '../src/shared/types'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 // ---- fakes -------------------------------------------------------------------
@@ -147,7 +147,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newChat?: 
   let projects: ProjectsData = options.projects ?? {
     projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/x',
-      tasks: [createHomeTask('p1').task, {
+      tasks: [{
         id: 't1', name: 'fix', tabs: { left: [{ id: 'tab1', type: 'claude', title: 'Claude' }] },
         activeTab: { left: 'tab1' }
       }]

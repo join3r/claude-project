@@ -33,9 +33,16 @@ function legacyTask(id: string, name: string, left: Tab[], extra: Partial<Legacy
   }
 }
 
-function legacyHome(projectId: string): LegacyTask {
-  const homeTab = tab(`home-tab-${projectId}`, 'home', 'Home', { system: 'home' })
-  return { ...legacyTask(`home-task-${projectId}`, 'Home', [homeTab]), system: 'home', lastInteractedAt: 1_000 }
+/** The Home tab builds before the Home page wrote; `TabType` no longer has 'home'. */
+function homeTab(projectId: string): Tab {
+  return { id: `home-tab-${projectId}`, type: 'home', title: 'Home', system: 'home' } as unknown as Tab
+}
+
+const isHomeTab = (t: Tab): boolean => (t as { type: string }).type === 'home'
+
+/** A Home task; `extra` are tabs the user opened in it next to the Home tab. */
+function legacyHome(projectId: string, extra: Tab[] = []): LegacyTask {
+  return { ...legacyTask(`home-task-${projectId}`, 'Home', [homeTab(projectId), ...extra]), system: 'home', lastInteractedAt: 1_000 }
 }
 
 const inbox = { visitedAt: 5_000, eventAt: 6_000, attentionAt: 6_000, settledAt: 7_000 }
@@ -100,7 +107,8 @@ function legacyData(): Record<string, unknown> {
     ssh: { host: 'example.test', port: 22, username: 'dev', remoteDir: '/srv/app' },
     lastTaskId: 'home-task-p-ssh',
     tasks: [
-      legacyHome('p-ssh'),
+      // A Claude Code tab opened in Home survives as a task in `main`.
+      legacyHome('p-ssh', [tab('tab-home-cc', 'claude', 'Claude Code', { sessionId: 's-home' })]),
       legacyTask('t-ssh', 'Metrics', [
         tab('tab-s-1', 'claude', 'Claude Code', { sessionId: 's-s1' }),
         tab('tab-s-2', 'claude', 'Claude Code', { sessionId: 's-s2' })
@@ -145,8 +153,9 @@ function stream(data: ProjectsData, projectId: string, streamId: string) {
 /**
  * What must hold for any legacy snapshot: every tab lands in exactly one task and
  * keeps its fields, every legacy task is a stream with the same id, name and
- * worktree, Inbox state and activity are copied to each task cut from it, the home
- * task sits in `main`, and running the migration again changes nothing.
+ * worktree, Inbox state and activity are copied to each task cut from it, the Home
+ * task is gone (any other tab it held is a task in `main`), and running the
+ * migration again changes nothing.
  */
 function expectLossless(raw: Record<string, unknown>): ProjectsData {
   const migrated = migrate(raw)
@@ -168,13 +177,18 @@ function expectLossless(raw: Record<string, unknown>): ProjectsData {
     const newTabs = projectTasks(next).flatMap(taskTabs)
     const newTabById = new Map(newTabs.map(t => [t.id, t]))
     expect(newTabById.size).toBe(newTabs.length)
-    const oldTabs = legacy.tasks.flatMap(t => [...(t.tabs?.left ?? []), ...(t.tabs?.right ?? [])])
+    // Every tab but Home's own, which went with the Home task.
+    const oldTabs = legacy.tasks
+      .flatMap(t => [...(t.tabs?.left ?? []), ...(t.tabs?.right ?? [])])
+      .filter(t => !isHomeTab(t))
     expect(newTabs).toHaveLength(oldTabs.length)
     for (const oldTab of oldTabs) expect(newTabById.get(oldTab.id)).toEqual(oldTab)
 
     for (const old of legacy.tasks) {
       if (old.system === 'home') {
-        expect(next.streams[0].tasks.map(t => t.id)).toContain(old.id)
+        const kept = [...(old.tabs?.left ?? []), ...(old.tabs?.right ?? [])].some(t => !isHomeTab(t))
+        if (kept) expect(next.streams[0].tasks.map(t => t.id)).toContain(old.id)
+        else expect(projectTasks(next).map(t => t.id)).not.toContain(old.id)
         continue
       }
       const s = next.streams.find(candidate => candidate.id === old.id)
@@ -210,11 +224,21 @@ describe('streams migration', () => {
     ])
   })
 
-  it('keeps the home task, as the only task of main', () => {
+  it('drops the Home task: main starts empty', () => {
     const main = stream(migrate(legacyData()), 'p-app', 'main-p-app')
     expect(main.name).toBe('main')
-    expect(main.tasks.map(t => t.id)).toEqual(['home-task-p-app'])
-    expect(main.tasks[0]).toMatchObject({ system: 'home', panes: [{ activeTabId: 'home-tab-p-app', width: 1 }] })
+    expect(main.tasks).toEqual([])
+  })
+
+  it('keeps tabs opened in Home as a task of main with the Home task id', () => {
+    const main = stream(migrate(legacyData()), 'p-ssh', 'main-p-ssh')
+    expect(main.tasks).toEqual([{
+      id: 'home-task-p-ssh',
+      name: 'Home',
+      mainTabId: 'tab-home-cc',
+      panes: [{ tabs: [expect.objectContaining({ id: 'tab-home-cc' })], activeTabId: 'tab-home-cc', width: 1 }],
+      lastInteractedAt: 1_000
+    }])
   })
 
   it('makes one task per agent tab; the one in front keeps the id and takes the other tabs', () => {

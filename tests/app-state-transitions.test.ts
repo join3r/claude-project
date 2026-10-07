@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   createDefaultWindowViewState,
-  createHomeTask,
   createMainStream,
   createTaskViewState,
   type PinnedItem,
@@ -148,15 +147,14 @@ describe('projectsData', () => {
   })
 
   it('removeTaskFromData retires a spent hidden project but keeps a normal one', () => {
-    const { task: home } = createHomeTask('p')
-    const hidden: Project = project('p', [home, task('t1')], { ephemeral: true })
+    const hidden: Project = project('p', [task('t1')], { ephemeral: true })
     const retired = removeTaskFromData(data([hidden]), 'p', 't1')
     expect(retired.projects).toEqual([])
     expect(retired.projectOrder).toEqual([])
 
     const normal: Project = { ...hidden, ephemeral: undefined }
     const kept = removeTaskFromData(data([normal]), 'p', 't1')
-    expect(projectTasks(kept.projects[0])).toEqual([home])
+    expect(projectTasks(kept.projects[0])).toEqual([])
   })
 
   it('removeTaskFromData drops a worktree stream with its last task, never main', () => {
@@ -261,11 +259,9 @@ describe('view state transitions', () => {
     expect(selectProjectView(next, null, null)).toMatchObject({ selectedProjectId: null, selectedTaskId: null })
   })
 
-  it('selectProjectHomeView puts the home tab in front', () => {
-    const { task: home } = createHomeTask('p')
-    const next = selectProjectHomeView(view(), 'p', home)
-    expect(next.selectedTaskId).toBe(home.id)
-    expect(next.taskStates[home.id].activeTab.left).toBe(paneTabs(home, 'left').find(t => t.system === 'home')!.id)
+  it('selectProjectHomeView selects the project with no task', () => {
+    const next = selectProjectHomeView(view({ selectedTaskId: 't' }), 'p')
+    expect(next).toMatchObject({ selectedProjectId: 'p', selectedTaskId: null, expandedProjectIds: ['p'] })
   })
 
   it('removeTaskView only clears the project selection when the owner retired', () => {
@@ -289,10 +285,8 @@ describe('view state transitions', () => {
     expect(writeSidebarToTask(view(), null, { fileBrowserActiveTab: 'notes' }).taskStates).toEqual({})
   })
 
-  it('sidebarForTask prefers saved state, then the home default, then the window', () => {
-    const { task: home } = createHomeTask('p')
+  it('sidebarForTask prefers saved state, then the window', () => {
     const base = view({ fileBrowserOpen: false, fileBrowserActiveTab: 'files' })
-    expect(sidebarForTask(base, home)).toEqual({ fileBrowserOpen: true, fileBrowserActiveTab: 'notes' })
     expect(sidebarForTask(base, task('t'))).toEqual({ fileBrowserOpen: false, fileBrowserActiveTab: 'files' })
     const saved = { ...base, taskStates: { t: { ...withActiveTab(taskState(task('t')), 'left', null), fileBrowserOpen: true } } }
     expect(sidebarForTask(saved, task('t')).fileBrowserOpen).toBe(true)

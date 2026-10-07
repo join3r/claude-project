@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBridge, CHAT_EVENT_INTERVAL_MS, type ChatPhone } from '../src/main/mobile/chat-bridge'
-import { createHomeTask, type ProjectsData, type Tab, type WorkspaceConfig } from '../src/shared/types'
+import type { ProjectsData, Tab, WorkspaceConfig } from '../src/shared/types'
 import type { ChatItem, ChatPrompt, ChatState } from '../src/shared/claude-chat'
 import type { AppMessage, ChatParams, ChatViewEvent } from '../protocol/ts/index.ts'
 import { FakeChats } from './helpers/fake-chats'
@@ -13,7 +13,6 @@ function projects(overrides: { hide?: boolean; tabs?: Tab[] } = {}): ProjectsDat
     projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: overrides.hide || undefined, aiToolArgs: { claude: '--verbose  --x' },
       tasks: [
-        { ...createHomeTask('p1').task, panes: undefined, tabs: { left: [{ id: 'tab-home-chat', type: 'claude-chat', title: 'Home', sessionId: 's' }] } },
         {
           id: 't1', name: 'fix', workspace: { worktreePath: '/wt/fix', relativeProjectPath: 'pkg' } as WorkspaceConfig,
           tabs: { left: overrides.tabs ?? [chatTab, { id: 'tab-term', type: 'terminal', title: 'zsh' }, { id: 'tab-new', type: 'claude-chat', title: 'New' }] },
@@ -82,8 +81,8 @@ describe('ChatBridge', () => {
     return who.messages.filter((m): m is ChatViewEvent => m.t === 'evt' && m.e === 'chat')
   }
 
-  it('answers not-found for unknown, hidden, home, non-chat and never-mounted tabs', async () => {
-    for (const tabId of ['nope', 'tab-term', 'tab-home-chat', 'tab-new']) {
+  it('answers not-found for unknown, hidden, non-chat and never-mounted tabs', async () => {
+    for (const tabId of ['nope', 'tab-term', 'tab-new']) {
       expect(await req('chat.open', { tabId })).toMatchObject({ ok: false, error: { code: 'not-found' } })
     }
     data = projects({ hide: true })

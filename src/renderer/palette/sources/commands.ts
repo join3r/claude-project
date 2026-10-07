@@ -2,7 +2,7 @@
 import { commandRegistry } from '../CommandRegistry'
 import type { AppCtx } from '../types'
 import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
-import { AI_TAB_TYPES, AI_TAB_META, isHomeTask, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
+import { AI_TAB_TYPES, AI_TAB_META, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
 import { claudeTabType } from '../../components/newTaskTabs'
 import { findStreamOfTask, findTaskInProject, taskTabs } from '../../../shared/streams'
@@ -15,7 +15,7 @@ function currentPinTargets(actions: any): { project: PinnedItem | null; task: Pi
   const projectTarget: PinnedItem | null = project ? { type: 'project', projectId: project.id } : null
   const task = findTaskInProject(project, selectedTaskId)
   const stream = findStreamOfTask(project, selectedTaskId)
-  const taskTarget: PinnedItem | null = task && stream && !isHomeTask(task)
+  const taskTarget: PinnedItem | null = task && stream
     ? { type: 'task', projectId: project.id, streamId: stream.id, taskId: task.id }
     : null
   return { project: projectTarget, task: taskTarget, isPinned }

@@ -778,7 +778,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
             </Group>
             <HelperText>
               Pinned, snoozed, unread and currently-open tasks are always kept, as is anything
-              with a running or waiting agent. Home tasks are never touched.
+              with a running or waiting agent.
             </HelperText>
 
             <FormGroup>

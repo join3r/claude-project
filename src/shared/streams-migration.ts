@@ -17,7 +17,11 @@
  * | Split layout                            | Dropped: every task has one pane                             |
  * | Task's Inbox state                      | Copied to each of its new tasks                              |
  * | Task pin                                | Pin of the new stream                                        |
- * | Home task                               | Kept as a task in `main` until step 3 removes it             |
+ * | Home task                               | Removed (Home is a project page); any other tab it held      |
+ * |                                         | becomes a task in `main` by the rules above                  |
+ *
+ * The Home task goes from new-shape data too (`dropHomeTasks`): builds between the
+ * streams migration and the Home page kept it as a `system: 'home'` task in `main`.
  */
 import { createMainStream, isAgentTabType, mainStreamId } from './types'
 import type {
@@ -48,6 +52,9 @@ export interface LegacyTask {
   inbox?: TaskInboxState
   system?: 'home'
 }
+
+/** A tab as builds with a Home task wrote it: the Home tab is `type: 'home'`, `system: 'home'`. */
+type MaybeHomeTab = Omit<Tab, 'type'> & { type: string; system?: string }
 
 export type LegacyProject = Omit<Project, 'streams' | 'lastStreamId'> & {
   tasks: LegacyTask[]
@@ -173,17 +180,21 @@ export function migrateLegacyTask(legacy: LegacyTask): Stream {
   }
 }
 
-/** The Home task in the new shape: one pane holding its tabs, kept in `main`. */
-function migrateHomeTask(legacy: LegacyTask): Task {
-  const tabs = legacyTabs(legacy)
-  const inherited = inheritedState(legacy)
-  return {
-    id: legacy.id,
-    name: legacy.name,
-    panes: singlePane(tabs, previouslyActive(legacy, tabs)),
-    system: 'home',
-    ...inherited
-  }
+function isHomeTab(tab: Tab): boolean {
+  const raw = tab as MaybeHomeTab
+  return raw.type === 'home' || raw.system === 'home'
+}
+
+/**
+ * What is left of a Home task once its Home tab is gone: nothing, or tasks for `main`
+ * cut from the tabs the user opened in it (a Claude Code tab, a terminal, ...),
+ * by the same rules as any legacy task. The MRU one keeps the Home task's id.
+ */
+function tasksFromHome(legacy: LegacyTask): Task[] {
+  const tabs = legacyTabs(legacy).filter(tab => !isHomeTab(tab))
+  if (tabs.length === 0) return []
+  const { system: _system, ...rest } = legacy
+  return tasksOf({ ...rest, tabs: { left: tabs } }).tasks
 }
 
 export function migrateLegacyProject(legacy: LegacyProject): Project {
@@ -192,7 +203,7 @@ export function migrateLegacyProject(legacy: LegacyProject): Project {
   const streams: Stream[] = []
   for (const task of legacyTasks) {
     if (!isRecord(task) || typeof task.id !== 'string') continue
-    if (task.system === 'home') homeTasks.push(migrateHomeTask(task))
+    if (task.system === 'home') homeTasks.push(...tasksFromHome(task))
     else streams.push(migrateLegacyTask(task))
   }
   const main = createMainStream(legacy.id, homeTasks)
@@ -219,6 +230,43 @@ function ensureMainStream(project: Project): Project {
   return { ...project, streams: [{ ...createMainStream(project.id), id }, ...project.streams] }
 }
 
+/** A new-shape task as builds before the Home page wrote it. */
+type MaybeHomeTask = Task & { system?: string }
+
+/**
+ * `project` without the `system: 'home'` task an earlier build kept in `main`; tabs
+ * the user opened in it besides Home survive as tasks in its place. A remembered
+ * selection pointing at a dropped id is cleared. Returns `project` itself when it
+ * holds no Home task.
+ */
+export function dropHomeTasks(project: Project): Project {
+  const isHome = (task: Task): boolean => (task as MaybeHomeTask).system === 'home'
+  if (!project.streams.some(stream => Array.isArray(stream.tasks) && stream.tasks.some(isHome))) return project
+  const dropped = new Set<string>()
+  const streams = project.streams.map((stream): Stream => {
+    if (!stream.tasks.some(isHome)) return stream
+    const tasks = stream.tasks.flatMap((task): Task[] => {
+      if (!isHome(task)) return [task]
+      const { system: _system, panes, ...rest } = task as MaybeHomeTask
+      const tabs = (Array.isArray(panes) ? panes : []).flatMap(pane => (Array.isArray(pane?.tabs) ? pane.tabs : []))
+      const replacement = tasksFromHome({ ...rest, tabs: { left: tabs }, activeTab: { left: panes?.[0]?.activeTabId ?? null } })
+      if (!replacement.some(candidate => candidate.id === task.id)) dropped.add(task.id)
+      return replacement
+    })
+    if (stream.lastTaskId && dropped.has(stream.lastTaskId)) {
+      const { lastTaskId: _last, ...plain } = stream
+      return { ...plain, tasks }
+    }
+    return { ...stream, tasks }
+  })
+  const lastTaskId = project.streams.find(stream => stream.id === project.lastStreamId)?.lastTaskId
+  if (lastTaskId && dropped.has(lastTaskId)) {
+    const { lastStreamId: _last, ...plain } = project
+    return { ...plain, streams }
+  }
+  return { ...project, streams }
+}
+
 /**
  * Every project in the new shape; `migrated` says whether any was legacy. `migratedStreamIds` is the set of streams cut
  * from legacy tasks — the only ids an old task pin can point at.
@@ -237,12 +285,12 @@ export function migrateProjects(raw: unknown[]): { projects: Project[]; migrated
       continue
     }
     const streams = Array.isArray(value.streams) ? value.streams as Stream[] : []
-    const project = ensureMainStream({
+    const project = dropHomeTasks(ensureMainStream({
       ...(value as unknown as Project),
       streams: streams
         .filter(stream => isRecord(stream) && typeof stream.id === 'string')
         .map(stream => (Array.isArray(stream.tasks) ? stream : { ...stream, tasks: [] }))
-    })
+    }))
     projects.push(project)
   }
   return { projects, migrated, migratedStreamIds }

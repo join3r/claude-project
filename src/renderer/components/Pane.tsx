@@ -8,7 +8,6 @@ import DiffTab from './DiffTab'
 import EditorTab from './EditorTab'
 import NotebookTab from './NotebookTab'
 import NoteTab from './NoteTab'
-import { ProjectHome } from './ProjectHome'
 import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
@@ -209,17 +208,6 @@ export default function Pane({
                 pane={pane}
                 effectiveTheme={effectiveTheme}
               />
-            )
-          }
-          if (tab.type === 'home') {
-            return (
-              <div
-                key={tab.id}
-                className="absolute inset-0 overflow-hidden"
-                style={{ display: taskVisible && tab.id === activeTabId ? 'flex' : 'none' }}
-              >
-                <ProjectHome projectId={projectId} />
-              </div>
             )
           }
           if (tab.type === 'note' && tab.noteId) {

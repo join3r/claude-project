@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef, type Dispatch, type MutableRe
 import {
   buildWindowViewState,
   createDefaultWindowViewState,
-  ensureHomeTasks,
   pruneUnusedTags,
   reconcileTaskViewState
 } from '../../../shared/types'
@@ -211,11 +210,10 @@ export function useAppStateCore(): AppStateCore {
       const projectsWithLifetime = hydratedProjectsData.projects.map(p =>
         backfillLifetimeStats(p, loadedNotes)
       )
-      const { projects: migratedProjects } = ensureHomeTasks(projectsWithLifetime)
-      const finalProjectsData = { ...hydratedProjectsData, projects: migratedProjects }
+      const finalProjectsData = { ...hydratedProjectsData, projects: projectsWithLifetime }
 
       const hydratedWindowViewState = buildWindowViewState(
-        migratedProjects,
+        projectsWithLifetime,
         hydratedConfig,
         loadedWindowViewState,
         finalProjectsData.tags

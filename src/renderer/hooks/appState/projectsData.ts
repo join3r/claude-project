@@ -5,7 +5,7 @@
  * unit-tested directly.
  */
 import { v4 as uuid } from 'uuid'
-import { createHomeTask, createMainStream, isSpentEphemeralProject, pinnedItemKey } from '../../../shared/types'
+import { createMainStream, isSpentEphemeralProject, pinnedItemKey } from '../../../shared/types'
 import type { PinnedItem, Project, ProjectsData, Stream, Tab, Tag, Task, WorkspaceConfig, WorkspaceDraft } from '../../../shared/types'
 import {
   addTaskToStream,
@@ -206,13 +206,12 @@ export function addTaskInDirectoryData(
   if (data.projects.some(p => p.id === ownerId)) {
     return appendTaskToProject(data, ownerId, task, placement)
   }
-  const { task: homeTask } = createHomeTask(ownerId)
   const project: Project = placeTask({
     id: ownerId,
     name: dirBasename(directory),
     directory,
     ephemeral: true,
-    streams: [createMainStream(ownerId, [homeTask])]
+    streams: [createMainStream(ownerId)]
   }, task, placement)
   return {
     ...data,
@@ -222,8 +221,8 @@ export function addTaskInDirectoryData(
 }
 
 /**
- * Drop a task; a hidden ad-hoc project left with nothing but its home task goes
- * with it in the same step.
+ * Drop a task; a hidden ad-hoc project left with no task goes with it in the
+ * same step.
  */
 export function removeTaskFromData(data: ProjectsData, projectId: string, taskId: string): ProjectsData {
   const withoutTask = data.projects.map(project =>

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { DEFAULT_CONFIG, createHomeTask, mainStreamId, type Project, type ProjectsData, type Task } from '../src/shared/types'
+import { DEFAULT_CONFIG, mainStreamId, type Project, type ProjectsData, type Task } from '../src/shared/types'
 import { projectTasks } from '../src/shared/streams'
 import { fixtureProject } from './helpers/streams-fixtures'
 import { AppProvider } from '../src/renderer/context/AppContext'
@@ -20,9 +20,8 @@ void React
  */
 
 function buildProjects(): Project[] {
-  const { task: home } = createHomeTask('p1')
   const work: Task = { id: 't1', name: 'Fix the thing', panes: [] }
-  return [fixtureProject({ id: 'p1', name: 'Alpha Project', directory: '/tmp/alpha', tasks: [home, work] })]
+  return [fixtureProject({ id: 'p1', name: 'Alpha Project', directory: '/tmp/alpha', tasks: [work] })]
 }
 
 let saved: ProjectsData[]
@@ -161,13 +160,13 @@ describe('Sidebar pins', () => {
     renderSidebar()
     const pinned = (await screen.findByText('Pinned')).parentElement!
     fireEvent.click(within(pinned).getByTitle('New task'))
-    await waitFor(() => expect(lastTasks()).toHaveLength(3))
-    expect(lastTasks()[2]).toMatchObject({ name: 'New Task' })
-    expect(lastTasks()[2].workspaceDraft).toBeUndefined()
+    await waitFor(() => expect(lastTasks()).toHaveLength(2))
+    expect(lastTasks()[1]).toMatchObject({ name: 'New Task' })
+    expect(lastTasks()[1].workspaceDraft).toBeUndefined()
 
     fireEvent.click(within(pinned).getByTitle('New workspace'))
-    await waitFor(() => expect(lastTasks()).toHaveLength(4))
-    expect(lastTasks()[3].workspaceDraft).toEqual({})
+    await waitFor(() => expect(lastTasks()).toHaveLength(3))
+    expect(lastTasks()[2].workspaceDraft).toEqual({})
   })
 
   it('adds a sibling task from a pinned task', async () => {
@@ -175,7 +174,7 @@ describe('Sidebar pins', () => {
     renderSidebar()
     const pinned = (await screen.findByText('Pinned')).parentElement!
     fireEvent.click(within(pinned).getByTitle('New task in Alpha Project'))
-    await waitFor(() => expect(lastTasks()).toHaveLength(3))
+    await waitFor(() => expect(lastTasks()).toHaveLength(2))
   })
 
   it('offers + Task and + Workspace under an expanded pinned project', async () => {
@@ -185,7 +184,7 @@ describe('Sidebar pins', () => {
     expect(within(pinned).queryByText('Workspace')).toBeNull()
     fireEvent.click(pinned.querySelector('[data-pin-key] button')!)
     fireEvent.click(within(pinned).getByText('Workspace'))
-    await waitFor(() => expect(lastTasks()[2]?.workspaceDraft).toEqual({}))
+    await waitFor(() => expect(lastTasks()[1]?.workspaceDraft).toEqual({}))
   })
 
   it('adds a workspace from a project\'s context menu', async () => {
@@ -193,7 +192,7 @@ describe('Sidebar pins', () => {
     await screen.findByText('Alpha Project')
     fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
     fireEvent.click(await screen.findByRole('button', { name: 'New workspace' }))
-    await waitFor(() => expect(lastTasks()[2]?.workspaceDraft).toEqual({}))
+    await waitFor(() => expect(lastTasks()[1]?.workspaceDraft).toEqual({}))
   })
 })
 
@@ -203,7 +202,7 @@ describe('revealFolder / projectDeletePrompt', () => {
     name: 'Alpha',
     directory: '/repo',
     tasks: [
-      { ...projectTasks(buildProjects()[0])[1], id: 'w1', workspace: { worktreePath: '/wt/feat', branchName: 'feat', baseBranch: 'main', relativeProjectPath: 'pkg' } }
+      { ...projectTasks(buildProjects()[0])[0], id: 'w1', workspace: { worktreePath: '/wt/feat', branchName: 'feat', baseBranch: 'main', relativeProjectPath: 'pkg' } }
     ]
   })
   it('uses the workspace for a workspace task and the project dir otherwise', () => {

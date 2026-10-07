@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { PushEmitter } from '../src/main/mobile/push-emitter'
 import type { MobilePushRegistration } from '../src/main/mobile/pairings-store'
 import type { PushOutcome } from '../src/main/mobile/mobile-service'
-import { createHomeTask, type ProjectsData } from '../src/shared/types'
+import type { ProjectsData } from '../src/shared/types'
 import type { ChatPrompt } from '../src/shared/claude-chat'
 import { b64uDecode, b64uEncode, openPushPayload, type PushPayload } from '../protocol/ts/index.ts'
 import { FakeChats } from './helpers/fake-chats'
@@ -18,7 +18,7 @@ function projects(hide = false): ProjectsData {
   return {
     projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hide || undefined,
-      tasks: [createHomeTask('p1').task, {
+      tasks: [{
         id: 't1', name: 'fix-auth',
         tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 's' }, { id: 'tab-term', type: 'terminal', title: 'zsh' }] },
         activeTab: { left: 'tab-chat' }

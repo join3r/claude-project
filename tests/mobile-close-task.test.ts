@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { closeTask, findClosableTab, removeTabFromData, type CloseTaskDeps } from '../src/main/mobile/close-task'
-import { createHomeTask, type ProjectsData, type Stream, type WorkspaceDeleteResult } from '../src/shared/types'
-import { findTaskInProject, paneTabs, projectTasks, removeTaskFromProject } from '../src/shared/streams'
+import { type ProjectsData, type Stream, type WorkspaceDeleteResult } from '../src/shared/types'
+import { findTaskInProject, paneTabs, removeTaskFromProject } from '../src/shared/streams'
 import { fixtureProject, fixtureTask, type FixtureTask } from './helpers/streams-fixtures'
 
 const workspace = { worktreePath: '/src/api/.worktrees/fix', branchName: 'fix', baseBranch: 'main', relativeProjectPath: '' }
 
 /** `t1` with a `workspace` sits alone in a worktree stream; without one, in `main`. */
 function data(task: Partial<FixtureTask> = {}, hidden = false, streams: Stream[] = []): ProjectsData {
-  const home = createHomeTask('p1').task
   return {
     projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/src/api', hideFromMobile: hidden || undefined,
-      tasks: [home, {
+      tasks: [{
         id: 't1', name: 'fix',
         tabs: {
           left: [{ id: 'tab1', type: 'claude-chat', title: 'Claude', sessionId: 's1' }, { id: 'ed1', type: 'editor', title: 'a.ts' }],
@@ -58,10 +57,8 @@ describe('closeTask (SPEC.md §8.7)', () => {
     expect(calls).toEqual(['remove t1'])
   })
 
-  it('refuses unknown, home and hidden tasks', async () => {
-    const home = projectTasks(data().projects[0])[0].id
+  it('refuses unknown and hidden tasks', async () => {
     expect(await closeTask(deps(data()).d, { taskId: 'nope' })).toMatchObject({ ok: false, code: 'not-found' })
-    expect(await closeTask(deps(data()).d, { taskId: home })).toMatchObject({ ok: false, code: 'not-found' })
     expect(await closeTask(deps(data({}, true)).d, { taskId: 't1' })).toMatchObject({ ok: false, code: 'not-found' })
   })
 

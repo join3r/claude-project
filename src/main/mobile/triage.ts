@@ -1,4 +1,4 @@
-import { isHomeTask, type ProjectsData, type Task, type TaskInboxState } from '../../shared/types'
+import type { ProjectsData, Task, TaskInboxState } from '../../shared/types'
 import { isSettled, isSnoozed, isUnread } from '../../shared/inbox-state'
 import {
   inboxSettled,
@@ -45,7 +45,7 @@ export function triageTaskInData(data: ProjectsData, params: TaskTriageParams, n
   for (const project of data.projects) {
     const task = findTaskInProject(project, params.taskId)
     if (!task) continue
-    if (!isVisibleOnMobile(project) || isHomeTask(task)) break
+    if (!isVisibleOnMobile(project)) break
     const inbox = nextInbox(task, params, now)
     if (!inbox) return { ok: true, data, changed: false }
     const next: ProjectsData = {

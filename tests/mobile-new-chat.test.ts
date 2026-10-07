@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { addChatTab } from '../src/main/mobile/new-chat'
-import { createHomeTask, type Project, type ProjectsData } from '../src/shared/types'
-import { findTaskInProject, paneTabs, projectTasks } from '../src/shared/streams'
+import { type Project, type ProjectsData } from '../src/shared/types'
+import { findTaskInProject, paneTabs } from '../src/shared/streams'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 function data(extra: Partial<Project> = {}): ProjectsData {
-  const home = createHomeTask('p1').task
   return {
     projects: [fixtureProject({
       id: 'p1', name: 'api', directory: '/src/api', ...extra,
-      tasks: [home, {
+      tasks: [{
         id: 't1', name: 'fix-auth',
         tabs: { left: [{ id: 'tab-term', type: 'terminal', title: 'zsh' }], right: [{ id: 'tab-r', type: 'browser', title: 'Browser' }] },
         activeTab: { left: 'tab-term', right: 'tab-r' }
@@ -43,10 +42,8 @@ describe('addChatTab (SPEC.md §8.2)', () => {
     expect(paneTabs(old, 'left')).toHaveLength(1)
   })
 
-  it('refuses unknown and home tasks, hidden projects and shell-command projects', () => {
-    const home = projectTasks(data().projects[0])[0].id
+  it('refuses unknown tasks, hidden projects and shell-command projects', () => {
     expect(addChatTab(data(), 'nope')).toMatchObject({ ok: false, code: 'not-found' })
-    expect(addChatTab(data(), home)).toMatchObject({ ok: false, code: 'not-found' })
     expect(addChatTab(data({ hideFromMobile: true }), 't1')).toMatchObject({ ok: false, code: 'not-found' })
     expect(addChatTab(data({ shellCommand: { command: 'npm run dev' } }), 't1')).toMatchObject({ ok: false, code: 'unsupported' })
   })

@@ -7,6 +7,7 @@ import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import { localProjectFolder } from '../../shared/external-editors'
 import Pane from './Pane'
+import { ProjectHome } from './ProjectHome'
 import TunnelPopup from './TunnelPopup'
 import UnsavedChangesModal from './UnsavedChangesModal'
 import StateSyncErrorModal from './StateSyncErrorModal'
@@ -256,7 +257,7 @@ export default function ContentArea(): React.ReactElement {
 
     const cleanupClose = window.api.onMenuCloseTab(() => {
       const info = getActiveTabInfo()
-      if (selectedProjectId && selectedTaskId && info?.activeTabId && info.activeTab?.type !== 'home') {
+      if (selectedProjectId && selectedTaskId && info?.activeTabId) {
         // May park on the unsaved-changes dialog before anything is removed.
         void removeTab(selectedProjectId, selectedTaskId, info.pane, info.activeTabId)
       }
@@ -362,11 +363,7 @@ export default function ContentArea(): React.ReactElement {
 
   const selectedTunnelState = selectedProjectId ? tunnelStates[selectedProjectId] : undefined
   const selectedTaskView = selectedTask ? getTaskViewState(selectedTask) : null
-  const windowBarTitle = buildWindowTitle(
-    selectedProject?.name ?? null,
-    selectedTask?.name ?? null,
-    selectedTask?.system === 'home'
-  )
+  const windowBarTitle = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null)
   const selectedWorkspace = taskWorkspace(selectedProject, selectedTask?.id)
   const selectedProjectDir = selectedWorkspace
     ? joinWorkspaceDir(selectedWorkspace.worktreePath, selectedWorkspace.relativeProjectPath)
@@ -411,7 +408,7 @@ export default function ContentArea(): React.ReactElement {
         <div className="content-toolbar flex items-center justify-between gap-1.5 px-2 py-0.5 bg-surface-2 border-b-[0.5px] border-border [-webkit-app-region:drag]">
           <div className="flex items-center gap-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm text-text-muted" title={windowBarTitle}>
             <span className="text-text font-medium">{selectedProject.name}</span>
-            {selectedTask && selectedTask.system !== 'home' && (
+            {selectedTask && (
               <>
                 <span className="text-text-muted"> / </span>
                 <span className="text-text-muted">{selectedTask.name}</span>
@@ -510,6 +507,12 @@ export default function ContentArea(): React.ReactElement {
 
       {!hasProjectSelection && (
         <div className="flex-1 flex items-center justify-center text-text-muted text-md">Select or create a task to get started</div>
+      )}
+      {/* A project with no task selected shows its Home page (clicking the project name lands here). */}
+      {selectedProject && !selectedTask && (
+        <div className="flex-1 min-h-0 flex overflow-hidden" data-testid="project-home">
+          <ProjectHome projectId={selectedProject.id} />
+        </div>
       )}
       {projects.flatMap((project) =>
         projectTasks(project).map((task) => {

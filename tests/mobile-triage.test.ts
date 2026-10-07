@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { triageTaskInData } from '../src/main/mobile/triage'
-import { createHomeTask, type Project, type ProjectsData, type TaskInboxState } from '../src/shared/types'
-import { findTaskInProject, projectTasks } from '../src/shared/streams'
+import { type Project, type ProjectsData, type TaskInboxState } from '../src/shared/types'
+import { findTaskInProject } from '../src/shared/streams'
 import { fixtureProject, type FixtureTask } from './helpers/streams-fixtures'
 
 const NOW = 1_790_000_000_000
@@ -11,7 +11,7 @@ function task(id: string, inbox?: TaskInboxState): FixtureTask {
 }
 
 function project(id: string, tasks: FixtureTask[], extra: Partial<Project> = {}): Project {
-  return fixtureProject({ id, directory: `/src/${id}`, tasks: [createHomeTask(id).task, ...tasks], ...extra })
+  return fixtureProject({ id, directory: `/src/${id}`, tasks, ...extra })
 }
 
 function data(inbox?: TaskInboxState): ProjectsData {
@@ -76,7 +76,5 @@ describe('triageTaskInData (SPEC.md §8.11)', () => {
     const start = data()
     expect(triageTaskInData(start, { taskId: 'nope', action: 'read' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
     expect(triageTaskInData(start, { taskId: 'h1', action: 'settle' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
-    const home = projectTasks(start.projects[0])[0].id
-    expect(triageTaskInData(start, { taskId: home, action: 'settle' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
   })
 })

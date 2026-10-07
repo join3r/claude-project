@@ -2,10 +2,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
 import { render, fireEvent, screen, act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { DEFAULT_CONFIG, createHomeTask, type Project, type ProjectNote, type Task } from '../src/shared/types'
+import { DEFAULT_CONFIG, type Project, type ProjectNote, type Task } from '../src/shared/types'
 import { resolveLandingTaskId } from '../src/renderer/hooks/taskNavigation'
 import { useAppState } from '../src/renderer/hooks/useAppState'
-import { findTaskInProject, paneTabs, projectTasks, withLastTask } from '../src/shared/streams'
+import { findTaskInProject, paneTabs, withLastTask } from '../src/shared/streams'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 // React import is required by the JSX runtime under vitest's default transform.
@@ -27,20 +27,18 @@ function note(id: string, name: string): ProjectNote {
 }
 
 function buildProjects(): Project[] {
-  const { task: homeA } = createHomeTask('proj-a')
-  const { task: homeB } = createHomeTask('proj-b')
   return [
     withLastTask(fixtureProject({
       id: 'proj-a',
       name: 'Project A',
       directory: '/tmp/a',
-      tasks: [homeA, task('task-a1', 'Task A1')]
+      tasks: [task('task-a1', 'Task A1')]
     }), 'task-a1'),
     withLastTask(fixtureProject({
       id: 'proj-b',
       name: 'Project B',
       directory: '/tmp/b',
-      tasks: [homeB, task('task-b1', 'Task B1')]
+      tasks: [task('task-b1', 'Task B1')]
     }), 'task-b1')
   ]
 }
@@ -63,14 +61,13 @@ describe('resolveLandingTaskId', () => {
     expect(resolveLandingTaskId(projectB, 'deleted-task')).toBe('task-b1')
   })
 
-  it('falls back to the home task when lastTaskId is stale', () => {
+  it('falls back to the first task of main when lastTaskId is stale', () => {
     const [, projectB] = buildProjects()
     const withoutLast: Project = {
       ...projectB,
       streams: projectB.streams.map(stream => (stream.id === projectB.lastStreamId ? { ...stream, lastTaskId: 'gone' } : stream))
     }
-    const homeId = projectTasks(projectB).find(t => t.system === 'home')!.id
-    expect(resolveLandingTaskId(withoutLast, 'task-a1')).toBe(homeId)
+    expect(resolveLandingTaskId(withoutLast, 'task-a1')).toBe('task-b1')
   })
 
   it('returns null for a missing project', () => {

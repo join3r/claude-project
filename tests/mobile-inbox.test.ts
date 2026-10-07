@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildInbox, inboxContentKey, type InboxTabLookup } from '../src/main/mobile/inbox'
-import { createHomeTask, mainStreamId, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue } from '../src/shared/types'
-import { findTaskInProject, paneTabs, projectTasks } from '../src/shared/streams'
+import { mainStreamId, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue } from '../src/shared/types'
+import { findTaskInProject, paneTabs } from '../src/shared/streams'
 import { fixtureProject, fixtureTask, type FixtureTask } from './helpers/streams-fixtures'
 import { emptyActivity, type AgentActivity } from '../src/shared/agent-activity'
 
@@ -16,9 +16,9 @@ function task(id: string, tabs: Tab[], extra: Omit<FixtureTask, 'id'> = {}): Fix
   return { id, name: `task ${id}`, tabs: { left: tabs, right: [] }, ...extra }
 }
 
-/** A project whose `main` stream holds its Home task first; workspace tasks get streams of their own. */
+/** A project whose `main` stream holds its tasks; workspace tasks get streams of their own. */
 function project(id: string, tasks: FixtureTask[], extra: Partial<Project> & { streams?: Stream[] } = {}): Project {
-  return fixtureProject({ id, name: `project ${id}`, directory: `/src/${id}`, tasks: [createHomeTask(id).task, ...tasks], ...extra })
+  return fixtureProject({ id, name: `project ${id}`, directory: `/src/${id}`, tasks, ...extra })
 }
 
 function data(projects: Project[], projectOrder = projects.map(p => p.id)): ProjectsData {
@@ -139,11 +139,6 @@ describe('buildInbox', () => {
     expect(label.endsWith('…')).toBe(true)
   })
 
-  it('never includes home tasks', () => {
-    const inbox = buildInbox(data([project('p1', [task('t1', [])])]), lookup(), DESKTOP, NOW)
-    expect(inbox.projects[0].tasks.map(t => t.id)).toEqual(['t1'])
-  })
-
   it('excludes projects hidden from mobile', () => {
     const inbox = buildInbox(
       data([project('p1', []), project('p2', [], { hideFromMobile: true })]),
@@ -154,7 +149,7 @@ describe('buildInbox', () => {
     expect(inbox.projects.map(p => p.id)).toEqual(['p1'])
   })
 
-  it('excludes spent ephemeral projects but keeps live ones without their home task', () => {
+  it('excludes spent ephemeral projects but keeps live ones', () => {
     const spent = project('spent', [], { ephemeral: true })
     const live = project('live', [task('t1', [tab('a', 'terminal')])], { ephemeral: true })
     const inbox = buildInbox(data([spent, live]), lookup(), DESKTOP, NOW)
@@ -178,7 +173,6 @@ describe('buildInbox', () => {
         { type: 'project', projectId: 'hidden' },
         { type: 'task', projectId: 'hidden', streamId: mainStreamId('hidden'), taskId: 'h1' },
         { type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 'gone' },
-        { type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: projectTasks(p1)[0].id },
         { type: 'project', projectId: 'p1' }
       ]
     }
@@ -241,7 +235,6 @@ describe('buildInbox', () => {
       pinnedItems: [
         { type: 'task', projectId: 'p1', streamId: 's1', taskId: 'a2' },
         { type: 'stream', projectId: 'p1', streamId: 's1' },
-        // main holds the Home task, which never goes out.
         { type: 'stream', projectId: 'p1', streamId: mainStreamId('p1') },
         { type: 'stream', projectId: 'p1', streamId: 'gone' }
       ]

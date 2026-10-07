@@ -1,4 +1,4 @@
-import { isHomeTask, pinnedItemKey, type PinnedItem, type ProjectsData } from '../../shared/types'
+import { pinnedItemKey, type PinnedItem, type ProjectsData } from '../../shared/types'
 import { findStreamOfTask } from '../../shared/streams'
 import { AppErrorCode, type PinSetParams } from '../../../protocol/ts/index.ts'
 import { isVisibleOnMobile } from './inbox'
@@ -26,7 +26,7 @@ export function setPinInData(data: ProjectsData, params: PinSetParams): PinSetRe
   if (params.taskId !== undefined) {
     const stream = findStreamOfTask(project, params.taskId)
     const task = stream?.tasks.find((t) => t.id === params.taskId)
-    if (!stream || !task || isHomeTask(task)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such task' }
+    if (!stream || !task) return { ok: false, code: AppErrorCode.NotFound, message: 'No such task' }
     item = { type: 'task', projectId: project.id, streamId: stream.id, taskId: task.id }
     shownBy.add(pinnedItemKey({ type: 'stream', projectId: project.id, streamId: stream.id }))
   }

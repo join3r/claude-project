@@ -13,7 +13,7 @@ import { ChatBridge } from '../src/main/mobile/chat-bridge'
 import { PushEmitter } from '../src/main/mobile/push-emitter'
 import { TabActivityRegistry } from '../src/main/tab-activity-registry'
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig } from '../src/shared/mobile'
-import { createHomeTask, type ProjectsData } from '../src/shared/types'
+import type { ProjectsData } from '../src/shared/types'
 import type { ChatPrompt } from '../src/shared/claude-chat'
 import { b64uEncode, openPushPayload, signPushRegister, type PushPayload } from '../protocol/ts/index.ts'
 import { startRelayServer, type RelayServer } from '../relay/src/server.ts'
@@ -40,7 +40,7 @@ const encryptor: SecretEncryptor = {
 const PROJECTS: ProjectsData = {
   projects: [fixtureProject({
     id: 'p1', name: 'api-server', directory: '/src/api',
-    tasks: [createHomeTask('p1').task, {
+    tasks: [{
       id: 't1', name: 'fix-auth',
       tabs: { left: [{ id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 'sess-e2e' }] },
       activeTab: { left: 'tab-chat' }

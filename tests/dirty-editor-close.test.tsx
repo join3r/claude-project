@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { createHomeTask, DEFAULT_CONFIG, type Project, type Tab } from '../src/shared/types'
+import { DEFAULT_CONFIG, type Project, type Tab } from '../src/shared/types'
 import { findTaskInProject, paneTabs, projectTasks } from '../src/shared/streams'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { formatShortcutForApp } from '../src/shared/shortcut-label'
@@ -68,7 +68,7 @@ vi.mock('@monaco-editor/react', async () => {
   return { default: MockEditor }
 })
 
-// The home task's tab is irrelevant here and drags in git/stat plumbing.
+// The project Home page is irrelevant here and drags in git/stat plumbing.
 vi.mock('../src/renderer/components/ProjectHome', () => ({
   ProjectHome: () => null
 }))
@@ -89,14 +89,13 @@ function editorTab(id: string, filePath: string): Tab {
 }
 
 function buildProjects(): Project[] {
-  const { task: home } = createHomeTask('p1')
   const task = fixtureTask({
     id: 't1',
     name: 'Task One',
     tabs: { left: [editorTab('tab-a', 'src/a.txt'), editorTab('tab-b', 'src/b.txt')] },
     activeTab: { left: 'tab-a' }
   })
-  return [fixtureProject({ id: 'p1', name: 'Project One', directory: '/project', tasks: [home, task] })]
+  return [fixtureProject({ id: 'p1', name: 'Project One', directory: '/project', tasks: [task] })]
 }
 
 let app: AppActions

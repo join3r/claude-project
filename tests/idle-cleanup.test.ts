@@ -27,7 +27,6 @@ function makeTask(id: string, opts?: {
   inbox?: TaskInboxState
   workspace?: boolean
   aiTabIds?: string[]
-  home?: boolean
 }): FixtureTask {
   return {
     id,
@@ -48,8 +47,7 @@ function makeTask(id: string, opts?: {
             relativeProjectPath: ''
           }
         }
-      : {}),
-    ...(opts?.home ? { system: 'home' as const } : {})
+      : {})
   }
 }
 
@@ -156,14 +154,6 @@ describe('cap ranking', () => {
     ]
     // maxTasks 2 puts only 'plain' over the cap; the workspaces hold the first two slots.
     expect(run(tasks, { byCount: { enabled: true, maxTasks: 2 } })).toEqual(['plain'])
-  })
-
-  it('never counts or deletes the home task', () => {
-    const tasks = [
-      makeTask('home', { daysIdle: 500, home: true }),
-      makeTask('stale', { daysIdle: 30 })
-    ]
-    expect(run(tasks, { byCount: { enabled: true, maxTasks: 1 } })).toEqual([])
   })
 
   it('uses the inbox event stamp when it is newer than the interaction stamp', () => {

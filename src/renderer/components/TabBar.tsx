@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useTabStatus } from '../context/TabStatusContext'
-import { isHomeTab, isRenamableTab, isShellCommandProject } from '../../shared/types'
+import { isRenamableTab, isShellCommandProject } from '../../shared/types'
 import type { Tab, TabType } from '../../shared/types'
 import { useMenuPosition } from '../hooks/useMenuPosition'
 import { getTabDropIndex } from './tabDrag'
@@ -265,7 +265,6 @@ export default function TabBar({
               onMouseDown={(event) => handleTabMouseDown(event, tab.id, index)}
               onContextMenu={(e) => {
                 e.preventDefault()
-                if (isHomeTab(tab)) return
                 setTabMenu({ tabId: tab.id, x: e.clientX, y: e.clientY })
               }}
             >
@@ -300,19 +299,17 @@ export default function TabBar({
               ) : (
                 <span className="overflow-hidden text-ellipsis">{tab.title}</span>
               )}
-              {!isHomeTab(tab) && (
-                <button
-                  className="bg-transparent border-0 text-text-muted cursor-pointer text-md px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    void removeTab(projectId, taskId, pane, tab.id)
-                  }}
-                  title={`Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`}
-                >
-                  &times;
-                </button>
-              )}
+              <button
+                className="bg-transparent border-0 text-text-muted cursor-pointer text-md px-0.5 rounded-sm shrink-0 leading-none hover:bg-surface-3 hover:text-text opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void removeTab(projectId, taskId, pane, tab.id)
+                }}
+                title={`Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`}
+              >
+                &times;
+              </button>
             </div>
           </React.Fragment>
         ))}
@@ -385,15 +382,13 @@ export default function TabBar({
                 {tab.type === 'claude' ? 'Open as chat' : 'Open in terminal'}
               </button>
             )}
-            {!isHomeTab(tab) && (
-              <button
-                type="button"
-                className={menuItemCls}
-                onClick={() => { void removeTab(projectId, taskId, pane, tab.id); close() }}
-              >
-                Close tab
-              </button>
-            )}
+            <button
+              type="button"
+              className={menuItemCls}
+              onClick={() => { void removeTab(projectId, taskId, pane, tab.id); close() }}
+            >
+              Close tab
+            </button>
           </div>
         </>
       )
