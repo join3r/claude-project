@@ -4,6 +4,7 @@ import { promptQuestions } from '../../shared/chat-prompts'
 import { summarizeTool } from '../../shared/agent-activity'
 import { b64uDecode, sealPushPayload, type PushPayload, type PushPayloadKind } from '../../../protocol/ts/index.ts'
 import { taskTabs } from '../../shared/streams'
+import { taskPlace } from '../../shared/project-label'
 import { isVisibleOnMobile } from './inbox'
 import type { MobilePushRegistration } from './pairings-store'
 import type { PushOutcome } from './mobile-service'
@@ -130,14 +131,13 @@ export class PushEmitter {
   }
 
   /**
-   * "project / task" for a chat tab on mobile ("project · stream / task" outside
+   * "project / task" for a chat tab on mobile ("project › stream / task" outside
    * `main`), or null when it isn't one (hidden, gone, archived).
    */
   private place(tabId: string): string | null {
     const found = findChatTab(this.deps.projects.peek(), tabId)
     if (!found) return null
-    const where = found.stream.isMain ? found.project.name : `${found.project.name} · ${found.stream.name}`
-    return `${where} / ${found.task.name}`
+    return `${taskPlace(found.project.name, found.stream)} / ${found.task.name}`
   }
 }
 

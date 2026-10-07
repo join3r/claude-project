@@ -1,6 +1,7 @@
 /** Small presentational pieces and status helpers shared by the sidebar tree. */
 import React, { useState } from 'react'
 import type { Project } from '../../../shared/types'
+import { projectSwatch, projectTile } from '../../../shared/project-label'
 import { dashboardIconUrl, type DashboardIconsMetadata } from '../dashboardIcons'
 import type { SidebarTaskState, TaskDropSlot } from './streamTree'
 
@@ -34,20 +35,6 @@ export const TASK_ROW_ML = 'ml-[64px]'
 /** Icon buttons in the sidebar header strip (search / filter / add). */
 export const headerIconCls = 'relative flex items-center bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)'
 
-export function getProjectInitials(name: string): string {
-  const trimmed = name.trim()
-  if (!trimmed) return '?'
-  const words = trimmed.split(/[\s\-_/]+/).filter(Boolean)
-  if (words.length >= 2) {
-    const a = words[0]?.replace(/[^a-zA-Z0-9]/g, '')[0]
-    const b = words[1]?.replace(/[^a-zA-Z0-9]/g, '')[0]
-    if (a && b) return (a + b).toUpperCase()
-  }
-  const letters = (words[0] ?? trimmed).replace(/[^a-zA-Z0-9]/g, '')
-  if (!letters) return '?'
-  return letters.slice(0, 2).toUpperCase()
-}
-
 export function ProjectIconSlot({
   project,
   theme,
@@ -61,6 +48,8 @@ export function ProjectIconSlot({
   const iconUrl = project.icon && !iconFailed
     ? dashboardIconUrl(project.icon, { theme, metadata: metadata ?? undefined })
     : null
+  const tile = projectTile(project)
+  const swatch = projectSwatch(tile, theme)
 
   return (
     <span className="w-5 shrink-0 flex items-center justify-center">
@@ -71,14 +60,15 @@ export function ProjectIconSlot({
           className="w-3.5 h-3.5 object-contain"
           onError={() => setIconFailed(true)}
         />
-      ) : project.emoji ? (
-        <span className="text-base leading-none">{project.emoji}</span>
+      ) : tile.emoji ? (
+        <span className="text-base leading-none">{tile.emoji}</span>
       ) : (
         <span
-          className="w-3.5 h-3.5 rounded-sm bg-surface-3 text-text-muted text-[8px] font-semibold leading-none flex items-center justify-center"
+          className="w-4 h-4 rounded-sm text-[8px] font-semibold leading-none flex items-center justify-center"
+          style={{ backgroundColor: swatch.bg, color: swatch.fg }}
           title={project.name}
         >
-          {getProjectInitials(project.name)}
+          {tile.text}
         </span>
       )}
     </span>

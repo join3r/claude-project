@@ -1,0 +1,222 @@
+{
+  "description": "Project tiles (§10): FNV-1a 32-bit of the UTF-8 project id, mod the palette length, picks the swatch; initials come from the name. Places join project and stream with \" › \".",
+  "palette": [
+    {
+      "name": "red",
+      "light": {
+        "bg": "#fde2e1",
+        "fg": "#b42318"
+      },
+      "dark": {
+        "bg": "#4a1d1b",
+        "fg": "#fca5a0"
+      }
+    },
+    {
+      "name": "orange",
+      "light": {
+        "bg": "#fde8d4",
+        "fg": "#b54708"
+      },
+      "dark": {
+        "bg": "#4a2a12",
+        "fg": "#fdba74"
+      }
+    },
+    {
+      "name": "amber",
+      "light": {
+        "bg": "#fbf0c8",
+        "fg": "#8a6100"
+      },
+      "dark": {
+        "bg": "#43360f",
+        "fg": "#fcd34d"
+      }
+    },
+    {
+      "name": "green",
+      "light": {
+        "bg": "#dcf3e2",
+        "fg": "#1f7a3d"
+      },
+      "dark": {
+        "bg": "#173d24",
+        "fg": "#86efac"
+      }
+    },
+    {
+      "name": "teal",
+      "light": {
+        "bg": "#d5f2ef",
+        "fg": "#0f766e"
+      },
+      "dark": {
+        "bg": "#123c39",
+        "fg": "#5eead4"
+      }
+    },
+    {
+      "name": "blue",
+      "light": {
+        "bg": "#dbe8fe",
+        "fg": "#1d4ed8"
+      },
+      "dark": {
+        "bg": "#1a2e55",
+        "fg": "#93c5fd"
+      }
+    },
+    {
+      "name": "violet",
+      "light": {
+        "bg": "#ebe3fd",
+        "fg": "#6d28d9"
+      },
+      "dark": {
+        "bg": "#33224f",
+        "fg": "#c4b5fd"
+      }
+    },
+    {
+      "name": "pink",
+      "light": {
+        "bg": "#fbe0ee",
+        "fg": "#be185d"
+      },
+      "dark": {
+        "bg": "#4a1a33",
+        "fg": "#f9a8d4"
+      }
+    }
+  ],
+  "tiles": [
+    {
+      "id": "p-stem",
+      "name": "stem-project",
+      "fnv1a32": 22764595,
+      "text": "SP",
+      "hue": 3
+    },
+    {
+      "id": "p-claude",
+      "name": "claude-project",
+      "fnv1a32": 4217202532,
+      "text": "CP",
+      "hue": 4
+    },
+    {
+      "id": "p-dmarc",
+      "name": "dmarc",
+      "fnv1a32": 2230340223,
+      "text": "DM",
+      "hue": 7
+    },
+    {
+      "id": "p-thumb",
+      "name": "thumb",
+      "fnv1a32": 1232513494,
+      "text": "TH",
+      "hue": 6
+    },
+    {
+      "id": "6f1c2e9a-3b7d-4c55-9e0a-1d2f3a4b5c6d",
+      "name": "DevTool",
+      "fnv1a32": 346330349,
+      "text": "DT",
+      "hue": 5
+    },
+    {
+      "id": "p-snake",
+      "name": "my_api server",
+      "fnv1a32": 3169144966,
+      "text": "MA",
+      "hue": 6
+    },
+    {
+      "id": "p-acronym",
+      "name": "APIServer",
+      "fnv1a32": 522316999,
+      "text": "AP",
+      "hue": 7
+    },
+    {
+      "id": "p-digits",
+      "name": "2fa-app",
+      "fnv1a32": 989696016,
+      "text": "2A",
+      "hue": 0
+    },
+    {
+      "id": "p-single",
+      "name": "x",
+      "fnv1a32": 301456014,
+      "text": "X",
+      "hue": 6
+    },
+    {
+      "id": "p-unicode",
+      "name": "école ßeta",
+      "fnv1a32": 57632593,
+      "text": "ÉSS",
+      "hue": 1
+    },
+    {
+      "id": "p-cjk",
+      "name": "日本語",
+      "fnv1a32": 318935244,
+      "text": "日本",
+      "hue": 4
+    },
+    {
+      "id": "p-symbols",
+      "name": " 🦀 ",
+      "fnv1a32": 2858286679,
+      "text": "🦀",
+      "hue": 7
+    },
+    {
+      "id": "p-empty",
+      "name": "",
+      "fnv1a32": 3616118955,
+      "text": "?",
+      "hue": 3
+    },
+    {
+      "id": "p-emoji",
+      "name": "rust-tools",
+      "emoji": "🦀",
+      "fnv1a32": 3786137904,
+      "text": "RT",
+      "hue": 0
+    }
+  ],
+  "places": [
+    {
+      "project": "claude-project",
+      "place": "claude-project"
+    },
+    {
+      "project": "claude-project",
+      "stream": {
+        "name": "main",
+        "isMain": true
+      },
+      "place": "claude-project"
+    },
+    {
+      "project": "claude-project",
+      "stream": {
+        "name": "0.6.0"
+      },
+      "place": "claude-project › 0.6.0"
+    },
+    {
+      "project": "thumb",
+      "stream": {
+        "name": "Chapter 1"
+      },
+      "place": "thumb › Chapter 1"
+    }
+  ]
+}

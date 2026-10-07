@@ -128,7 +128,7 @@ describe('PushEmitter (SPEC.md §7.6)', () => {
     const [task] = project.streams[0].tasks
     data = { ...data, projects: [{ ...project, streams: [{ ...project.streams[0], tasks: [] }, { id: 's-050', name: '0.5.0', tasks: [task] }] }] }
     chats.update('tab-chat', (s) => ({ ...s, pending: [bash] }))
-    expect(sent[0].payload.title).toBe('api · 0.5.0 / fix-auth')
+    expect(sent[0].payload.title).toBe('api › 0.5.0 / fix-auth')
   })
 
   it('stops watching on stop()', () => {

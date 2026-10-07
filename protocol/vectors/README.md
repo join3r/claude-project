@@ -125,3 +125,11 @@ Hex fields are lowercase hex. Strings that go on the wire (`cap`, `data`, `sig`)
 | `cap` | `{ sealKey, nonce, payload, cap }`: sealing `payload` (as `{"d","g","t","e"}` JSON in that key order) with `sealKey` and the fixed `nonce` gives exactly `cap`; opening `cap` gives `payload`. |
 | `payload` | `{ key, keyId, nonce, cases[] }`. Each case is `{ name, input, data, opened }`: the desktop seals `input` with `key`, `keyId` and the fixed `nonce` to exactly `data`; the phone opens `data` to `opened`. `opened` shows the cuts: title and body end in "…" at 120 and 400 characters, and the last case's body was shortened further so `data` fits in 3072 characters. |
 | `params[]` | `{ op, params, parsed }`: the desktop's `push.*` params parser. Unknown `kinds` are dropped. |
+
+## `project-tile.json` (§10)
+
+| field | meaning |
+|---|---|
+| `palette[]` | `{ name, light: { bg, fg }, dark: { bg, fg } }` in palette order, colours as `#rrggbb` |
+| `tiles[]` | `{ id, name, emoji?, fnv1a32, text, hue }`: `fnv1a32` is the hash of `id`'s UTF-8 bytes, `hue` the palette index, `text` the initials of `name`. The output `emoji` is the input one (trimmed), absent when there is none. Covers separators, camelCase, digits, a one-letter name, case mapping that grows (`ß`), a name with no letters, and an empty name. |
+| `places[]` | `{ project, stream?: { name, isMain? }, place }` |

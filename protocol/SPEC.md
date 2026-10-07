@@ -191,6 +191,7 @@ Desktop rules:
 - `pairing-uri.json`: object ↔ URI.
 - `app-messages.json`: sample valid messages, including unknown extra fields that must be ignored.
 - `fragments.json` and `chat-messages.json` (M2, §6.7).
+- `project-tile.json`: project tiles and places (§10).
 - The field layout of every file is in `protocol/vectors/README.md`. `protocol/vectors/official/noise-ik-25519-aesgcm-sha256.json` holds the IK entries from cacophony, snow and noise-c. The generated files are rewritten by `node protocol/ts/generate-vectors.ts`, and a test fails if they have drifted.
 
 The Swift `DevToolKit` tests load these files directly from `../../protocol/vectors`.
@@ -510,4 +511,13 @@ The desktop moved from Project › Task › Tab to **Project › Stream › Task
 - §8.4: `task.new` takes an optional `streamId`, defaulting to the stream last used. §8.6 (`workspace`, `"task.workspace"`) is gone.
 - §8.7: `task.close` archives, with the desktop's blockers (`working`, `unsaved`) instead of the worktree ones; a stream and its worktree outlive their tasks.
 - §8.10: `pin.set` takes an optional `streamId`.
-- The relay (§3), the pairing URI (§2, still `v: 1`), Noise (§4.2), chat (§6) and push (§7, payload `v: 1`) are unchanged. A push `title` names the stream when it isn't `main` (`project · stream / task`).
+- The relay (§3), the pairing URI (§2, still `v: 1`), Noise (§4.2), chat (§6) and push (§7, payload `v: 1`) are unchanged. A push `title` names the stream when it isn't `main` (`project › stream / task`, §10).
+
+## 10. Project tile (no wire format)
+
+Both apps show a project the same way wherever one of its tasks or streams appears outside the project's own screen: a tile, then `project › stream`. Nothing here goes on the wire; the inbox already carries the project's `id`, `name` and `emoji` (§4.4). `protocol/ts/project-tile.ts` implements it, and `protocol/vectors/project-tile.json` checks both apps.
+
+- **Tile content:** the project's `emoji` (trimmed) when it has one, else its initials. The initials are always derived, as a fallback.
+- **Initials:** split the name into words: runs of Unicode letters and numbers (general categories L* and N*); anything else separates words, and a run also breaks where a lowercase letter (Ll) is followed by an uppercase one (Lu), so `devTool` is two words. Two or more words give the first code point of the first two; one word its first two code points; no word the first code point of the whitespace-trimmed name; an empty name `?`. The result is uppercased with full case mapping (`ß` becomes `SS`, so it can be longer than two characters).
+- **Colour:** FNV-1a 32-bit (offset basis `0x811c9dc5`, prime `0x01000193`) over the UTF-8 bytes of the project `id`, modulo the palette length, indexes the palette in `project-tile.json` (8 swatches, each a light and a dark `bg`/`fg`). The palette's order is part of this spec. The desktop's dashboard `icon`, which the phone never sees, still wins over the tile on the desktop.
+- **Place:** `project › stream` (U+203A between single spaces), or just `project` when the stream is `main` or unknown. Push titles (§7.5) use it before ` / task`.

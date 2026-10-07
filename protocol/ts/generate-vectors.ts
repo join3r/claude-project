@@ -16,6 +16,7 @@ import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
 import { parseChatNewParams, parseChatNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
+import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
 
 /**
  * Writes `protocol/vectors/*.json` (§5). Every byte comes from fixed labels, so running
@@ -811,6 +812,38 @@ function push(): unknown {
   }
 }
 
+/** §10: a project's tile (initials and palette index) and its task place. */
+function projectTiles(): unknown {
+  const projects: { id: string; name: string; emoji?: string }[] = [
+    { id: 'p-stem', name: 'stem-project' },
+    { id: 'p-claude', name: 'claude-project' },
+    { id: 'p-dmarc', name: 'dmarc' },
+    { id: 'p-thumb', name: 'thumb' },
+    { id: '6f1c2e9a-3b7d-4c55-9e0a-1d2f3a4b5c6d', name: 'DevTool' },
+    { id: 'p-snake', name: 'my_api server' },
+    { id: 'p-acronym', name: 'APIServer' },
+    { id: 'p-digits', name: '2fa-app' },
+    { id: 'p-single', name: 'x' },
+    { id: 'p-unicode', name: 'école ßeta' },
+    { id: 'p-cjk', name: '日本語' },
+    { id: 'p-symbols', name: ' 🦀 ' },
+    { id: 'p-empty', name: '' },
+    { id: 'p-emoji', name: 'rust-tools', emoji: '🦀' }
+  ]
+  const places: { project: string; stream?: { name: string; isMain?: boolean }; place?: string }[] = [
+    { project: 'claude-project' },
+    { project: 'claude-project', stream: { name: 'main', isMain: true } },
+    { project: 'claude-project', stream: { name: '0.6.0' } },
+    { project: 'thumb', stream: { name: 'Chapter 1' } }
+  ]
+  return {
+    description: 'Project tiles (§10): FNV-1a 32-bit of the UTF-8 project id, mod the palette length, picks the swatch; initials come from the name. Places join project and stream with " › ".',
+    palette: PROJECT_TILE_PALETTE,
+    tiles: projects.map((project) => ({ ...project, fnv1a32: fnv1a32(project.id), ...projectTile(project) })),
+    places: places.map((c) => ({ ...c, place: taskPlace(c.project, c.stream) }))
+  }
+}
+
 export function buildVectors(): Record<string, string> {
   const files: Record<string, unknown> = {
     'noise-ik.json': noiseIk(),
@@ -820,7 +853,8 @@ export function buildVectors(): Record<string, string> {
     'app-messages.json': appMessages(),
     'fragments.json': fragments(),
     'chat-messages.json': chatMessages(),
-    'push.json': push()
+    'push.json': push(),
+    'project-tile.json': projectTiles()
   }
   return Object.fromEntries(Object.entries(files).map(([name, value]) => [name, JSON.stringify(value, null, 2) + '\n']))
 }
