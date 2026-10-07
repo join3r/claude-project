@@ -11,6 +11,7 @@ struct InboxView: View {
     /// The row whose Snooze swipe is asking for a preset.
     @State private var snoozing: InboxEntry?
     @AppStorage(InboxSettings.workingLastKey) private var workingLast = false
+    @State private var newTask: NewTaskTarget?
 
     var body: some View {
         // Wait times and snooze expiry are worked out against the clock; the
@@ -20,6 +21,14 @@ struct InboxView: View {
         }
         .navigationTitle("Inbox")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NewTaskToolbarButton(desktopIds: model.desktops.map(\.id), newTask: $newTask)
+            }
+        }
+        .sheet(item: $newTask) { target in
+            NewTaskSheet(target: target)
+        }
         .confirmationDialog(
             snoozing.map { "Snooze “\($0.task.name)”" } ?? "",
             isPresented: Binding(get: { snoozing != nil }, set: { if !$0 { snoozing = nil } }),

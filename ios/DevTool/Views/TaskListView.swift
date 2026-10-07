@@ -19,6 +19,11 @@ struct TaskListView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NewTaskToolbarButton(desktopIds: scopeDesktops.map(\.id), newTask: $newTask)
+            }
+        }
         .refreshable {
             await model.refresh(scopeDesktops.map(\.id))
         }
@@ -66,14 +71,14 @@ struct TaskListView: View {
                     }
                     if model.supports(DesktopFeature.taskNew, on: desktop.id) {
                         Button {
-                            newTask = NewTaskTarget(desktopId: desktop.id, project: project, workspace: false)
+                            newTask = NewTaskTarget(desktopId: desktop.id, projectId: project.id, workspace: false)
                         } label: {
                             Label("New task", systemImage: "plus")
                         }
                         .disabled(offline)
                         if model.supports(DesktopFeature.taskWorkspace, on: desktop.id) {
                             Button {
-                                newTask = NewTaskTarget(desktopId: desktop.id, project: project, workspace: true)
+                                newTask = NewTaskTarget(desktopId: desktop.id, projectId: project.id, workspace: true)
                             } label: {
                                 Label("New workspace", systemImage: "arrow.triangle.branch")
                             }
