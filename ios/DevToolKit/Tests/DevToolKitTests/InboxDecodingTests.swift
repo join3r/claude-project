@@ -23,7 +23,7 @@ import Testing
               "attentionAt": 1790000000000,
               "tabs": [{
                 "id": "tab1", "type": "claude-chat", "title": "Claude",
-                "status": "working", "since": 1790000000000, "activity": "Running Bash"
+                "status": "working", "since": 1790000000000, "activity": "Running Bash", "topic": "Fix the login redirect"
               }]
             }]
           }]
@@ -42,7 +42,7 @@ import Testing
         let tab = try #require(project.tasks.first?.tabs.first)
         #expect(tab.type == .claudeChat)
         #expect(tab.status == .working)
-        #expect(tab.activity == "Running Bash")
+        #expect(tab.activity == "Running Bash" && tab.topic == "Fix the login redirect")
         #expect(tab.since == 1_790_000_000_000)
     }
 

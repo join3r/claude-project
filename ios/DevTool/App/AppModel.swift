@@ -504,10 +504,10 @@ extension AppModel {
         cached.projects = [
             InboxProject(id: "p-ml", name: "model-eval", emoji: "🧪", tasks: [
                 InboxTask(id: "t-bench", name: "benchmark-suite", lastInteractedAt: lastSeen.unixMilliseconds - 300_000, tabs: [
-                    InboxTab(id: "o-1", type: .claude, title: "Claude Code", status: .working, since: lastSeen.unixMilliseconds - 600_000, activity: "Running pytest"),
+                    InboxTab(id: "o-1", type: .claude, title: "Claude Code", status: .working, since: lastSeen.unixMilliseconds - 600_000, activity: "Running pytest", topic: "Speed up the benchmark suite"),
                     InboxTab(id: "o-2", type: .terminal, title: "zsh", status: .idle, since: lastSeen.unixMilliseconds - 900_000),
                     InboxTab(id: "o-3", type: .claudeChat, title: "Claude", status: .attention, since: lastSeen.unixMilliseconds - 120_000,
-                             activity: "Wants to run pytest"),
+                             activity: "Wants to run pytest", topic: "Why is eval-42 flaky?"),
                 ]),
             ]),
         ]

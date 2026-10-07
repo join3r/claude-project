@@ -256,8 +256,8 @@ struct TabRow: View {
             TabTypeIcon(type: tab.type, status: tab.status)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(tab.title.isEmpty ? tab.type.displayName : tab.title)
-                        .lineLimit(1)
+                    Text(headline)
+                        .lineLimit(2)
                     Spacer(minLength: 8)
                     if let since = tab.since {
                         RelativeTime(date: Date(unixMilliseconds: since))
@@ -267,8 +267,8 @@ struct TabRow: View {
                 }
                 HStack(spacing: 6) {
                     StatusBadge(status: tab.status)
-                    if let activity = tab.activity, !activity.isEmpty {
-                        Text(activity)
+                    if let detail {
+                        Text(detail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -278,5 +278,27 @@ struct TabRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+    }
+
+    private var kind: String {
+        tab.title.isEmpty ? tab.type.displayName : tab.title
+    }
+
+    /// What the tab is about leads; "Claude" is only the kind of tab. A desktop
+    /// without `topic` gives the activity line instead.
+    private var headline: String {
+        if let topic = nonEmpty(tab.topic) { return topic }
+        return nonEmpty(tab.activity) ?? kind
+    }
+
+    /// The tab's kind, then what it is doing, minus whatever the headline already says.
+    private var detail: String? {
+        let parts = [kind, nonEmpty(tab.activity)].compactMap { $0 }.filter { $0 != headline }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func nonEmpty(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        return text
     }
 }

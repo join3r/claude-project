@@ -170,6 +170,17 @@ describe('buildInbox', () => {
     expect('activity' in tabs[2]).toBe(false)
   })
 
+  it("sends what a tab is about: Claude's session title, else the last prompt", () => {
+    const titled: AgentActivity = { ...emptyActivity(1), title: 'Fix the login redirect', lastPrompt: 'look at auth.ts' }
+    const prompted: AgentActivity = { ...emptyActivity(1), lastPrompt: 'why is CI red?' }
+    const t = task('t1', [tab('a', 'claude'), tab('b', 'claude-chat'), tab('c', 'pi')])
+    const inbox = buildInbox(data([project('p1', [t])]), lookup({}, { a: titled, b: prompted }), DESKTOP, NOW)
+    const tabs = inbox.projects[0].tasks[0].tabs
+    expect(tabs[0].topic).toBe('Fix the login redirect')
+    expect(tabs[1].topic).toBe('why is CI red?')
+    expect('topic' in tabs[2]).toBe(false)
+  })
+
   it('shortens long activity labels to one phone row', () => {
     const long: AgentActivity = { ...emptyActivity(1), lastMessage: 'x'.repeat(160) }
     const t = task('t1', [tab('a', 'claude')])

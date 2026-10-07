@@ -59,6 +59,8 @@ export interface InboxTab {
   status: InboxTabStatus
   since?: number
   activity?: string
+  /** What an agent tab's conversation is about: its session title, else the last prompt. */
+  topic?: string
 }
 
 export interface InboxTask {
@@ -336,6 +338,8 @@ function parseTab(value: unknown): InboxTab {
   if (since !== undefined) tab.since = since
   const activity = optStr(o, 'activity')
   if (activity !== undefined) tab.activity = activity
+  const topic = optStr(o, 'topic')
+  if (topic !== undefined) tab.topic = topic
   return tab
 }
 

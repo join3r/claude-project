@@ -55,6 +55,8 @@ function buildTab(tab: Tab & { type: MobileTabType }, lookup: InboxTabLookup): M
   const activity = lookup.activityOf(tab.id)
   const label = shortLabel(describeActivity(activity ?? undefined, status))
   if (label) out.activity = label
+  const topic = shortLabel(activity?.title ?? activity?.lastPrompt)
+  if (topic) out.topic = topic
   return out
 }
 

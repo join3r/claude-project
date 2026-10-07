@@ -231,7 +231,7 @@ function appMessages(): unknown {
           lastInteractedAt: 1790000000000, attentionAt: 1790000000000,
           eventAt: 1790000000000, unread: true,
           tabs: [
-            { id: 'tab1', type: 'claude-chat', title: 'Claude', status: 'working', since: 1790000000000, activity: 'Running Bash' },
+            { id: 'tab1', type: 'claude-chat', title: 'Claude', status: 'working', since: 1790000000000, activity: 'Running Bash', topic: 'Fix the login redirect' },
             { id: 'tab2', type: 'terminal', title: 'zsh', status: 'idle' }
           ]
         }, {

@@ -166,7 +166,7 @@ Desktop rules:
         "id": "…", "type": "claude-chat", "title": "Claude",
         "status": "working" | "attention" | "exited" | "idle",
         "since": 1790000000000,
-        "activity": "Running Bash"
+        "activity": "Running Bash", "topic": "Fix the login redirect"
       }]
     }]
   }],
@@ -178,6 +178,7 @@ Desktop rules:
 - A task's `status` is its one status: the strongest of its **status tabs** (its main tab, plus any agent tab) in the order `attention`, `working`, `exited`, else `idle`. An extra terminal's bell or exit lights only its own tab, never the task. `since` is when the task entered `status` (the oldest change among the status tabs in it), and `activity` the label of the first such tab that has one. The desktop Inbox and sidebar read the same status.
 - Only agent/terminal tab types are included in `tabs`: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. A tab's `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
 - `activity` (on a task or a tab) is an optional short label derived from `AgentActivity`.
+- `topic` (on a tab) is an optional line saying what an agent tab's conversation is about: Claude's session title, else the first line of its last prompt. The phone heads the tab's row with it, above the tab type.
 - The triage fields carry the desktop inbox's state for the task (§8.11). `eventAt` is the task's last event: a hook notification or stop, a terminal bell, a process exit. `unread: true` is present while the desktop counts the task unread. `settledAt` is present while the task is settled (an event after the settle un-settles it). `snoozedUntil` is present while a timed snooze hasn't passed at `generatedAt`, and `snoozeUntilAttention: true` while the task is snoozed until it needs the user. A desktop sends at most one of the two snooze fields, and drops `settledAt` from a snoozed task. A receiver treats `unread` and `snoozeUntilAttention` other than `true` as absent.
 - Archived streams and tasks are never sent, nor is anything inside an archived stream. Ephemeral-but-spent projects (no open task left) and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.

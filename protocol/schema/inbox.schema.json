@@ -87,7 +87,8 @@
         "title": { "type": "string" },
         "status": { "$ref": "#/$defs/status" },
         "since": { "$ref": "#/$defs/unixMs" },
-        "activity": { "type": "string", "description": "Short label derived from AgentActivity, e.g. \"Running Bash\"." }
+        "activity": { "type": "string", "description": "Short label derived from AgentActivity, e.g. \"Running Bash\"." },
+        "topic": { "type": "string", "description": "What an agent tab's conversation is about: Claude's session title, else the last prompt." }
       }
     }
   }

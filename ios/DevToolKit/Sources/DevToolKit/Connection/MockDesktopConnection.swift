@@ -703,11 +703,11 @@ public enum MockInbox {
                         InboxTab(id: "tab-5", type: .terminal, title: "npm run docs", status: .exited, since: ago(170)),
                     ]),
                     task("t-auth", "fix-auth", api050, lastInteractedAt: ago(3), attentionAt: ago(1), eventAt: ago(1), unread: true, tabs: [
-                        InboxTab(id: "tab-1", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Wants to run npm test"),
+                        InboxTab(id: "tab-1", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Wants to run npm test", topic: "Fix the flaky login test"),
                         InboxTab(id: "tab-2", type: .terminal, title: "zsh", status: .idle, since: ago(40)),
                     ]),
                     task("t-rate", "rate-limiter", api050, lastInteractedAt: ago(12), eventAt: ago(6), unread: true, tabs: [
-                        InboxTab(id: "tab-3", type: .claude, title: "Claude Code", status: .working, since: ago(4), activity: "Running Bash"),
+                        InboxTab(id: "tab-3", type: .claude, title: "Claude Code", status: .working, since: ago(4), activity: "Running Bash", topic: "Bump the API client to v3"),
                     ]),
                     task("t-flaky", "flaky-login-test", apiBugs, lastInteractedAt: ago(30), eventAt: ago(30), tabs: [
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),
@@ -715,7 +715,7 @@ public enum MockInbox {
                 ]),
                 InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin], tasks: [
                     task("t-charts", "usage-charts", webMain, lastInteractedAt: ago(25), tabs: [
-                        InboxTab(id: "tab-11", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Plan ready for review"),
+                        InboxTab(id: "tab-11", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Plan ready for review", topic: "Plan the settings page redesign"),
                         InboxTab(id: "tab-7", type: .terminal, title: "vite", status: .idle, since: ago(25)),
                     ]),
                     task("t-pi", "chart-colors", webMain, lastInteractedAt: ago(20), tabs: [
