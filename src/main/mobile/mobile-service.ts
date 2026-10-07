@@ -694,8 +694,9 @@ export class MobileService {
       sendFrame: (data) => {
         this.transport?.send({ t: 'frame', to: phoneId, data: b64uEncode(data) })
       },
-      onIncompatible: ({ update, deviceName }) => {
-        const name = this.deps.pairings.get(phoneId)?.name ?? deviceName ?? 'A phone'
+      onIncompatible: ({ update }) => {
+        // The hello's own deviceName is unauthenticated; only a paired phone's stored name is shown.
+        const name = this.deps.pairings.get(phoneId)?.name ?? 'A phone'
         this.incompatible.set(phoneId, { name, update, at: this.timers.now() })
         this.log(`handshake phone=${phoneId} result=incompatible update=${update}`)
         this.emitState()

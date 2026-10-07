@@ -237,8 +237,8 @@ describe('MobileService version refusals (SPEC.md §4.3)', () => {
 
     const stranger = env.frameFrom(phoneKeys(2).id)
     stranger.hooks.onIncompatible?.({ update: 'phone', deviceName: "Old iPhone" })
-    expect(env.service.getState().incompatible).toMatchObject({ name: 'Old iPhone', update: 'phone' })
-    expect(env.states.at(-1)?.incompatible?.name).toBe('Old iPhone')
+    expect(env.service.getState().incompatible).toMatchObject({ name: 'A phone', update: 'phone' })
+    expect(env.states.at(-1)?.incompatible?.name).toBe('A phone')
   })
 })
 
