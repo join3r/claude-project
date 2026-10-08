@@ -11,7 +11,7 @@ import {
 import { findTaskInProject, taskTabs } from '../src/shared/streams'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { useAppStateCore, usePersistence } from '../src/renderer/hooks/appState/useAppStateCore'
-import { useTaskInbox } from '../src/renderer/hooks/appState/useTaskInbox'
+import { useLeaveOnPutAway, useTaskInbox } from '../src/renderer/hooks/appState/useTaskInbox'
 import { useTabs } from '../src/renderer/hooks/appState/useTabs'
 import { useWindowLayout } from '../src/renderer/hooks/appState/useWindowLayout'
 import { useZoom } from '../src/renderer/hooks/appState/useZoom'
@@ -114,6 +114,30 @@ describe('useTaskInbox', () => {
     act(() => { hook.result.current.inbox.settleTask('p1', 't1') })
     await waitFor(() => expect(saved.length).toBeGreaterThan(0))
     expect(workTask(saved[saved.length - 1]).inbox?.settledAt).toBeTypeOf('number')
+  })
+})
+
+describe('useLeaveOnPutAway', () => {
+  it('leaves the task on screen for its project Home when it is settled or snoozed', async () => {
+    const selectProjectHome = vi.fn()
+    const hook = renderHook(() => {
+      const core = useAppStateCore()
+      const inbox = useTaskInbox(core)
+      return { core, putAway: useLeaveOnPutAway(core, inbox, selectProjectHome) }
+    })
+    await loaded(hook)
+
+    // Not on screen: the view stays.
+    act(() => { hook.result.current.putAway.settleTask('p1', 't1') })
+    expect(selectProjectHome).not.toHaveBeenCalled()
+    expect(workTask(hook.result.current.core.projectsData).inbox?.settledAt).toBeTypeOf('number')
+
+    act(() => {
+      hook.result.current.core.updateWindowViewState(prev => ({ ...prev, selectedProjectId: 'p1', selectedTaskId: 't1' }))
+    })
+    act(() => { hook.result.current.putAway.snoozeTask('p1', 't1', { until: Date.now() + 60_000 }) })
+    expect(selectProjectHome).toHaveBeenCalledWith('p1')
+    expect(workTask(hook.result.current.core.projectsData).inbox?.snoozedUntil).toBeTypeOf('number')
   })
 })
 

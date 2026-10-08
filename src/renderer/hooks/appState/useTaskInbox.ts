@@ -94,3 +94,35 @@ export function useTaskInbox(core: AppStateCore): TaskInboxActions {
     unsnoozeTask
   }
 }
+
+/**
+ * Settle and snooze that also leave the task when this window is looking at it:
+ * the task drops into a group the Inbox may keep folded, so it should not stay
+ * open with nothing in the sidebar marking it. The window goes to the project's
+ * Home. Only this window's own actions do this; a triage from the phone or
+ * another window leaves the view alone.
+ */
+export function useLeaveOnPutAway(
+  core: AppStateCore,
+  inbox: Pick<TaskInboxActions, 'settleTask' | 'snoozeTask'>,
+  selectProjectHome: (projectId: string) => void
+): Pick<TaskInboxActions, 'settleTask' | 'snoozeTask'> {
+  const { windowViewStateRef } = core
+  const { settleTask: settle, snoozeTask: snooze } = inbox
+
+  const leaveIfSelected = useCallback((projectId: string, taskId: string) => {
+    if (windowViewStateRef.current.selectedTaskId === taskId) selectProjectHome(projectId)
+  }, [windowViewStateRef, selectProjectHome])
+
+  const settleTask = useCallback((projectId: string, taskId: string) => {
+    settle(projectId, taskId)
+    leaveIfSelected(projectId, taskId)
+  }, [settle, leaveIfSelected])
+
+  const snoozeTask = useCallback((projectId: string, taskId: string, options: SnoozeOptions) => {
+    snooze(projectId, taskId, options)
+    leaveIfSelected(projectId, taskId)
+  }, [snooze, leaveIfSelected])
+
+  return { settleTask, snoozeTask }
+}
