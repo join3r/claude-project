@@ -59,7 +59,10 @@ final class ChatModel {
     /// Events that arrive while `chat.open` is in flight.
     @ObservationIgnored private var buffered: [ChatEvent] = []
     @ObservationIgnored private var opening = false
-    @ObservationIgnored private var openGeneration = 0
+    /// A new session or a seq gap came while `chat.open` was in flight: open again after it.
+    @ObservationIgnored private var reopen = false
+    /// Counts `run()` calls, so a superseded run's late cancellation doesn't stop the new one.
+    @ObservationIgnored private var runs = 0
     @ObservationIgnored private let log = Logger(subsystem: "sk.awantech.devtool", category: "chat")
     /// Tool-result images fetched this screen (`chat.image`), the largest copy of each.
     @ObservationIgnored private var images: [ChatImageRef: (side: Int, image: UIImage)] = [:]
@@ -79,22 +82,31 @@ final class ChatModel {
 
     /// Subscribes and opens. Returns when `stop()` is called or the task is cancelled.
     func run() async {
-        guard listener == nil, let connection = connection() else {
-            if connection() == nil { phase = .failed("This desktop isn't connected.") }
+        guard let connection = connection() else {
+            phase = .failed("This desktop isn't connected.")
             return
         }
+        // The screen came back before the last run's stop landed: take over its
+        // subscription instead of returning and letting that stop end it.
+        runs += 1
+        let run = runs
+        listener?.cancel()
         let stream = await connection.chatEvents()
-        listener = Task { [weak self] in
+        guard run == runs else { return }
+        let listener = Task { [weak self] in
             for await event in stream {
                 guard let self else { return }
                 self.handle(event)
             }
         }
+        self.listener = listener
         await open()
         await withTaskCancellationHandler {
-            await listener?.value
+            await listener.value
         } onCancel: {
-            Task { @MainActor [weak self] in self?.stop() }
+            Task { @MainActor [weak self] in
+                if self?.runs == run { self?.stop() }
+            }
         }
     }
 
@@ -110,25 +122,36 @@ final class ChatModel {
         }
     }
 
+    /// Opens the chat. Asked again while an open is in flight (a new session,
+    /// a seq gap), it opens once more after that one: its result may belong to
+    /// a session the desktop has already forgotten.
     private func open() async {
-        guard let connection = connection(), !opening else { return }
+        guard !opening else {
+            reopen = true
+            return
+        }
         opening = true
-        openGeneration += 1
-        let generation = openGeneration
+        defer { opening = false }
+        repeat {
+            reopen = false
+            await openOnce()
+        } while reopen
+    }
+
+    private func openOnce() async {
+        guard let connection = connection() else { return }
         buffered = []
         if state == nil { phase = .loading }
-        defer { opening = false }
         do {
             let result = try await connection.openChat(tabId: route.tabId)
-            guard generation == openGeneration else { return }
+            if reopen { return }
             var next = ChatState(open: result)
             // Events that raced the open: stale ones are ignored, later ones applied.
             let pending = buffered
             buffered = []
             for event in pending where next.apply(event) == .gap {
                 // Lost events while opening: try again.
-                opening = false
-                await open()
+                reopen = true
                 return
             }
             state = next
@@ -137,6 +160,7 @@ final class ChatModel {
             phase = .ready
             saveNow()
         } catch let error as DesktopConnectionError {
+            if reopen { return }
             switch error {
             case .desktopOffline, .notConnected, .connectionLost, .timeout:
                 if state == nil, let cached = dependencies.loadCache() {
@@ -151,6 +175,7 @@ final class ChatModel {
                 phase = .failed(error.localizedDescription)
             }
         } catch {
+            if reopen { return }
             phase = .failed(error.localizedDescription)
         }
     }
