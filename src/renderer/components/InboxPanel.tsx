@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react'
-import { AlarmClockOff, Check, ChevronRight, Clock, Inbox as InboxIcon, SquarePen, X } from 'lucide-react'
+import { AlarmClockOff, Check, Clock, Inbox as InboxIcon, SquarePen, X } from 'lucide-react'
 import type { AppConfig, Project, Task } from '../../shared/types'
 import { isEphemeralProject } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { RowActions, RowAction } from './ui'
 import ProjectTileBadge from './ProjectTileBadge'
+import { StateDot, TreeChevron } from './sidebar/SidebarParts'
+import type { SidebarTaskState } from './sidebar/streamTree'
 import {
   formatRelativeAge,
   formatWaitTime,
@@ -37,6 +39,8 @@ type Props = {
   theme: 'dark' | 'light'
   /** Settings → Sidebar: one list (default), or the open rows gathered by project. */
   layout?: AppConfig['inboxLayout']
+  /** Project tiles beside project names (Settings → Show project icons). */
+  showIcons?: boolean
 }
 
 type GroupKey = 'needsYou' | 'yourTurn' | 'working' | 'quiet' | 'settled' | 'snoozed'
@@ -72,21 +76,17 @@ function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey, agent: Tas
   return lastActivityAt(entry.task) > 0 ? null : 'no activity yet'
 }
 
-/**
- * Rows waiting on you get a left bar and a faint tint, so "your move" reads at a
- * glance whether or not you have already looked. Amber for a blocked agent
- * (question, permission), accent for one that finished and is waiting for your
- * reply. The bar is an inset shadow so it does not shift the row's content.
- */
-function turnClass(status: TabStatusValue, yourTurn: boolean, selected: boolean): string {
-  if (!yourTurn) return ''
-  if (status === 'attention') {
-    return `shadow-[inset_2px_0_0_var(--color-status-attention)] ${selected ? '' : 'bg-status-attention/10'}`
-  }
-  return `shadow-[inset_2px_0_0_var(--color-accent)] ${selected ? '' : 'bg-accent/10'}`
-}
-
 const TILE = 16
+
+/** The row's dot: the sidebar's colours for the same states. */
+const ROW_STATE: Record<GroupKey, SidebarTaskState> = {
+  needsYou: 'attention',
+  yourTurn: 'unread',
+  working: 'working',
+  quiet: null,
+  settled: null,
+  snoozed: null
+}
 
 function InboxRow({
   entry,
@@ -96,6 +96,7 @@ function InboxRow({
   now,
   theme,
   showProject,
+  showIcon,
   onSelect,
   onContextMenu,
   onSettle,
@@ -108,15 +109,17 @@ function InboxRow({
   selected: boolean
   now: number
   theme: 'dark' | 'light'
-  /** Tile and project name on the first line; the grouped layout's header says it instead. */
+  /** Project name on the first line; the grouped layout's header says it instead. */
   showProject: boolean
+  /** The project's tile beside its name (Settings → Show project icons). */
+  showIcon: boolean
   onSelect: () => void
   onContextMenu: (e: React.MouseEvent) => void
   onSettle: () => void
   onSnooze: (e: React.MouseEvent) => void
   onClose: () => void
 }): React.ReactElement {
-  const { task, project, stream, unread, yourTurn } = entry
+  const { task, project, stream, unread } = entry
   const activity = lastActivityAt(task)
   const working = group === 'working'
   const needsYou = group === 'needsYou'
@@ -150,14 +153,13 @@ function InboxRow({
   )
 
   // Lines two and three line up with the project name, past the tile.
-  const indent = showProject ? 'pl-[22px]' : ''
+  const indent = showProject && showIcon ? 'pl-[22px]' : ''
 
   return (
     <div
       className={[
-        'group mx-1.5 px-2 py-1.5 rounded-md cursor-pointer text-sm text-text',
+        'group flex gap-2 mx-1.5 px-2 py-1.5 rounded-md cursor-pointer text-sm text-text',
         'transition-colors duration-(--motion-fast)',
-        turnClass(entry.status, yourTurn, selected),
         working && !selected ? 'opacity-50 hover:opacity-100' : '',
         selected ? 'bg-sel' : 'hover:bg-surface-3'
       ].join(' ')}
@@ -167,9 +169,11 @@ function InboxRow({
       data-testid="inbox-row"
       data-task-id={task.id}
     >
+      <span className="flex items-center h-[18px] shrink-0"><StateDot state={ROW_STATE[group]} hollow /></span>
+      <div className="flex-1 min-w-0">
       {placeLine && (
         <div className="flex items-center gap-1.5 min-h-[18px]">
-          {showProject && <ProjectTileBadge project={project} theme={theme} size={TILE} />}
+          {showProject && showIcon && <ProjectTileBadge project={project} theme={theme} size={TILE} />}
           <span
             className="flex items-center gap-1 min-w-0 flex-1 text-xs text-text-muted overflow-hidden whitespace-nowrap"
             data-testid="inbox-row-place"
@@ -220,18 +224,24 @@ function InboxRow({
           {subtitle}
         </div>
       )}
+      </div>
     </div>
   )
 }
 
 /** The grouped layout's header: the project's tile and name. */
-function ProjectHeader({ project, theme, count }: { project: Project; theme: 'dark' | 'light'; count: number }): React.ReactElement {
+function ProjectHeader({ project, theme, count, showIcon }: {
+  project: Project
+  theme: 'dark' | 'light'
+  count: number
+  showIcon: boolean
+}): React.ReactElement {
   return (
     <div
       className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 text-xs overflow-hidden whitespace-nowrap"
       data-testid="inbox-project-header"
     >
-      <ProjectTileBadge project={project} theme={theme} size={TILE} />
+      {showIcon && <ProjectTileBadge project={project} theme={theme} size={TILE} />}
       <span className="font-semibold text-text overflow-hidden text-ellipsis min-w-0">{project.name}</span>
       <span className="text-2xs text-text-subtle">{count}</span>
     </div>
@@ -254,20 +264,15 @@ function GroupHeader({
   return (
     <div
       className={[
-        'flex items-center gap-1 px-3 pt-2 pb-1 text-2xs font-bold uppercase tracking-[0.06em] text-text-muted',
+        'flex items-center gap-1.5 px-3 pt-2.5 pb-1 text-2xs uppercase tracking-[0.08em] text-text-subtle',
         collapsible ? 'cursor-pointer hover:text-text transition-colors duration-(--motion-fast)' : ''
       ].join(' ')}
       onClick={onToggle}
       data-testid="inbox-group-header"
     >
-      {collapsible && (
-        <ChevronRight
-          size={11}
-          className={`transition-transform duration-(--motion-fast) ${collapsed ? '' : 'rotate-90'}`}
-        />
-      )}
+      {collapsible && <TreeChevron open={!collapsed} />}
       <span>{label}</span>
-      <span className="text-text-subtle font-normal">{count}</span>
+      <span className="tracking-normal tabular-nums">{count}</span>
     </div>
   )
 }
@@ -286,7 +291,8 @@ export default function InboxPanel({
   activities,
   now,
   theme,
-  layout = 'flat'
+  layout = 'flat',
+  showIcons = false
 }: Props): React.ReactElement {
   // Fold state lives with the panel, as it always has for Snoozed and Done for now.
   // Working is never folded: the task you just sent a prompt to moves there and
@@ -327,6 +333,7 @@ export default function InboxPanel({
       now={now}
       theme={theme}
       showProject={showProject}
+      showIcon={showIcons}
       onSelect={() => onSelectTask(entry.project.id, entry.task)}
       onContextMenu={(e) => onTaskContextMenu(e, entry.project.id, entry.task.id)}
       onSettle={() => onSettle(entry.project.id, entry.task.id)}
@@ -375,7 +382,7 @@ export default function InboxPanel({
       {grouped ? (<>
         {projectGroups.map(({ project, entries }) => (
           <div key={project.id} data-testid="inbox-project-group">
-            <ProjectHeader project={project} theme={theme} count={entries.length} />
+            <ProjectHeader project={project} theme={theme} count={entries.length} showIcon={showIcons} />
             {entries.map(entry => renderRow(entry, groupOf(entry), false))}
           </div>
         ))}

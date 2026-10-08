@@ -52,7 +52,11 @@ const stem: Project = {
 const statuses = { 'c-tab': 'attention' as const, 'd-tab': 'working' as const }
 const since = { 'c-tab': NOW - 120_000, 'd-tab': NOW - 30_000 }
 
-function renderPanel(layout: 'flat' | 'grouped', handlers: { onClose?: () => void; onSettle?: () => void; onSnooze?: () => void } = {}) {
+function renderPanel(
+  layout: 'flat' | 'grouped',
+  handlers: { onClose?: () => void; onSettle?: () => void; onSnooze?: () => void } = {},
+  showIcons = false
+) {
   return render(
     <InboxPanel
       projects={[devtool, stem]}
@@ -69,6 +73,7 @@ function renderPanel(layout: 'flat' | 'grouped', handlers: { onClose?: () => voi
       now={NOW}
       theme="dark"
       layout={layout}
+      showIcons={showIcons}
     />
   )
 }
@@ -112,8 +117,8 @@ describe('InboxPanel', () => {
     renderPanel('grouped')
     const groups = screen.getAllByTestId('inbox-project-group')
     expect(groups.map(group => group.querySelector('[data-testid="inbox-project-header"]')?.textContent))
-      .toEqual(['DTDevTool5', 'STStem1'])
-    // Tile initials, name, count. DevTool holds the task that needs you, so it comes first; Working rows sit in their project.
+      .toEqual(['DevTool5', 'Stem1'])
+    // Name and count (no tiles unless Settings asks for them). DevTool holds the task that needs you, so it comes first; Working rows sit in their project.
     expect(rowIds()).toEqual(['c', 'b', 'a', 'd', 'e', 'f'])
     expect(screen.queryAllByTestId('inbox-group-header')).toEqual([])
     expect(row('d').className).toContain('opacity-50')
@@ -121,6 +126,13 @@ describe('InboxPanel', () => {
     expect(place('c')).toBe('0.5.0')
     // On main there is nothing to say under the project header: the task name leads.
     expect(row('a').querySelector('[data-testid="inbox-row-place"]')).toBeNull()
+  })
+
+  it('shows project tiles when Settings asks for them', () => {
+    renderPanel('grouped', {}, true)
+    const groups = screen.getAllByTestId('inbox-project-group')
+    expect(groups.map(group => group.querySelector('[data-testid="inbox-project-header"]')?.textContent))
+      .toEqual(['DTDevTool5', 'STStem1'])
   })
 
   it('settles, snoozes and closes a task from its row', () => {

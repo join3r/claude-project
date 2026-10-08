@@ -1032,6 +1032,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           now={now}
           theme={effectiveTheme}
           layout={config?.inboxLayout ?? 'flat'}
+          showIcons={showIcons}
         />
       ) : (
       <div className="sidebar-list flex-1 overflow-y-auto pb-1">
