@@ -455,6 +455,8 @@ export interface AppConfig {
   inboxLayout: 'flat' | 'grouped'
   /** Sidebar: fold streams where no task needs you, runs or has news. */
   autoCollapseQuietStreams: boolean
+  /** Project tiles and icons beside project names in the sidebar, Inbox and task header. */
+  showProjectIcons: boolean
   /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
@@ -667,6 +669,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   defaultSidebarTab: 'inbox',
   inboxLayout: 'flat',
   autoCollapseQuietStreams: true,
+  showProjectIcons: false,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
   taskRecencyHighlight: {

@@ -535,6 +535,16 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                 }
               />
               <GroupRow
+                label="Show project icons"
+                sub="Tiles and icons beside project names in the sidebar, Inbox and task header."
+                trailing={
+                  <Switch
+                    checked={config.showProjectIcons}
+                    onChange={(showProjectIcons) => updateConfig({ showProjectIcons })}
+                  />
+                }
+              />
+              <GroupRow
                 label="Highlight recently focused tasks"
                 trailing={
                   <Switch

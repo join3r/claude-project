@@ -1,12 +1,12 @@
 import React, { useCallback, useState } from 'react'
-import { ChevronRight, RotateCcw } from 'lucide-react'
+import { RotateCcw } from 'lucide-react'
 import type { Project, Stream } from '../../../shared/types'
 import { archivedTasksOf, visibleArchive, type ArchivedStream, type ArchivedTask } from '../../../shared/archive'
 import { useProjectArchive } from '../../hooks/archiveStore'
 import { useArchivedView, type ArchivedViewTarget } from '../archivedViewTarget'
 import { ContextMenu, RowAction, RowActions, type ContextMenuItem } from '../ui'
 import { formatActivityAge } from './streamTree'
-import { STREAM_ROW_PL, TASK_ROW_PL } from './SidebarParts'
+import { DONE_ITEM_PL, STREAM_ROW_PL, TASK_ROW_PL, TreeChevron } from './SidebarParts'
 
 export interface DoneRowActions {
   open: (target: ArchivedViewTarget) => void
@@ -16,7 +16,7 @@ export interface DoneRowActions {
   deleteStream: (projectId: string, entry: ArchivedStream) => void
 }
 
-const doneRowCls = 'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm cursor-pointer transition-colors duration-(--motion-fast)'
+const doneRowCls = 'group flex items-center gap-2 mx-1.5 px-2.5 h-[26px] rounded-md text-sm cursor-pointer transition-colors duration-(--motion-fast)'
 
 function archivedAge(archivedAt: number, now: number): string {
   return formatActivityAge({ id: '', name: '', panes: [], lastInteractedAt: archivedAt }, now) ?? ''
@@ -83,7 +83,7 @@ function DoneHeader({ label, count, open, indentCls, onToggle, testId }: {
       data-testid={testId}
       onClick={onToggle}
     >
-      <ChevronRight size={12} className={`shrink-0 transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
+      <TreeChevron open={open} />
       <span>{label} ({count})</span>
     </div>
   )
@@ -108,7 +108,7 @@ export function StreamDoneRow({ project, stream, now, actions }: {
   return (
     <>
       <DoneHeader label="Done" count={count} open={open} indentCls={TASK_ROW_PL} onToggle={() => setOpen(!open)} testId={`done-tasks-${stream.id}`} />
-      {open && !archive && <div className={`mx-1.5 px-2.5 ${TASK_ROW_PL} pl-[74px] h-6 text-xs text-text-subtle flex items-center`}>Loading…</div>}
+      {open && !archive && <div className={`mx-1.5 px-2.5 ${DONE_ITEM_PL} h-6 text-xs text-text-subtle flex items-center`}>Loading…</div>}
       {open && tasks.map(entry => (
         <DoneItemRow
           key={entry.task.id}
@@ -116,7 +116,7 @@ export function StreamDoneRow({ project, stream, now, actions }: {
           title={`${entry.task.name} · archived`}
           archivedAt={entry.archivedAt}
           now={now}
-          indentCls="pl-[74px]"
+          indentCls={DONE_ITEM_PL}
           selected={view?.kind === 'task' && view.id === entry.task.id}
           testId={`archived-task-${entry.task.id}`}
           onOpen={() => actions.open({ projectId: project.id, kind: 'task', id: entry.task.id })}

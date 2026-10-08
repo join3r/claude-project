@@ -23,19 +23,49 @@ export type DropTarget =
   | ({ type: 'task-slot'; projectId: string } & TaskDropSlot)
   | null
 
-/** Rows carry mx-1.5 (6px); project name starts 64px from the sidebar edge:
-    6 (mx) + 10 (px-2.5) + 12 (chevron) + 8 (gap) + 20 (icon) + 8 (gap).
-    A stream row's chevron sits under the project icon, so its name lines up
-    with the project name; a task row's dot sits there too, its name one step in.
-    Rows indent with pl (inside mx), drop indicators with ml (no mx). */
-export const STREAM_ROW_PL = 'pl-[38px]'
-export const TASK_ROW_PL = 'pl-[58px]'
-export const TASK_ROW_ML = 'ml-[64px]'
+/** Rows carry mx-1.5 (6px) and px-2.5 (10px), so a project's chevron sits 16px
+    from the sidebar edge. Each level steps in 18px (chevron 10 + gap 8): a
+    stream's chevron sits under the project name, a task's dot under the stream
+    name. Rows indent with pl (inside mx), drop indicators with ml (no mx). */
+export const STREAM_ROW_PL = 'pl-[28px]'
+export const TASK_ROW_PL = 'pl-[46px]'
+export const TASK_ROW_ML = 'ml-[52px]'
+/** Rows inside a stream's Done group: one step past the task rows. */
+export const DONE_ITEM_PL = 'pl-[64px]'
+
+/** The tree's fold marker: a small filled triangle, quieter than an icon. */
+export function TreeChevron({ open }: { open: boolean }): React.ReactElement {
+  return (
+    <svg
+      viewBox="0 0 10 10"
+      className={`w-2.5 h-2.5 shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`}
+      aria-hidden
+    >
+      <path d="M3.5 2.5 7 5 3.5 7.5Z" fill="currentColor" />
+    </svg>
+  )
+}
 
 /** Icon buttons in the sidebar header strip (search / filter / add). */
 export const headerIconCls = 'relative flex items-center bg-transparent border-0 text-text-muted cursor-pointer px-1.5 py-1 rounded-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)'
 
+/** The project's icon or tile; nothing when Settings → Show project icons is off. */
 export function ProjectIconSlot({
+  project,
+  theme,
+  metadata,
+  show,
+}: {
+  project: Project
+  theme: 'dark' | 'light'
+  metadata: DashboardIconsMetadata | null
+  show: boolean
+}): React.ReactElement | null {
+  if (!show) return null
+  return <ProjectIcon project={project} theme={theme} metadata={metadata} />
+}
+
+function ProjectIcon({
   project,
   theme,
   metadata,
@@ -75,7 +105,7 @@ export function ProjectIconSlot({
   )
 }
 
-/** One half of the Projects | Inbox segmented control in the sidebar header. */
+/** One of the Projects | Inbox pills in the sidebar header. */
 export function SidebarTabButton({
   label,
   active,
@@ -91,16 +121,16 @@ export function SidebarTabButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={[
-        'flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer',
-        'text-2xs font-bold uppercase tracking-[0.06em]',
+        'flex items-center gap-1.5 border-0 px-2 py-1 rounded-md cursor-pointer text-sm',
         'transition-colors duration-(--motion-fast)',
-        active ? 'text-text' : 'text-text-subtle hover:text-text-muted'
+        active ? 'bg-surface-3 text-text' : 'bg-transparent text-text-muted hover:text-text'
       ].join(' ')}
     >
       <span>{label}</span>
       {badge !== undefined && badge > 0 && (
-        <span className="px-1 rounded-full bg-status-attention text-2xs font-bold text-accent-ink leading-[1.4] tabular-nums">
+        <span className="px-1.5 rounded-full bg-accent text-2xs font-semibold text-accent-ink leading-[1.4] tabular-nums">
           {badge}
         </span>
       )}
@@ -123,8 +153,8 @@ const STATE_LABEL: Record<Exclude<SidebarTaskState, null>, string> = {
 }
 
 /**
- * A task's state dot, or a stream's / project's rolled-up one. `hollow` draws a
- * quiet task as a ring so the row's dot column stays aligned; `hideOnHover`
+ * A task's state dot, or a stream's / project's rolled-up one. `hollow` keeps an
+ * empty slot for a quiet task so the row's dot column stays aligned; `hideOnHover`
  * makes room for the row's hover actions.
  */
 export function StateDot({ state, hollow, hideOnHover }: {
@@ -133,7 +163,7 @@ export function StateDot({ state, hollow, hideOnHover }: {
   hideOnHover?: boolean
 }): React.ReactElement | null {
   if (!state && !hollow) return null
-  const cls = state ? STATE_DOT_CLS[state] : 'border border-border-strong'
+  const cls = state ? STATE_DOT_CLS[state] : ''
   return (
     <span
       className={`w-1.5 h-1.5 rounded-full shrink-0 ${cls} ${hideOnHover ? 'group-hover:hidden' : ''}`}

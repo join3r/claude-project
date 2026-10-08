@@ -20,7 +20,7 @@ import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from
 import { isSettled, isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
 import { useResizeHandle } from '../hooks/useResizeHandle'
-import { ChevronRight, GitBranch, Plus, Search, Settings as SettingsIcon, Plug, SquarePen, Terminal as TerminalIcon, X, Cog } from 'lucide-react'
+import { GitBranch, Plus, Search, Settings as SettingsIcon, SquarePen, X, Cog } from 'lucide-react'
 import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
@@ -32,6 +32,7 @@ import {
   ProjectIconSlot,
   SidebarTabButton,
   StateDot,
+  TreeChevron,
   headerIconCls,
   type SidebarContextMenuState
 } from './sidebar/SidebarParts'
@@ -59,6 +60,9 @@ type ResolvedPin = { item: PinnedItem; key: string; project: Project; stream?: S
 
 /** Where a stream's rows are drawn: the tree drags and drops, the pinned list doesn't. */
 type StreamPlace = 'tree' | 'pin'
+
+/** "Pinned" / "Projects" over their parts of the tree. */
+const sectionHeadCls = 'px-4 pt-2.5 pb-1 text-2xs uppercase tracking-[0.08em] text-text-subtle'
 
 const inputCls = 'bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full'
 
@@ -120,6 +124,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     [allStatuses, now]
   )
   const autoCollapse = config?.autoCollapseQuietStreams ?? true
+  const showIcons = config?.showProjectIcons ?? false
   const isStreamOpen = useCallback((stream: Stream): boolean => isStreamExpanded({
     override: streamExpansion[stream.id],
     autoCollapse,
@@ -153,7 +158,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
   const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null)
-  const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [iconMetadata, setIconMetadata] = useState<DashboardIconsMetadata | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -215,6 +219,15 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     }
     return resolved
   }, [pinnedItems, projectsById])
+  // A pinned project lives in Pinned only; listing it twice is noise.
+  const pinnedProjectIds = React.useMemo(
+    () => new Set(resolvedPins.filter(pin => pin.item.type === 'project').map(pin => pin.project.id)),
+    [resolvedPins]
+  )
+  const listedProjectIds = React.useMemo(
+    () => treeProjectIds.filter(id => !pinnedProjectIds.has(id)),
+    [treeProjectIds, pinnedProjectIds]
+  )
   const isPinned = useCallback((item: PinnedItem) => {
     const key = pinnedItemKey(item)
     return (pinnedItems ?? []).some(candidate => pinnedItemKey(candidate) === key)
@@ -289,20 +302,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       if (selectedProjectId) setProjectSettingsId(selectedProjectId)
     })
   }, [selectedProjectId])
-
-  useEffect(() => {
-    window.api.onSshStatusChanged((projectId: string, status: string) => {
-      setSshStatuses(prev => ({ ...prev, [projectId]: status }))
-    })
-  }, [])
-
-  useEffect(() => {
-    projects.filter(isRemoteProject).forEach(p => {
-      window.api.sshStatus(p.id).then(status => {
-        setSshStatuses(prev => ({ ...prev, [p.id]: status }))
-      })
-    })
-  }, [projects])
 
   /**
    * The inline rename input and the "+ Task" affordances only exist in the project
@@ -536,7 +535,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   const { dragState, dropTarget, handleDragMouseDown } = useSidebarTreeDrag({
-    editingId, projectOrder, treeProjectIds, moveTask: handleMoveTask, reorderProjects
+    editingId, projectOrder, treeProjectIds: listedProjectIds, moveTask: handleMoveTask, reorderProjects
   })
 
   const [expandedPinnedProjectIds, setExpandedPinnedProjectIds] = useState<string[]>([])
@@ -592,7 +591,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       <div
         key={task.id}
         className={[
-          'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
+          'group flex items-center gap-2 mx-1.5 px-2.5 h-[26px] rounded-md text-base text-text cursor-pointer',
           TASK_ROW_PL,
           inTree ? 'task-item' : '',
           'transition-colors duration-(--motion-fast)',
@@ -677,7 +676,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       <React.Fragment key={stream.id}>
         <div
           className={[
-            'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
+            'group flex items-center gap-2 mx-1.5 px-2.5 h-[26px] rounded-md text-sm text-text cursor-pointer',
             STREAM_ROW_PL,
             'transition-colors duration-(--motion-fast)',
             isDropTarget ? 'bg-sel shadow-focus' : 'hover:bg-surface-3',
@@ -689,7 +688,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onClick={() => { if (editingId !== stream.id) setStreamExpanded(stream.id, !open) }}
           onContextMenu={(e) => handleContextMenu(e, 'stream', project.id, stream.id)}
         >
-          <ChevronRight size={12} className={`shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
+          <TreeChevron open={open} />
           {editingId === stream.id ? (
             <input
               ref={editRef}
@@ -705,7 +704,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             />
           ) : (
             <>
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-text-muted">{stream.name}</span>
+              <span className={`overflow-hidden text-ellipsis whitespace-nowrap font-mono ${open ? 'text-text' : 'text-text-muted'}`}>{stream.name}</span>
               {stream.workspace && (
                 <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
               )}
@@ -745,7 +744,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     <div className="sidebar-project" key={project.id} data-project-id={project.id}>
       <div
         className={[
-          'group flex items-center gap-2 mx-1.5 px-2.5 h-7 rounded-md text-base text-text cursor-pointer',
+          'group flex items-center gap-2 mx-1.5 px-2.5 h-[26px] rounded-md text-base text-text cursor-pointer',
           'transition-colors duration-(--motion-fast)',
           isProjectSelected ? 'bg-sel' : 'hover:bg-surface-3',
           isProjectDragging ? 'opacity-40' : '',
@@ -778,29 +777,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); toggleProjectExpansion(project.id) }}
             >
-              <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isExpanded ? 'rotate-90' : ''}`} />
+              <TreeChevron open={isExpanded} />
             </button>
-            <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} />
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{project.name}</span>
-            {isRemoteProject(project) && (
-              <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
-                <Plug size={10} className="inline mr-0.5" />ssh
-              </span>
-            )}
-            {isShellCommandProject(project) && (
-              <span className="text-2xs px-1 py-px rounded-sm bg-surface-3 text-text-muted ml-1.5 shrink-0">
-                <TerminalIcon size={10} className="inline mr-0.5" />shell
-              </span>
-            )}
-            {isRemoteProject(project) && (() => {
-              const sshStatus = sshStatuses[project.id] || 'disconnected'
-              const dotClass = sshStatus === 'connected'
-                ? 'bg-ssh-connected'
-                : sshStatus === 'connecting'
-                ? 'bg-ssh-connecting status-pulse'
-                : 'bg-ssh-disconnected'
-              return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ml-1 ${dotClass}`} />
-            })()}
+            <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} show={showIcons} />
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
             <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {!isExpanded && <StateDot state={rollUpState(projectTasks(project).map(stateOf))} hideOnHover />}
               <RowActions>
@@ -834,12 +814,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     return (
       <React.Fragment key={stream.id}>
         <div
-          className={`group flex items-center gap-2 mx-1.5 px-2.5 ${STREAM_ROW_PL} h-6 rounded-md text-sm text-text cursor-pointer hover:bg-surface-3 transition-colors duration-(--motion-fast)`}
+          className={`group flex items-center gap-2 mx-1.5 px-2.5 ${STREAM_ROW_PL} h-[26px] rounded-md text-sm text-text cursor-pointer hover:bg-surface-3 transition-colors duration-(--motion-fast)`}
           onClick={() => setStreamExpanded(stream.id, !open)}
           onContextMenu={(e) => handleContextMenu(e, 'stream', project.id, stream.id)}
         >
-          <ChevronRight size={12} className={`shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-text-muted">{stream.name}</span>
+          <TreeChevron open={open} />
+          <span className={`overflow-hidden text-ellipsis whitespace-nowrap font-mono ${open ? 'text-text' : 'text-text-muted'}`}>{stream.name}</span>
           {stream.workspace && (
             <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
           )}
@@ -883,7 +863,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         {pinDropIndex === index && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
         <div
           className={[
-            'group flex items-center gap-2 mx-1.5 px-2.5 h-6 rounded-md text-sm text-text cursor-pointer',
+            'group flex items-center gap-2 mx-1.5 px-2.5 h-[26px] rounded-md text-base text-text cursor-pointer',
             'transition-colors duration-(--motion-fast)',
             isSelected ? 'bg-sel' : 'hover:bg-surface-3',
             isDraggingPin ? 'opacity-40' : '',
@@ -905,22 +885,22 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           )}
         >
           {task ? (
-            <span className="w-3 shrink-0" />
+            <span className="w-2.5 shrink-0" />
           ) : (
             <button
               className="text-text-subtle hover:text-text bg-transparent border-0 cursor-pointer p-0 flex items-center shrink-0"
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); toggleOpen() }}
             >
-              <ChevronRight size={12} className={`transition-transform duration-(--motion-fast) ${isOpen ? 'rotate-90' : ''}`} />
+              <TreeChevron open={isOpen} />
             </button>
           )}
-          <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} />
+          <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} show={showIcons} />
           {isProjectPin ? (
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-medium">{project.name}</span>
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
           ) : (
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-              <span className="text-text-muted">{project.name}</span>
+              <span className="font-semibold">{project.name}</span>
               <span className="text-text-subtle mx-1">›</span>
               {task ? task.name : <span className="font-mono">{stream!.name}</span>}
             </span>
@@ -989,18 +969,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       {switcherActive ? null : (<>
       <div className="h-9 shrink-0 [-webkit-app-region:drag]" />
 
-      {resolvedPins.length > 0 && (
-        <div className="pb-1 [-webkit-app-region:no-drag]">
-          <div className="px-3 pb-1 text-2xs font-bold uppercase tracking-[0.06em] text-text-muted">Pinned</div>
-          <div className="sidebar-pinned-list">
-            {resolvedPins.map(renderPin)}
-            {pinDropIndex === resolvedPins.length && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between px-3 pt-1 pb-2 [-webkit-app-region:drag]">
-        <div className="flex items-center gap-1.5 min-w-0 [-webkit-app-region:no-drag]" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between pl-2.5 pr-2 pb-2 border-b border-hair [-webkit-app-region:drag]">
+        <div className="flex items-center gap-1 min-w-0 [-webkit-app-region:no-drag]" onMouseDown={(e) => e.stopPropagation()}>
           <SidebarTabButton
             label="Projects"
             active={sidebarTab === 'projects'}
@@ -1064,8 +1034,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           layout={config?.inboxLayout ?? 'flat'}
         />
       ) : (
-      <div className="sidebar-list flex-1 overflow-y-auto py-1">
-        {treeProjectIds.map((projectId, listIdx) => {
+      <div className="sidebar-list flex-1 overflow-y-auto pb-1">
+        {resolvedPins.length > 0 ? (
+          <>
+            <div>
+              <div className={sectionHeadCls}>Pinned</div>
+              <div className="sidebar-pinned-list">
+                {resolvedPins.map(renderPin)}
+                {pinDropIndex === resolvedPins.length && <div className="h-0.5 bg-accent mx-2 rounded-sm" />}
+              </div>
+            </div>
+            <div className={sectionHeadCls}>Projects</div>
+          </>
+        ) : <div className="h-1" />}
+        {listedProjectIds.map((projectId, listIdx) => {
           const project = projectsById.get(projectId)
           if (!project) return null
           return (
@@ -1077,7 +1059,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             </React.Fragment>
           )
         })}
-        {dropTarget?.type === 'between-projects' && dropTarget.index === treeProjectIds.length && (
+        {dropTarget?.type === 'between-projects' && dropTarget.index === listedProjectIds.length && (
           <div className="h-0.5 bg-accent mx-2 rounded-sm" />
         )}
       </div>
@@ -1102,8 +1084,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         onNewStream={handleNewStream}
       />
 
-      <div className="px-3 py-2 border-t border-hair">
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] text-base transition-colors duration-(--motion-fast)" onClick={() => setSettingsOpen(true)} title="Settings"><SettingsIcon size={16} /></button>
+      <div className="px-2 py-1 border-t border-hair [-webkit-app-region:no-drag]">
+        <button className={headerIconCls} onClick={() => setSettingsOpen(true)} title="Settings"><SettingsIcon size={14} /></button>
       </div>
 
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
