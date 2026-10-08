@@ -196,13 +196,22 @@ enum UsageFormat {
     }
 }
 
-/// The compact meter: the 5-hour bar over the weekly one, then the 5-hour countdown.
+/// The compact meter, as the desktop's strip: how full the context is (ring + used
+/// tokens), then the 5-hour bar over the weekly one and the 5-hour countdown.
 private struct UsageMeter: View {
     let usage: ChatUsage
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             HStack(spacing: 6) {
+                if let tokens = usage.contextTokens {
+                    HStack(spacing: 4) {
+                        ContextRing(tokens: tokens, max: usage.contextMax)
+                        Text(UsageFormat.tokens(tokens))
+                            .monospacedDigit()
+                            .foregroundStyle(UsageTone.context(tokens))
+                    }
+                }
                 if usage.fiveHour != nil || usage.sevenDay != nil {
                     VStack(spacing: 3) {
                         Bar(window: usage.fiveHour)
@@ -218,12 +227,6 @@ private struct UsageMeter: View {
                                 .foregroundStyle(.tertiary)
                         }
                     }
-                } else if let tokens = usage.contextTokens {
-                    Circle()
-                        .fill(UsageTone.context(tokens))
-                        .frame(width: 7, height: 7)
-                    Text(UsageFormat.tokens(tokens))
-                        .monospacedDigit()
                 }
             }
             .foregroundStyle(.secondary)
@@ -232,6 +235,26 @@ private struct UsageMeter: View {
             .background(Color(.secondarySystemBackground), in: Capsule())
             .contentShape(Capsule())
         }
+    }
+}
+
+/// How full the context is, as a ring in the context's colour band; a full dot when
+/// the window size is unknown.
+private struct ContextRing: View {
+    let tokens: Int64
+    let max: Int64?
+
+    var body: some View {
+        let tone = UsageTone.context(tokens)
+        let fraction = max.map { $0 > 0 ? Swift.min(1, Swift.max(0, Double(tokens) / Double($0))) : 1 } ?? 1
+        ZStack {
+            Circle().stroke(tone.opacity(0.2), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(tone, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 11, height: 11)
     }
 }
 
