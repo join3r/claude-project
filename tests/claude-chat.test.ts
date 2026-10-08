@@ -416,17 +416,27 @@ describe('chat tabs', () => {
 })
 
 describe('backgroundTaskCount', () => {
-  it('counts the live non-ambient tasks in a background_tasks_changed level', () => {
+  it('counts the live agents and workflows in a background_tasks_changed level', () => {
     expect(backgroundTaskCount({
       type: 'system',
       subtype: 'background_tasks_changed',
       tasks: [
         { task_id: 'b1', task_type: 'local_bash', description: 'eval' },
         { task_id: 'w1', task_type: 'monitor', description: 'watch', ambient: true },
-        { task_id: 'a1', task_type: 'local_agent', description: 'review' }
+        { task_id: 'a1', task_type: 'local_agent', description: 'review' },
+        { task_id: 'f1', task_type: 'local_workflow', description: 'audit' }
       ]
     })).toBe(2)
     expect(backgroundTaskCount({ type: 'system', subtype: 'background_tasks_changed', tasks: [] })).toBe(0)
+  })
+
+  // A dev server left running in a background shell kept the task working for good.
+  it('does not count background shells, which may never end', () => {
+    expect(backgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'npm run dev' }]
+    })).toBe(0)
   })
 
   it('ignores every other message', () => {

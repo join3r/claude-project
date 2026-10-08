@@ -111,15 +111,26 @@ function limitWindow(raw: { utilization: number | null; resets_at: string | null
 }
 
 /**
- * How many background tasks are live, from a `background_tasks_changed` level, or
- * null for any other message. Ambient ones (watchers, skip-transcript tasks) are
- * not activity, so they don't count.
+ * Background task types that end on their own and hand the turn back to Claude:
+ * agents and workflows. A shell may be a dev server or a watcher that never ends,
+ * so it must not keep the task working.
+ */
+const RESUMING_TASK_TYPES = new Set(['local_agent', 'remote_agent', 'in_process_teammate', 'local_workflow'])
+
+/**
+ * How many live background tasks hold the agent's turn open, from a
+ * `background_tasks_changed` level, or null for any other message. Ambient ones
+ * (watchers, skip-transcript tasks) are not activity, and shells may never end,
+ * so neither counts.
  */
 export function backgroundTaskCount(message: unknown): number | null {
   const m = message as { type?: unknown; subtype?: unknown; tasks?: unknown } | null
   if (!m || m.type !== 'system' || m.subtype !== 'background_tasks_changed') return null
   const tasks = Array.isArray(m.tasks) ? m.tasks : []
-  return tasks.filter((task) => !(task && typeof task === 'object' && (task as { ambient?: unknown }).ambient === true)).length
+  return tasks.filter((task) => {
+    const t = task as { ambient?: unknown; task_type?: unknown } | null
+    return !!t && typeof t === 'object' && t.ambient !== true && typeof t.task_type === 'string' && RESUMING_TASK_TYPES.has(t.task_type)
+  }).length
 }
 
 /** SDK messages no window draws; dropped before they cost an IPC hop. */

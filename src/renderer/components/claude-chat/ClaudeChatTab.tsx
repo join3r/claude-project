@@ -127,7 +127,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       // the snapshot: the hook events that set it went by before it was listening.
       const snapshot = getChatState(tabId)
       if (snapshot.pending.length > 0) applyStatus('hook-needs-input')
-      else if (snapshot.busy || Object.values(snapshot.tasks).some((task) => task.background && task.status === 'running')) {
+      else if (snapshot.busy || Object.values(snapshot.tasks).some((task) => task.background && task.status === 'running' && (task.kind === 'subagent' || task.kind === 'workflow'))) {
         applyStatus('hook-working')
       }
       // Opened from an empty task's prompt box: apply its choices, then send.

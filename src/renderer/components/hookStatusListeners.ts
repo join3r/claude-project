@@ -8,7 +8,7 @@ import type { AiStatusEvent } from '../../shared/ai-status'
  */
 export interface HookStatusCallbacks {
   onWorking: () => void
-  /** `backgroundTasks`: shells/agents still running past the turn (chat tabs only). */
+  /** `backgroundTasks`: agents/workflows still running past the turn (chat tabs only). */
   onStopped: (backgroundTasks: number) => void
   onNotification: (body: Record<string, unknown>) => void
   onSessionStart: (body: Record<string, unknown>) => void

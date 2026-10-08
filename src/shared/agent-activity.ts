@@ -32,7 +32,7 @@ export interface AgentActivity {
   }
   subagents: number
   /**
-   * Live background tasks (shells, agents) — the chat tab's `background_tasks_changed`
+   * Live background agents and workflows — the chat tab's `background_tasks_changed`
    * level. Outlives Stop: they keep running after the turn. Terminal tabs never set it.
    */
   background?: number

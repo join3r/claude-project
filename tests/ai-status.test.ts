@@ -66,8 +66,8 @@ describe('nextAiStatus', () => {
       expect(nextAiStatus('exited', 'hook-stopped', hookTab())).toBe('keep')
     })
 
-    // A turn ending with a benchmark still running in a background shell read as
-    // "Your turn" for as long as the shell ran.
+    // A turn ending with a review agent still running in the background read as
+    // "Your turn" for as long as the agent ran.
     it('stays working while background tasks run past the turn', () => {
       expect(nextAiStatus('working', 'hook-stopped', hookTab({ backgroundTasks: 1 }))).toBe('working')
       expect(nextAiStatus('attention', 'hook-stopped', hookTab({ backgroundTasks: 2 }))).toBe('working')
