@@ -128,7 +128,7 @@ describe('InboxPanel', () => {
     const onSettle = vi.fn()
     const onSnooze = vi.fn()
     renderPanel('flat', { onClose, onSettle, onSnooze })
-    fireEvent.click(row('a').querySelector('button[title="Settle"]')!)
+    fireEvent.click(row('a').querySelector('button[title="Done for now"]')!)
     expect(onSettle).toHaveBeenCalledWith('p', 'a')
     fireEvent.click(row('a').querySelector('button[title="Snooze…"]')!)
     expect(onSnooze).toHaveBeenCalledWith(expect.anything(), 'p', 'a')

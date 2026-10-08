@@ -116,7 +116,7 @@ export default function TaskHeader({
     items.push({ label: pinned ? 'Unpin' : 'Pin', onSelect: () => togglePinnedItem(pin) })
     const settled = isSettled(task)
     items.push({
-      label: settled ? 'Unsettle' : 'Settle',
+      label: settled ? 'Back to Inbox' : 'Done for now',
       dividerBefore: true,
       onSelect: () => (settled ? unsettleTask : settleTask)(project.id, task.id)
     })

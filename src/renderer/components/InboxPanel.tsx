@@ -130,7 +130,7 @@ function InboxRow({
     <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
       <RowActions>
         <RowAction
-          title={group === 'settled' ? 'Unsettle' : 'Settle'}
+          title={group === 'settled' ? 'Back to Inbox' : 'Done for now'}
           on={group === 'settled'}
           onClick={onSettle}
         >
@@ -288,7 +288,7 @@ export default function InboxPanel({
   theme,
   layout = 'flat'
 }: Props): React.ReactElement {
-  // Fold state lives with the panel, as it always has for Settled and Snoozed.
+  // Fold state lives with the panel, as it always has for Snoozed and Done for now.
   // Working is never folded: the task you just sent a prompt to moves there and
   // must stay in sight.
   const [folded, setFolded] = useState<Record<'quiet' | 'settled' | 'snoozed', boolean>>({
@@ -303,7 +303,7 @@ export default function InboxPanel({
     [projects, allStatuses, statusSince, now]
   )
   const grouped = layout === 'grouped'
-  // Grouped: the open groups by project. Settled and Snoozed stay folded sections
+  // Grouped: the open groups by project. Snoozed and Done for now stay folded sections
   // below, as in the flat list.
   const projectGroups = useMemo(
     () => (grouped
@@ -386,15 +386,15 @@ export default function InboxPanel({
         {section('Quiet', 'quiet', partition.quiet, 'quiet')}
       </>)}
 
-      {section('Settled', 'settled', partition.settled, 'settled')}
       {section('Snoozed', 'snoozed', partition.snoozed, 'snoozed')}
-
       {partition.snoozed.length > 0 && folded.snoozed && (
         <div className="px-3 pb-2 text-2xs text-text-subtle flex items-center gap-1">
           <Clock size={10} />
           <span>{partition.snoozed.length} hidden until they wake</span>
         </div>
       )}
+
+      {section('Done for now', 'settled', partition.settled, 'settled')}
     </div>
   )
 }

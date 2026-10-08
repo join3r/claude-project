@@ -515,7 +515,7 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                   value={config.inboxLayout}
                   onChange={(inboxLayout) => updateConfig({ inboxLayout })}
                 />
-                <HelperText>Grouped puts open tasks under a header per project, each row naming its stream; Working, Settled and Snoozed stay folded at the bottom.</HelperText>
+                <HelperText>Grouped puts open tasks under a header per project, each row naming its stream; Snoozed and Done for now stay folded at the bottom.</HelperText>
               </SetBlock>
             </FormGroup>
 

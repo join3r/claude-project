@@ -87,15 +87,15 @@ describe('Sidebar context menu', () => {
     const row = await screen.findByText('Fix the thing')
 
     fireEvent.contextMenu(row)
-    // By text: the row's own hover action is also a button titled 'Settle'.
-    const settle = await screen.findByText('Settle', { selector: 'button' })
+    // By text: the row's own hover action is also a button titled 'Done for now'.
+    const settle = await screen.findByText('Done for now', { selector: 'button' })
     act(() => { fireEvent.click(settle) })
 
     await waitFor(() => {
       const task = projectTasks(saved[saved.length - 1]?.projects[0]).find(t => t.id === 't1')
       expect(task?.inbox?.settledAt).toBeTypeOf('number')
     })
-    expect(screen.queryByText('Settle', { selector: 'button' })).toBeNull()
+    expect(screen.queryByText('Done for now', { selector: 'button' })).toBeNull()
   })
 
   it('pages to the snooze presets and back out on dismiss', async () => {

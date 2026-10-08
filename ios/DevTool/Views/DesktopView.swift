@@ -358,7 +358,7 @@ struct ActiveProjectRow: View {
         let state: String
         switch lead.inboxGroup(now: now) {
         case .snoozed: state = "snoozed"
-        case .settled: state = "settled"
+        case .settled: state = "done for now"
         default: state = InboxClock.activity(lead) ?? lead.status.label.lowercased()
         }
         return "\(label) · \(state)"

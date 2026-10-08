@@ -48,11 +48,11 @@ describe('taskStatusChip', () => {
     expect(taskStatusChip(task, statuses('exited'), {}, NOW)).toEqual({ label: 'Your turn', tone: 'turn' })
   })
 
-  it('shows Snoozed and Settled over Your turn', () => {
+  it('shows Snoozed and Done for now over Your turn', () => {
     const snoozed = makeTask([code], { eventAt: NOW - 1000, snoozedUntil: NOW + 60_000 })
     expect(taskStatusChip(snoozed, {}, {}, NOW)?.label).toBe('Snoozed')
     const settled = makeTask([code], { eventAt: NOW - 5000, settledAt: NOW - 1000 })
-    expect(taskStatusChip(settled, {}, {}, NOW)?.label).toBe('Settled')
+    expect(taskStatusChip(settled, {}, {}, NOW)?.label).toBe('Done for now')
   })
 
   it('is empty for a quiet task', () => {

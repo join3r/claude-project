@@ -28,7 +28,7 @@ export interface TaskChip {
 
 /**
  * The header's status chip, in the Inbox's order: Needs you (with how long it has
- * waited), Working, then Snoozed / Settled, then Your turn; nothing for a quiet task.
+ * waited), Working, then Snoozed / Done for now, then Your turn; nothing for a quiet task.
  */
 export function taskStatusChip(
   task: Task,
@@ -43,7 +43,7 @@ export function taskStatusChip(
   }
   if (status === 'working') return { label: 'Working', tone: 'working' }
   if (isSnoozed(task, now)) return { label: 'Snoozed', tone: 'quiet' }
-  if (isSettled(task)) return { label: 'Settled', tone: 'quiet' }
+  if (isSettled(task)) return { label: 'Done for now', tone: 'quiet' }
   if (isYourTurn(task, status)) return { label: 'Your turn', tone: 'turn' }
   return null
 }

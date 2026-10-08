@@ -117,7 +117,7 @@ public struct InboxPartition: Sendable, Equatable {
     /// The open, unfolded groups gathered by project for the grouped layout
     /// (the desktop's `groupInboxByProject`): Needs you, Your turn and Quiet.
     /// A project sits where its most urgent task sits in the flat list and
-    /// keeps that order inside. Working, Settled and Snoozed stay folded rows.
+    /// keeps that order inside. Working, Snoozed and Done for now stay folded rows.
     public var byProject: [InboxProjectGroup] {
         InboxProjectGroup.group(needsYou + yourTurn + quiet)
     }

@@ -152,7 +152,7 @@ export default function SidebarContextMenu({
                   <button className={menuItemCls} onClick={() => {
                     handleToggleSettled(contextMenu.projectId, contextMenu.taskId!)
                     closeContextMenu()
-                  }}>{settled ? 'Unsettle' : 'Settle'}</button>
+                  }}>{settled ? 'Back to Inbox' : 'Done for now'}</button>
                   {snoozed ? (
                     <button className={menuItemCls} onClick={() => {
                       unsnoozeTask(contextMenu.projectId, contextMenu.taskId!)

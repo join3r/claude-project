@@ -2,7 +2,7 @@ import DevToolKit
 import SwiftUI
 
 /// Every task of every paired desktop in the desktop inbox's groups (§8.3):
-/// Needs you, Your turn and Quiet open; Working, Settled and Snoozed folded
+/// Needs you, Your turn and Quiet open; Working, Snoozed and Done for now folded
 /// into one-line summaries. The toolbar switches to cards by project.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
@@ -137,7 +137,7 @@ struct InboxView: View {
         return count == 0 ? "By project" : "By project · \(count) need\(count == 1 ? "s" : "") you"
     }
 
-    /// Working, Settled and Snoozed: a row each with a one-line summary,
+    /// Working, Snoozed and Done for now: a row each with a one-line summary,
     /// opening in place.
     @ViewBuilder
     private func folded(_ partition: InboxPartition, now: Date) -> some View {
@@ -149,16 +149,16 @@ struct InboxView: View {
                         ForEach(partition.working) { row($0, group: .working, now: now) }
                     }
                 }
-                if !partition.settled.isEmpty {
-                    FoldedGroupRow(kind: .settled, entries: partition.settled, expanded: $showSettled)
-                    if showSettled {
-                        ForEach(partition.settled) { row($0, group: .settled, now: now) }
-                    }
-                }
                 if !partition.snoozed.isEmpty {
                     FoldedGroupRow(kind: .snoozed, entries: partition.snoozed, expanded: $showSnoozed)
                     if showSnoozed {
                         ForEach(partition.snoozed) { row($0, group: .snoozed, now: now) }
+                    }
+                }
+                if !partition.settled.isEmpty {
+                    FoldedGroupRow(kind: .settled, entries: partition.settled, expanded: $showSettled)
+                    if showSettled {
+                        ForEach(partition.settled) { row($0, group: .settled, now: now) }
                     }
                 }
             }
@@ -213,7 +213,7 @@ struct InboxView: View {
                     Button {
                         triage(.unsettle, entry)
                     } label: {
-                        Label("Unsettle", systemImage: "arrow.uturn.backward")
+                        Label("Back to Inbox", systemImage: "arrow.uturn.backward")
                     }
                     .tint(.gray)
                     snoozeButton(entry)
@@ -261,7 +261,7 @@ struct InboxView: View {
         Button {
             triage(.settle, entry)
         } label: {
-            Label("Settle", systemImage: "checkmark")
+            Label("Done for now", systemImage: "checkmark")
         }
         .tint(.green)
     }
@@ -294,9 +294,9 @@ struct TriageMenuItems: View {
             run(task.unread ? .read : .unread)
         }
         if group == .settled {
-            Button("Unsettle", systemImage: "arrow.uturn.backward") { run(.unsettle) }
+            Button("Back to Inbox", systemImage: "arrow.uturn.backward") { run(.unsettle) }
         } else {
-            Button("Settle", systemImage: "checkmark") { run(.settle) }
+            Button("Done for now", systemImage: "checkmark") { run(.settle) }
         }
         if group == .snoozed {
             Button("Unsnooze", systemImage: "bell") { run(.unsnooze) }
@@ -478,7 +478,7 @@ struct ProjectCardHeader: View {
     }
 }
 
-/// Working, Settled or Snoozed folded to one row: its name, count and a
+/// Working, Snoozed or Done for now folded to one row: its name, count and a
 /// one-line summary ("claude-project · DevTool Streams Redesign, …"). Tap to
 /// open the group in place.
 struct FoldedGroupRow: View {
@@ -488,7 +488,7 @@ struct FoldedGroupRow: View {
         var title: String {
             switch self {
             case .working: "Working"
-            case .settled: "Settled"
+            case .settled: "Done for now"
             case .snoozed: "Snoozed"
             }
         }

@@ -328,7 +328,7 @@ struct TaskInfoSheet: View {
             if calendar.isDateInTomorrow(date) { return "Snoozed until tomorrow \(time)" }
             return "Snoozed until \(date.formatted(.dateTime.weekday(.wide).hour().minute()))"
         case .settled:
-            return "Settled"
+            return "Done for now"
         case .needsYou, .yourTurn, .working, .quiet:
             return task.unread ? "Unread" : nil
         }

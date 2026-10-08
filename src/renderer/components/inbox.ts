@@ -107,7 +107,7 @@ export interface InboxPartition {
 /**
  * Splits tasks into the inbox groups. A live agent wins over snooze and settle:
  * a task that needs you or is working shows there, the same as its header chip,
- * and drops back to Snoozed / Settled once the agent goes quiet. Snooze wins over
+ * and drops back to Snoozed / Done for now once the agent goes quiet. Snooze wins over
  * settle (an explicitly snoozed task stays hidden even if it was settled earlier).
  */
 export function partitionInbox(
