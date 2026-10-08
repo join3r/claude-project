@@ -30,6 +30,8 @@ public actor MockDesktopConnection: DesktopConnection {
     private var openTab: String?
     private var chatSubscribers: [UUID: AsyncStream<ChatStreamEvent>.Continuation] = [:]
     private var scripts: [String: Task<Void, Never>] = [:]
+    /// `/permissions` rules (§8.14), shared by every mock chat.
+    private var permissionSources = MockChats.permissionSources()
     /// Pause between streamed chunks.
     private let streamStep: Duration
 
@@ -94,6 +96,21 @@ public actor MockDesktopConnection: DesktopConnection {
             Task { await self?.removeSubscriber(id) }
         }
         return stream
+    }
+
+    private func updatePermission(_ update: ChatPermissionsUpdateParams) {
+        guard let index = permissionSources.firstIndex(where: { $0.kind == update.kind }) else { return }
+        let rule = update.rule.trimmingCharacters(in: .whitespacesAndNewlines)
+        var rules = permissionSources[index].rules(update.behavior)
+        switch update.action {
+        case .add: if !rules.contains(rule) { rules.append(rule) }
+        case .remove: rules.removeAll { $0 == rule }
+        }
+        switch update.behavior {
+        case .allow: permissionSources[index].allow = rules
+        case .ask: permissionSources[index].ask = rules
+        case .deny: permissionSources[index].deny = rules
+        }
     }
 
     private func removeSubscriber(_ id: UUID) {
@@ -255,6 +272,33 @@ public actor MockDesktopConnection: DesktopConnection {
                 chat.status.settings = settings
             }
             return .object([:])
+        case ChatOp.commands:
+            guard chats[try string("tabId")] != nil else { throw notFound() }
+            return ChatCommandsResult(commands: MockChats.commands).json
+        case ChatOp.btw:
+            let parsed: ChatBtwParams
+            do {
+                parsed = try ChatBtwParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard chats[parsed.tabId] != nil else { throw notFound() }
+            // Claude takes a moment to think it over.
+            try? await Task.sleep(for: streamStep * 8)
+            return ChatBtwResult(response: MockChats.sideAnswer(parsed.question)).json
+        case ChatOp.permissions:
+            guard chats[try string("tabId")] != nil else { throw notFound() }
+            return ChatPermissionsResult(sources: permissionSources).json
+        case ChatOp.permissionsUpdate:
+            let parsed: ChatPermissionsUpdateParams
+            do {
+                parsed = try ChatPermissionsUpdateParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard chats[parsed.tabId] != nil else { throw notFound() }
+            updatePermission(parsed)
+            return ChatPermissionsResult(sources: permissionSources).json
         case ChatOp.interrupt:
             let tabId = try string("tabId")
             guard chats[tabId] != nil else { throw notFound() }
@@ -607,7 +651,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
-            DesktopFeature.streamNew, DesktopFeature.branchesList,
+            DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

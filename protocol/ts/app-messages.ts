@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_IMAGE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent } from './chat-messages.ts'
 import type { ChatViewEvent } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -192,6 +192,10 @@ export const AppOp = {
   BranchesList: BRANCHES_LIST_OP,
   ChatSettings: CHAT_SETTINGS_OP,
   ChatImage: CHAT_IMAGE_OP,
+  ChatCommands: CHAT_COMMANDS_OP,
+  ChatBtw: CHAT_BTW_OP,
+  ChatPermissions: CHAT_PERMISSIONS_OP,
+  ChatPermissionsUpdate: CHAT_PERMISSIONS_UPDATE_OP,
   PushRegister: PushOp.Register,
   PushUnregister: PushOp.Unregister
 } as const

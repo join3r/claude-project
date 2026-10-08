@@ -37,6 +37,10 @@ import {
   parseChatParams,
   parseChatSettingsParams,
   parseChatImageParams,
+  parseChatCommandsParams,
+  parseChatBtwParams,
+  parseChatPermissionsParams,
+  parseChatPermissionsUpdateParams,
   parsePushParams,
   PushOp,
   ProtocolError
@@ -55,7 +59,8 @@ import type {
   PushResultValue,
   RevokeMessage,
   PushMessage,
-  PushedMessage
+  PushedMessage,
+  ChatParams
 } from '../../../protocol/ts/index.ts'
 
 /** What the service sends through the relay once authenticated (SPEC.md §3.2, §3.4). */
@@ -214,6 +219,16 @@ export interface MobileServiceDeps {
 }
 
 // ---- The service -----------------------------------------------------------------
+
+/** Tab ops with params of their own (§8); the rest go through `parseChatParams`. */
+const CHAT_PARAM_PARSERS: Record<string, (params: unknown) => ChatParams> = {
+  [AppOp.ChatSettings]: parseChatSettingsParams,
+  [AppOp.ChatImage]: parseChatImageParams,
+  [AppOp.ChatCommands]: parseChatCommandsParams,
+  [AppOp.ChatBtw]: parseChatBtwParams,
+  [AppOp.ChatPermissions]: parseChatPermissionsParams,
+  [AppOp.ChatPermissionsUpdate]: parseChatPermissionsUpdateParams
+}
 
 /** Inbox events go out at most this often per phone, trailing edge included. */
 export const INBOX_THROTTLE_MS = 1000
@@ -920,11 +935,8 @@ export class MobileService {
     if (this.deps.chat) {
       let chatParams: ReturnType<typeof parseChatParams>
       try {
-        chatParams = message.op === AppOp.ChatSettings
-          ? parseChatSettingsParams(message.params)
-          : message.op === AppOp.ChatImage
-            ? parseChatImageParams(message.params)
-            : parseChatParams(message.op, message.params)
+        const parse = CHAT_PARAM_PARSERS[message.op]
+        chatParams = parse ? parse(message.params) : parseChatParams(message.op, message.params)
       } catch (err) {
         if (!(err instanceof ProtocolError)) throw err
         session.channel.send({ t: 'res', id, ok: false, error: { code: AppErrorCode.BadRequest, message: err.message } })

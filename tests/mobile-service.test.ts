@@ -587,6 +587,30 @@ describe('MobileService chat.image (SPEC.md §8.9)', () => {
   })
 })
 
+describe('MobileService chat.commands, chat.btw and chat.permissions (SPEC.md §8.14)', () => {
+  it('hands parsed params to the bridge and rejects bad ones', () => {
+    const requests: { op: string; params: unknown }[] = []
+    const env = pairedSetup({
+      chat: { request: (_phone, _id, op, params) => { requests.push({ op, params }) }, dropPhone: () => {}, dropAll: () => {}, projectsChanged: () => {} }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'chat.commands', params: { tabId: 't', extra: 1 } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 7, op: 'chat.btw', params: { tabId: 't', question: 'why?' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 8, op: 'chat.permissions', params: { tabId: 't' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 9, op: 'chat.permissions.update', params: { tabId: 't', kind: 'localSettings', behavior: 'deny', rule: 'WebFetch', action: 'add' } })
+    expect(requests).toEqual([
+      { op: 'chat.commands', params: { tabId: 't' } },
+      { op: 'chat.btw', params: { tabId: 't', question: 'why?' } },
+      { op: 'chat.permissions', params: { tabId: 't' } },
+      { op: 'chat.permissions.update', params: { tabId: 't', kind: 'localSettings', behavior: 'deny', rule: 'WebFetch', action: 'add' } }
+    ])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 10, op: 'chat.btw', params: { tabId: 't', question: '  ' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 10, ok: false, error: { code: 'bad-request' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 11, op: 'chat.permissions.update', params: { tabId: 't', kind: 'managed', behavior: 'deny', rule: 'x', action: 'add' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 11, ok: false, error: { code: 'bad-request' } })
+    expect(requests).toHaveLength(4)
+  })
+})
+
 describe('MobileService chat.new (retired, SPEC.md §8.2)', () => {
   it('answers unsupported like any unknown op', () => {
     const env = pairedSetup()

@@ -280,3 +280,48 @@ extension MockChatTranscript {
         return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 }
+
+/// The `/` menu of a mock chat (§8.14): what a desktop lists once Claude has
+/// reported its commands, `btw` and `permissions` first.
+extension MockChats {
+    static let commands: [ChatCommand] = [
+        ChatCommand(name: "btw", description: "Ask a quick side question — the answer stays out of the conversation", argumentHint: "<question>"),
+        ChatCommand(name: "permissions", description: "View and edit allow, ask and deny rules"),
+        ChatCommand(name: "clear", description: "Clear conversation history and free up context"),
+        ChatCommand(name: "compact", description: "Clear conversation history but keep a summary in context",
+                    argumentHint: "<optional custom summarization instructions>"),
+        ChatCommand(name: "context", description: "Visualize current context usage as a colored grid"),
+        ChatCommand(name: "cost", description: "Show the total cost and duration of the current session"),
+        ChatCommand(name: "config", description: "Open config panel", terminalOnly: true),
+        ChatCommand(name: "init", description: "Initialize a new CLAUDE.md file with codebase documentation"),
+        ChatCommand(name: "model", description: "Set the AI model for Claude Code", argumentHint: "[model]"),
+        ChatCommand(name: "review", description: "Review a pull request", argumentHint: "<pr-number>"),
+        ChatCommand(name: "security-review", description: "Complete a security review of the pending changes on the current branch"),
+        ChatCommand(name: "deploy", description: "Deploy the API to staging or production (project skill)", argumentHint: "<staging|production>"),
+        ChatCommand(name: "release-notes", description: "Draft release notes from the commits since the last tag (skill)", argumentHint: "[since-tag]"),
+        ChatCommand(name: "resume", description: "Resume a conversation", terminalOnly: true),
+    ]
+
+    static func sideAnswer(_ question: String) -> String {
+        """
+        Short answer: the middleware checks `exp` **before** the signature, so an expired token \
+        never reaches `verify()` and falls through to the generic handler.
+
+        - `auth.ts:42` reads the claims with `decode()` first
+        - the 401 path only runs for `JsonWebTokenError`
+
+        (You asked: “\(question)”)
+        """
+    }
+
+    static func permissionSources() -> [ChatPermissionSource] {
+        [
+            ChatPermissionSource(kind: .localSettings, path: "/Users/me/src/api-server/.claude/settings.local.json", exists: true,
+                                 allow: ["Bash(npm test:*)", "Bash(git diff:*)", "Read(./docs/**)"], deny: ["Bash(rm -rf:*)"]),
+            ChatPermissionSource(kind: .projectSettings, path: "/Users/me/src/api-server/.claude/settings.json", exists: true,
+                                 allow: ["WebFetch(domain:github.com)"], ask: ["Bash(git push:*)"]),
+            ChatPermissionSource(kind: .userSettings, path: "/Users/me/.claude/settings.json", exists: true,
+                                 allow: ["Bash(ls:*)"], deny: ["Read(./.env)"]),
+        ]
+    }
+}

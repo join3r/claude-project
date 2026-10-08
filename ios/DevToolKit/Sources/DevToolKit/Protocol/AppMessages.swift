@@ -192,6 +192,9 @@ public enum DesktopFeature {
     public static let streamNew = "stream.new"
     /// The desktop answers `branches.list` (§8.13).
     public static let branchesList = "branches.list"
+    /// The desktop answers `chat.commands`, `chat.btw`, `chat.permissions` and
+    /// `chat.permissions.update` (§8.14).
+    public static let chatCommands = "chat.commands"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

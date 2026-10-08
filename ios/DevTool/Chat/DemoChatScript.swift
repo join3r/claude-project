@@ -3,14 +3,34 @@ import DevToolKit
 import Foundation
 
 /// Scripted chat actions for screenshots and live runs without UI automation
-/// (`-demoToolDetail`, `-demoChatScript`; see `LaunchOptions`).
+/// (`-demoToolDetail`, `-demoChatScript`, `-demoComposerText`, `-demoCommandSheet`;
+/// see `LaunchOptions`).
 @MainActor
 enum DemoChatScript {
-    static func run(model: ChatModel, openDetail: (ChatItem) -> Void) async {
+    /// A sheet the `/` menu opens.
+    enum Sheet {
+        case permissions
+        case btw(String)
+    }
+
+    static func run(model: ChatModel, openDetail: (ChatItem) -> Void, setDraft: (String) -> Void, openSheet: (Sheet) -> Void) async {
         let options = LaunchOptions.current
-        guard options.demoToolDetail != nil || options.demoChatScript else { return }
+        guard options.demoToolDetail != nil || options.demoChatScript || options.demoComposerText != nil
+            || options.demoCommandSheet != nil else { return }
         while model.state == nil || model.showingCache {
             guard (try? await Task.sleep(for: .milliseconds(100))) != nil else { return }
+        }
+        if let text = options.demoComposerText {
+            guard (try? await Task.sleep(for: .milliseconds(500))) != nil else { return }
+            setDraft(text)
+        }
+        switch options.demoCommandSheet {
+        case "permissions":
+            openSheet(.permissions)
+        case "btw":
+            openSheet(.btw(options.demoMessage ?? "Why does the expired-token test get a 500?"))
+        default:
+            break
         }
         if let itemId = options.demoToolDetail {
             guard (try? await Task.sleep(for: .milliseconds(700))) != nil else { return }

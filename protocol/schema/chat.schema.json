@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://devtool.awantech.sk/schema/mobile/v2/chat.schema.json",
   "title": "Chat view",
-  "description": "The chat view model, SPEC.md §6.2, and the chat.* results, §6.3. Describes what a desktop sends; receivers keep unknown item and prompt kinds as 'Needs a newer app' and ignore unknown fields.",
+  "description": "The chat view model, SPEC.md §6.2, and the chat.* results, §6.3 and §8. Describes what a desktop sends; receivers keep unknown item and prompt kinds as 'Needs a newer app' and ignore unknown fields.",
   "$ref": "#/$defs/view",
   "$defs": {
     "ms": { "type": "integer", "minimum": 0 },
@@ -168,6 +168,72 @@
       "properties": {
         "mediaType": { "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"] },
         "data": { "type": "string", "pattern": "^[A-Za-z0-9+/]+=*$" }
+      }
+    },
+    "commandsResult": {
+      "description": "chat.commands (§8.14): the composer's / menu, in the desktop's order. May be empty before Claude has reported its commands.",
+      "type": "object",
+      "required": ["commands"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string", "description": "Without the leading /" },
+              "description": { "type": "string" },
+              "argumentHint": { "type": "string" },
+              "terminalOnly": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    "btwResult": {
+      "description": "chat.btw (§8.14): the side question's answer; null when Claude had nothing to say. synthetic: the CLI made it up (an error or refusal).",
+      "type": "object",
+      "required": ["response"],
+      "properties": {
+        "response": { "oneOf": [{ "type": "string" }, { "const": null }] },
+        "synthetic": { "const": true }
+      }
+    },
+    "permissionKind": { "enum": ["localSettings", "projectSettings", "userSettings"] },
+    "rules": { "type": "array", "items": { "type": "string" } },
+    "permissionsResult": {
+      "description": "chat.permissions and chat.permissions.update (§8.14): the settings files Claude reads rules from, most specific first.",
+      "type": "object",
+      "required": ["sources"],
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "path", "exists", "allow", "ask", "deny"],
+            "properties": {
+              "kind": { "$ref": "#/$defs/permissionKind" },
+              "path": { "type": "string", "description": "Absolute, on the desktop" },
+              "exists": { "type": "boolean" },
+              "allow": { "$ref": "#/$defs/rules" },
+              "ask": { "$ref": "#/$defs/rules" },
+              "deny": { "$ref": "#/$defs/rules" },
+              "error": { "type": "string", "description": "The file exists but couldn't be read; it isn't edited" }
+            }
+          }
+        }
+      }
+    },
+    "permissionsUpdateParams": {
+      "description": "chat.permissions.update params (§8.14).",
+      "type": "object",
+      "required": ["tabId", "kind", "behavior", "rule", "action"],
+      "properties": {
+        "tabId": { "type": "string" },
+        "kind": { "$ref": "#/$defs/permissionKind" },
+        "behavior": { "enum": ["allow", "ask", "deny"] },
+        "rule": { "type": "string", "pattern": "\\S", "maxLength": 2000 },
+        "action": { "enum": ["add", "remove"] }
       }
     },
     "chatEvt": {

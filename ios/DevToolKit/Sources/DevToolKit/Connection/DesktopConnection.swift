@@ -288,6 +288,38 @@ extension DesktopConnection {
         return try decode(result, ChatImageResult.parse)
     }
 
+    /// `chat.commands` (§8.14): the composer's `/` menu. Empty until Claude has
+    /// reported its commands.
+    public func chatCommands(tabId: String) async throws -> [ChatCommand] {
+        let result = try await request(ChatOp.commands, params: ChatTabParams(tabId: tabId).json)
+        return try decode(result, ChatCommandsResult.parse).commands
+    }
+
+    /// `chat.btw` (§8.14): a side question, answered from the conversation
+    /// without joining it. Claude may have to start first, so this waits long.
+    public func askSideQuestion(tabId: String, question: String) async throws -> ChatBtwResult {
+        guard question.utf16.count <= ChatOp.maxBtwLength else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Questions are limited to \(ChatOp.maxBtwLength) characters.")
+        }
+        let params = ChatBtwParams(tabId: tabId, question: question)
+        let result = try await request(ChatOp.btw, params: params.json, timeout: .seconds(180))
+        return try decode(result, ChatBtwResult.parse)
+    }
+
+    /// `chat.permissions` (§8.14): the allow, ask and deny rules of the chat's
+    /// settings files. A remote project answers `.remote(code: "unsupported")`.
+    public func chatPermissions(tabId: String) async throws -> [ChatPermissionSource] {
+        let result = try await request(ChatOp.permissions, params: ChatTabParams(tabId: tabId).json)
+        return try decode(result, ChatPermissionsResult.parse).sources
+    }
+
+    /// `chat.permissions.update` (§8.14): add or remove one rule; returns the
+    /// sources read again.
+    public func updateChatPermission(_ params: ChatPermissionsUpdateParams) async throws -> [ChatPermissionSource] {
+        let result = try await request(ChatOp.permissionsUpdate, params: params.json)
+        return try decode(result, ChatPermissionsResult.parse).sources
+    }
+
     /// `chat.detail`: a tool's full input/result, or a truncated item's full text.
     public func chatDetail(tabId: String, itemId: String) async throws -> ChatDetail {
         let result = try await request(ChatOp.detail, params: .object(["tabId": .string(tabId), "itemId": .string(itemId)]))

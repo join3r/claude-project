@@ -17,6 +17,9 @@ import Foundation
 ///   detail sheet opens too. `-demoChatScript` then sends `-demoMessage <text>`
 ///   (default "Hello from the phone") and answers each prompt after
 ///   `-demoAnswerDelay <seconds>` (default 6): Allow, the first option(s), Approve.
+///   `-demoComposerText <text>` puts text in the composer (`/` shows the command
+///   menu), and `-demoCommandSheet btw|permissions` opens that sheet (`btw` asks
+///   `-demoMessage`, or a canned question).
 /// - `-pairLink <devtool://pair?d=…>` (Debug builds): open that pairing link at
 ///   launch, as if tapped; add `-autoConfirmPairing` to also press Pair. Lets
 ///   scripts pair the simulator without the system "Open in DevTool?" prompt.
@@ -70,6 +73,8 @@ struct LaunchOptions: Sendable {
     var demoChatScript = false
     var demoMessage: String?
     var demoAnswerDelay: Double?
+    var demoComposerText: String?
+    var demoCommandSheet: String?
     var pushGateway: URL?
     var fakePushToken: String?
     var mockAuth: String?
@@ -104,6 +109,8 @@ struct LaunchOptions: Sendable {
         demoChatScript = args.contains("-demoChatScript")
         demoMessage = value("-demoMessage")
         demoAnswerDelay = value("-demoAnswerDelay").flatMap(Double.init)
+        demoComposerText = value("-demoComposerText")
+        demoCommandSheet = value("-demoCommandSheet")
         pushGateway = (value("-pushGateway") ?? env["DEVTOOL_PUSH_GATEWAY"]).flatMap { URL(string: $0) }
         fakePushToken = (value("-fakePushToken") ?? env["DEVTOOL_FAKE_PUSH_TOKEN"])?.lowercased()
         #else

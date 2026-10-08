@@ -382,6 +382,86 @@ describe('ChatBridge', () => {
     }
   })
 
+  it('lists the composer\'s / menu with chat.commands, btw and permissions first (§8.14)', async () => {
+    expect(await req('chat.commands', { tabId: 'tab-chat' })).toMatchObject({ ok: true })
+    expect(chats.runtimes.get('tab-chat')?.config.cwd).toBe('/wt/fix/pkg')
+    chats.update('tab-chat', (s) => ({
+      ...s,
+      commands: [
+        { name: 'compact', description: 'Summarize the conversation', argumentHint: '<instructions>' },
+        { name: 'permissions', description: 'Manage permissions' },
+        { name: 'config', description: 'Open config panel' },
+        { name: 'review', description: '' }
+      ]
+    }))
+    expect(await req('chat.commands', { tabId: 'tab-chat' })).toEqual(expect.objectContaining({
+      ok: true,
+      result: {
+        commands: [
+          { name: 'btw', description: 'Ask a quick side question — the answer stays out of the conversation', argumentHint: '<question>' },
+          { name: 'compact', description: 'Summarize the conversation', argumentHint: '<instructions>' },
+          { name: 'permissions', description: 'Manage permissions' },
+          { name: 'config', description: 'Open config panel', terminalOnly: true },
+          { name: 'review' }
+        ]
+      }
+    }))
+    expect(await req('chat.commands', { tabId: 'nope' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+  })
+
+  it('asks /btw side questions without sending into the chat (§8.14)', async () => {
+    expect(await req('chat.btw', { tabId: 'tab-chat', question: 'why?' })).toMatchObject({ ok: true, result: { response: 'An answer' } })
+    chats.sideAnswer = { response: null, synthetic: true }
+    const res = await req('chat.btw', { tabId: 'tab-chat', question: 'again?' })
+    expect(res).toEqual(expect.objectContaining({ ok: true, result: { response: null, synthetic: true } }))
+    expect(chats.sideQuestions).toEqual([{ tabId: 'tab-chat', question: 'why?' }, { tabId: 'tab-chat', question: 'again?' }])
+    expect(chats.sent).toEqual([])
+    chats.askSideQuestion = async () => { throw new Error('Claude is not running.') }
+    expect(await req('chat.btw', { tabId: 'tab-chat', question: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'Claude is not running.' } })
+  })
+
+  it('reads and edits /permissions rules in the chat\'s folder; remote projects are unsupported (§8.14)', async () => {
+    expect(await req('chat.permissions', { tabId: 'tab-chat' })).toMatchObject({ ok: false, error: { code: 'unsupported' } })
+    const rules: Record<string, string[]> = { allow: ['Read'], ask: [], deny: [] }
+    const calls: unknown[] = []
+    bridge = new ChatBridge({
+      chats,
+      projects: { peek: () => data },
+      timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+      log: (m) => logs.push(m),
+      permissions: {
+        read: async (cwd) => {
+          calls.push(['read', cwd])
+          return [
+            { kind: 'localSettings', path: `${cwd}/.claude/settings.local.json`, exists: true, allow: [...rules.allow], ask: [], deny: [...rules.deny], defaultMode: 'plan' },
+            { kind: 'userSettings', path: '/home/.claude/settings.json', exists: true, allow: [], ask: [], deny: [], error: "Couldn't read it" }
+          ]
+        },
+        update: async (cwd, kind, behavior, rule, action) => {
+          calls.push(['update', cwd, kind, behavior, rule, action])
+          rules[behavior] = action === 'add' ? [...rules[behavior], rule] : rules[behavior].filter((r) => r !== rule)
+        }
+      }
+    })
+    expect(await req('chat.permissions', { tabId: 'tab-chat' })).toEqual(expect.objectContaining({
+      ok: true,
+      result: {
+        sources: [
+          { kind: 'localSettings', path: '/wt/fix/pkg/.claude/settings.local.json', exists: true, allow: ['Read'], ask: [], deny: [] },
+          { kind: 'userSettings', path: '/home/.claude/settings.json', exists: true, allow: [], ask: [], deny: [], error: "Couldn't read it" }
+        ]
+      }
+    }))
+    const update = await req('chat.permissions.update', { tabId: 'tab-chat', kind: 'localSettings', behavior: 'deny', rule: 'WebFetch', action: 'add' })
+    expect(update).toMatchObject({ ok: true, result: { sources: [{ kind: 'localSettings', deny: ['WebFetch'] }, { kind: 'userSettings' }] } })
+    expect(calls).toEqual([['read', '/wt/fix/pkg'], ['update', '/wt/fix/pkg', 'localSettings', 'deny', 'WebFetch', 'add'], ['read', '/wt/fix/pkg']])
+
+    data.projects[0].ssh = { host: 'box', remoteDir: '/srv/api' } as NonNullable<ProjectsData['projects'][number]['ssh']>
+    const remote = await req('chat.permissions', { tabId: 'tab-chat' })
+    expect(remote).toMatchObject({ ok: false, error: { code: 'unsupported', message: expect.stringContaining('remote host') } })
+    expect(calls).toHaveLength(3)
+  })
+
   it('reports a failing manager call as internal', async () => {
     chats.send = async () => { throw new Error('boom') }
     expect(await req('chat.send', { tabId: 'tab-chat', text: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'boom' } })

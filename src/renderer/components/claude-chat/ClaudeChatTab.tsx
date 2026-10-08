@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import { PERMISSIONS_COMMAND, SIDE_QUESTION_COMMAND, type ChatColdCache, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
+import { composerCommands, type ChatColdCache, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
@@ -242,11 +242,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
     })
   }, [tabId, projectId, taskId, markTaskInteracted])
 
-  // The CLI doesn't list /btw or /permissions to SDK clients; the chat tab runs them itself.
-  const commands = useMemo(() => {
-    const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND].filter((command) => !state.commands.some((c) => c.name === command.name))
-    return own.length > 0 ? [...own, ...state.commands] : state.commands
-  }, [state.commands])
+  const commands = useMemo(() => composerCommands(state.commands), [state.commands])
 
   const respond = useCallback((promptId: string, response: ChatPromptResponse) => {
     markTaskInteracted(projectId, taskId)

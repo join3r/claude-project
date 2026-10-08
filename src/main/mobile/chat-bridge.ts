@@ -1,4 +1,15 @@
-import type { ChatEvent, ChatPrompt, ChatPromptResponse, ChatSnapshot, ChatState } from '../../shared/claude-chat'
+import {
+  composerCommands,
+  PERMISSIONS_COMMAND,
+  TERMINAL_ONLY_COMMANDS,
+  type ChatEvent,
+  type ChatPrompt,
+  type ChatPromptResponse,
+  type ChatSideAnswer,
+  type ChatSnapshot,
+  type ChatState
+} from '../../shared/claude-chat'
+import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../../shared/chat-permissions'
 import {
   dismissQuestionResponse,
   planApprovalResponse,
@@ -26,15 +37,32 @@ import {
   type SentItems
 } from './chat-view'
 import { fitImage, ImageTooLargeError, type ImageCodec } from './chat-image'
-import { AppErrorCode, CHAT_IMAGE_OP, CHAT_SETTINGS_OP, ChatLimits, ChatOp } from '../../../protocol/ts/index.ts'
+import {
+  AppErrorCode,
+  CHAT_BTW_OP,
+  CHAT_COMMANDS_OP,
+  CHAT_IMAGE_OP,
+  CHAT_PERMISSIONS_OP,
+  CHAT_PERMISSIONS_UPDATE_OP,
+  CHAT_SETTINGS_OP,
+  ChatLimits,
+  ChatOp
+} from '../../../protocol/ts/index.ts'
 import type {
   AppMessage,
   ChatAnswer,
   ChatAnswerParams,
+  ChatBtwParams,
+  ChatBtwResult,
+  ChatCommandEntry,
+  ChatCommandsResult,
   ChatDetailParams,
   ChatEarlierParams,
   ChatImageParams,
   ChatParams,
+  ChatPermissionSource,
+  ChatPermissionsResult,
+  ChatPermissionsUpdateParams,
   ChatSendParams,
   ChatSettingsParams
 } from '../../../protocol/ts/index.ts'
@@ -63,6 +91,8 @@ export interface ChatBridgeChats {
   setModel?(tabId: string, model: string | undefined): Promise<void>
   setEffort?(tabId: string, effort: string | undefined): Promise<void>
   interrupt(tabId: string): Promise<void>
+  /** `/btw` (`chat.btw`, §8.14); starts the process when it isn't running. */
+  askSideQuestion?(tabId: string, question: string): Promise<ChatSideAnswer>
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean
 }
 
@@ -81,6 +111,14 @@ export interface ChatBridgeDeps {
   onPhoneSend?(phoneId: string, tabId: string): void
   /** Decodes and resizes `chat.image` images (§8.9). Without it that op answers `unsupported`. */
   images?: ImageCodec
+  /**
+   * `/permissions` (§8.14): the rules in Claude's settings files for a chat's folder,
+   * checked against the folders the user configured. Without it those ops answer `unsupported`.
+   */
+  permissions?: {
+    read(cwd: string): Promise<PermissionSettingsSource[]>
+    update(cwd: string, kind: PermissionSourceKind, behavior: PermissionBehavior, rule: string, action: 'add' | 'remove'): Promise<void>
+  }
 }
 
 /**
@@ -262,9 +300,44 @@ export class ChatBridge {
           throw err
         }
       }
+      case CHAT_COMMANDS_OP:
+        return chatCommands(await this.ensureRuntime(resolved))
+      case CHAT_BTW_OP: {
+        if (!this.deps.chats.askSideQuestion) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot ask side questions')
+        await this.ensureRuntime(resolved)
+        const answer = await this.deps.chats.askSideQuestion(params.tabId, (params as ChatBtwParams).question)
+        const result: ChatBtwResult = { response: answer.response }
+        if (answer.synthetic) result.synthetic = true
+        return result
+      }
+      case CHAT_PERMISSIONS_OP:
+        return this.readPermissions(resolved)
+      case CHAT_PERMISSIONS_UPDATE_OP: {
+        const { kind, behavior, rule, action } = params as ChatPermissionsUpdateParams
+        const { permissions, cwd } = this.permissionsFor(resolved)
+        await permissions.update(cwd, kind, behavior, rule, action)
+        return this.readPermissions(resolved)
+      }
       default:
         throw new OpError(AppErrorCode.Unsupported, `Unknown op ${op}`)
     }
+  }
+
+  /** The folder the desktop's `/permissions` dialog edits: the chat's own, never a remote one. */
+  private permissionsFor(resolved: ResolvedTab): { permissions: NonNullable<ChatBridgeDeps['permissions']>; cwd: string } {
+    const permissions = this.deps.permissions
+    if (!permissions) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot edit permission rules')
+    if (resolved.project.ssh) {
+      throw new OpError(AppErrorCode.Unsupported, "This project's Claude settings live on the remote host. Run /permissions in a terminal there.")
+    }
+    if (!resolved.config.cwd) throw new OpError(AppErrorCode.Unsupported, 'This project has no folder for Claude settings')
+    return { permissions, cwd: resolved.config.cwd }
+  }
+
+  private async readPermissions(resolved: ResolvedTab): Promise<ChatPermissionsResult> {
+    const { permissions, cwd } = this.permissionsFor(resolved)
+    const sources = await permissions.read(cwd)
+    return { sources: sources.map(permissionSource) }
   }
 
   /** `chat.settings` (SPEC.md §8.5): what the composer's pickers do, in their order. */
@@ -414,6 +487,32 @@ export class ChatBridge {
     if (sub.timer !== null) this.deps.timers.clearTimeout(sub.timer)
     sub.stop()
   }
+}
+
+/** `chat.commands` (§8.14): the composer's `/` menu, as ClaudeChatTab builds it. */
+export function chatCommands(chat: ChatState): ChatCommandsResult {
+  return {
+    commands: composerCommands(chat.commands).map((command) => {
+      const entry: ChatCommandEntry = { name: command.name }
+      if (command.description) entry.description = command.description
+      if (command.argumentHint) entry.argumentHint = command.argumentHint
+      if (TERMINAL_ONLY_COMMANDS.has(command.name) && command.name !== PERMISSIONS_COMMAND.name) entry.terminalOnly = true
+      return entry
+    })
+  }
+}
+
+function permissionSource(source: PermissionSettingsSource): ChatPermissionSource {
+  const out: ChatPermissionSource = {
+    kind: source.kind,
+    path: source.path,
+    exists: source.exists,
+    allow: source.allow,
+    ask: source.ask,
+    deny: source.deny
+  }
+  if (source.error) out.error = source.error
+  return out
 }
 
 /** A phone's answer → exactly what the desktop's prompt card would send (§6.3). */

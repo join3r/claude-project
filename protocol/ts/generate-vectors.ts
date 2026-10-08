@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -772,6 +772,88 @@ function chatMessages(): unknown {
           text({ tabId: 'tab-chat' }),
           text({ tabId: 'tab-chat', mode: 'yolo' }),
           text({ tabId: 'tab-chat', model: 4 }),
+          'null'
+        ]
+      }
+    },
+    // §8.14: the composer's `/` menu, `/btw` and `/permissions`.
+    commands: {
+      params: [text({ tabId: 'tab-chat' }), text({ tabId: 'tab-chat', extra: 1 })].map((json) => ({ json, expected: parseChatCommandsParams(JSON.parse(json)) })),
+      results: [
+        text({
+          commands: [
+            { name: 'btw', description: 'Ask a quick side question — the answer stays out of the conversation', argumentHint: '<question>' },
+            { name: 'permissions', description: 'View and edit allow, ask and deny rules' },
+            { name: 'compact', description: 'Clear conversation history but keep a summary in context', argumentHint: '<optional custom summarization instructions>' },
+            { name: 'review', description: 'Review a pull request', argumentHint: null, source: 'builtin' },
+            { name: 'config', description: 'Open config panel', terminalOnly: true },
+            { name: 'init', terminalOnly: false }
+          ]
+        }),
+        text({ commands: [] })
+      ].map((json) => ({ json, expected: parseChatCommandsResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), text({ tabId: 7 }), 'null'],
+        results: [text({}), text({ commands: [{ description: 'no name' }] }), text({ commands: [{ name: 'x', description: 4 }] }), text({ commands: 'btw' }), '[]']
+      }
+    },
+    btw: {
+      params: [
+        text({ tabId: 'tab-chat', question: 'what does the reducer do with removes?' }),
+        text({ tabId: 'tab-chat', question: '  why?  ', extra: true })
+      ].map((json) => ({ json, expected: parseChatBtwParams(JSON.parse(json)) })),
+      results: [
+        text({ response: 'It applies `removes` before `upserts`.' }),
+        text({ response: null }),
+        text({}),
+        text({ response: 'API Error: overloaded', synthetic: true }),
+        text({ response: 'ok', synthetic: false, extra: 1 })
+      ].map((json) => ({ json, expected: parseChatBtwResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ question: 'why?' }),
+          text({ tabId: 'tab-chat' }),
+          text({ tabId: 'tab-chat', question: '   ' }),
+          text({ tabId: 'tab-chat', question: 'x'.repeat(20001) }),
+          'null'
+        ],
+        results: [text({ response: 4 }), '[]', 'null']
+      }
+    },
+    permissions: {
+      params: [text({ tabId: 'tab-chat' }), text({ tabId: 'tab-chat', cwd: '/elsewhere' })].map((json) => ({ json, expected: parseChatPermissionsParams(JSON.parse(json)) })),
+      results: [
+        text({
+          sources: [
+            { kind: 'localSettings', path: '/Users/me/app/.claude/settings.local.json', exists: true, allow: ['Bash(npm test:*)', 'Read(./docs/**)'], ask: [], deny: ['Bash(rm -rf:*)'], defaultMode: 'acceptEdits' },
+            { kind: 'projectSettings', path: '/Users/me/app/.claude/settings.json', exists: false, allow: [], ask: [], deny: [], error: null },
+            { kind: 'policySettings', path: '/Library/Application Support/ClaudeCode/managed-settings.json', exists: true, allow: [], ask: [], deny: [] },
+            { kind: 'userSettings', path: '/Users/me/.claude/settings.json', exists: true, allow: [], ask: [], deny: [], error: "Couldn't read it: Unexpected token } in JSON at position 41" }
+          ]
+        }),
+        text({ sources: [] })
+      ].map((json) => ({ json, expected: parseChatPermissionsResult(JSON.parse(json)) })),
+      updateParams: [
+        text({ tabId: 'tab-chat', kind: 'localSettings', behavior: 'allow', rule: 'Bash(npm test:*)', action: 'add' }),
+        text({ tabId: 'tab-chat', kind: 'userSettings', behavior: 'deny', rule: ' WebFetch ', action: 'remove', extra: 1 })
+      ].map((json) => ({ json, expected: parseChatPermissionsUpdateParams(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), 'null'],
+        results: [
+          text({}),
+          text({ sources: [{ kind: 'localSettings', path: '/a', exists: true, allow: [], ask: [] }] }),
+          text({ sources: [{ kind: 'localSettings', path: '/a', exists: 'yes', allow: [], ask: [], deny: [] }] }),
+          text({ sources: [{ kind: 'localSettings', path: '/a', exists: true, allow: [1], ask: [], deny: [] }] }),
+          '[]'
+        ],
+        updateParams: [
+          text({ kind: 'localSettings', behavior: 'allow', rule: 'Read', action: 'add' }),
+          text({ tabId: 'tab-chat', kind: 'managedSettings', behavior: 'allow', rule: 'Read', action: 'add' }),
+          text({ tabId: 'tab-chat', kind: 'localSettings', behavior: 'always', rule: 'Read', action: 'add' }),
+          text({ tabId: 'tab-chat', kind: 'localSettings', behavior: 'allow', rule: 'Read', action: 'toggle' }),
+          text({ tabId: 'tab-chat', kind: 'localSettings', behavior: 'allow', rule: '  ', action: 'add' }),
+          text({ tabId: 'tab-chat', kind: 'localSettings', behavior: 'allow', rule: 'x'.repeat(2001), action: 'add' }),
+          text({ tabId: 'tab-chat', kind: 'localSettings', behavior: 'allow', action: 'add' }),
           'null'
         ]
       }

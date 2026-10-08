@@ -1,4 +1,4 @@
-import { emptyChatState, type ChatEvent, type ChatPromptResponse, type ChatSnapshot, type ChatState } from '../../src/shared/claude-chat'
+import { emptyChatState, type ChatEvent, type ChatPromptResponse, type ChatSideAnswer, type ChatSnapshot, type ChatState } from '../../src/shared/claude-chat'
 import type { ChatTabConfigShape } from '../../src/shared/chat-tab-config'
 import type { ChatBridgeChats } from '../../src/main/mobile/chat-bridge'
 
@@ -72,6 +72,14 @@ export class FakeChats implements ChatBridgeChats {
 
   async interrupt(tabId: string): Promise<void> {
     this.interrupts.push(tabId)
+  }
+
+  readonly sideQuestions: { tabId: string; question: string }[] = []
+  sideAnswer: ChatSideAnswer = { response: 'An answer' }
+
+  async askSideQuestion(tabId: string, question: string): Promise<ChatSideAnswer> {
+    this.sideQuestions.push({ tabId, question })
+    return this.sideAnswer
   }
 
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean {

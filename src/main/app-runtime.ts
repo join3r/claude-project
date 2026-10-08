@@ -37,6 +37,7 @@ import { registerTerminalHandlers } from './ipc/terminals'
 import { createWorkspace, listWorkspaceBranches, registerWorkspaceHandlers } from './ipc/workspaces'
 import { registerArchiveHandlers } from './ipc/archive'
 import { readLocalTranscript, readRemoteTranscript } from './claude-chat/transcript'
+import { readPermissionSettings, updatePermissionRule } from './claude-chat/permission-settings'
 import { registerFileBrowserHandlers } from './ipc/file-browser'
 import { registerGitHandlers } from './ipc/git'
 import { registerNotebookHandlers } from './ipc/notebooks'
@@ -75,6 +76,7 @@ import { triageTaskInData } from './mobile/triage'
 import {
   AppErrorCode,
   BRANCHES_LIST_FEATURE,
+  CHAT_COMMANDS_FEATURE,
   CHAT_IMAGE_FEATURE,
   CHAT_SETTINGS_FEATURE,
   PIN_FEATURE,
@@ -325,7 +327,13 @@ export class AppRuntime {
       },
       log,
       onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId),
-      images: nativeImageCodec
+      images: nativeImageCodec,
+      // The same folder check as the chat tab's /permissions IPC.
+      permissions: {
+        read: async (cwd) => readPermissionSettings(await this.resolveAllowedDirectory(cwd)),
+        update: async (cwd, kind, behavior, rule, action) =>
+          updatePermissionRule(await this.resolveAllowedDirectory(cwd), kind, behavior, rule, action)
+      }
     })
     push.start()
     service = new MobileService({
@@ -348,7 +356,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),

@@ -37,6 +37,8 @@ final class ChatModel {
     private(set) var showingCache = false
     /// When the cached transcript was saved.
     private(set) var cachedAt: Date?
+    /// The `/` menu (`chat.commands`, §8.14); nil until first fetched.
+    private(set) var commands: [ChatCommand]?
 
     /// Where the model gets its connection, cached transcript and answer authorization.
     struct Dependencies {
@@ -61,6 +63,7 @@ final class ChatModel {
     @ObservationIgnored private let log = Logger(subsystem: "sk.awantech.devtool", category: "chat")
     /// Tool-result images fetched this screen (`chat.image`), the largest copy of each.
     @ObservationIgnored private var images: [ChatImageRef: (side: Int, image: UIImage)] = [:]
+    @ObservationIgnored private var loadingCommands = false
 
     init(route: ChatRoute, dependencies: Dependencies) {
         self.route = route
@@ -296,6 +299,43 @@ final class ChatModel {
         }
         if (images[ref]?.side ?? 0) < maxSide { images[ref] = (maxSide, image) }
         return image
+    }
+
+    // MARK: The / menu (§8.14)
+
+    /// Fetches the `/` menu once per open chat; again while it comes back empty
+    /// (Claude hasn't reported its commands yet).
+    func loadCommands() async {
+        guard commands?.isEmpty ?? true, !loadingCommands, !showingCache, let connection = connection() else { return }
+        loadingCommands = true
+        defer { loadingCommands = false }
+        do {
+            commands = try await connection.chatCommands(tabId: route.tabId)
+        } catch {
+            log.notice("chat.commands failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Whether the menu marks `name` as terminal-only.
+    func isTerminalOnly(_ name: String) -> Bool {
+        commands?.first { $0.name == name }?.terminalOnly ?? false
+    }
+
+    func askSideQuestion(_ question: String) async throws -> ChatBtwResult {
+        guard let connection = connection() else { throw DesktopConnectionError.notConnected }
+        return try await connection.askSideQuestion(tabId: route.tabId, question: question)
+    }
+
+    func permissionSources() async throws -> [ChatPermissionSource] {
+        guard let connection = connection() else { throw DesktopConnectionError.notConnected }
+        return try await connection.chatPermissions(tabId: route.tabId)
+    }
+
+    func updatePermission(_ kind: ChatPermissionKind, _ behavior: ChatPermissionBehavior, rule: String,
+                          _ action: ChatPermissionAction) async throws -> [ChatPermissionSource] {
+        guard let connection = connection() else { throw DesktopConnectionError.notConnected }
+        return try await connection.updateChatPermission(
+            .init(tabId: route.tabId, kind: kind, behavior: behavior, rule: rule, action: action))
     }
 
     func detail(for itemId: String) async throws -> ChatDetail {

@@ -1230,3 +1230,12 @@ export const TERMINAL_ONLY_COMMANDS = new Set([
   'install-github-app', 'permissions', 'hooks', 'agents', 'mcp', 'plugin', 'resume', 'status',
   'statusline', 'upgrade', 'exit', 'quit', 'rewind', 'export', 'memory', 'privacy-settings'
 ])
+
+/**
+ * The composer's `/` menu: the CLI doesn't list /btw or /permissions to SDK clients,
+ * so the chat tab adds them (it runs both itself), then what the CLI reported.
+ */
+export function composerCommands(commands: ChatCommand[]): ChatCommand[] {
+  const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND].filter((command) => !commands.some((c) => c.name === command.name))
+  return own.length > 0 ? [...own, ...commands] : commands
+}

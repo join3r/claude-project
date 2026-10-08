@@ -19,7 +19,7 @@ function doc(file: string): Schema {
 
 const KNOWN = new Set([
   '$schema', '$id', '$defs', '$ref', 'title', 'description', 'type', 'required', 'properties',
-  'items', 'enum', 'const', 'pattern', 'minimum', 'oneOf', 'if', 'then'
+  'items', 'enum', 'const', 'pattern', 'minimum', 'maxLength', 'oneOf', 'if', 'then'
 ])
 
 function resolve(ref: string, file: string): [Schema, string] {
@@ -54,6 +54,7 @@ function validate(schema: Schema, value: unknown, file: string, path = '$'): str
   if ('const' in schema && value !== schema.const) errors.push(`${path}: not ${JSON.stringify(schema.const)}`)
   if (schema.enum && !(schema.enum as unknown[]).includes(value)) errors.push(`${path}: not in enum`)
   if (schema.pattern && (typeof value !== 'string' || !new RegExp(schema.pattern as string).test(value))) errors.push(`${path}: pattern`)
+  if (typeof schema.maxLength === 'number' && typeof value === 'string' && value.length > schema.maxLength) errors.push(`${path}: maxLength`)
   if (typeof schema.minimum === 'number' && (typeof value !== 'number' || value < schema.minimum)) errors.push(`${path}: minimum`)
   const isObj = typeOk('object', value)
   if (isObj && schema.required) {
@@ -148,5 +149,17 @@ describe('JSON Schema', () => {
     for (const s of chat.branchesList.results) expect(check('branchesListResult', s.expected), s.json).toEqual([])
     for (const text of chat.streamNew.invalid.params) expect(check('streamNewParams', JSON.parse(text)), text).not.toEqual([])
     for (const text of chat.branchesList.invalid.results) expect(check('branchesListResult', JSON.parse(text)), text).not.toEqual([])
+  })
+
+  it('accepts the chat.commands, chat.btw and chat.permissions samples and rejects the invalid ones (§8.14)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `chat.schema.json#/$defs/${def}` }, value, 'chat.schema.json')
+    for (const s of chat.commands.results) expect(check('commandsResult', s.expected), s.json).toEqual([])
+    for (const s of chat.btw.results) expect(check('btwResult', s.expected), s.json).toEqual([])
+    for (const s of chat.permissions.results) expect(check('permissionsResult', s.expected), s.json).toEqual([])
+    for (const s of chat.permissions.updateParams) expect(check('permissionsUpdateParams', s.expected), s.json).toEqual([])
+    for (const text of chat.commands.invalid.results) expect(check('commandsResult', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.btw.invalid.results) expect(check('btwResult', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.permissions.invalid.results) expect(check('permissionsResult', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.permissions.invalid.updateParams) expect(check('permissionsUpdateParams', JSON.parse(text)), text).not.toEqual([])
   })
 })

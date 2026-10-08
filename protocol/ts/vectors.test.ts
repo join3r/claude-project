@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -183,5 +183,19 @@ describe('M2 vectors', () => {
     for (const s of file.image.results) expect(parseChatImageResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.image.invalid.params) expect(() => parseChatImageParams(JSON.parse(s)), s).toThrow()
     for (const s of file.image.invalid.results) expect(() => parseChatImageResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.commands.params) expect(parseChatCommandsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.commands.results) expect(parseChatCommandsResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.commands.invalid.params) expect(() => parseChatCommandsParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.commands.invalid.results) expect(() => parseChatCommandsResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.btw.params) expect(parseChatBtwParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.btw.results) expect(parseChatBtwResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.btw.invalid.params) expect(() => parseChatBtwParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.btw.invalid.results) expect(() => parseChatBtwResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.permissions.params) expect(parseChatPermissionsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.permissions.results) expect(parseChatPermissionsResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.permissions.updateParams) expect(parseChatPermissionsUpdateParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.permissions.invalid.params) expect(() => parseChatPermissionsParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.permissions.invalid.results) expect(() => parseChatPermissionsResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.permissions.invalid.updateParams) expect(() => parseChatPermissionsUpdateParams(JSON.parse(s)), s).toThrow()
   })
 })

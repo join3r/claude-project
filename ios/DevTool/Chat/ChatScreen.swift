@@ -10,6 +10,8 @@ struct ChatScreen: View {
     @State private var atBottom = true
     @State private var detailItem: ChatItem?
     @State private var viewerImage: ChatImageRef?
+    @State private var sideQuestion: SideQuestion?
+    @State private var showingPermissions = false
     @FocusState private var composerFocused: Bool
     /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
     @State private var viewportHeight: CGFloat = 0
@@ -50,6 +52,23 @@ struct ChatScreen: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(item: $sideQuestion) { side in
+                SideQuestionSheet(question: side.question) { [model] in try await model.askSideQuestion(side.question) }
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showingPermissions) {
+                PermissionsSheet(
+                    mode: model.view?.status.permissionMode,
+                    editable: !readOnly,
+                    load: { [model] in try await model.permissionSources() },
+                    update: { [model] kind, behavior, rule, action in try await model.updatePermission(kind, behavior, rule: rule, action) }
+                )
+                .presentationDetents([.large])
+            }
+            .onChange(of: commandQuery != nil) { _, typing in
+                if typing { Task { await model.loadCommands() } }
+            }
             .fullScreenCover(item: $viewerImage) { ref in
                 ChatImageViewer(start: ref) { [model] ref, side in try await model.image(ref, maxSide: side) }
             }
@@ -61,7 +80,17 @@ struct ChatScreen: View {
             .onAppear { app.visibleChat = route }
             .onDisappear { if app.visibleChat == route { app.visibleChat = nil } }
             #if DEBUG
-            .task { await DemoChatScript.run(model: model, openDetail: { detailItem = $0 }) }
+            .task {
+                await DemoChatScript.run(model: model, openDetail: { detailItem = $0 }, setDraft: {
+                    draft = $0
+                    composerFocused = true
+                }, openSheet: { sheet in
+                    switch sheet {
+                    case .permissions: showingPermissions = true
+                    case .btw(let question): sideQuestion = SideQuestion(question: question)
+                    }
+                })
+            }
             #endif
     }
 
@@ -242,7 +271,8 @@ struct ChatScreen: View {
                     answering: model.answering.contains(prompt.id),
                     error: model.answerErrors[prompt.id],
                     enabled: !readOnly,
-                    maxHeight: viewportHeight > 0 ? max(200, viewportHeight * 0.55) : .infinity
+                    // The / menu needs part of that room while it's up.
+                    maxHeight: viewportHeight > 0 ? max(suggestions == nil ? 200 : 120, viewportHeight * (suggestions == nil ? 0.55 : 0.3)) : .infinity
                 ) { answer in
                     Task { await model.answer(prompt, answer) }
                 }
@@ -259,6 +289,10 @@ struct ChatScreen: View {
                     Task { await self.model.updateSettings(mode: mode, model: model, effort: effort) }
                 }
             }
+            if let suggestions {
+                CommandSuggestions(commands: suggestions, maxHeight: viewportHeight > 0 ? viewportHeight * 0.3 : 270, pick: pick)
+                    .transition(.opacity)
+            }
             composer
         }
         .padding(.horizontal, 12)
@@ -269,6 +303,7 @@ struct ChatScreen: View {
         .background(.bar)
         .animation(.snappy, value: model.view?.prompts.first?.id)
         .animation(.snappy, value: model.toast)
+        .animation(.snappy, value: suggestions?.map(\.name))
         // Above the bar, not over it: over the composer it would cover Stop and Send.
         .overlay(alignment: .topTrailing) {
             if !atBottom {
@@ -371,6 +406,7 @@ struct ChatScreen: View {
 
     private func send() {
         guard canSend else { return }
+        if supportsCommands, runCommand(draft) { return }
         let text = draft
         draft = ""
         atBottom = true
@@ -381,6 +417,67 @@ struct ChatScreen: View {
                 draft = text // Give the text back so it isn't lost.
             }
         }
+    }
+}
+
+// MARK: - The / menu (§8.14)
+
+/// A `/btw` question on screen.
+struct SideQuestion: Identifiable {
+    let id = UUID()
+    let question: String
+}
+
+extension ChatScreen {
+    /// The desktop lists the `/` menu ops.
+    private var supportsCommands: Bool {
+        app.supports(DesktopFeature.chatCommands, on: route.desktopId)
+    }
+
+    /// What follows the `/` while the composer holds `/` and one word.
+    private var commandQuery: String? {
+        guard supportsCommands, !readOnly else { return nil }
+        return ChatCommandMenu.query(draft)
+    }
+
+    private var suggestions: [ChatCommand]? {
+        guard let query = commandQuery, let commands = model.commands else { return nil }
+        let matches = ChatCommandMenu.matches(commands, query: query)
+        return matches.isEmpty ? nil : matches
+    }
+
+    private func pick(_ command: ChatCommand) {
+        guard !command.terminalOnly else { return }
+        if command.name == ChatCommandMenu.permissions {
+            draft = ""
+            composerFocused = false
+            showingPermissions = true
+            return
+        }
+        draft = "/\(command.name) "
+    }
+
+    /// `/permissions`, `/btw <question>` and terminal-only commands, which the
+    /// composer handles itself rather than sending. True when `text` was one.
+    private func runCommand(_ text: String) -> Bool {
+        let command = ChatCommandMenu.command(in: text)
+        if command == ChatCommandMenu.permissions {
+            draft = ""
+            composerFocused = false
+            showingPermissions = true
+            return true
+        }
+        if let command, model.isTerminalOnly(command) {
+            model.flash("/\(command) only works in a terminal on the desktop.")
+            return true
+        }
+        guard let question = ChatCommandMenu.sideQuestion(in: text) else { return false }
+        // A bare /btw does nothing, as on the desktop.
+        guard !question.isEmpty else { return true }
+        draft = ""
+        composerFocused = false
+        sideQuestion = SideQuestion(question: question)
+        return true
     }
 }
 

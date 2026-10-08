@@ -661,10 +661,18 @@ public enum ChatOp {
     public static let settings = "chat.settings"
     /// `chat.image` (§8.9); parsed by `ChatImageParams`, not `ChatParams`.
     public static let image = "chat.image"
+    /// The `/` menu (§8.14); each parsed by its own type, not `ChatParams`.
+    public static let commands = "chat.commands"
+    public static let btw = "chat.btw"
+    public static let permissions = "chat.permissions"
+    public static let permissionsUpdate = "chat.permissions.update"
 
     /// §6.3 limits.
     public static let maxSendLength = 32_000
     public static let maxEarlierLimit = 100
+    /// §8.14 limits.
+    public static let maxBtwLength = 20_000
+    public static let maxRuleLength = 2000
 }
 
 // MARK: - Parsing

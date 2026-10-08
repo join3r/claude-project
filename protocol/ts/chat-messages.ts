@@ -129,6 +129,64 @@ export const CHAT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/
 export interface ChatImageParams { tabId: string; itemId: string; index: number; maxSide?: number }
 export interface ChatImageResult { mediaType: string; data: string }
 
+/**
+ * The composer's `/` menu (SPEC.md §8.14): `chat.commands` lists Claude Code's
+ * commands and skills, `chat.btw` asks a side question, and `chat.permissions` /
+ * `chat.permissions.update` read and edit the allow, ask and deny rules. One feature
+ * covers all four.
+ */
+export const CHAT_COMMANDS_OP = 'chat.commands'
+export const CHAT_BTW_OP = 'chat.btw'
+export const CHAT_PERMISSIONS_OP = 'chat.permissions'
+export const CHAT_PERMISSIONS_UPDATE_OP = 'chat.permissions.update'
+/** The handshake feature (§8.1) a desktop lists when it answers the four ops above. */
+export const CHAT_COMMANDS_FEATURE = 'chat.commands'
+
+export interface ChatCommandEntry {
+  name: string
+  description?: string
+  argumentHint?: string
+  /** Only works in the terminal UI; the phone lists it greyed out. */
+  terminalOnly?: true
+}
+export interface ChatCommandsResult { commands: ChatCommandEntry[] }
+
+export interface ChatBtwParams { tabId: string; question: string }
+export interface ChatBtwResult {
+  /** Null when Claude had nothing to say (the question was cancelled). */
+  response: string | null
+  /** The CLI made the answer up itself (an error or refusal), not the model. */
+  synthetic?: true
+}
+
+/** The settings files Claude reads permission rules from, most specific first. */
+export const CHAT_PERMISSION_KINDS = ['localSettings', 'projectSettings', 'userSettings'] as const
+export type ChatPermissionKind = (typeof CHAT_PERMISSION_KINDS)[number]
+export const CHAT_PERMISSION_BEHAVIORS = ['allow', 'ask', 'deny'] as const
+export type ChatPermissionBehavior = (typeof CHAT_PERMISSION_BEHAVIORS)[number]
+export const CHAT_PERMISSION_ACTIONS = ['add', 'remove'] as const
+export type ChatPermissionAction = (typeof CHAT_PERMISSION_ACTIONS)[number]
+
+export interface ChatPermissionSource {
+  kind: ChatPermissionKind
+  /** The settings file, absolute, on the desktop. */
+  path: string
+  exists: boolean
+  allow: string[]
+  ask: string[]
+  deny: string[]
+  /** It exists but couldn't be read; it isn't edited. */
+  error?: string
+}
+export interface ChatPermissionsResult { sources: ChatPermissionSource[] }
+export interface ChatPermissionsUpdateParams {
+  tabId: string
+  kind: ChatPermissionKind
+  behavior: ChatPermissionBehavior
+  rule: string
+  action: ChatPermissionAction
+}
+
 /** Caps from §6.2–§6.4. */
 export const ChatLimits = {
   /** `text.markdown` / `user.text` in the view; longer ones end in "…" and come through `chat.detail`. */
@@ -154,7 +212,11 @@ export const ChatLimits = {
   imageMaxSide: 4096,
   imageDefaultSide: 2048,
   /** `chat.image` base64 `data`, so the result fits one message (§6.1). */
-  imageData: 3_000_000
+  imageData: 3_000_000,
+  /** `chat.btw` question (§8.14). */
+  btwQuestion: 20_000,
+  /** `chat.permissions.update` rule (§8.14). */
+  permissionRule: 2000
 } as const
 
 export type ChatViewToolStatus = 'pending' | 'running' | 'waiting' | 'done' | 'error' | 'denied'
@@ -293,7 +355,16 @@ export type ChatAnswer =
 
 export interface ChatAnswerParams { tabId: string; promptId: string; answer: ChatAnswer }
 
-export type ChatParams = ChatTabParams | ChatEarlierParams | ChatSendParams | ChatDetailParams | ChatAnswerParams | ChatSettingsParams | ChatImageParams
+export type ChatParams =
+  | ChatTabParams
+  | ChatEarlierParams
+  | ChatSendParams
+  | ChatDetailParams
+  | ChatAnswerParams
+  | ChatSettingsParams
+  | ChatImageParams
+  | ChatBtwParams
+  | ChatPermissionsUpdateParams
 
 export interface ChatOpenResult { seq: number; view: ChatView }
 export interface ChatEarlierResult { items: ChatViewItem[]; hasEarlier: boolean }
@@ -749,6 +820,99 @@ export function parseChatImageResult(value: unknown): ChatImageResult {
   const data = str(o, 'data')
   if (!data) fail('data is empty')
   return { mediaType, data }
+}
+
+/** `chat.commands` and `chat.permissions` params (the desktop's side): just `tabId`. */
+export function parseChatCommandsParams(params: unknown): ChatTabParams {
+  return { tabId: str(obj(params, 'params'), 'tabId') }
+}
+
+export const parseChatPermissionsParams = parseChatCommandsParams
+
+/** `chat.commands` result (the phone's side). `terminalOnly` other than `true` is absent. */
+export function parseChatCommandsResult(value: unknown): ChatCommandsResult {
+  const o = obj(value, 'result')
+  return {
+    commands: arr(o, 'commands').map((raw) => {
+      const c = obj(raw, 'command')
+      const command: ChatCommandEntry = { name: str(c, 'name') }
+      const description = optStr(c, 'description')
+      if (description !== undefined) command.description = description
+      const argumentHint = optStr(c, 'argumentHint')
+      if (argumentHint !== undefined) command.argumentHint = argumentHint
+      if (flag(c, 'terminalOnly')) command.terminalOnly = true
+      return command
+    })
+  }
+}
+
+/**
+ * `chat.btw` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `tabId`, or a blank question or one over {@link ChatLimits.btwQuestion} characters.
+ */
+export function parseChatBtwParams(params: unknown): ChatBtwParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const question = str(o, 'question')
+  if (question.length > ChatLimits.btwQuestion) fail(`question over ${ChatLimits.btwQuestion} characters`)
+  if (!question.trim()) fail('question is empty')
+  return { tabId, question }
+}
+
+/** `chat.btw` result (the phone's side). `response` is a string or `null`; absent reads as `null`. */
+export function parseChatBtwResult(value: unknown): ChatBtwResult {
+  const o = obj(value, 'result')
+  const result: ChatBtwResult = { response: optStr(o, 'response') ?? null }
+  if (flag(o, 'synthetic')) result.synthetic = true
+  return result
+}
+
+function oneOf<T extends string>(o: Obj, key: string, allowed: readonly T[]): T {
+  const value = str(o, key)
+  if (!(allowed as readonly string[]).includes(value)) fail(`unknown ${key} ${value}`)
+  return value as T
+}
+
+/**
+ * `chat.permissions.update` params (the desktop's side). Throws ProtocolError —
+ * `bad-request` — on a missing `tabId`, an unknown `kind`, `behavior` or `action`, or
+ * a blank rule or one over {@link ChatLimits.permissionRule} characters.
+ */
+export function parseChatPermissionsUpdateParams(params: unknown): ChatPermissionsUpdateParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const kind = oneOf(o, 'kind', CHAT_PERMISSION_KINDS)
+  const behavior = oneOf(o, 'behavior', CHAT_PERMISSION_BEHAVIORS)
+  const rule = str(o, 'rule')
+  if (rule.length > ChatLimits.permissionRule) fail(`rule over ${ChatLimits.permissionRule} characters`)
+  if (!rule.trim()) fail('rule is empty')
+  return { tabId, kind, behavior, rule, action: oneOf(o, 'action', CHAT_PERMISSION_ACTIONS) }
+}
+
+/**
+ * `chat.permissions` and `chat.permissions.update` result (the phone's side). A source
+ * of a kind this build doesn't know is skipped.
+ */
+export function parseChatPermissionsResult(value: unknown): ChatPermissionsResult {
+  const o = obj(value, 'result')
+  const sources: ChatPermissionSource[] = []
+  for (const raw of arr(o, 'sources')) {
+    const s = obj(raw, 'source')
+    const kind = str(s, 'kind')
+    if (!(CHAT_PERMISSION_KINDS as readonly string[]).includes(kind)) continue
+    const source: ChatPermissionSource = {
+      kind: kind as ChatPermissionKind,
+      path: str(s, 'path'),
+      exists: bool(s, 'exists'),
+      allow: strings(s, 'allow'),
+      ask: strings(s, 'ask'),
+      deny: strings(s, 'deny')
+    }
+    const error = optStr(s, 'error')
+    if (error !== undefined) source.error = error
+    sources.push(source)
+  }
+  return { sources }
 }
 
 /** `task.new` result (the phone's side). */
