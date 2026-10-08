@@ -65,6 +65,27 @@ describe('nextAiStatus', () => {
     it('does not resurrect an exited tab', () => {
       expect(nextAiStatus('exited', 'hook-stopped', hookTab())).toBe('keep')
     })
+
+    // A turn ending with a benchmark still running in a background shell read as
+    // "Your turn" for as long as the shell ran.
+    it('stays working while background tasks run past the turn', () => {
+      expect(nextAiStatus('working', 'hook-stopped', hookTab({ backgroundTasks: 1 }))).toBe('working')
+      expect(nextAiStatus('attention', 'hook-stopped', hookTab({ backgroundTasks: 2 }))).toBe('working')
+      expect(nextAiStatus('working', 'hook-stopped', hookTab({ backgroundTasks: 0 }))).toBeNull()
+    })
+  })
+
+  describe('background tasks', () => {
+    it('settles working once the last background task ends', () => {
+      expect(nextAiStatus('working', 'background-done', hookTab())).toBeNull()
+      expect(nextAiStatus('attention', 'background-done', hookTab())).toBe('keep')
+      expect(nextAiStatus('exited', 'background-done', hookTab())).toBe('keep')
+    })
+
+    it('marks an idle tab working when background work goes live', () => {
+      expect(nextAiStatus(null, 'background-started', hookTab())).toBe('working')
+      expect(nextAiStatus('attention', 'background-started', hookTab())).toBe('keep')
+    })
   })
 
   describe('hook-notification', () => {

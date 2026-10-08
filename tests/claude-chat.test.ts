@@ -5,7 +5,7 @@ import { buildTimeline, summarizeGroup } from '../src/renderer/components/claude
 import { contextTone, formatCost, formatResetAt, formatResetIn, formatTokens, limitTone } from '../src/renderer/components/claude-chat/UsageMeter'
 import { diffLines, diffStats, editPairs } from '../src/renderer/components/claude-chat/diff'
 import { JsonLineGate, sdkAddedEnv } from '../src/main/claude-chat/remote-spawn'
-import { coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput } from '../src/main/claude-chat/chat-session'
+import { backgroundTaskCount, coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput } from '../src/main/claude-chat/chat-session'
 import { coldCacheText, formatIdle } from '../src/renderer/components/claude-chat/ColdCacheNotice'
 import { parseTranscriptLines, remoteTranscriptScript } from '../src/main/claude-chat/transcript'
 import { claudeTabType, createTab } from '../src/renderer/components/newTaskTabs'
@@ -412,5 +412,26 @@ describe('chat tabs', () => {
     expect(claudeTabType('claude', 'chat')).toBe('claude-chat')
     expect(claudeTabType('claude', 'terminal')).toBe('claude')
     expect(claudeTabType('pi', 'chat')).toBe('pi')
+  })
+})
+
+describe('backgroundTaskCount', () => {
+  it('counts the live non-ambient tasks in a background_tasks_changed level', () => {
+    expect(backgroundTaskCount({
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: [
+        { task_id: 'b1', task_type: 'local_bash', description: 'eval' },
+        { task_id: 'w1', task_type: 'monitor', description: 'watch', ambient: true },
+        { task_id: 'a1', task_type: 'local_agent', description: 'review' }
+      ]
+    })).toBe(2)
+    expect(backgroundTaskCount({ type: 'system', subtype: 'background_tasks_changed', tasks: [] })).toBe(0)
+  })
+
+  it('ignores every other message', () => {
+    expect(backgroundTaskCount({ type: 'system', subtype: 'task_started', task_id: 'b1' })).toBeNull()
+    expect(backgroundTaskCount({ type: 'result' })).toBeNull()
+    expect(backgroundTaskCount(null)).toBeNull()
   })
 })

@@ -31,6 +31,11 @@ export interface AgentActivity {
     since: number
   }
   subagents: number
+  /**
+   * Live background tasks (shells, agents) — the chat tab's `background_tasks_changed`
+   * level. Outlives Stop: they keep running after the turn. Terminal tabs never set it.
+   */
+  background?: number
   compacting: boolean
   /** When the current turn started; undefined between turns. */
   turnStartedAt?: number
@@ -251,6 +256,21 @@ export function reduceAgentActivity(
       break
     }
 
+    // DevTool's own event: the chat tab's set of live background tasks changed.
+    // Going live or going quiet between turns is a status change of its own; inside
+    // a turn the turn's own hooks decide.
+    case 'DevtoolBackgroundTasks': {
+      const count = typeof body.count === 'number' && body.count > 0 ? Math.floor(body.count) : 0
+      const before = base.background ?? 0
+      if (count === before) return { activity: base, statusEvent: null, changed: false }
+      next.background = count > 0 ? count : undefined
+      if (next.turnStartedAt === undefined) {
+        if (before === 0) statusEvent = 'background-started'
+        else if (count === 0) statusEvent = 'background-done'
+      }
+      break
+    }
+
     case 'SubagentStart':
       next.subagents = base.subagents + 1
       break
@@ -338,6 +358,10 @@ export function describeActivity(
     const parts: string[] = []
     if (activity.tool) parts.push(activity.tool.label)
     if (activity.subagents > 0) parts.push(activity.subagents === 1 ? '1 agent' : `${activity.subagents} agents`)
+    const background = activity.background ?? 0
+    if (background > 0 && activity.turnStartedAt === undefined) {
+      parts.push(background === 1 ? '1 background task' : `${background} background tasks`)
+    }
     if (parts.length > 0) return parts.join(' · ')
     return activity.lastPrompt ? `Thinking · ${activity.lastPrompt}` : 'Thinking'
   }

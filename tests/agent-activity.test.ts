@@ -207,6 +207,40 @@ describe('TabActivityRegistry', () => {
     expect(registry.getStatus('tab')).toBe('working')
   })
 
+  it('keeps a turn that leaves background tasks running working until they end', () => {
+    const registry = new TabActivityRegistry(() => 1)
+    const hook = (body: Record<string, unknown>): void => {
+      const update = registry.applyHook('tab', body)
+      if (update?.statusEvent) registry.statusEvent('tab', update.statusEvent)
+    }
+    hook({ hook_event_name: 'UserPromptSubmit', prompt: 'Run the eval' })
+    registry.working('tab')
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1 })
+    hook({ hook_event_name: 'Stop' })
+    registry.stopped('tab')
+    expect(registry.getStatus('tab')).toBe('working')
+    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('1 background task')
+
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 0 })
+    expect(registry.getStatus('tab')).toBeNull()
+  })
+
+  it('leaves a running turn alone when its background tasks end', () => {
+    const { events } = fold([
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Go' },
+      { hook_event_name: 'DevtoolBackgroundTasks', count: 1 },
+      { hook_event_name: 'DevtoolBackgroundTasks', count: 0 }
+    ])
+    expect(events).toEqual([null, null, null])
+  })
+
+  it('forgets background tasks when the process goes away', () => {
+    const registry = new TabActivityRegistry(() => 1)
+    registry.applyHook('tab', { hook_event_name: 'DevtoolBackgroundTasks', count: 2 })
+    registry.reset('tab')
+    expect(registry.backgroundTasks('tab')).toBe(0)
+  })
+
   it('returns null for bodies that change nothing', () => {
     const registry = new TabActivityRegistry(() => 1)
     expect(registry.applyHook('tab', {})).toBeNull()

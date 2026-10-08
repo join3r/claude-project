@@ -50,9 +50,18 @@ export class TabActivityRegistry {
     this.apply(tabId, (current) => nextAiStatus(current, 'hook-working', this.context()))
   }
 
-  /** Claude's Stop hook — authoritative "the agent is done". */
+  /**
+   * Claude's Stop hook — authoritative "the turn is done". The agent is done too
+   * unless it left background tasks running.
+   */
   stopped(tabId: string): void {
-    this.apply(tabId, (current) => nextAiStatus(current, 'hook-stopped', this.context()))
+    const ctx = { ...this.context(), backgroundTasks: this.backgroundTasks(tabId) }
+    this.apply(tabId, (current) => nextAiStatus(current, 'hook-stopped', ctx))
+  }
+
+  /** Live background tasks the tab's agent reported, 0 when none or unknown. */
+  backgroundTasks(tabId: string): number {
+    return this.activities.get(tabId)?.background ?? 0
   }
 
   /**
@@ -148,6 +157,7 @@ export class TabActivityRegistry {
       tool: undefined,
       waiting: undefined,
       subagents: 0,
+      background: undefined,
       compacting: false,
       turnStartedAt: undefined,
       updatedAt: this.now()

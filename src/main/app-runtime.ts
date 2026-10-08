@@ -659,7 +659,7 @@ export class AppRuntime {
       case 'stopped':
         this.activityRegistry.stopped(tabId)
         this.recordAgentActivity(tabId, body)
-        this.broadcastToAttachedWindows(tabId, 'hook-stopped', tabId)
+        this.broadcastToAttachedWindows(tabId, 'hook-stopped', tabId, this.activityRegistry.backgroundTasks(tabId))
         return
       case 'notification':
         this.activityRegistry.notification(tabId, body)

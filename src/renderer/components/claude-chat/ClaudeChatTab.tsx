@@ -62,13 +62,14 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const [permissionsOpen, setPermissionsOpen] = useState(false)
 
-  const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind): AiStatusDecision => {
+  const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind, backgroundTasks?: number): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
     const decision = nextAiStatus(current, event, {
       isHookTab: true,
       visible: visibleRef.current,
       windowFocused: document.hasFocus(),
-      notificationKind
+      notificationKind,
+      backgroundTasks
     })
     if (decision !== 'keep') statusStore.setStatus(tabId, decision, event)
     return decision
@@ -78,8 +79,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   useEffect(() => {
     hookStatusCallbacks.set(tabId, {
       onWorking: () => { applyStatus('hook-working') },
-      onStopped: () => {
-        applyStatus('hook-stopped')
+      onStopped: (backgroundTasks) => {
+        applyStatus('hook-stopped', undefined, backgroundTasks)
         markTaskEvent(projectId, taskId)
       },
       onNotification: (body) => {
@@ -126,7 +127,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       // the snapshot: the hook events that set it went by before it was listening.
       const snapshot = getChatState(tabId)
       if (snapshot.pending.length > 0) applyStatus('hook-needs-input')
-      else if (snapshot.busy) applyStatus('hook-working')
+      else if (snapshot.busy || Object.values(snapshot.tasks).some((task) => task.background && task.status === 'running')) {
+        applyStatus('hook-working')
+      }
       // Opened from an empty task's prompt box: apply its choices, then send.
       const first = takePendingPrompt(tabId)
       if (!first) return

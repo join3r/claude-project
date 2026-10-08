@@ -110,6 +110,18 @@ function limitWindow(raw: { utilization: number | null; resets_at: string | null
   return { utilization: raw.utilization, ...(raw.resets_at ? { resetsAt: raw.resets_at } : {}) }
 }
 
+/**
+ * How many background tasks are live, from a `background_tasks_changed` level, or
+ * null for any other message. Ambient ones (watchers, skip-transcript tasks) are
+ * not activity, so they don't count.
+ */
+export function backgroundTaskCount(message: unknown): number | null {
+  const m = message as { type?: unknown; subtype?: unknown; tasks?: unknown } | null
+  if (!m || m.type !== 'system' || m.subtype !== 'background_tasks_changed') return null
+  const tasks = Array.isArray(m.tasks) ? m.tasks : []
+  return tasks.filter((task) => !(task && typeof task === 'object' && (task as { ambient?: unknown }).ambient === true)).length
+}
+
 /** SDK messages no window draws; dropped before they cost an IPC hop. */
 export function isDisplayRelevant(message: unknown): boolean {
   const m = message as { type?: string; subtype?: string; event?: { type?: string; delta?: { type?: string } } } | null
@@ -336,6 +348,10 @@ export class ChatSession {
         if (isDisplayRelevant(message)) this.options.onEvent({ t: 'sdk', m: message, at: Date.now() })
         const started = sessionStartInput(message)
         if (started) this.onSessionStart(started)
+        const background = backgroundTaskCount(message)
+        if (background !== null) {
+          try { this.options.onHook({ hook_event_name: 'DevtoolBackgroundTasks', count: background }) } catch { /* status is best-effort */ }
+        }
         this.noteForUsage(message as { type?: string; subtype?: string; parent_tool_use_id?: unknown; total_cost_usd?: unknown })
       }
     } catch (err) {

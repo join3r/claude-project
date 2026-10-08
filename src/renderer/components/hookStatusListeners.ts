@@ -8,7 +8,8 @@ import type { AiStatusEvent } from '../../shared/ai-status'
  */
 export interface HookStatusCallbacks {
   onWorking: () => void
-  onStopped: () => void
+  /** `backgroundTasks`: shells/agents still running past the turn (chat tabs only). */
+  onStopped: (backgroundTasks: number) => void
   onNotification: (body: Record<string, unknown>) => void
   onSessionStart: (body: Record<string, unknown>) => void
   onActivity: (statusEvent: AiStatusEvent | null) => void
@@ -26,8 +27,8 @@ export function ensureHookListeners(): void {
   window.api.onHookWorking((tabId: string) => {
     hookStatusCallbacks.get(tabId)?.onWorking()
   })
-  window.api.onHookStopped((tabId: string) => {
-    hookStatusCallbacks.get(tabId)?.onStopped()
+  window.api.onHookStopped((tabId: string, backgroundTasks: number) => {
+    hookStatusCallbacks.get(tabId)?.onStopped(backgroundTasks)
   })
   window.api.onHookNotification((tabId: string, body: Record<string, unknown>) => {
     hookStatusCallbacks.get(tabId)?.onNotification(body)

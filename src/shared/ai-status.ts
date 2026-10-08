@@ -22,6 +22,10 @@ export type AiStatusEvent =
   | 'hook-working'
   /** Claude's Stop hook. */
   | 'hook-stopped'
+  /** Background work (shells, agents) went live while no turn was running. */
+  | 'background-started'
+  /** The last background task ended and no turn picked up after it. */
+  | 'background-done'
   /** Claude's Notification hook / pi's agent_end. */
   | 'hook-notification'
   /**
@@ -53,6 +57,8 @@ export interface AiStatusCtx {
   visible: boolean
   windowFocused: boolean
   notificationKind?: AiNotificationKind
+  /** Live background tasks (shells, agents) the agent left running past its turn. */
+  backgroundTasks?: number
 }
 
 /** 'keep' means "leave the status alone" — distinct from setting it to null. */
@@ -143,7 +149,16 @@ export function nextAiStatus(
     case 'hook-stopped':
       // The Stop hook is the authoritative "the agent is done"; it must be able to
       // clear an 'attention' a heuristic guessed while the agent was still running.
-      return null
+      // A turn that ends with background shells or agents still running isn't done:
+      // Claude picks the turn back up when they finish.
+      return (ctx.backgroundTasks ?? 0) > 0 ? 'working' : null
+
+    case 'background-started':
+      return current === null ? 'working' : 'keep'
+
+    case 'background-done':
+      // Only what the background work held up: an attention or exit stays.
+      return current === 'working' ? null : 'keep'
 
     case 'hook-notification':
       switch (ctx.notificationKind) {

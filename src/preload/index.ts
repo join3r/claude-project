@@ -209,8 +209,8 @@ const api = {
   onHookWorking: (callback: (tabId: string) => void): void => {
     ipcRenderer.on('hook-working', (_e, tabId) => callback(tabId))
   },
-  onHookStopped: (callback: (tabId: string) => void): void => {
-    ipcRenderer.on('hook-stopped', (_e, tabId) => callback(tabId))
+  onHookStopped: (callback: (tabId: string, backgroundTasks: number) => void): void => {
+    ipcRenderer.on('hook-stopped', (_e, tabId, backgroundTasks) => callback(tabId, typeof backgroundTasks === 'number' ? backgroundTasks : 0))
   },
   onHookNotification: (callback: (tabId: string, body: Record<string, unknown>) => void): void => {
     ipcRenderer.on('hook-notification', (_e, tabId, body) => callback(tabId, body))
