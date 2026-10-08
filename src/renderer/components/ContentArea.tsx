@@ -1,13 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Folder, GitBranch, StickyNote, Columns2 } from 'lucide-react'
+import { Folder, GitBranch, Globe, StickyNote, Columns2, SquareTerminal } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
-import { useGitStatus } from '../hooks/useGitStatus'
 import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import { localProjectFolder } from '../../shared/external-editors'
 import TaskPanes from './TaskPanes'
-import NewTabMenu from './NewTabMenu'
 import TaskHeader from './TaskHeader'
 import { ProjectHome } from './ProjectHome'
 import { ArchivedView } from './ArchivedView'
@@ -27,6 +25,11 @@ import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from
 import { showsTabBars } from '../../shared/panes'
 import type { Task } from '../../shared/types'
 
+const toolBtnCls = 'bg-transparent border-0 cursor-pointer w-[28px] h-[26px] rounded-md leading-none inline-flex items-center justify-center [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent'
+
+/** A hairline between the toolbar's groups of buttons. */
+const ToolbarSep = (): React.ReactElement => <span className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden />
+
 function FileBrowserTabButton({
   icon,
   tab,
@@ -45,7 +48,8 @@ function FileBrowserTabButton({
   const active = fileBrowserOpen && fileBrowserActiveTab === tab
   return (
     <button
-      className={`bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) ${active ? 'text-accent' : 'text-text-muted hover:text-text'}`}
+      className={`${toolBtnCls} ${active ? 'bg-sel text-text' : 'text-text-muted hover:text-text hover:bg-surface-3'}`}
+      aria-pressed={active}
       onClick={() => onActivate(tab)}
       title={active ? `Close ${label}` : `Open ${label}`}
     >
@@ -325,10 +329,6 @@ export default function ContentArea(): React.ReactElement {
   const selectedTunnelState = selectedProjectId ? tunnelStates[selectedProjectId] : undefined
   const selectedStream = selectedTask ? findStreamOfTask(selectedProject, selectedTask.id) : undefined
   const windowBarTitle = buildWindowTitle(selectedProject?.name ?? null, selectedTask?.name ?? null, selectedStream)
-  const selectedWorkspace = taskWorkspace(selectedProject, selectedTask?.id)
-  const selectedProjectDir = selectedWorkspace
-    ? joinWorkspaceDir(selectedWorkspace.worktreePath, selectedWorkspace.relativeProjectPath)
-    : selectedProject?.directory ?? ''
   const canShowLocalTabs = !!selectedProject
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
@@ -344,13 +344,6 @@ export default function ContentArea(): React.ReactElement {
     setFileBrowserActiveTab(tab)
     if (!fileBrowserOpen) setFileBrowserOpen(true)
   }, [fileBrowserOpen, fileBrowserActiveTab, setFileBrowserOpen, setFileBrowserActiveTab])
-  const shouldShowGitSummary = !!selectedProject
-    && !isRemoteProject(selectedProject)
-    && !isShellCommandProject(selectedProject)
-    && !!selectedProjectDir
-  const gitStatus = useGitStatus(selectedProjectDir, shouldShowGitSummary)
-  const gitSummary = gitStatus?.summary ?? null
-  const hasGitSummary = !!gitSummary && (gitSummary.added > 0 || gitSummary.deleted > 0)
   const baseTunnelClasses = 'bg-transparent border-0 text-text-muted cursor-pointer w-[30px] h-6 rounded-md text-md leading-none inline-flex items-center justify-center hover:bg-surface-3 hover:text-text [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
   const tunnelButtonClassName = selectedProject && isRemoteProject(selectedProject)
     ? [
@@ -370,8 +363,6 @@ export default function ContentArea(): React.ReactElement {
           project={selectedProject}
           task={selectedTask}
           stream={selectedStream}
-          projectDir={selectedProjectDir}
-          gitSummary={hasGitSummary ? gitSummary : null}
           title={windowBarTitle}
           tools={(
             <>
@@ -384,11 +375,43 @@ export default function ContentArea(): React.ReactElement {
                   &#8596;
                 </button>
               )}
+              {selectedTask && (
+                <>
+                  <button
+                    className={`${toolBtnCls} text-text-muted hover:text-text hover:bg-surface-3`}
+                    onClick={() => addTab(selectedProject.id, selectedTask.id, selectedFocusedPane, 'terminal')}
+                    title={`New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`}
+                  >
+                    <SquareTerminal size={15} />
+                  </button>
+                  <button
+                    className={`${toolBtnCls} text-text-muted hover:text-text hover:bg-surface-3`}
+                    onClick={() => addTab(selectedProject.id, selectedTask.id, selectedFocusedPane, 'browser')}
+                    title="New browser tab"
+                  >
+                    <Globe size={15} />
+                  </button>
+                  {showsTabBars(selectedTask) && (
+                    <button
+                      className={`${toolBtnCls} text-text-muted hover:text-text hover:bg-surface-3`}
+                      disabled={(selectedTask.panes[selectedFocusedPane]?.tabs.length ?? 0) < 2}
+                      onClick={() => {
+                        const pane = selectedTask.panes[selectedFocusedPane]
+                        if (pane) splitTabRight(selectedProject.id, selectedTask.id, pane.activeTabId)
+                      }}
+                      title={`Split right (${formatShortcutForApp('CmdOrCtrl+D')})`}
+                    >
+                      <Columns2 size={15} />
+                    </button>
+                  )}
+                  <ToolbarSep />
+                </>
+              )}
               {hasFileBrowserTabs && (
                 <>
                   {canShowLocalTabs && (
                     <FileBrowserTabButton
-                      icon={<Folder size={14} />}
+                      icon={<Folder size={15} />}
                       tab="files"
                       label="Files"
                       fileBrowserOpen={fileBrowserOpen}
@@ -398,7 +421,7 @@ export default function ContentArea(): React.ReactElement {
                   )}
                   {canShowLocalTabs && (
                     <FileBrowserTabButton
-                      icon={<GitBranch size={14} />}
+                      icon={<GitBranch size={15} />}
                       tab="git"
                       label="Git"
                       fileBrowserOpen={fileBrowserOpen}
@@ -407,7 +430,7 @@ export default function ContentArea(): React.ReactElement {
                     />
                   )}
                   <FileBrowserTabButton
-                    icon={<StickyNote size={14} />}
+                    icon={<StickyNote size={15} />}
                     tab="notes"
                     label="Notes"
                     fileBrowserOpen={fileBrowserOpen}
@@ -424,22 +447,7 @@ export default function ContentArea(): React.ReactElement {
                   onError={setOpenInIdeError}
                 />
               )}
-              {selectedTask && !showsTabBars(selectedTask) && (
-                <NewTabMenu projectId={selectedProject.id} taskId={selectedTask.id} pane={0} />
-              )}
-              {selectedTask && showsTabBars(selectedTask) && (
-                <button
-                  className="bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
-                  disabled={(selectedTask.panes[selectedFocusedPane]?.tabs.length ?? 0) < 2}
-                  onClick={() => {
-                    const pane = selectedTask.panes[selectedFocusedPane]
-                    if (pane) splitTabRight(selectedProject.id, selectedTask.id, pane.activeTabId)
-                  }}
-                  title={`Split right (${formatShortcutForApp('CmdOrCtrl+D')})`}
-                >
-                  <Columns2 size={15} />
-                </button>
-              )}
+              {selectedTask && <ToolbarSep />}
             </>
           )}
         />

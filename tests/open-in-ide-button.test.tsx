@@ -45,7 +45,6 @@ describe('OpenInIdeButton', () => {
         onError={onError}
       />
     )
-    expect(screen.getByText('IDE')).toBeTruthy()
     fireEvent.click(screen.getByTitle('Open in Cursor'))
     await waitFor(() => {
       expect((window as any).api.openInIde).toHaveBeenCalledWith('cursor', 'C:/Repos/demo')

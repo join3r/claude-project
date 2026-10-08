@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { ArrowUpRight, ChevronDown } from 'lucide-react'
+import { ChevronDown, CodeXml } from 'lucide-react'
 import type { ExternalEditor } from '../../shared/types'
 import { resolveDefaultExternalEditor } from '../../shared/external-editors'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
@@ -36,7 +36,7 @@ export default function OpenInIdeButton({ editors, defaultId, folder, onError }:
     <div className="relative inline-flex items-center shrink-0">
       <button
         type="button"
-        className={`${btnCls} gap-0.5 px-1.5`}
+        className={`${btnCls} w-[28px] h-[26px]`}
         disabled={disabled || !defaultEditor}
         title={tooltip}
         aria-label={tooltip}
@@ -44,8 +44,7 @@ export default function OpenInIdeButton({ editors, defaultId, folder, onError }:
           if (defaultEditor) launch(defaultEditor.id)
         }}
       >
-        <span className="text-xs font-medium tracking-wide">IDE</span>
-        <ArrowUpRight size={12} strokeWidth={2} />
+        <CodeXml size={15} />
       </button>
       {editors.length > 1 && (
         <button
