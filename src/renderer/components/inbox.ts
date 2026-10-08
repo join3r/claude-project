@@ -146,7 +146,8 @@ export function partitionInbox(
   // Longest wait first — the point of the tier is surfacing what has been blocked longest.
   partition.needsYou.sort((a, b) => (a.since ?? now) - (b.since ?? now))
   partition.yourTurn.sort(byRecency)
-  partition.working.sort(byRecency)
+  // Newest start first, so a task you just sent a prompt to lands at the top.
+  partition.working.sort((a, b) => (b.since ?? lastActivityAt(b.task)) - (a.since ?? lastActivityAt(a.task)))
   partition.quiet.sort(byRecency)
   partition.settled.sort((a, b) => (inboxState(b.task).settledAt ?? 0) - (inboxState(a.task).settledAt ?? 0))
   partition.snoozed.sort((a, b) => wakeAt(a.task) - wakeAt(b.task))

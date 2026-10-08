@@ -289,8 +289,9 @@ export default function InboxPanel({
   layout = 'flat'
 }: Props): React.ReactElement {
   // Fold state lives with the panel, as it always has for Settled and Snoozed.
-  const [folded, setFolded] = useState<Record<'working' | 'quiet' | 'settled' | 'snoozed', boolean>>({
-    working: true,
+  // Working is never folded: the task you just sent a prompt to moves there and
+  // must stay in sight.
+  const [folded, setFolded] = useState<Record<'quiet' | 'settled' | 'snoozed', boolean>>({
     quiet: false,
     settled: true,
     snoozed: true
@@ -302,17 +303,19 @@ export default function InboxPanel({
     [projects, allStatuses, statusSince, now]
   )
   const grouped = layout === 'grouped'
-  // Grouped: the rows that want or might want you, by project. Working, Settled and
-  // Snoozed stay folded sections below, as in the flat list.
+  // Grouped: the open groups by project. Settled and Snoozed stay folded sections
+  // below, as in the flat list.
   const projectGroups = useMemo(
-    () => (grouped ? groupInboxByProject([...partition.needsYou, ...partition.yourTurn, ...partition.quiet]) : []),
+    () => (grouped
+      ? groupInboxByProject([...partition.needsYou, ...partition.yourTurn, ...partition.working, ...partition.quiet])
+      : []),
     [grouped, partition]
   )
 
   const total = Object.values(partition).reduce((sum, entries) => sum + entries.length, 0)
 
   const groupOf = (entry: InboxEntry): GroupKey =>
-    entry.status === 'attention' ? 'needsYou' : entry.yourTurn ? 'yourTurn' : 'quiet'
+    entry.status === 'attention' ? 'needsYou' : entry.status === 'working' ? 'working' : entry.yourTurn ? 'yourTurn' : 'quiet'
 
   const renderRow = (entry: InboxEntry, group: GroupKey, showProject = true): React.ReactElement => (
     <InboxRow
@@ -376,11 +379,10 @@ export default function InboxPanel({
             {entries.map(entry => renderRow(entry, groupOf(entry), false))}
           </div>
         ))}
-        {section('Working', 'working', partition.working, 'working')}
       </>) : (<>
         {section('Needs you', 'needsYou', partition.needsYou)}
         {section('Your turn', 'yourTurn', partition.yourTurn)}
-        {section('Working', 'working', partition.working, 'working')}
+        {section('Working', 'working', partition.working)}
         {section('Quiet', 'quiet', partition.quiet, 'quiet')}
       </>)}
 

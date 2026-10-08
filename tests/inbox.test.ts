@@ -289,6 +289,18 @@ describe('partitionInbox', () => {
     expect(result.quiet.map(e => e.task.id)).toEqual(['answered', 'untouched'])
   })
 
+  it('puts the task that started working last at the top of Working', () => {
+    const early = makeTask('early', { eventAt: NOW - 1000 }, { aiTabIds: ['e1'] })
+    const late = makeTask('late', { eventAt: NOW - 90_000 }, { aiTabIds: ['l1'] })
+    const result = partitionInbox(
+      [{ task: early, project, stream }, { task: late, project, stream }],
+      { e1: 'working', l1: 'working' },
+      { e1: NOW - 60_000, l1: NOW - 2000 },
+      NOW
+    )
+    expect(result.working.map(e => e.task.id)).toEqual(['late', 'early'])
+  })
+
   it('puts a working task you settled or snoozed under Working', () => {
     const settled = makeTask('settled-busy', { eventAt: NOW - 5000, settledAt: NOW }, { aiTabIds: ['w1'] })
     const snoozed = makeTask('snoozed-busy', { snoozedAt: NOW, snoozedUntil: NOW + 60_000 }, { aiTabIds: ['w2'] })

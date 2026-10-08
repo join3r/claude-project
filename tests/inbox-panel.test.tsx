@@ -80,14 +80,14 @@ const row = (id: string) => screen.getAllByTestId('inbox-row').find(el => el.dat
 afterEach(() => cleanup())
 
 describe('InboxPanel', () => {
-  it('flat: Needs you, Your turn, then Working folded, Quiet', () => {
+  it('flat: Needs you, Your turn, Working (never folded), Quiet', () => {
     renderPanel('flat')
     expect(headers()).toEqual(['Needs you1', 'Your turn3', 'Working1', 'Quiet1'])
-    // Working is folded by default: its row only shows once opened.
-    expect(rowIds()).toEqual(['c', 'b', 'a', 'f', 'e'])
-    fireEvent.click(screen.getByText('Working'))
+    // Working is always open, so the task you just sent a prompt to stays in sight.
     expect(rowIds()).toEqual(['c', 'b', 'a', 'f', 'd', 'e'])
     expect(row('d').className).toContain('opacity-50')
+    fireEvent.click(screen.getByText('Working'))
+    expect(rowIds()).toEqual(['c', 'b', 'a', 'f', 'd', 'e'])
   })
 
   it('flat rows lead with the project, then the stream unless it is main', () => {
@@ -112,10 +112,11 @@ describe('InboxPanel', () => {
     renderPanel('grouped')
     const groups = screen.getAllByTestId('inbox-project-group')
     expect(groups.map(group => group.querySelector('[data-testid="inbox-project-header"]')?.textContent))
-      .toEqual(['DTDevTool4', 'STStem1'])
-    // Tile initials, name, count. DevTool holds the task that needs you, so it comes first; Working stays folded below.
-    expect(rowIds()).toEqual(['c', 'b', 'a', 'e', 'f'])
-    expect(headers()).toEqual(['Working1'])
+      .toEqual(['DTDevTool5', 'STStem1'])
+    // Tile initials, name, count. DevTool holds the task that needs you, so it comes first; Working rows sit in their project.
+    expect(rowIds()).toEqual(['c', 'b', 'a', 'd', 'e', 'f'])
+    expect(screen.queryAllByTestId('inbox-group-header')).toEqual([])
+    expect(row('d').className).toContain('opacity-50')
     const place = (id: string) => row(id).querySelector('[data-testid="inbox-row-place"]')?.textContent
     expect(place('c')).toBe('0.5.0')
     // On main there is nothing to say under the project header: the task name leads.
