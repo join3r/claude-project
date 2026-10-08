@@ -6,8 +6,8 @@ import Foundation
 /// renders each block's inline Markdown with `AttributedString(markdown:)`.
 ///
 /// Supported: paragraphs, ATX headings, bullet and ordered list items (one
-/// level of nesting by indent), block quotes, fenced code blocks, and
-/// thematic breaks. Anything else is a paragraph. Streaming text with an
+/// level of nesting by indent), block quotes, fenced code blocks, GFM pipe
+/// tables, and thematic breaks. Anything else is a paragraph. Streaming text with an
 /// unclosed fence renders the rest as code.
 public enum MarkdownBlock: Sendable, Equatable {
     case paragraph(String)
@@ -16,7 +16,13 @@ public enum MarkdownBlock: Sendable, Equatable {
     case listItem(marker: String, indent: Int, text: String)
     case quote(String)
     case code(language: String?, text: String)
+    /// A GFM pipe table. Every row has as many cells as `header`.
+    case table(header: [String], alignments: [TableAlignment], rows: [[String]])
     case rule
+
+    public enum TableAlignment: Sendable, Equatable {
+        case leading, center, trailing
+    }
 
     public static func parse(_ markdown: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
@@ -41,9 +47,11 @@ public enum MarkdownBlock: Sendable, Equatable {
             flushQuote()
         }
 
-        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false)
-        for rawLine in lines {
-            let line = String(rawLine)
+        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            index += 1
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if var open = fence {
@@ -90,6 +98,30 @@ public enum MarkdownBlock: Sendable, Equatable {
                 continue
             }
 
+            // A header row followed by a delimiter row starts a table; body
+            // rows run until a blank line or a line without a pipe.
+            if index < lines.count, line.contains("|"),
+               let alignments = Self.tableDelimiter(lines[index]) {
+                let header = Self.tableCells(line)
+                if header.count == alignments.count {
+                    flush()
+                    index += 1
+                    var rows: [[String]] = []
+                    while index < lines.count {
+                        let row = lines[index].trimmingCharacters(in: .whitespaces)
+                        guard !row.isEmpty, row.contains("|") else { break }
+                        var cells = Self.tableCells(row)
+                        if cells.count < header.count {
+                            cells += Array(repeating: "", count: header.count - cells.count)
+                        }
+                        rows.append(Array(cells.prefix(header.count)))
+                        index += 1
+                    }
+                    blocks.append(.table(header: header, alignments: alignments, rows: rows))
+                    continue
+                }
+            }
+
             if let item = Self.listItem(line) {
                 flush()
                 blocks.append(item)
@@ -120,6 +152,52 @@ public enum MarkdownBlock: Sendable, Equatable {
         // Optional closing hashes.
         while text.hasSuffix("#") { text.removeLast() }
         return .heading(level: hashes, text: text.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// Cells of a pipe-table row, with the optional outer pipes dropped.
+    /// `\|` stays a literal pipe inside a cell.
+    private static func tableCells(_ line: String) -> [String] {
+        var row = line.trimmingCharacters(in: .whitespaces)
+        if row.hasPrefix("|") { row.removeFirst() }
+        if row.hasSuffix("|"), !row.hasSuffix("\\|") { row.removeLast() }
+        var cells: [String] = []
+        var cell = ""
+        var escaped = false
+        for char in row {
+            if escaped {
+                cell.append(char == "|" ? "|" : "\\\(char)")
+                escaped = false
+            } else if char == "\\" {
+                escaped = true
+            } else if char == "|" {
+                cells.append(cell.trimmingCharacters(in: .whitespaces))
+                cell = ""
+            } else {
+                cell.append(char)
+            }
+        }
+        if escaped { cell.append("\\") }
+        cells.append(cell.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    /// The column alignments of a delimiter row like `| :--- | :-: | --: |`,
+    /// or nil when the line isn't one.
+    private static func tableDelimiter(_ line: String) -> [TableAlignment]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("-"), trimmed.contains("|") || trimmed.allSatisfy({ ":- ".contains($0) }) else { return nil }
+        var alignments: [TableAlignment] = []
+        for cell in tableCells(trimmed) {
+            guard cell.count >= 1, cell.allSatisfy({ $0 == "-" || $0 == ":" }), cell.contains("-") else { return nil }
+            let dashes = cell.drop { $0 == ":" }.prefix { $0 == "-" }
+            guard dashes.count == cell.filter({ $0 == "-" }).count else { return nil }
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
+            case (true, true): alignments.append(.center)
+            case (false, true): alignments.append(.trailing)
+            default: alignments.append(.leading)
+            }
+        }
+        return alignments
     }
 
     private static func isRule(_ line: String) -> Bool {

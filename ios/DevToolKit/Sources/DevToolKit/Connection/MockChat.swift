@@ -184,6 +184,13 @@ enum MockChats {
                 There are four auth screens today: **Login**, **Sign up**, **Forgot password** and **2FA**. \
                 They share `AuthLayout.tsx` but each hard-codes its own spacing.
 
+                | Screen | Padding | Fields |
+                | :--- | ---: | ---: |
+                | Login | `24px` | 2 |
+                | Sign up | `32px` | 4 |
+                | Forgot password | `20px` | 1 |
+                | 2FA | `28px` | 1 |
+
                 Before I propose a layout I need two decisions from you.
                 """, streaming: false)),
             ChatItem(id: "t2", .tool(ChatTool(name: "AskUserQuestion", summary: "Asking 2 questions", status: .waiting, hasDetail: false))),
