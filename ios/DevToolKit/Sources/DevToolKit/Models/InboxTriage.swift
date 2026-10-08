@@ -49,11 +49,12 @@ extension InboxTask {
         return eventAt > (lastInteractedAt ?? 0)
     }
 
+    /// A live agent wins over snooze and settle, as on the desktop.
     public func inboxGroup(now: Date) -> InboxGroup {
-        if isSnoozed(now: now) { return .snoozed }
-        if settledAt != nil { return .settled }
         if status == .attention { return .needsYou }
         if status == .working { return .working }
+        if isSnoozed(now: now) { return .snoozed }
+        if settledAt != nil { return .settled }
         return isYourTurn ? .yourTurn : .quiet
     }
 }

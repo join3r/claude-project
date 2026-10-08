@@ -87,7 +87,7 @@ export interface InboxEntry extends InboxSource {
   /** When the current status began — null when unknown (e.g. after a restart). */
   since: number | null
   unread: boolean
-  /** Waiting on you rather than the agent — see isYourTurn. Never set on settled or snoozed rows. */
+  /** Waiting on you rather than the agent — see isYourTurn. Never set on quiet settled or snoozed rows. */
   yourTurn: boolean
 }
 
@@ -105,9 +105,10 @@ export interface InboxPartition {
 }
 
 /**
- * Splits tasks into the inbox groups. Snooze wins over settle (an explicitly
- * snoozed task stays hidden even if it was settled earlier), and both win over
- * the live split, so a task you put away stays put away while its agent runs.
+ * Splits tasks into the inbox groups. A live agent wins over snooze and settle:
+ * a task that needs you or is working shows there, the same as its header chip,
+ * and drops back to Snoozed / Settled once the agent goes quiet. Snooze wins over
+ * settle (an explicitly snoozed task stays hidden even if it was settled earlier).
  */
 export function partitionInbox(
   entries: readonly InboxSource[],
@@ -128,13 +129,15 @@ export function partitionInbox(
       unread: isUnread(task),
       yourTurn: false
     }
-    if (isSnoozed(task, now)) partition.snoozed.push(entry)
+    if (status === 'attention') {
+      entry.yourTurn = true
+      partition.needsYou.push(entry)
+    } else if (status === 'working') partition.working.push(entry)
+    else if (isSnoozed(task, now)) partition.snoozed.push(entry)
     else if (isSettled(task)) partition.settled.push(entry)
     else {
       entry.yourTurn = isYourTurn(task, status)
-      if (status === 'attention') partition.needsYou.push(entry)
-      else if (status === 'working') partition.working.push(entry)
-      else if (entry.yourTurn) partition.yourTurn.push(entry)
+      if (entry.yourTurn) partition.yourTurn.push(entry)
       else partition.quiet.push(entry)
     }
   }

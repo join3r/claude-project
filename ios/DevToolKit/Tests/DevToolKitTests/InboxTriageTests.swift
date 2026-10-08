@@ -29,16 +29,19 @@ import Testing
             InboxTask(id: "settled-new", name: "", settledAt: 200, tabs: []),
             InboxTask(id: "snoozed-soon", name: "", settledAt: 300, snoozedUntil: Self.nowMs + 60_000, tabs: []),
             InboxTask(id: "woke", name: "", snoozedUntil: Self.nowMs - 1, tabs: []),
+            InboxTask(id: "snoozed-busy", name: "", status: .working, settledAt: 400, snoozedUntil: Self.nowMs + 60_000, tabs: [tab("5", .working)]),
+            InboxTask(id: "snoozed-quiet", name: "", snoozeUntilAttention: true, tabs: []),
         ])
         let partition = InboxPartition([("a", a), ("b", b)], now: Self.now)
-        #expect(partition.needsYou.map(\.task.id) == ["waiting-long", "waiting-short"])
+        // A live agent wins over snooze and settle.
+        #expect(partition.needsYou.map(\.task.id) == ["waiting-long", "waiting-short", "snoozed-attention"])
         // "recent" had an event and no word since; "older" and "woke" had nothing happen after you.
         #expect(partition.yourTurn.map(\.task.id) == ["recent"])
         #expect(partition.quiet.map(\.task.id) == ["older", "woke"])
-        #expect(partition.working.isEmpty)
+        #expect(partition.working.map(\.task.id) == ["snoozed-busy"])
         #expect(partition.settled.map(\.task.id) == ["settled-new", "settled-old"])
         // A snooze wins over a settle; "until it needs me" sorts last.
-        #expect(partition.snoozed.map(\.task.id) == ["snoozed-soon", "snoozed-attention"])
+        #expect(partition.snoozed.map(\.task.id) == ["snoozed-soon", "snoozed-quiet"])
         #expect(partition.needsYou.first?.desktopId == "b")
         #expect(!partition.isEmpty && InboxPartition([], now: Self.now).isEmpty)
         let unread = InboxPartition([("a", inbox("a", [

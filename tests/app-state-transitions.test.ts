@@ -235,6 +235,16 @@ describe('inbox transitions', () => {
     expect(next).toEqual({ eventAt: 10, attentionAt: 10 })
   })
 
+  it('an attention event wakes a timed snooze', () => {
+    const next = inboxWithEvent({ snoozedUntil: 100, snoozedAt: 2 }, 10, 'attention', false)
+    expect(next).toEqual({ eventAt: 10, attentionAt: 10 })
+  })
+
+  it('a plain event leaves a timed snooze alone', () => {
+    const next = inboxWithEvent({ snoozedUntil: 100, snoozedAt: 2 }, 10, 'event', false)
+    expect(next).toEqual({ snoozedUntil: 100, snoozedAt: 2, eventAt: 10 })
+  })
+
   it('a plain event leaves an attention-snooze alone, and a watched one is read', () => {
     const next = inboxWithEvent({ snoozeUntilAttention: true, snoozedAt: 2 }, 10, 'event', true)
     expect(next).toEqual({ snoozeUntilAttention: true, snoozedAt: 2, eventAt: 10, visitedAt: 10 })

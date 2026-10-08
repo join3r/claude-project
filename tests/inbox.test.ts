@@ -98,6 +98,11 @@ describe('isSnoozed', () => {
     expect(isSnoozed(task, NOW + 2000)).toBe(false)
   })
 
+  it('a timed snooze wakes on an attention event too', () => {
+    const task = makeTask('t', { snoozedAt: NOW, snoozedUntil: NOW + 60_000, attentionAt: NOW + 1000 })
+    expect(isSnoozed(task, NOW + 2000)).toBe(false)
+  })
+
   it('ignores an attention event from before the snooze', () => {
     const task = makeTask('t', { snoozedAt: NOW, snoozeUntilAttention: true, attentionAt: NOW - 1000 })
     expect(isSnoozed(task, NOW)).toBe(true)
@@ -226,7 +231,7 @@ describe('partitionInbox', () => {
     expect(result.needsYou[0].task.id).toBe('blocked-long')
   })
 
-  it('keeps a snoozed task out of needsYou even while it is blocked', () => {
+  it('puts a snoozed task that is blocked under needsYou', () => {
     const snoozedAndBlocked = makeTask(
       'snoozed-blocked',
       { snoozedAt: NOW, snoozedUntil: NOW + 60_000 },
@@ -238,8 +243,14 @@ describe('partitionInbox', () => {
       { sb: NOW - 1000 },
       NOW
     )
-    expect(result.needsYou).toHaveLength(0)
-    expect(result.snoozed).toHaveLength(1)
+    expect(result.needsYou).toHaveLength(1)
+    expect(result.snoozed).toHaveLength(0)
+  })
+
+  it('keeps a snoozed task under Snoozed once its agent is quiet again', () => {
+    const snoozed = makeTask('snoozed-quiet', { snoozedAt: NOW, snoozedUntil: NOW + 60_000 }, { aiTabIds: ['sq'] })
+    const result = partitionInbox([{ task: snoozed, project, stream }], { sq: null }, {}, NOW)
+    expect(result.snoozed.map(e => e.task.id)).toEqual(['snoozed-quiet'])
   })
 
   it('flags your-turn rows, but never settled or snoozed ones', () => {
@@ -278,11 +289,18 @@ describe('partitionInbox', () => {
     expect(result.quiet.map(e => e.task.id)).toEqual(['answered', 'untouched'])
   })
 
-  it('keeps a working task you settled under Settled', () => {
-    const busy = makeTask('busy', { eventAt: NOW - 5000, settledAt: NOW }, { aiTabIds: ['w'] })
-    const result = partitionInbox([{ task: busy, project, stream }], { w: 'working' }, {}, NOW)
-    expect(result.working).toEqual([])
-    expect(result.settled.map(e => e.task.id)).toEqual(['busy'])
+  it('puts a working task you settled or snoozed under Working', () => {
+    const settled = makeTask('settled-busy', { eventAt: NOW - 5000, settledAt: NOW }, { aiTabIds: ['w1'] })
+    const snoozed = makeTask('snoozed-busy', { snoozedAt: NOW, snoozedUntil: NOW + 60_000 }, { aiTabIds: ['w2'] })
+    const result = partitionInbox(
+      [{ task: settled, project, stream }, { task: snoozed, project, stream }],
+      { w1: 'working', w2: 'working' },
+      {},
+      NOW
+    )
+    expect(result.working.map(e => e.task.id).sort()).toEqual(['settled-busy', 'snoozed-busy'])
+    expect(result.settled).toEqual([])
+    expect(result.snoozed).toEqual([])
   })
 })
 

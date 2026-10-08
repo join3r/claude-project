@@ -16,7 +16,8 @@ export type TaskEventKind = 'event' | 'attention'
  * the user, which is what "snooze until it needs me" wakes on.
  *
  * Also resolves triage state that the event supersedes: a settle is undone (settle
- * means "done for now", not "muted"), and an attention-snooze is woken. `watching`
+ * means "done for now", not "muted"), and on 'attention' any snooze is woken: an
+ * agent that needs you overrides a snooze, timed or not. `watching`
  * marks it read on arrival, for the task on screen.
  */
 export function inboxWithEvent(
@@ -29,7 +30,8 @@ export function inboxWithEvent(
   if (kind === 'attention') next.attentionAt = now
   if (watching) next.visitedAt = now
   if (typeof next.settledAt === 'number') delete next.settledAt
-  if (kind === 'attention' && next.snoozeUntilAttention) {
+  if (kind === 'attention') {
+    delete next.snoozedUntil
     delete next.snoozeUntilAttention
     delete next.snoozedAt
   }

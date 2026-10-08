@@ -40,16 +40,17 @@ export function isSettled(task: Task): boolean {
 }
 
 /**
- * Snooze is the verb that survives events — otherwise it would be indistinguishable
- * from settle. "Until it needs me" waits for an attention event specifically (a
- * question or permission prompt), ignoring a plain "agent finished".
+ * Snooze is the verb that survives plain events — otherwise it would be
+ * indistinguishable from settle. An attention event (a question or permission
+ * prompt) wakes any snooze, timed or "until it needs me"; a plain "agent
+ * finished" does not.
  */
 export function isSnoozed(task: Task, now: number): boolean {
   const inbox = inboxState(task)
-  if (inbox.snoozeUntilAttention) {
-    const snoozedAt = inbox.snoozedAt ?? 0
-    return !(typeof inbox.attentionAt === 'number' && inbox.attentionAt > snoozedAt)
-  }
+  if (!inbox.snoozeUntilAttention && typeof inbox.snoozedUntil !== 'number') return false
+  const snoozedAt = inbox.snoozedAt ?? 0
+  if (typeof inbox.attentionAt === 'number' && inbox.attentionAt > snoozedAt) return false
+  if (inbox.snoozeUntilAttention) return true
   if (typeof inbox.snoozedUntil !== 'number') return false
   return now < inbox.snoozedUntil
 }
