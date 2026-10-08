@@ -545,17 +545,6 @@ export default function Settings({ onClose }: Props): React.ReactElement {
                   />
                 }
               />
-              <GroupRow
-                label="Show Recent Activity panel"
-                trailing={
-                  <Switch
-                    checked={config.activityPanel.enabled}
-                    onChange={(enabled) => updateConfig({
-                      activityPanel: { ...config.activityPanel, enabled }
-                    })}
-                  />
-                }
-              />
             </Group>
 
             <FormGroup>

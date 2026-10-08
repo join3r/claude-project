@@ -34,8 +34,6 @@ export interface WindowLayoutActions {
   setFileBrowserActiveTab: (tab: FileBrowserTab) => void
   sidebarWidth: number
   setSidebarWidth: (width: number) => void
-  sidebarProjectsCollapsed: boolean
-  toggleSidebarProjectsCollapsed: () => void
   sidebarTab: SidebarTab
   setSidebarTab: (tab: SidebarTab) => void
 }
@@ -89,10 +87,6 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
     updateWindowViewState(prev => ({ ...prev, sidebarWidth: clampSidebarWidth(width) }))
   }, [updateWindowViewState])
 
-  const toggleSidebarProjectsCollapsed = useCallback(() => {
-    updateWindowViewState(prev => ({ ...prev, sidebarProjectsCollapsed: !prev.sidebarProjectsCollapsed }))
-  }, [updateWindowViewState])
-
   const setSidebarTab = useCallback((tab: SidebarTab) => {
     updateWindowViewState(prev => ({ ...prev, sidebarTab: tab }))
   }, [updateWindowViewState])
@@ -122,8 +116,6 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
     setFileBrowserActiveTab,
     sidebarWidth: windowViewState.sidebarWidth,
     setSidebarWidth,
-    sidebarProjectsCollapsed: windowViewState.sidebarProjectsCollapsed,
-    toggleSidebarProjectsCollapsed,
     sidebarTab: windowViewState.sidebarTab,
     setSidebarTab
   }

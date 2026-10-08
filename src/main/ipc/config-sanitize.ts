@@ -78,10 +78,6 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
     rankCount: num,
     timeWindowMinutes: num
   }),
-  activityPanel: v.object({
-    enabled: bool,
-    heightPx: num
-  }),
   mobile: v.optional(mobileConfig)
 }
 

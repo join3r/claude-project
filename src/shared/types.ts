@@ -465,10 +465,6 @@ export interface AppConfig {
     rankCount: number
     timeWindowMinutes: number
   }
-  activityPanel: {
-    enabled: boolean
-    heightPx: number
-  }
   /**
    * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
    * window's stale copy cannot flip it back.
@@ -615,7 +611,6 @@ export interface WindowViewState {
   fileBrowserWidth: number
   fileBrowserActiveTab: FileBrowserTab
   sidebarWidth: number
-  sidebarProjectsCollapsed: boolean
   sidebarTab: SidebarTab
 }
 
@@ -680,10 +675,6 @@ export const DEFAULT_CONFIG: AppConfig = {
     rankCount: 5,
     timeWindowMinutes: 1440
   },
-  activityPanel: {
-    enabled: true,
-    heightPx: 160
-  },
   externalEditors: { editors: [], defaultId: null },
   mobile: { ...DEFAULT_MOBILE_CONFIG }
 }
@@ -711,7 +702,6 @@ export function createDefaultWindowViewState(): WindowViewState {
     fileBrowserWidth: 250,
     fileBrowserActiveTab: 'files',
     sidebarWidth: 240,
-    sidebarProjectsCollapsed: false,
     sidebarTab: 'projects'
   }
 }
@@ -732,7 +722,6 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     fileBrowserWidth: state.fileBrowserWidth,
     fileBrowserActiveTab: state.fileBrowserActiveTab,
     sidebarWidth: state.sidebarWidth,
-    sidebarProjectsCollapsed: state.sidebarProjectsCollapsed,
     sidebarTab: state.sidebarTab
   }
 }
@@ -825,7 +814,6 @@ export function reconcileWindowViewState(
     fileBrowserWidth: state.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
     sidebarWidth: state.sidebarWidth ?? 240,
-    sidebarProjectsCollapsed: state.sidebarProjectsCollapsed ?? false,
     // only normalise unrecognised values — buildWindowViewState already applied the configured default
     sidebarTab: state.sidebarTab === 'inbox' || state.sidebarTab === 'projects' ? state.sidebarTab : 'projects'
   }
@@ -861,7 +849,6 @@ export function buildWindowViewState(
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
     sidebarWidth: seed?.sidebarWidth ?? 240,
-    sidebarProjectsCollapsed: seed?.sidebarProjectsCollapsed ?? false,
     sidebarTab: seed?.sidebarTab ?? config.defaultSidebarTab
   }, projects)
 }

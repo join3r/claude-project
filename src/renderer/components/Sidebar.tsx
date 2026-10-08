@@ -9,7 +9,6 @@ import AddLocalProject from './AddLocalProject'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
-import ActivityPanel from './ActivityPanel'
 import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
 import NewStreamModal from './NewStreamModal'
@@ -78,7 +77,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     streamExpansion, setStreamExpanded,
     effectiveTheme,
     sidebarWidth, setSidebarWidth,
-    sidebarProjectsCollapsed, toggleSidebarProjectsCollapsed,
     sidebarTab, setSidebarTab,
     settleTask, unsettleTask, unsnoozeTask
   } = useApp()
@@ -1014,16 +1012,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             badge={inboxUnreadCount}
             onClick={() => setSidebarTab('inbox')}
           />
-          <button
-            className="flex items-center bg-transparent border-0 p-0 cursor-pointer text-text-subtle hover:text-text transition-colors duration-(--motion-fast)"
-            onClick={toggleSidebarProjectsCollapsed}
-            title={sidebarProjectsCollapsed ? 'Show list' : 'Hide list'}
-          >
-            <ChevronRight
-              size={11}
-              className={`transition-transform duration-(--motion-fast) ${sidebarProjectsCollapsed ? '' : 'rotate-90'}`}
-            />
-          </button>
         </div>
         <div className="flex items-center gap-0.5 shrink-0 [-webkit-app-region:no-drag]" onMouseDown={(e) => e.stopPropagation()}>
           {inboxActive && (
@@ -1058,9 +1046,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         </div>
       </div>
 
-      {sidebarProjectsCollapsed ? (
-        <div className="flex-1" />
-      ) : (<>
       {inboxActive ? (
         <InboxPanel
           projects={inboxProjects}
@@ -1096,24 +1081,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           <div className="h-0.5 bg-accent mx-2 rounded-sm" />
         )}
       </div>
-      )}
-      </>)}
-
-      {config?.activityPanel?.enabled && (
-        <ActivityPanel
-          projects={projects}
-          selectedTaskId={selectedTaskId}
-          switchToTask={switchToTask}
-          onTaskContextMenu={handleTaskContextMenu}
-          recencySettings={config.taskRecencyHighlight}
-          now={now}
-          heightPx={config.activityPanel.heightPx}
-          onHeightChange={(next) => updateConfig({
-            activityPanel: { ...config.activityPanel, heightPx: next }
-          })}
-          allStatuses={allStatuses}
-          theme={effectiveTheme}
-        />
       )}
       </>)}
 

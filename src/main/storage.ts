@@ -213,10 +213,12 @@ export class Storage {
     try {
       const parsed = result.data
       // Retired keys: the folder tree's collapse state, the new-task auto-open
-      // setting the empty task's prompt box replaced, idle task cleanup, and
-      // "working tasks last" (the Inbox gives Working its own folded group now).
+      // setting the empty task's prompt box replaced, idle task cleanup,
+      // "working tasks last" (the Inbox gives Working its own folded group now),
+      // and the Recent Activity panel (the Inbox replaced it).
       const {
         collapsedFolderIds: _legacy, newTaskAutoOpen: _autoOpen, idleTaskCleanup: _idle, inboxWorkingLast: _workingLast,
+        activityPanel: _activityPanel,
         ...rest
       } = parsed
       const config = { ...DEFAULT_CONFIG, ...rest } as AppConfig
@@ -453,7 +455,6 @@ export class Storage {
         fileBrowserWidth: isFiniteNumber(value.fileBrowserWidth) ? value.fileBrowserWidth : 250,
         fileBrowserActiveTab,
         sidebarWidth: isFiniteNumber(value.sidebarWidth) ? value.sidebarWidth : 240,
-        sidebarProjectsCollapsed: typeof value.sidebarProjectsCollapsed === 'boolean' ? value.sidebarProjectsCollapsed : false,
         sidebarTab: (value.sidebarTab === 'inbox' || value.sidebarTab === 'projects')
           ? value.sidebarTab
           : defaultSidebarTab

@@ -66,8 +66,10 @@ describe('sanitizeConfigUpdate', () => {
   })
 
   it('strips unknown keys inside nested settings', () => {
-    const { config } = sanitizeConfigUpdate({ activityPanel: { enabled: true, heightPx: 10, extra: 1 } })
-    expect(config.activityPanel).toEqual({ enabled: true, heightPx: 10 })
+    const { config } = sanitizeConfigUpdate({
+      taskRecencyHighlight: { enabled: true, mode: 'rank', rankCount: 5, timeWindowMinutes: 60, extra: 1 }
+    })
+    expect(config.taskRecencyHighlight).toEqual({ enabled: true, mode: 'rank', rankCount: 5, timeWindowMinutes: 60 })
   })
 
   it('coerces windowsTerminal like loadConfig does', () => {

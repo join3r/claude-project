@@ -334,7 +334,6 @@ describe('Storage', () => {
           fileBrowserWidth: 250,
           fileBrowserActiveTab: 'files',
           sidebarWidth: 240,
-          sidebarProjectsCollapsed: false,
           sidebarTab: 'projects'
         }
       }]

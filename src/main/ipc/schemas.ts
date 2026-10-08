@@ -67,7 +67,6 @@ export const windowViewState: Validator<WindowViewState> = v.object({
   fileBrowserWidth: v.number(),
   fileBrowserActiveTab: v.literal('files', 'git', 'notes'),
   sidebarWidth: v.number(),
-  sidebarProjectsCollapsed: v.boolean(),
   sidebarTab: v.literal('projects', 'inbox')
 }, 'passthrough')
 
