@@ -115,59 +115,69 @@ struct NewTaskSheet: View {
     var body: some View {
         let desktops = model.newTaskDesktops(target.desktopIds)
         NavigationStack {
-            Form {
-                Section {
-                    projectRow(desktops)
-                    let streams = selectedProject?.streams ?? []
-                    if streams.count > 1 {
-                        Picker("Stream", selection: $streamId) {
-                            ForEach(streams) { stream in
-                                StreamLabel(stream: stream)
-                                    .tag(Optional(stream.id))
+            ScrollViewReader { scroller in
+                Form {
+                    Section {
+                        projectRow(desktops)
+                        let streams = selectedProject?.streams ?? []
+                        if streams.count > 1 {
+                            Picker("Stream", selection: $streamId) {
+                                ForEach(streams) { stream in
+                                    StreamLabel(stream: stream)
+                                        .tag(Optional(stream.id))
+                                }
+                            }
+                            .pickerStyle(.navigationLink)
+                            .disabled(sending)
+                        } else if let stream = selectedStream ?? streams.first {
+                            LabeledContent("Stream") { StreamLabel(stream: stream) }
+                        }
+                    } footer: {
+                        if let selection, model.isOffline(selection.desktopId) {
+                            Text("\(model.desktop(selection.desktopId)?.name ?? "This desktop") is offline.")
+                        } else if let stream = selectedStream, let branch = stream.branch {
+                            Text("Works in the \(stream.name) worktree, on \(branch).")
+                        }
+                    }
+                    Section {
+                        // `task.new` starts a Claude chat; other agents start on the desktop.
+                        LabeledContent("Agent") {
+                            HStack(spacing: 6) {
+                                Image(systemName: "bubble.left")
+                                Text("Claude chat")
                             }
                         }
-                        .pickerStyle(.navigationLink)
-                        .disabled(sending)
-                    } else if let stream = selectedStream ?? streams.first {
-                        LabeledContent("Stream") { StreamLabel(stream: stream) }
-                    }
-                } footer: {
-                    if let selection, model.isOffline(selection.desktopId) {
-                        Text("\(model.desktop(selection.desktopId)?.name ?? "This desktop") is offline.")
-                    } else if let stream = selectedStream, let branch = stream.branch {
-                        Text("Works in the \(stream.name) worktree, on \(branch).")
-                    }
-                }
-                Section {
-                    // `task.new` starts a Claude chat; other agents start on the desktop.
-                    LabeledContent("Agent") {
-                        HStack(spacing: 6) {
-                            Image(systemName: "bubble.left")
-                            Text("Claude chat")
+                        Picker("Mode", selection: $mode) {
+                            Text("Default").tag("")
+                            ForEach(TaskOp.modes, id: \.self) { value in
+                                Text(PermissionModes.labels[value] ?? value).tag(value)
+                            }
                         }
-                    }
-                    Picker("Mode", selection: $mode) {
-                        Text("Default").tag("")
-                        ForEach(TaskOp.modes, id: \.self) { value in
-                            Text(PermissionModes.labels[value] ?? value).tag(value)
-                        }
-                    }
-                    .disabled(sending)
-                }
-                Section {
-                    TextField("What should Claude work on?", text: $prompt, axis: .vertical)
-                        .lineLimit(5...12)
-                        .focused($focused)
                         .disabled(sending)
-                } header: {
-                    Text("What should it do?")
-                } footer: {
-                    Text("The task is named from this prompt.")
-                }
-                if let error {
+                    }
                     Section {
-                        Text(error).foregroundStyle(.red)
+                        TextField("What should Claude work on?", text: $prompt, axis: .vertical)
+                            .lineLimit(5...12)
+                            .focused($focused)
+                            .disabled(sending)
+                            .id(Self.promptId)
+                    } header: {
+                        Text("What should it do?")
+                    } footer: {
+                        Text("The task is named from this prompt.")
                     }
+                    if let error {
+                        Section {
+                            Text(error).foregroundStyle(.red)
+                        }
+                    }
+                }
+                // The field sits low and grows as it fills: keep its bottom edge,
+                // where the caret usually is, above the keyboard.
+                .onChange(of: prompt) { revealPrompt(scroller) }
+                .onChange(of: focused) { if focused { revealPrompt(scroller) } }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                    if focused { revealPrompt(scroller) }
                 }
             }
             .navigationTitle("New task")
@@ -197,6 +207,12 @@ struct NewTaskSheet: View {
                 streamId = selectedProject?.defaultStream?.id
             }
         }
+    }
+
+    private static let promptId = "prompt"
+
+    private func revealPrompt(_ scroller: ScrollViewProxy) {
+        withAnimation { scroller.scrollTo(Self.promptId, anchor: .bottom) }
     }
 
     /// The project, first and bold with its tile: fixed when the sheet came
