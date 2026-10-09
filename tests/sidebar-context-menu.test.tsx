@@ -36,14 +36,14 @@ beforeEach(() => {
   projectsFixture = buildProjects
   configOverrides = { autoCollapseQuietStreams: false }
   const known: Record<string, unknown> = {
-    loadProjects: vi.fn().mockImplementation(async () => ({
+    loadProjects: vi.fn().mockImplementation(async () => ({ local: {
       revision: 0,
       data: { projects: projectsFixture(), tags: [], projectOrder: projectsFixture().map(p => p.id), pinnedItems }
-    })),
+    } })),
     loadConfig: vi.fn().mockImplementation(async () => ({ ...DEFAULT_CONFIG, ...configOverrides })),
     loadWindowState: vi.fn().mockResolvedValue({ expandedProjectIds: ['p1'], sidebarTab: 'projects' }),
     notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
-    saveProjects: vi.fn().mockImplementation((payload: { data: ProjectsData }) => {
+    saveProjects: vi.fn().mockImplementation((_source: string, payload: { data: ProjectsData }) => {
       saved.push(payload.data)
       return Promise.resolve({ ok: true, revision: saved.length })
     }),
@@ -152,7 +152,7 @@ describe('Sidebar context menu', () => {
 
     fireEvent.contextMenu(row)
     fireEvent.click(await screen.findByRole('button', { name: /Reveal in Finder|Show in/ }))
-    expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha')
+    expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha', undefined, 'p1')
   })
 })
 

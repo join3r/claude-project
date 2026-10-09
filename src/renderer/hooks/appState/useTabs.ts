@@ -24,6 +24,7 @@ import {
 import type { AppStateCore } from './useAppStateCore'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { findTask, insertTabAt, mapTask, patchTab, renameTabInData } from './projectsData'
+import { featureAvailable } from '../../../shared/project-features'
 
 export interface TabsActions {
   /** The new tab, or null when the task already has an agent and `type` is one (a second agent is a new task). */
@@ -163,6 +164,7 @@ export function useTabs(
     const owner = findTask(projectsRef.current, projectId, taskId)
     const tab = owner ? taskTabs(owner).find(candidate => candidate.id === tabId) : undefined
     if (!tab || tab.type === to || (tab.type !== 'claude' && tab.type !== 'claude-chat')) return
+    if (to === 'claude-chat' && !featureAvailable(projectsRef.current.find(p => p.id === projectId), 'chat')) return
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
     void window.api.scrollbackDelete(tabId)
     markClaudeHandoff(tabId)

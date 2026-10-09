@@ -8,6 +8,7 @@ import { NEW_TASK_NAME, PROMPT_BOX_AGENTS } from '../../shared/types'
 import type { AiTabType, AppConfig, Project, PromptBoxAgent } from '../../shared/types'
 import type { ChatImage } from '../../shared/claude-chat'
 import { taskNameFromPrompt } from '../../shared/task-name'
+import { featureAvailable } from '../../shared/project-features'
 
 export { taskNameFromPrompt }
 
@@ -40,13 +41,15 @@ export function shouldNameTask(currentName: string): boolean {
 /**
  * The agents this project's prompt box offers: the ones switched on in Settings, in
  * a fixed order. A shell-command project runs one command, not agents, so it gets none.
+ * A DevTool server's project has no Claude chat yet (Claude runs there in its terminal).
  */
 export function availablePromptAgents(
   config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi'>,
-  project: Pick<Project, 'shellCommand'>
+  project: Pick<Project, 'shellCommand' | 'host'>
 ): PromptBoxAgent[] {
   if (project.shellCommand) return []
   return PROMPT_BOX_AGENTS.filter((agent) => {
+    if (agent === 'claude-chat' && !featureAvailable(project, 'chat')) return false
     if (agent === 'claude-chat' || agent === 'claude') return config.enableClaude
     if (agent === 'codex') return config.enableCodex
     return config.enablePi

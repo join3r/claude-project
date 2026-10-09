@@ -47,13 +47,13 @@ describe('OpenInIdeButton', () => {
     )
     fireEvent.click(screen.getByTitle('Open in Cursor'))
     await waitFor(() => {
-      expect((window as any).api.openInIde).toHaveBeenCalledWith('cursor', 'C:/Repos/demo')
+      expect((window as any).api.openInIde).toHaveBeenCalledWith('cursor', 'C:/Repos/demo', undefined)
     })
 
     fireEvent.click(screen.getByTitle('Open in another editor'))
     fireEvent.click(screen.getByText('Open in Visual Studio Code'))
     await waitFor(() => {
-      expect((window as any).api.openInIde).toHaveBeenCalledWith('code', 'C:/Repos/demo')
+      expect((window as any).api.openInIde).toHaveBeenCalledWith('code', 'C:/Repos/demo', undefined)
     })
   })
 })

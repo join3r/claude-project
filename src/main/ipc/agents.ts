@@ -91,13 +91,13 @@ async function listChatFiles(deps: AgentDeps, cwd: string, projectId?: string, c
 
 /** Hook injection, Codex/Claude session lookups and Claude chat tabs. */
 export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void {
-  ipc.handle('hooks-inject', [v.string({ nonEmpty: true }), safeId], async (_event, projectDir, tabId) => {
+  ipc.handle('hooks-inject', [v.string({ nonEmpty: true }), safeId, optSafeId], async (_event, projectDir, tabId) => {
     // Writes `.claude/settings.local.json` into the directory: only into ones the user configured.
     await deps.assertAllowedDirectory(projectDir)
     deps.hookInjector().inject(projectDir, tabId)
   })
   // Release is owner-tracked in HookInjector: an unknown dir/tab pair is a no-op.
-  ipc.handle('hooks-cleanup', [str, safeId], (_event, projectDir, tabId) => {
+  ipc.handle('hooks-cleanup', [str, safeId, optSafeId], (_event, projectDir, tabId) => {
     deps.hookInjector().cleanup(projectDir, tabId)
   })
   ipc.handle('hooks-cleanup-remote', [safeId, sshConfig, optStr, safeId], (_event, projectId, config, remoteDir, tabId) =>
@@ -229,14 +229,16 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   ipc.handle('chat-list-files', [str, optSafeId, optSshConfig], (_event, cwd, projectId, config) =>
     listChatFiles(deps, cwd, projectId, config))
   // `/permissions`: the project's settings files are only reachable for directories the user configured.
-  ipc.handle('chat-permissions-read', [v.string({ nonEmpty: true })], async (_event, cwd) =>
+  ipc.handle('chat-permissions-read', [v.string({ nonEmpty: true }), optSafeId], async (_event, cwd) =>
     readPermissionSettings(await deps.assertAllowedDirectory(cwd)))
   ipc.handle('chat-permissions-update', [
     v.string({ nonEmpty: true }),
     v.literal('localSettings', 'projectSettings', 'userSettings'),
     v.literal(...PERMISSION_BEHAVIORS),
     v.string({ nonEmpty: true, max: 2000 }),
-    v.literal('add', 'remove')
+    v.literal('add', 'remove'),
+    // The project, for the desktop's router; the folder check is the host's.
+    optSafeId
   ], async (_event, cwd, kind, behavior, rule, action) =>
     updatePermissionRule(await deps.assertAllowedDirectory(cwd), kind, behavior, rule, action))
 }

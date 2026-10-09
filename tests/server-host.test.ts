@@ -137,9 +137,9 @@ describe.skipIf(process.platform === 'win32')('server host (in process)', () => 
   it('reads files only inside a project the server has', async () => {
     await expect(server.clients.call(a.id, 'fb-read-file', [projectDir, 'hello.txt'])).rejects.toThrow()
 
-    const { revision, data } = await server.clients.call(a.id, 'load-projects') as { revision: number; data: ProjectsData }
+    const { local: { revision, data } } = await server.clients.call(a.id, 'load-projects') as { local: { revision: number; data: ProjectsData } }
     const project = fixtureProject({ id: 'server-project', name: 'Server project', directory: projectDir })
-    const saved = await server.clients.call(a.id, 'save-projects', [{
+    const saved = await server.clients.call(a.id, 'save-projects', ['local', {
       baseRevision: revision,
       data: { ...data, projects: [...data.projects, project], projectOrder: [...(data.projectOrder ?? []), project.id] }
     }]) as { ok: boolean }
@@ -149,6 +149,52 @@ describe.skipIf(process.platform === 'win32')('server host (in process)', () => 
     expect(await server.clients.call(a.id, 'fb-read-file', [projectDir, 'hello.txt'])).toBe('hello from the server\n')
     await expect(server.clients.call(a.id, 'fb-read-file', [projectDir, '../outside.txt'])).rejects.toThrow()
     await expect(server.clients.call(a.id, 'fb-read-directory', ['/etc', ''])).rejects.toThrow()
+  })
+
+  it('keeps a desktop\'s slice of projects in its own data: its tags, order and pins stay, tag ids too', async () => {
+    const { local: before } = await server.clients.call(a.id, 'load-projects') as { local: { revision: number; data: ProjectsData } }
+    // A restart never reuses a revision: they start from the clock.
+    expect(before.revision).toBeGreaterThan(1_600_000_000_000)
+    // The server's own tag, on its own project (an unused tag would be pruned).
+    const own = {
+      ...before.data,
+      projects: before.data.projects.map((p, i) => (i === 0 ? { ...p, tagIds: ['server-tag'] } : p)),
+      tags: [{ id: 'server-tag', name: 'phone' }],
+      projectOrder: [...before.data.projectOrder].reverse()
+    }
+    const first = await server.clients.call(a.id, 'save-projects', ['local', { baseRevision: before.revision, data: own }]) as { ok: boolean; revision: number }
+    expect(first.ok).toBe(true)
+
+    const added = { ...fixtureProject({ id: 'from-desktop', name: 'From a desktop', directory: projectDir }), tagIds: ['desktop-only-tag'], host: 'this-server' }
+    const slice = { projects: [...own.projects, added] }
+    const saved = await server.clients.call(a.id, 'save-projects-slice', [{ baseRevision: first.revision, data: slice }]) as { ok: boolean }
+    expect(saved.ok).toBe(true)
+    const { local: after } = await server.clients.call(a.id, 'load-projects') as { local: { revision: number; data: ProjectsData } }
+    const stored = after.data.projects.find(p => p.id === 'from-desktop')!
+    expect(stored.tagIds).toEqual(['desktop-only-tag'])
+    expect(stored).not.toHaveProperty('host')
+    expect(after.data.tags).toEqual([{ id: 'server-tag', name: 'phone' }])
+    expect(after.data.projectOrder).toEqual([...own.projectOrder, 'from-desktop'])
+
+    // A stale slice is refused with the server's data, as for a window.
+    const stale = await server.clients.call(a.id, 'save-projects-slice', [{ baseRevision: first.revision, data: slice }]) as { ok: boolean; revision: number }
+    expect(stale).toMatchObject({ ok: false, revision: after.revision })
+  })
+
+  it('works out a shell\'s status itself, with no window\'s help', async () => {
+    const tabId = 'status-tab'
+    await server.clients.call(a.id, 'pty-spawn', [tabId, '/bin/sh', projectDir, 80, 24, ['-c', 'echo busy; sleep 30'], {}, undefined, undefined])
+    await ptyText(a, tabId, 'busy')
+    await expect.poll(() => server.host.tabStatuses()[tabId]).toBe('working')
+    await server.clients.call(a.id, 'pty-kill', [tabId])
+  })
+
+  it('lists its folders and finds its repos for a desktop adding a project', async () => {
+    const listing = await server.clients.call(a.id, 'server-list-dirs', ['ignored-host-id', projectDir, {}]) as { path: string; entries: unknown[] }
+    expect(listing.path).toBe(projectDir)
+    fs.mkdirSync(path.join(projectDir, 'repo', '.git'), { recursive: true })
+    const found = await server.clients.call(a.id, 'server-discover-repos', ['ignored-host-id', { root: projectDir }]) as { repos: Array<{ name: string }> }
+    expect(found.repos.map(r => r.name)).toEqual(['repo'])
   })
 
   it('runs a chat tab against the configured claude', async () => {

@@ -1,6 +1,7 @@
 import { isRemoteProject, isShellCommandProject, type ExternalEditor, type ExternalEditorsConfig, type Project, type Task } from './types'
 import { taskWorkspace } from './streams'
 import { joinWorkspaceDir } from './workspace-path'
+import { featureAvailable } from './project-features'
 
 export function resolveDefaultExternalEditor(config: ExternalEditorsConfig): ExternalEditor | null {
   if (config.defaultId) {
@@ -26,7 +27,7 @@ export function paletteAliasesForEditor(name: string): string[] {
 /** Folder the Files panel uses: the task's worktree (its own, else its stream's), else the project directory. */
 export function localProjectFolder(project: Project | null | undefined, task: Task | null | undefined): string | null {
   if (!project) return null
-  if (isRemoteProject(project) || isShellCommandProject(project)) return null
+  if (isRemoteProject(project) || isShellCommandProject(project) || !featureAvailable(project, 'local-folder')) return null
   const workspace = taskWorkspace(project, task?.id)
   if (workspace) {
     return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)

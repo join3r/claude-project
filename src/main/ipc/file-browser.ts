@@ -9,7 +9,7 @@ import {
 } from '../file-browser-fs'
 import { resolveConfinedPath, type RealpathApi, nodeRealpath } from './path-allowlist'
 import type { IpcRegistrar } from './registrar'
-import { str } from './schemas'
+import { optSafeId, str } from './schemas'
 
 export interface FileBrowserDeps {
   /**
@@ -29,31 +29,31 @@ export function registerFileBrowserHandlers(ipc: IpcRegistrar, deps: FileBrowser
   const fsApi = deps.fs ?? nodeRealpath
   const follow = { followFinal: true }
 
-  ipc.handle('fb-read-directory', [str, str], async (_event, projectCwd, relativeDirPath): Promise<DirectoryEntry[]> => {
+  ipc.handle('fb-read-directory', [str, str, optSafeId], async (_event, projectCwd, relativeDirPath): Promise<DirectoryEntry[]> => {
     const root = await deps.resolveRoot(projectCwd)
     await resolveConfinedPath(root, relativeDirPath, follow, fsApi)
     return listProjectDirectory(root, relativeDirPath)
   })
 
-  ipc.handle('fb-read-file', [str, str], async (_event, projectCwd, relativeFilePath): Promise<string> => {
+  ipc.handle('fb-read-file', [str, str, optSafeId], async (_event, projectCwd, relativeFilePath): Promise<string> => {
     const root = await deps.resolveRoot(projectCwd)
     const fullPath = await resolveConfinedPath(root, relativeFilePath, follow, fsApi)
     return fsPromises.readFile(fullPath, 'utf-8')
   })
 
-  ipc.handle('fb-write-file', [str, str, str], async (_event, projectCwd, relativeFilePath, content): Promise<void> => {
+  ipc.handle('fb-write-file', [str, str, str, optSafeId], async (_event, projectCwd, relativeFilePath, content): Promise<void> => {
     const root = await deps.resolveRoot(projectCwd)
     const fullPath = await resolveConfinedPath(root, relativeFilePath, follow, fsApi)
     await fsPromises.writeFile(fullPath, content, 'utf-8')
   })
 
-  ipc.handle('fb-create-file', [str, str, str], async (_event, projectCwd, parentRelativePath, name): Promise<DirectoryEntry> => {
+  ipc.handle('fb-create-file', [str, str, str, optSafeId], async (_event, projectCwd, parentRelativePath, name): Promise<DirectoryEntry> => {
     const root = await deps.resolveRoot(projectCwd)
     await resolveConfinedPath(root, parentRelativePath, follow, fsApi)
     return createProjectFile(root, parentRelativePath, name)
   })
 
-  ipc.handle('fb-create-directory', [str, str, str], async (_event, projectCwd, parentRelativePath, name): Promise<DirectoryEntry> => {
+  ipc.handle('fb-create-directory', [str, str, str, optSafeId], async (_event, projectCwd, parentRelativePath, name): Promise<DirectoryEntry> => {
     const root = await deps.resolveRoot(projectCwd)
     await resolveConfinedPath(root, parentRelativePath, follow, fsApi)
     return createProjectDirectory(root, parentRelativePath, name)
@@ -61,13 +61,13 @@ export function registerFileBrowserHandlers(ipc: IpcRegistrar, deps: FileBrowser
 
   // Renaming or deleting acts on the entry itself (a symlink is renamed/removed,
   // not its target), so only the directory holding it has to be inside the root.
-  ipc.handle('fb-rename', [str, str, str], async (_event, projectCwd, fromRelativePath, newName): Promise<DirectoryEntry> => {
+  ipc.handle('fb-rename', [str, str, str, optSafeId], async (_event, projectCwd, fromRelativePath, newName): Promise<DirectoryEntry> => {
     const root = await deps.resolveRoot(projectCwd)
     await resolveConfinedPath(root, fromRelativePath, { followFinal: false }, fsApi)
     return renameProjectEntry(root, fromRelativePath, newName)
   })
 
-  ipc.handle('fb-delete', [str, str], async (_event, projectCwd, relativePath): Promise<void> => {
+  ipc.handle('fb-delete', [str, str, optSafeId], async (_event, projectCwd, relativePath): Promise<void> => {
     const root = await deps.resolveRoot(projectCwd)
     await resolveConfinedPath(root, relativePath, { followFinal: false }, fsApi)
     return deleteProjectEntry(root, relativePath)

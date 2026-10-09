@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-export function useCommitHistory(projectDir: string, enabled: boolean): {
+/** `projectId` routes the call to a DevTool server's project. */
+export function useCommitHistory(projectDir: string, enabled: boolean, projectId?: string): {
   commits: string[]
   loading: boolean
 } {
@@ -18,7 +19,7 @@ export function useCommitHistory(projectDir: string, enabled: boolean): {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     setLoading(true)
-    window.api.gitCommitHistory(projectDir)
+    window.api.gitCommitHistory(projectDir, projectId)
       .then(result => {
         if (requestId !== requestIdRef.current) return
         setCommits(result.commits)
@@ -29,7 +30,7 @@ export function useCommitHistory(projectDir: string, enabled: boolean): {
         setCommits([])
         setLoading(false)
       })
-  }, [enabled, projectDir])
+  }, [enabled, projectDir, projectId])
 
   useEffect(() => {
     fetch()

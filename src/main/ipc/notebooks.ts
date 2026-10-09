@@ -2,7 +2,7 @@ import type { NotebookKernelCondaOverride } from '../../shared/notebook'
 import type { CondaListResult } from '../../shared/conda'
 import { parseNotebookExecuteIpc } from '../../shared/notebook-execute'
 import type { IpcRegistrar } from './registrar'
-import { safeId, str } from './schemas'
+import { optSafeId, safeId, str } from './schemas'
 import { v } from './validate'
 
 export interface NotebookDeps {
@@ -31,7 +31,7 @@ const condaOverride = v.optional(v.object({
  * so its error messages stay the ones the tab shows.
  */
 export function registerNotebookHandlers(ipc: IpcRegistrar, deps: NotebookDeps): void {
-  ipc.handle('conda-list-envs', [], () => deps.listCondaEnvs())
+  ipc.handle('conda-list-envs', [optSafeId], () => deps.listCondaEnvs())
 
   ipc.handle('notebook-kernel-start', [safeId, safeId, str, condaOverride], (_event, tabId, projectId, cwd, override) =>
     deps.startKernel(tabId, projectId, cwd, override)

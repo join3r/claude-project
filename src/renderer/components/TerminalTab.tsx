@@ -25,6 +25,7 @@ import { buildXtermTheme } from './terminalThemes'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { hasBell, terminalStatusFromOutput } from '../../shared/terminal-status'
 import { takePendingCommand } from './terminalStartup'
+import ServerOfflineOverlay, { useServerOnline } from './ServerOfflineOverlay'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -35,6 +36,8 @@ interface Props {
   taskId: string
   projectDir: string
   sshConfig?: SshConfig
+  /** The DevTool server the project is on (`Project.host`): the PTY runs there. */
+  serverId?: string
   shellCommand?: ShellCommandConfig
   cwd?: string
   /**
@@ -141,7 +144,7 @@ function attachWebgl(tabId: string, term: Terminal): WebglAddon | null {
   }
 }
 
-export default function TerminalTab({ tabId, visible, projectId, taskId, projectDir, sshConfig, shellCommand, cwd, isMainTab = false }: Props): React.ReactElement {
+export default function TerminalTab({ tabId, visible, projectId, taskId, projectDir, sshConfig, serverId, shellCommand, cwd, isMainTab = false }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const { addTab, config, effectiveTerminalTheme, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
@@ -154,6 +157,11 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
   const prevSshReadyRef = useRef(sshReady)
   const [searchOpen, setSearchOpen] = useState(false)
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
+  // A server tab waits for its server, and attaches again (a new xterm, fed the
+  // scrollback) each time the server comes back.
+  const serverOnline = useServerOnline(serverId)
+  const prevServerOnlineRef = useRef(serverOnline)
+  const [attachEpoch, setAttachEpoch] = useState(0)
 
   const statusStore = useTabStatusStore()
   // A ref, so a tab that becomes (or stops being) the main tab doesn't re-register its listeners.
@@ -162,8 +170,12 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
   const lastStatusWriteRef = useRef(0)
   const decayTimerRef = useRef<number | null>(null)
 
-  // No hooks here: this window's heuristics are the only status there is.
-  useEffect(() => statusStore.mirrorToMain(tabId), [statusStore, tabId])
+  // No hooks here: this window's heuristics are the only status there is. A
+  // server tab's status is the server's own (it runs the same heuristics).
+  useEffect(() => {
+    if (serverId) return
+    return statusStore.mirrorToMain(tabId)
+  }, [statusStore, tabId, serverId])
 
   const handleOutputForStatus = useCallback((chunk: string) => {
     const now = Date.now()
@@ -211,6 +223,20 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
     const interval = setInterval(check, 500)
     return () => { cancelled = true; clearInterval(interval) }
   }, [sshConfig, projectId])
+
+  // Back online: the server let go of this window when the link dropped, so attach
+  // again. A hidden tab has no xterm and attaches when it is shown.
+  useEffect(() => {
+    const wasOnline = prevServerOnlineRef.current
+    prevServerOnlineRef.current = serverOnline
+    if (!serverId || !serverOnline || wasOnline) return
+    if (!terminals.has(tabId)) return
+    disposeTerminal(tabId, { killRuntime: false, persistScrollback: false })
+    initializedRef.current = false
+    spawnedRef.current = false
+    statusStore.setStatus(tabId, null, 'server-reattach')
+    setAttachEpoch(n => n + 1)
+  }, [serverOnline, serverId, tabId, statusStore])
 
   // Respawn PTY after SSH reconnection (detect false→true transition)
   useEffect(() => {
@@ -363,7 +389,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
     ensurePtyExitListener()
     ensurePtySizeListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, projectId, taskId, visible, markTaskInteracted])
+  }, [tabId, config, effectiveTerminalTheme, terminalZoomDelta, addTab, projectId, taskId, visible, markTaskInteracted, attachEpoch])
 
   // Manage WebGL addon lifecycle based on visibility
   useEffect(() => {
@@ -407,6 +433,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
         }
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
+          if (!serverOnline) return // wait for the DevTool server
           spawnedRef.current = true
           entry.restoring = true
           entry.pendingData = []
@@ -458,7 +485,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, config, sshReady, sshConfig, shellCommand, projectId, visible])
+  }, [tabId, config, sshReady, sshConfig, shellCommand, projectId, visible, serverOnline, attachEpoch])
 
   // Focus terminal on visibility change
   useEffect(() => {
@@ -559,6 +586,7 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
       style={{ display: visible ? 'block' : 'none', position: 'relative' }}
     >
       <div ref={hostRef} className="w-full h-full" />
+      {serverId && <ServerOfflineOverlay serverId={serverId} />}
       {entry && (
         <TerminalSearchBar
           searchAddon={entry.searchAddon}

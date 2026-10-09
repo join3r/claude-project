@@ -226,7 +226,7 @@ export function useTasks(
           toDir,
           plan.sessions,
           plan.cwdMoves.map(move => move.cwd),
-          project.ssh ? projectId : undefined,
+          projectId,
           project.ssh
         )
         dirsExist = prepared.dirsExist
@@ -307,7 +307,7 @@ export function useTasks(
       void window.api.workspaceDelete(
         {
           projectDir: getProjectDir(project),
-          projectId: project.ssh ? projectId : undefined,
+          projectId,
           sshConfig: project.ssh,
           worktreePath: workspace.worktreePath,
           branchName: workspace.branchName,
@@ -384,7 +384,7 @@ export function useTasks(
     if (old) {
       const restored = await window.api.workspaceRestore({
         projectDir: getProjectDir(project),
-        projectId: project.ssh ? projectId : undefined,
+        projectId,
         sshConfig: project.ssh,
         worktreePath: old.worktreePath,
         branchName: old.branchName
@@ -505,7 +505,7 @@ async function carrySessions(project: Project, tasks: Task[], fromDir: string, t
   let dirsExist: boolean[] = []
   try {
     const prepared = await window.api.taskMovePrepare(
-      fromDir, toDir, sessions, cwdMoves.map(move => move.cwd), project.ssh ? project.id : undefined, project.ssh
+      fromDir, toDir, sessions, cwdMoves.map(move => move.cwd), project.id, project.ssh
     )
     dirsExist = prepared.dirsExist
   } catch {

@@ -25,7 +25,9 @@ export function chatTabConfig(project: Project, task: Task, sessionId: string): 
   return {
     cwd: taskDirectory(project, task),
     sessionId,
-    projectId: sshConfig ? project.id : undefined,
+    // Always: the desktop's router follows it to a server project; main treats
+    // only `projectId` with `sshConfig` as SSH.
+    projectId: project.id,
     sshConfig,
     extraArgs: splitExtraArgs(project.aiToolArgs?.claude)
   }

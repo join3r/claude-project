@@ -10,8 +10,6 @@ import type {
   NotesRecord,
   NotesSaveResult,
   ProjectsData,
-  ProjectsEnvelope,
-  ProjectsSaveResult,
   SshConfig,
   TabStatusValue,
   TaskRemoval,
@@ -42,6 +40,8 @@ import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
 import type { ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult } from '../shared/servers'
+import type { ProjectsSources, ProjectsUpdate, SourceSaveResult } from '../shared/projects-sources'
+import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shared/host-fs'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
@@ -49,12 +49,14 @@ import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind
 const api = {
   // Projects
   // Projects and notes are revision-guarded: a save quotes the revision it was
-  // derived from and main refuses it if another window got there first.
-  loadProjects: (): Promise<ProjectsEnvelope> => ipcRenderer.invoke('load-projects'),
-  saveProjects: (payload: { baseRevision: number; data: ProjectsData }): Promise<ProjectsSaveResult> =>
-    ipcRenderer.invoke('save-projects', payload),
-  onProjectsUpdated: (callback: (envelope: ProjectsEnvelope) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, envelope: ProjectsEnvelope) => callback(envelope)
+  // derived from and main refuses it if another window got there first. Projects
+  // come from several sources (this desktop, each DevTool server), each with its
+  // own revision (shared/projects-sources.ts).
+  loadProjects: (): Promise<ProjectsSources> => ipcRenderer.invoke('load-projects'),
+  saveProjects: (source: string, payload: { baseRevision: number; data: ProjectsData }): Promise<SourceSaveResult> =>
+    ipcRenderer.invoke('save-projects', source, payload),
+  onProjectsUpdated: (callback: (update: ProjectsUpdate) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, update: ProjectsUpdate) => callback(update)
     ipcRenderer.on('projects-updated', handler)
     return () => ipcRenderer.removeListener('projects-updated', handler)
   },
@@ -125,13 +127,13 @@ const api = {
   pickFile: (title?: string): Promise<string | null> =>
     ipcRenderer.invoke('pick-file', title),
 
-  condaListEnvs: (): Promise<CondaListResult> =>
-    ipcRenderer.invoke('conda-list-envs'),
+  condaListEnvs: (projectId?: string): Promise<CondaListResult> =>
+    ipcRenderer.invoke('conda-list-envs', projectId),
 
   externalIdeDetect: (): Promise<Array<{ name: string; command: string }>> =>
     ipcRenderer.invoke('external-ide-detect'),
-  openInIde: (editorId: string, folder: string): Promise<void> =>
-    ipcRenderer.invoke('open-in-ide', editorId, folder),
+  openInIde: (editorId: string, folder: string, projectId?: string): Promise<void> =>
+    ipcRenderer.invoke('open-in-ide', editorId, folder, projectId),
 
   /** Main-process platform. Renderer uses this for Windows-only Settings. */
   platform: process.platform,
@@ -171,7 +173,8 @@ const api = {
   getNativeTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('get-native-theme'),
   clipboardWriteText: (text: string): Promise<void> => ipcRenderer.invoke('clipboard-write-text', text),
   /** Open a project/workspace directory in the OS file manager, or select a path under it. */
-  revealInFolder: (folder: string, relativePath?: string): Promise<void> => ipcRenderer.invoke('reveal-in-folder', folder, relativePath),
+  revealInFolder: (folder: string, relativePath?: string, projectId?: string): Promise<void> =>
+    ipcRenderer.invoke('reveal-in-folder', folder, relativePath, projectId),
   clipboardReadText: (): Promise<string> => ipcRenderer.invoke('clipboard-read-text'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
   onThemeChanged: (callback: (theme: 'dark' | 'light') => void): void => {
@@ -187,8 +190,10 @@ const api = {
   // Hook injection
   // tabId identifies which tab owns the injection — hooks are shared per directory
   // and only come off disk once every owning tab has released them.
-  hooksInject: (projectDir: string, tabId: string): Promise<void> => ipcRenderer.invoke('hooks-inject', projectDir, tabId),
-  hooksCleanup: (projectDir: string, tabId: string): Promise<void> => ipcRenderer.invoke('hooks-cleanup', projectDir, tabId),
+  hooksInject: (projectDir: string, tabId: string, projectId?: string): Promise<void> =>
+    ipcRenderer.invoke('hooks-inject', projectDir, tabId, projectId),
+  hooksCleanup: (projectDir: string, tabId: string, projectId?: string): Promise<void> =>
+    ipcRenderer.invoke('hooks-cleanup', projectDir, tabId, projectId),
   hooksCleanupRemote: (projectId: string, sshConfig: SshConfig, remoteDir: string | undefined, tabId: string): Promise<void> =>
     ipcRenderer.invoke('hooks-cleanup-remote', projectId, sshConfig, remoteDir, tabId),
 
@@ -266,14 +271,16 @@ const api = {
   chatClose: (tabId: string): void => ipcRenderer.send('chat-close', tabId),
   chatListFiles: (cwd: string, projectId?: string, sshConfig?: SshConfig): Promise<string[]> =>
     ipcRenderer.invoke('chat-list-files', cwd, projectId, sshConfig),
-  chatPermissionsRead: (cwd: string): Promise<PermissionSettingsSource[]> => ipcRenderer.invoke('chat-permissions-read', cwd),
+  chatPermissionsRead: (cwd: string, projectId?: string): Promise<PermissionSettingsSource[]> =>
+    ipcRenderer.invoke('chat-permissions-read', cwd, projectId),
   chatPermissionsUpdate: (
     cwd: string,
     kind: PermissionSourceKind,
     behavior: PermissionBehavior,
     rule: string,
-    action: 'add' | 'remove'
-  ): Promise<void> => ipcRenderer.invoke('chat-permissions-update', cwd, kind, behavior, rule, action),
+    action: 'add' | 'remove',
+    projectId?: string
+  ): Promise<void> => ipcRenderer.invoke('chat-permissions-update', cwd, kind, behavior, rule, action, projectId),
   onChatEvent: (callback: (tabId: string, seq: number, event: ChatEvent) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, tabId: string, seq: number, event: ChatEvent) => callback(tabId, seq, event)
     ipcRenderer.on('chat-event', handler)
@@ -374,42 +381,42 @@ const api = {
   },
 
   // File browser
-  fbReadDirectory: (projectCwd: string, relativeDirPath: string): Promise<DirectoryEntry[]> =>
-    ipcRenderer.invoke('fb-read-directory', projectCwd, relativeDirPath),
-  fbReadFile: (projectCwd: string, relativeFilePath: string): Promise<string> =>
-    ipcRenderer.invoke('fb-read-file', projectCwd, relativeFilePath),
-  fbWriteFile: (projectCwd: string, relativeFilePath: string, content: string): Promise<void> =>
-    ipcRenderer.invoke('fb-write-file', projectCwd, relativeFilePath, content),
-  fbCreateFile: (projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
-    ipcRenderer.invoke('fb-create-file', projectCwd, parentRelativePath, name),
-  fbCreateDirectory: (projectCwd: string, parentRelativePath: string, name: string): Promise<DirectoryEntry> =>
-    ipcRenderer.invoke('fb-create-directory', projectCwd, parentRelativePath, name),
-  fbRename: (projectCwd: string, fromRelativePath: string, newName: string): Promise<DirectoryEntry> =>
-    ipcRenderer.invoke('fb-rename', projectCwd, fromRelativePath, newName),
-  fbDelete: (projectCwd: string, relativePath: string): Promise<void> =>
-    ipcRenderer.invoke('fb-delete', projectCwd, relativePath),
-  fbGitStatus: (projectCwd: string): Promise<GitStatusResult> =>
-    ipcRenderer.invoke('fb-git-status', projectCwd),
-  gitProjectPosture: (projectCwd: string): Promise<GitPostureResult> =>
-    ipcRenderer.invoke('git-project-posture', projectCwd),
-  gitCommitHistory: (projectCwd: string): Promise<CommitHistoryResult> =>
-    ipcRenderer.invoke('git-commit-history', projectCwd),
-  fbGitDiff: (projectCwd: string, relativeFilePath: string): Promise<string> =>
-    ipcRenderer.invoke('fb-git-diff', projectCwd, relativeFilePath),
+  fbReadDirectory: (projectCwd: string, relativeDirPath: string, projectId?: string): Promise<DirectoryEntry[]> =>
+    ipcRenderer.invoke('fb-read-directory', projectCwd, relativeDirPath, projectId),
+  fbReadFile: (projectCwd: string, relativeFilePath: string, projectId?: string): Promise<string> =>
+    ipcRenderer.invoke('fb-read-file', projectCwd, relativeFilePath, projectId),
+  fbWriteFile: (projectCwd: string, relativeFilePath: string, content: string, projectId?: string): Promise<void> =>
+    ipcRenderer.invoke('fb-write-file', projectCwd, relativeFilePath, content, projectId),
+  fbCreateFile: (projectCwd: string, parentRelativePath: string, name: string, projectId?: string): Promise<DirectoryEntry> =>
+    ipcRenderer.invoke('fb-create-file', projectCwd, parentRelativePath, name, projectId),
+  fbCreateDirectory: (projectCwd: string, parentRelativePath: string, name: string, projectId?: string): Promise<DirectoryEntry> =>
+    ipcRenderer.invoke('fb-create-directory', projectCwd, parentRelativePath, name, projectId),
+  fbRename: (projectCwd: string, fromRelativePath: string, newName: string, projectId?: string): Promise<DirectoryEntry> =>
+    ipcRenderer.invoke('fb-rename', projectCwd, fromRelativePath, newName, projectId),
+  fbDelete: (projectCwd: string, relativePath: string, projectId?: string): Promise<void> =>
+    ipcRenderer.invoke('fb-delete', projectCwd, relativePath, projectId),
+  fbGitStatus: (projectCwd: string, projectId?: string): Promise<GitStatusResult> =>
+    ipcRenderer.invoke('fb-git-status', projectCwd, projectId),
+  gitProjectPosture: (projectCwd: string, projectId?: string): Promise<GitPostureResult> =>
+    ipcRenderer.invoke('git-project-posture', projectCwd, projectId),
+  gitCommitHistory: (projectCwd: string, projectId?: string): Promise<CommitHistoryResult> =>
+    ipcRenderer.invoke('git-commit-history', projectCwd, projectId),
+  fbGitDiff: (projectCwd: string, relativeFilePath: string, projectId?: string): Promise<string> =>
+    ipcRenderer.invoke('fb-git-diff', projectCwd, relativeFilePath, projectId),
   // `repo` is a GitRepoStatus.path (project-relative, '' for the root);
   // `files` are project-relative paths inside it.
-  fbGitStage: (projectCwd: string, repo: string, files: string[]): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-stage', projectCwd, repo, files),
-  fbGitUnstage: (projectCwd: string, repo: string, files: string[]): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-unstage', projectCwd, repo, files),
-  fbGitDiscard: (projectCwd: string, repo: string, files: string[]): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-discard', projectCwd, repo, files),
-  fbGitPull: (projectCwd: string, repo: string): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-pull', projectCwd, repo),
-  fbGitCommit: (projectCwd: string, repo: string, message: string): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-commit', projectCwd, repo, message),
-  fbGitPush: (projectCwd: string, repo: string): Promise<GitOperationResult> =>
-    ipcRenderer.invoke('fb-git-push', projectCwd, repo),
+  fbGitStage: (projectCwd: string, repo: string, files: string[], projectId?: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-stage', projectCwd, repo, files, projectId),
+  fbGitUnstage: (projectCwd: string, repo: string, files: string[], projectId?: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-unstage', projectCwd, repo, files, projectId),
+  fbGitDiscard: (projectCwd: string, repo: string, files: string[], projectId?: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-discard', projectCwd, repo, files, projectId),
+  fbGitPull: (projectCwd: string, repo: string, projectId?: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-pull', projectCwd, repo, projectId),
+  fbGitCommit: (projectCwd: string, repo: string, message: string, projectId?: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-commit', projectCwd, repo, message, projectId),
+  fbGitPush: (projectCwd: string, repo: string, projectId?: string): Promise<GitOperationResult> =>
+    ipcRenderer.invoke('fb-git-push', projectCwd, repo, projectId),
 
   // Menu: file browser toggle
   onMenuToggleFileBrowser: (callback: () => void): (() => void) => {
@@ -542,6 +549,18 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, state: MobileState) => callback(state)
     ipcRenderer.on('mobile-state-changed', handler)
     return () => ipcRenderer.removeListener('mobile-state-changed', handler)
+  },
+  // Adding a project to a host (`host`: 'local' or a server id): its folders, its git repos, a clone.
+  serverListDirs: (host: string, dir: string, options?: { showHidden?: boolean }): Promise<HostDirListing> =>
+    ipcRenderer.invoke('server-list-dirs', host, dir, options),
+  serverDiscoverRepos: (host: string, options?: { root?: string; maxDepth?: number }): Promise<HostRepoDiscovery> =>
+    ipcRenderer.invoke('server-discover-repos', host, options),
+  serverCloneRepo: (host: string, request: { url: string; parentDir?: string; name?: string; opId: string }): Promise<HostCloneResult> =>
+    ipcRenderer.invoke('server-clone-repo', host, request),
+  onServerCloneProgress: (callback: (opId: string, line: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, opId: string, line: string) => callback(opId, line)
+    ipcRenderer.on('server-clone-progress', handler)
+    return () => ipcRenderer.removeListener('server-clone-progress', handler)
   },
   // DevTool servers. Main owns the state; every change is also broadcast.
   serversGetState: (): Promise<ServersState> => ipcRenderer.invoke('servers-get-state'),

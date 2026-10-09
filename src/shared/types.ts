@@ -391,6 +391,12 @@ export interface Project {
   /** How many streams are archived (its `Done` group); they live in `archive/<projectId>.json`. */
   archivedStreamCount?: number
   ssh?: SshConfig
+  /**
+   * The DevTool server this project lives on (its id), when it isn't on this
+   * desktop. Set by the desktop on every project of a server's slice and never
+   * stored on the server; `directory` is then a path on that server.
+   */
+  host?: string
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
@@ -414,8 +420,14 @@ export interface Project {
   hideFromMobile?: true
 }
 
+/** An SSH project: DevTool reaches its directory over SSH. */
 export function isRemoteProject(project: Project): boolean {
   return !!project.ssh
+}
+
+/** A project on a DevTool server (`Project.host`): its tabs, files and git run there. */
+export function isServerProject(project: Project): boolean {
+  return !!project.host
 }
 
 export function isEphemeralProject(project: Project): boolean {
@@ -547,20 +559,37 @@ export function normalizePinnedItems(items: unknown, projects: readonly Project[
   return result
 }
 
-export function pruneUnusedTags(data: ProjectsData): ProjectsData {
+export interface TagPruneOptions {
+  /** Projects stored elsewhere (a desktop's server projects): their tags count as used. */
+  foreignProjects?: readonly Project[]
+  /** Keep every project's tag ids, known or not: a server's store, whose desktops own the tags. */
+  keepUnknownTagIds?: boolean
+}
+
+/**
+ * Drop tags no project uses, and tag ids whose tag is gone. A server project's
+ * tag ids are left alone: tags belong to each desktop, so a server project can
+ * carry another desktop's ids, which this one ignores on display.
+ */
+export function pruneUnusedTags(data: ProjectsData, options: TagPruneOptions = {}): ProjectsData {
   const usedTagIds = new Set<string>()
-  for (const project of data.projects) {
+  for (const project of [...data.projects, ...(options.foreignProjects ?? [])]) {
     for (const tagId of project.tagIds ?? []) {
       usedTagIds.add(tagId)
     }
   }
   const tags = (data.tags ?? []).filter(tag => usedTagIds.has(tag.id))
   const tagIds = new Set(tags.map(t => t.id))
-  const projects = data.projects.map(project => ({
-    ...project,
-    tagIds: (project.tagIds ?? []).filter(id => tagIds.has(id))
-  }))
+  const projects = data.projects.map(project => (options.keepUnknownTagIds || isServerProject(project))
+    ? project
+    : { ...project, tagIds: (project.tagIds ?? []).filter(id => tagIds.has(id)) })
   return { ...data, tags, projects }
+}
+
+/** The project's tag ids this desktop knows (a server project may carry another desktop's). */
+export function knownTagIds(project: Project, tags: readonly Tag[]): string[] {
+  const known = new Set(tags.map(tag => tag.id))
+  return (project.tagIds ?? []).filter(id => known.has(id))
 }
 
 export interface AppConfig {

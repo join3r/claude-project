@@ -82,6 +82,15 @@ export class RevisionSyncClient<T> {
     this.pending.push({ id: this.nextId++, key, updater })
   }
 
+  /**
+   * Drop every unacknowledged mutation and anything queued: the store refused
+   * them for good (a DevTool server that is offline), so the caller rolls back.
+   */
+  abandon(): void {
+    this.pending = []
+    this.queued = null
+  }
+
   /** Re-run every unacknowledged mutation on top of `base`. */
   replay(base: T): T {
     let next = base

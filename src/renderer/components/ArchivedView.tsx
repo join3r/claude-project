@@ -62,7 +62,7 @@ function TaskHistory({ project, task, dir }: { project: Project; task: Task; dir
     }
     const { id: projectId, ssh } = projectRef.current
     if ((tabType === 'claude' || tabType === 'claude-chat') && sessionId) {
-      window.api.archiveTranscript(sessionId, dir, ssh ? projectId : undefined, ssh)
+      window.api.archiveTranscript(sessionId, dir, projectId, ssh)
         .then(messages => (messages.length > 0 ? done({ kind: 'chat', messages }) : scrollback()))
         .catch(scrollback)
     } else {

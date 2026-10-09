@@ -160,7 +160,7 @@ export function Palette(): React.ReactElement | null {
         const project = actions.projects.find(p => p.id === actions.selectedProjectId)
         const task = findTaskInProject(project, actions.selectedTaskId)
         const folder = localProjectFolder(project, task ?? null)
-        if (folder) void openWorkspaceInIde(editorId, folder)
+        if (folder) void openWorkspaceInIde(editorId, folder, project?.id)
       } else {
         const cmd = commandRegistry.getById(cmdId)
         if (cmd) Promise.resolve(cmd.run({ actions })).catch(() => {})

@@ -6,6 +6,7 @@
 import { isAgentTabType } from './types'
 import type { Project, Stream, Tab, TabType, Task, TaskPane, WorkspaceConfig } from './types'
 import { joinWorkspaceDir, retargetPath } from './workspace-path'
+import { featureAvailable } from './project-features'
 
 // --- Tasks across a project's streams ---------------------------------------
 
@@ -74,6 +75,7 @@ export function needsTaskWorktree(project: Project, stream: Stream, task: Task):
   return !!stream.workspace
     && !!stream.taskWorktrees
     && !project.ssh
+    && featureAvailable(project, 'task-worktrees')
     && !task.workspace
     && !task.sharesStreamWorktree
 }
@@ -87,7 +89,8 @@ export function needsTaskWorktree(project: Project, stream: Stream, task: Task):
  * it works in the stream's directory, as before.
  */
 export function reopensInOwnWorktree(project: Project, stream: Stream, task: Task): boolean {
-  return !!stream.workspace && !!stream.taskWorktrees && !project.ssh && !task.sharesStreamWorktree
+  return !!stream.workspace && !!stream.taskWorktrees && !project.ssh && featureAvailable(project, 'task-worktrees')
+    && !task.sharesStreamWorktree
 }
 
 /**

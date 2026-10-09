@@ -1,6 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type { Project, Task, TaskLandingResult } from '../shared/types'
 import { findStreamOfTask } from '../shared/streams'
+import { featureAvailable } from '../shared/project-features'
 
 /**
  * This window's side of landing tasks into their streams (main's
@@ -51,7 +52,8 @@ function without<T>(record: Record<string, T>, key: string): Record<string, T> {
 
 /** The task has a worktree of its own to land, in a local project. */
 export function canLandTask(project: Project, task: Task): boolean {
-  return !project.ssh && !!task.workspace && !!findStreamOfTask(project, task.id)?.workspace
+  return !project.ssh && featureAvailable(project, 'task-worktrees')
+    && !!task.workspace && !!findStreamOfTask(project, task.id)?.workspace
 }
 
 /** Shows `notice` on the task's banner (null clears it). Info lines go by themselves. */

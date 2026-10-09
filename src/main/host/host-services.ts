@@ -22,6 +22,7 @@ import { bracketedPaste } from '../pty-paste'
 import { NotesStorage } from '../notes-storage'
 import { RevisionStore } from '../revision-store'
 import { TabActivityRegistry } from '../tab-activity-registry'
+import { TerminalStatusTracker } from '../terminal-status-tracker'
 import { SleepBlocker } from '../sleep-blocker'
 import type { ActivityUpdate } from '../../shared/agent-activity'
 import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from '../task-teardown'
@@ -42,6 +43,7 @@ import { readPermissionSettings, updatePermissionRule } from '../claude-chat/per
 import { registerFileBrowserHandlers } from '../ipc/file-browser'
 import { registerGitHandlers } from '../ipc/git'
 import { registerNotebookHandlers } from '../ipc/notebooks'
+import { registerHostFsHandlers } from '../ipc/host-fs'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../../shared/archive'
 import {
@@ -88,6 +90,7 @@ import {
   TASK_TRIAGE_FEATURE
 } from '../../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../../shared/mobile'
+import { LOCAL_SOURCE } from '../../shared/projects-sources'
 import type {
   AppConfig,
   Project,
@@ -98,7 +101,8 @@ import type {
   TunnelConfig,
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
-  NotesRecord
+  NotesRecord,
+  TabStatusValue
 } from '../../shared/types'
 import type { ClientHub } from './client-hub'
 import type { HostEnv } from './host-env'
@@ -122,6 +126,21 @@ export interface HostServicesOptions {
    * drops it from the window view states it persists.
    */
   onTaskArchived?: (taskId: string) => void
+  /** How this host's projects.json is kept (see `ProjectsNormalizeOptions`). */
+  projects?: {
+    /** A desktop's server projects: its local order and pins may name them. */
+    foreign?: () => readonly Project[]
+    /** A server keeps tag ids only its desktops know. */
+    keepUnknownTagIds?: boolean
+    /** The first revision (a server starts from the clock; see RevisionStore). */
+    initialRevision?: number
+  }
+  /**
+   * Who works out the status of tabs without hooks (shells, Codex): the windows
+   * showing them (a desktop, `report-tab-status`), or the host itself from their
+   * PTY output (a server, so it has statuses with no window attached).
+   */
+  terminalStatus?: 'windows' | 'host'
 }
 
 /**
@@ -181,7 +200,7 @@ export class HostServices {
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
 
-  constructor({ env, clients, onTaskArchived, relayRole }: HostServicesOptions) {
+  constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus }: HostServicesOptions) {
     this.env = env
     this.clients = clients
     this.onTaskArchived = onTaskArchived ?? (() => {})
@@ -197,7 +216,12 @@ export class HostServices {
       log: (message) => this.logDebug(`relay ${message}`)
     })
     this.relay = new RelayMux(this.relayClient, (message) => this.logDebug(message))
-    this.storage = new Storage(configDir)
+    this.storage = new Storage(configDir, {
+      projectsNormalize: () => ({
+        foreignProjects: projects?.foreign?.() ?? [],
+        keepUnknownTagIds: projects?.keepUnknownTagIds
+      })
+    })
     this.scrollbackStorage = new ScrollbackStorage(path.join(configDir, 'scrollback'))
     this.archiveStorage = new ArchiveStorage(path.join(configDir, 'archive'))
     this.notesStorage = new NotesStorage(configDir)
@@ -208,9 +232,10 @@ export class HostServices {
     this.storage.backupProjectsOnStartup()
     this.projectsStore = new RevisionStore<ProjectsData>({
       initial: this.storage.loadProjects(),
-      normalize: (data) => Storage.normalizeProjectsData(data as unknown as Record<string, unknown>),
+      normalize: (data) => this.storage.normalizeProjects(data),
       persist: (data) => this.storage.saveProjects(data),
-      broadcast: (envelope) => this.clients.broadcast('projects-updated', envelope)
+      broadcast: (envelope) => this.clients.broadcast('projects-updated', { source: LOCAL_SOURCE, ...envelope }),
+      initialRevision: projects?.initialRevision
     })
     // Notes only gained a canonical copy in main when they gained a revision: before
     // that `notes-save` proxied straight to disk, which is why note changes never
@@ -279,8 +304,21 @@ export class HostServices {
       log: (message) => this.logDebug(message),
       piExtensionPath: () => env.resourcePath(PI_EXTENSION_RESOURCE),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
-      onKill: (tabId) => this.shutdownNotebookKernel(tabId)
+      onKill: (tabId) => this.shutdownNotebookKernel(tabId),
+      terminalStatus: terminalStatus === 'host' ? this.hostTerminalStatus() : undefined
     })
+  }
+
+  /** The terminal status heuristics run here, feeding the activity registry like a window's reports. */
+  private hostTerminalStatus(): { output: (tabId: string, data: string) => void; forget: (tabId: string) => void } {
+    const tracker = new TerminalStatusTracker({
+      getStatus: (tabId) => this.activityRegistry.getStatus(tabId),
+      report: (tabId, status) => this.activityRegistry.reported(tabId, status)
+    })
+    return {
+      output: (tabId, data) => tracker.output(tabId, data),
+      forget: (tabId) => tracker.forget(tabId)
+    }
   }
 
   /**
@@ -294,6 +332,11 @@ export class HostServices {
 
   getProjectsData(): ProjectsData {
     return this.projectsStore.peek()
+  }
+
+  /** After every commit of this host's projects (a desktop's router re-indexes them). */
+  onProjectsChanged(listener: (data: ProjectsData) => void): () => void {
+    return this.projectsStore.subscribe(listener)
   }
 
   getConfig(): AppConfig {
@@ -634,6 +677,11 @@ export class HostServices {
     return this.ptySessions.heldBy(holder)
   }
 
+  /** Every tab's status as this host has it (hooks, reports, or its own terminal heuristics). */
+  tabStatuses(): Record<string, TabStatusValue> {
+    return this.activityRegistry.getSnapshot()
+  }
+
   async shutdown(): Promise<void> {
     this.mobileService?.stop()
     this.ptySessions.saveAllScrollback()
@@ -844,6 +892,10 @@ export class HostServices {
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
     registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
+    registerHostFsHandlers(ipc, {
+      send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
+      env: () => getShellEnv()
+    })
   }
 
   /**

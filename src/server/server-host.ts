@@ -49,7 +49,15 @@ export async function startServerHost(options: ServerHostOptions): Promise<Serve
     onClientGone: (clientId) => host?.detachClient(clientId),
     log: env.log
   })
-  host = new HostServices({ env, clients, relayRole: 'server' })
+  host = new HostServices({
+    env,
+    clients,
+    relayRole: 'server',
+    // Desktops own the tags; a restart never reuses a revision a desktop quoted.
+    projects: { keepUnknownTagIds: true, initialRevision: Date.now() },
+    // No window may be attached: shells' and Codex's status comes from their output here.
+    terminalStatus: 'host'
+  })
   await host.start()
   host.registerIpcHandlers(clients.createRegistrar(env.log))
 

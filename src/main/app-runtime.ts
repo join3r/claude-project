@@ -6,6 +6,7 @@ import { HostServices } from './host/host-services'
 import { ServerHub } from './servers/server-hub'
 import { desktopBundle, desktopBundleDir } from './servers/desktop-bundle'
 import { DEFAULT_INSTALL_URL } from '../shared/servers'
+import { DesktopRouting } from './servers/desktop-routing'
 import { registerServerHandlers } from './ipc/servers'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type { HostEnv } from './host/host-env'
@@ -54,6 +55,8 @@ export class AppRuntime {
   private readonly env: HostEnv
   /** The DevTool servers this desktop paired with, on the relay socket the phones use. */
   private servers!: ServerHub
+  /** Server projects and the router that sends a server project's calls to its server. */
+  private readonly routing: DesktopRouting
   private readonly windowStates = new Map<number, PersistedWindowState>()
   private updates!: Updates
   private started = false
@@ -64,13 +67,16 @@ export class AppRuntime {
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
     this.env = createDesktopHostEnv()
+    this.routing = new DesktopRouting({ configDir: this.env.configDir, windows: this.clients, log: (message) => this.logDebug(message) })
     this.host = new HostServices({
       env: this.env,
       clients: this.clients,
-      onTaskArchived: (taskId) => this.forgetTaskInWindowStates(taskId)
+      onTaskArchived: (taskId) => this.forgetTaskInWindowStates(taskId),
+      projects: { foreign: () => this.routing.foreignProjects() }
     })
+    this.routing.attachHost(this.host)
     this.startupWindowStates = this.host.storage.loadWindowSession(
-      this.host.getProjectsData(),
+      this.allProjectsData(),
       this.host.getConfig().defaultSidebarTab
     ).windows
   }
@@ -101,6 +107,7 @@ export class AppRuntime {
       log: (message) => this.logDebug(message)
     })
     servers.onStateChange((state) => this.clients.broadcast('servers-state-changed', state))
+    this.routing.attachHub(servers)
     this.host.onConfigChanged(() => servers.relayUrlChanged())
     servers.start()
     return servers
@@ -149,7 +156,7 @@ export class AppRuntime {
       geometry: getWindowGeometry(window),
       viewState: initialViewState
         ? cloneWindowViewState(initialViewState)
-        : buildWindowViewState(this.host.getProjectsData().projects, this.host.getConfig())
+        : buildWindowViewState(this.allProjectsData().projects, this.host.getConfig())
     })
     this.logDebug(`registerWindow windowId=${window.id}`)
     const syncGeometry = () => {
@@ -290,14 +297,15 @@ export class AppRuntime {
     })
     const resolveRoot = (dir: string) => this.host.resolveAllowedDirectory(dir)
 
-    this.host.registerIpcHandlers(ipc)
+    // Every host channel goes through the router: a server project's calls run on its server.
+    this.host.registerIpcHandlers(this.routing.wrap(ipc))
 
     registerWindowHandlers(ipc, {
       loadViewState: (windowId) => {
         const state = this.windowStates.get(windowId) ?? null
         return state
           ? cloneWindowViewState(state.viewState)
-          : buildWindowViewState(this.host.getProjectsData().projects, this.host.getConfig())
+          : buildWindowViewState(this.allProjectsData().projects, this.host.getConfig())
       },
       saveViewState: (window, viewState) => {
         const current = this.windowStates.get(window.id)
@@ -312,7 +320,8 @@ export class AppRuntime {
         this.createWindow(viewState, null)
       },
       getConfig: () => this.host.getConfig(),
-      assertAllowedDirectory: resolveRoot
+      assertAllowedDirectory: resolveRoot,
+      isServerProject: (projectId) => this.routing.isServerProject(projectId)
     })
 
     registerSocksProxyHandlers(ipc, {
@@ -325,6 +334,11 @@ export class AppRuntime {
 
     registerUpdateHandlers(ipc, { updates: () => this.updates })
     registerServerHandlers(ipc, { servers: () => this.servers })
+  }
+
+  /** This desktop's projects plus every server's, as the windows list them. */
+  private allProjectsData() {
+    return this.routing.mergedProjects(this.host.getProjectsData())
   }
 
   private updateWindowGeometry(windowId: number): void {

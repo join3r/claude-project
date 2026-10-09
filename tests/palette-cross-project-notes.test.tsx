@@ -129,10 +129,10 @@ describe('Palette note selection', () => {
 describe('openOrFocusNoteTab navigation', () => {
   beforeEach(() => {
     ;(window as any).api = {
-      loadProjects: vi.fn().mockResolvedValue({
+      loadProjects: vi.fn().mockResolvedValue({ local: {
         revision: 0,
         data: { projects: buildProjects(), tags: [], projectOrder: [], pinnedItems: [] }
-      }),
+      } }),
       loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG }),
       loadWindowState: vi.fn().mockResolvedValue(null),
       notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: NOTES }),

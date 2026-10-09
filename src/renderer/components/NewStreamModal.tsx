@@ -38,7 +38,7 @@ export default function NewStreamModal({ project, onCreate, onClose }: Props): R
   const branchName = branch ?? defaultStreamBranch(name)
   const target = {
     projectDir: getProjectDir(project),
-    projectId: project.ssh ? project.id : undefined,
+    projectId: project.id,
     sshConfig: project.ssh
   }
 

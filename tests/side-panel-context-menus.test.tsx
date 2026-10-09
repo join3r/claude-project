@@ -76,12 +76,12 @@ describe('git panel right-click menu', () => {
     render(<GitStatus gitStatus={status} projectDir="/repo" onFileClick={vi.fn()} />)
     fireEvent.contextMenu(screen.getByText('src/a.ts'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Reveal in Finder' }))
-    expect(window.api.revealInFolder).toHaveBeenCalledWith('/repo', 'src/a.ts')
+    expect(window.api.revealInFolder).toHaveBeenCalledWith('/repo', 'src/a.ts', undefined)
 
     vi.stubGlobal('confirm', vi.fn(() => true))
     fireEvent.contextMenu(screen.getByText('src/a.ts'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Discard changes…' }))
-    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', '', ['src/a.ts'])
+    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', '', ['src/a.ts'], undefined)
   })
 
   it('gives each nested repo its own block, with repo-relative rows and operations', () => {
@@ -95,7 +95,7 @@ describe('git panel right-click menu', () => {
     vi.stubGlobal('confirm', vi.fn(() => true))
     fireEvent.contextMenu(screen.getByText('b.ts'))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Discard changes…' }))
-    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', 'lib/x', ['lib/x/b.ts'])
+    expect(window.api.fbGitDiscard).toHaveBeenCalledWith('/repo', 'lib/x', ['lib/x/b.ts'], undefined)
   })
 
   it('shows why a repo was skipped instead of a commit box', () => {

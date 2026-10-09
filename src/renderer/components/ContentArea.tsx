@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
+import { featureAvailable } from '../../shared/project-features'
 import { localProjectFolder } from '../../shared/external-editors'
 import TaskPanes from './TaskPanes'
 import TaskLandingBanner from './TaskLandingBanner'
@@ -332,6 +333,7 @@ export default function ContentArea(): React.ReactElement {
   const canShowLocalTabs = !!selectedProject
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
+    && featureAvailable(selectedProject, 'files')
     && !!selectedProject.directory
   // Notes are always available (including remote / shell-command projects); the
   // Files/Git tabs are local-only.
@@ -444,6 +446,7 @@ export default function ContentArea(): React.ReactElement {
                   editors={config?.externalEditors?.editors ?? []}
                   defaultId={config?.externalEditors?.defaultId ?? null}
                   folder={localProjectFolder(selectedProject, selectedTask)}
+                  projectId={selectedProject?.id}
                   onError={setOpenInIdeError}
                 />
               )}

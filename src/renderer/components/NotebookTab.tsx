@@ -175,7 +175,7 @@ export default function NotebookTab({
   const refreshContent = useCallback((force = false) => {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
-    window.api.fbReadFile(projectDir, filePath).then((text) => {
+    window.api.fbReadFile(projectDir, filePath, projectId).then((text) => {
       if (requestId !== requestIdRef.current) return
       if (!force && dirtyRef.current) return
       try {
@@ -208,7 +208,7 @@ export default function NotebookTab({
       condaOverrideRef.current = null
       setKernelBootReady(true)
     })
-  }, [filePath, projectDir])
+  }, [filePath, projectDir, projectId])
 
   useEffect(() => {
     setDoc(null)
@@ -254,7 +254,7 @@ export default function NotebookTab({
     if (!current) return Promise.resolve()
     const value = serializeNotebook(current)
     setSaveError(null)
-    return window.api.fbWriteFile(projectDir, filePath, value).then(() => {
+    return window.api.fbWriteFile(projectDir, filePath, value, projectId).then(() => {
       savedRef.current = value
       diskIdsRef.current = storedCellIds(value)
       dirtyRef.current = serializeNotebook(docRef.current ?? current) !== value
@@ -266,7 +266,7 @@ export default function NotebookTab({
       setSaveError(message ? `Save failed: ${message}` : 'Save failed.')
       throw err
     })
-  }, [filePath, projectDir])
+  }, [filePath, projectDir, projectId])
 
   const saveContent = useCallback(() => {
     void writeBuffer().catch(() => {})
@@ -403,7 +403,7 @@ export default function NotebookTab({
   useEffect(() => {
     if (!everVisible) return
     let cancelled = false
-    window.api.condaListEnvs().then((result) => {
+    window.api.condaListEnvs(projectId).then((result) => {
       if (cancelled) return
       setCondaEnvs(result.envs)
       if (result.error && result.envs.length === 0) setCondaListError(result.error)
@@ -412,7 +412,7 @@ export default function NotebookTab({
       if (!cancelled) setCondaListError(err instanceof Error ? err.message : 'Failed to list conda envs')
     })
     return () => { cancelled = true }
-  }, [everVisible])
+  }, [everVisible, projectId])
 
   const clearRunQueue = useCallback(() => {
     runStateRef.current = idleRunQueue()

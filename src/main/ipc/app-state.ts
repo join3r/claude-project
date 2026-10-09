@@ -3,7 +3,8 @@ import type { AgentActivity } from '../../shared/agent-activity'
 import type { RevisionStore } from '../revision-store'
 import type { PaletteFrecencyStorage } from '../palette-frecency-storage'
 import type { IpcRegistrar } from './registrar'
-import { frecencyFile, notesRecord, projectsData, revisionSave } from './schemas'
+import { frecencyFile, notesRecord, projectsData, projectsSlice, revisionSave, safeId } from './schemas'
+import { LOCAL_SOURCE, mergeProjectsSlice, type ProjectsSources } from '../../shared/projects-sources'
 import { MAIN_OWNED_CONFIG_KEYS, sanitizeConfigUpdate } from './config-sanitize'
 import { v } from './validate'
 
@@ -33,9 +34,17 @@ function clone<T>(value: T): T {
 
 /** Shared persisted state: projects, notes, config, palette frecency, and what main must know of each window. */
 export function registerAppStateHandlers(ipc: IpcRegistrar, deps: AppStateDeps): void {
-  ipc.handle('load-projects', [], () => deps.projectsStore.get())
-  ipc.handle('save-projects', [revisionSave(projectsData)], (_event, payload) =>
-    deps.projectsStore.save(payload.baseRevision, payload.data))
+  // A host has one source of projects, its own. A desktop's router adds its
+  // servers' sources to these two (shared/projects-sources.ts).
+  ipc.handle('load-projects', [], (): ProjectsSources => ({ [LOCAL_SOURCE]: deps.projectsStore.get() }))
+  ipc.handle('save-projects', [safeId, revisionSave(projectsData)], (_event, source, payload) => {
+    if (source !== LOCAL_SOURCE) throw new Error(`Unknown projects source: ${source}`)
+    return deps.projectsStore.save(payload.baseRevision, payload.data)
+  })
+  // A desktop's slice of a server's projects: the projects only, merged into the
+  // host's own data so its tags, order and pins (the phone's) stay.
+  ipc.handle('save-projects-slice', [revisionSave(projectsSlice)], (_event, payload) =>
+    deps.projectsStore.save(payload.baseRevision, mergeProjectsSlice(deps.projectsStore.peek(), payload.data.projects)))
 
   ipc.handle('get-agent-activity', [], () => deps.getAgentActivity())
 

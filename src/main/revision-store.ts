@@ -9,6 +9,12 @@ export interface RevisionStoreOptions<T> {
   persist: (data: T) => void
   /** Tell every window about the new canonical value. */
   broadcast: (envelope: RevisionEnvelope<T>) => void
+  /**
+   * The revision before the first commit (default 0). A server starts from the
+   * clock, so a restarted server never hands out a revision a desktop already
+   * quoted for different data.
+   */
+  initialRevision?: number
 }
 
 function structuralClone<T>(value: T): T {
@@ -33,6 +39,7 @@ export class RevisionStore<T> {
   private readonly listeners = new Set<(data: T) => void>()
 
   constructor(private readonly options: RevisionStoreOptions<T>) {
+    this.revision = options.initialRevision ?? 0
     this.data = options.normalize ? options.normalize(options.initial) : options.initial
   }
 

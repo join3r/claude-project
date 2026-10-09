@@ -8,6 +8,8 @@ import { revealInFolderLabel } from '../utils/revealLabel'
 interface Props {
   gitStatus: GitStatusResult | null
   projectDir: string
+  /** Routes the git calls to a DevTool server's project. */
+  projectId?: string
   onFileClick: (filePath: string) => void
 }
 
@@ -32,7 +34,7 @@ const EMPTY_ROOT: GitRepoStatus = { path: '', staged: [], unstaged: [], untracke
  * before; one with nested repos (or only nested repos) gets a header per repo,
  * each with its own Pull/Push and commit box.
  */
-export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props) {
+export default function GitStatus({ gitStatus, projectDir, projectId, onFileClick }: Props) {
   const repos = gitStatus ? gitStatus.repos : [EMPTY_ROOT]
   if (repos.length === 0) {
     return <div className="flex items-center justify-center p-6 text-text-muted text-base">Not a git repository</div>
@@ -47,6 +49,7 @@ export default function GitStatus({ gitStatus, projectDir, onFileClick }: Props)
           repo={repo}
           title={showHeaders ? (repo.path || rootName) : null}
           projectDir={projectDir}
+          projectId={projectId}
           onFileClick={onFileClick}
         />
       ))}
@@ -59,10 +62,11 @@ interface RepoPanelProps {
   /** Header label, or null for a lone root repo (no header). */
   title: string | null
   projectDir: string
+  projectId?: string
   onFileClick: (filePath: string) => void
 }
 
-function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
+function RepoPanel({ repo, title, projectDir, projectId, onFileClick }: RepoPanelProps) {
   const [repoCollapsed, setRepoCollapsed] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -104,7 +108,7 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     if (busy || files.length === 0) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitStage(projectDir, repo.path, files)
+      const result = await window.api.fbGitStage(projectDir, repo.path, files, projectId)
       if (!result.success) showFeedback('error', result.message)
       refreshStatus()
     } catch {
@@ -112,13 +116,13 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus, projectId])
 
   const handleUnstage = useCallback(async (files: string[]) => {
     if (busy || files.length === 0) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitUnstage(projectDir, repo.path, files)
+      const result = await window.api.fbGitUnstage(projectDir, repo.path, files, projectId)
       if (!result.success) showFeedback('error', result.message)
       refreshStatus()
     } catch {
@@ -126,13 +130,13 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus, projectId])
 
   const handleDiscard = useCallback(async (files: string[]) => {
     if (busy || files.length === 0) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitDiscard(projectDir, repo.path, files)
+      const result = await window.api.fbGitDiscard(projectDir, repo.path, files, projectId)
       if (result.success) {
         showFeedback('success', result.message)
       } else {
@@ -144,7 +148,7 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus, projectId])
 
   const handleStageAll = useCallback(() => {
     const files = [
@@ -158,7 +162,7 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     if (busy) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitPull(projectDir, repo.path)
+      const result = await window.api.fbGitPull(projectDir, repo.path, projectId)
       showFeedback(result.success ? 'success' : 'error', result.message)
       if (result.success) refreshStatus()
     } catch {
@@ -166,13 +170,13 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus, projectId])
 
   const handleCommit = useCallback(async () => {
     if (busy || !commitMsg.trim()) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitCommit(projectDir, repo.path, commitMsg)
+      const result = await window.api.fbGitCommit(projectDir, repo.path, commitMsg, projectId)
       showFeedback(result.success ? 'success' : 'error', result.message)
       if (result.success) {
         setCommitMsg('')
@@ -183,13 +187,13 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, repo.path, commitMsg, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, commitMsg, showFeedback, refreshStatus, projectId])
 
   const handlePush = useCallback(async () => {
     if (busy) return
     setBusy(true)
     try {
-      const result = await window.api.fbGitPush(projectDir, repo.path)
+      const result = await window.api.fbGitPush(projectDir, repo.path, projectId)
       showFeedback(result.success ? 'success' : 'error', result.message)
       if (result.success) refreshStatus()
     } catch {
@@ -197,7 +201,7 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [busy, projectDir, repo.path, showFeedback, refreshStatus])
+  }, [busy, projectDir, repo.path, showFeedback, refreshStatus, projectId])
 
   const changeCount = repo.staged.length + repo.unstaged.length + repo.untracked.length
   const isEmpty = changeCount === 0
@@ -338,7 +342,7 @@ function RepoPanel({ repo, title, projectDir, onFileClick }: RepoPanelProps) {
       items.push({
         label: revealInFolderLabel(),
         onSelect: () => {
-          window.api.revealInFolder(projectDir, entry.relativePath).catch((err: unknown) => {
+          window.api.revealInFolder(projectDir, entry.relativePath, projectId).catch((err: unknown) => {
             showFeedback('error', err instanceof Error ? err.message : String(err))
           })
         }

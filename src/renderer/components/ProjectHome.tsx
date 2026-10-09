@@ -6,6 +6,7 @@ import { useGitPosture } from '../hooks/useGitPosture'
 import { useCommitHistory } from '../hooks/useCommitHistory'
 import { useProjectArchive } from '../hooks/archiveStore'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { featureAvailable } from '../../shared/project-features'
 import type { Project, Stream, TabStatusValue } from '../../shared/types'
 import { archivedTasksOf, visibleArchive } from '../../shared/archive'
 import { projectTasks, streamDirectory } from '../../shared/streams'
@@ -56,7 +57,7 @@ function StreamCard({ project, stream, local, allStatuses, statusSince, now }: {
   const [doneOpen, setDoneOpen] = useState(false)
   const archive = useProjectArchive(project.id, doneOpen)
   const workspace = stream.workspace
-  const posture = useGitPosture(local && workspace ? streamDirectory(project, stream) : '', local && !!workspace)
+  const posture = useGitPosture(local && workspace ? streamDirectory(project, stream) : '', local && !!workspace, project.id)
   const tone = streamTone(stream, allStatuses, statusSince, now)
   const doneCount = stream.archivedTaskCount ?? 0
   const doneTasks = archive ? archivedTasksOf(visibleArchive(archive, project), stream.id) : []
@@ -184,10 +185,12 @@ function ArchivedStreamsLine({ project }: { project: Project }): React.ReactElem
 export function ProjectHome({ projectId }: Props): React.ReactElement | null {
   const actions = useApp()
   const project = actions.projects.find(p => p.id === projectId)
-  const isLocal = project ? !isRemoteProject(project) && !isShellCommandProject(project) : false
+  const isLocal = project
+    ? !isRemoteProject(project) && !isShellCommandProject(project) && featureAvailable(project, 'git-posture')
+    : false
   const projectDir = isLocal && project?.directory ? project.directory : ''
-  const posture = useGitPosture(projectDir, isLocal)
-  const { commits } = useCommitHistory(projectDir, isLocal)
+  const posture = useGitPosture(projectDir, isLocal, project?.id)
+  const { commits } = useCommitHistory(projectDir, isLocal, project?.id)
   const allStatuses = useAllTabStatuses()
   const statusSince = useAllTabStatusSince()
   const [now, setNow] = useState(() => Date.now())

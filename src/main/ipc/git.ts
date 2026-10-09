@@ -15,7 +15,7 @@ import { nestedGitRepos, repoForPath, toProjectEntries, toRepoPath } from '../gi
 import { GIT_STATUS_ARGS, parseGitStatusZ } from '../git-status-parse'
 import { findGitBashExe } from '../shell-env'
 import type { IpcRegistrar } from './registrar'
-import { str, stringList } from './schemas'
+import { optSafeId, str, stringList } from './schemas'
 
 const execFileAsync = promisify(execFile)
 
@@ -205,7 +205,7 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     }
   }
 
-  ipc.handle('git-project-posture', [str], async (_event, projectCwd): Promise<GitPostureResult> => {
+  ipc.handle('git-project-posture', [str, optSafeId], async (_event, projectCwd): Promise<GitPostureResult> => {
     const cwd = await rootOrNull(projectCwd)
     if (!cwd) return { ...EMPTY_POSTURE }
     try {
@@ -222,7 +222,7 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     }
   })
 
-  ipc.handle('git-commit-history', [str], async (_event, projectCwd): Promise<CommitHistoryResult> => {
+  ipc.handle('git-commit-history', [str, optSafeId], async (_event, projectCwd): Promise<CommitHistoryResult> => {
     const cwd = await rootOrNull(projectCwd)
     if (!cwd) return { commits: [] }
     try {
@@ -234,7 +234,7 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     }
   })
 
-  ipc.handle('fb-git-status', [str], async (_event, projectCwd): Promise<GitStatusResult> => {
+  ipc.handle('fb-git-status', [str, optSafeId], async (_event, projectCwd): Promise<GitStatusResult> => {
     const result: GitStatusResult = { staged: [], unstaged: [], untracked: [], summary: { added: 0, deleted: 0 }, repos: [] }
     const cwd = await rootOrNull(projectCwd)
     if (!cwd) return result
@@ -273,7 +273,7 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     return result
   })
 
-  ipc.handle('fb-git-diff', [str, str], async (_event, projectCwd, relativeFilePath): Promise<string> => {
+  ipc.handle('fb-git-diff', [str, str, optSafeId], async (_event, projectCwd, relativeFilePath): Promise<string> => {
     const root = await rootOrNull(projectCwd)
     if (!root) return ''
     try {
@@ -291,27 +291,27 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     }
   })
 
-  ipc.handle('fb-git-stage', [str, str, stringList], (_event, projectCwd, repo, files) => operation(async (cwd) => {
+  ipc.handle('fb-git-stage', [str, str, stringList, optSafeId], (_event, projectCwd, repo, files) => operation(async (cwd) => {
     await execFileAsync('git', ['add', '--', ...repoPaths(repo, files)], { cwd, timeout: 10000 })
     return { success: true, message: `Staged ${files.length} file(s)` }
   })(projectCwd, repo))
 
-  ipc.handle('fb-git-unstage', [str, str, stringList], (_event, projectCwd, repo, files) => operation(async (cwd) => {
+  ipc.handle('fb-git-unstage', [str, str, stringList, optSafeId], (_event, projectCwd, repo, files) => operation(async (cwd) => {
     await execFileAsync('git', ['reset', 'HEAD', '--', ...repoPaths(repo, files)], { cwd, timeout: 10000 })
     return { success: true, message: `Unstaged ${files.length} file(s)` }
   })(projectCwd, repo))
 
-  ipc.handle('fb-git-discard', [str, str, stringList], (_event, projectCwd, repo, files) => operation(async (cwd) => {
+  ipc.handle('fb-git-discard', [str, str, stringList, optSafeId], (_event, projectCwd, repo, files) => operation(async (cwd) => {
     await execFileAsync('git', ['checkout', '--', ...repoPaths(repo, files)], { cwd, timeout: 10000 })
     return { success: true, message: `Discarded changes in ${files.length} file(s)` }
   })(projectCwd, repo))
 
-  ipc.handle('fb-git-pull', [str, str], (_event, projectCwd, repo) => operation(async (cwd) => {
+  ipc.handle('fb-git-pull', [str, str, optSafeId], (_event, projectCwd, repo) => operation(async (cwd) => {
     const { stdout, stderr } = await execFileAsync('git', ['pull'], { cwd, timeout: 60000 })
     return { success: true, message: stdout.trim() || stderr.trim() || 'Pull complete' }
   })(projectCwd, repo))
 
-  ipc.handle('fb-git-commit', [str, str, str], async (_event, projectCwd, repo, commitMessage) => {
+  ipc.handle('fb-git-commit', [str, str, str, optSafeId], async (_event, projectCwd, repo, commitMessage) => {
     if (!commitMessage || !commitMessage.trim()) {
       return { success: false, message: 'Commit message cannot be empty' }
     }
@@ -321,7 +321,7 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     })(projectCwd, repo)
   })
 
-  ipc.handle('fb-git-push', [str, str], (_event, projectCwd, repo) => operation(async (cwd) => {
+  ipc.handle('fb-git-push', [str, str, optSafeId], (_event, projectCwd, repo) => operation(async (cwd) => {
     const { stdout, stderr } = await execFileAsync('git', ['push'], { cwd, timeout: 60000 })
     return { success: true, message: stdout.trim() || stderr.trim() || 'Push complete' }
   })(projectCwd, repo))

@@ -246,7 +246,7 @@ describe('FileTree', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
 
     await waitFor(() => {
-      expect(window.api.fbCreateFile).toHaveBeenCalledWith('/project', '', 'b.ts')
+      expect(window.api.fbCreateFile).toHaveBeenCalledWith('/project', '', 'b.ts', undefined)
     })
   })
 
@@ -300,13 +300,13 @@ describe('FileTree', () => {
     fireEvent.change(input, { target: { value: 'b.ts' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => {
-      expect(window.api.fbRename).toHaveBeenCalledWith('/project', 'a.ts', 'b.ts')
+      expect(window.api.fbRename).toHaveBeenCalledWith('/project', 'a.ts', 'b.ts', undefined)
     })
 
     fireEvent.contextMenu(await screen.findByText('b.ts'))
     fireEvent.click(screen.getByText('Delete'))
     await waitFor(() => {
-      expect(window.api.fbDelete).toHaveBeenCalledWith('/project', 'b.ts')
+      expect(window.api.fbDelete).toHaveBeenCalledWith('/project', 'b.ts', undefined)
     })
     expect(window.confirm).toHaveBeenCalled()
   })
@@ -387,7 +387,7 @@ describe('FileTree', () => {
     fireEvent.change(input, { target: { value: 'b.ts' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => {
-      expect(window.api.fbCreateFile).toHaveBeenCalledWith('/project', '', 'b.ts')
+      expect(window.api.fbCreateFile).toHaveBeenCalledWith('/project', '', 'b.ts', undefined)
     })
   })
 

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitStatusResult } from '../../shared/types'
 import { FILE_BROWSER_REFRESH_MS } from './fileBrowserRefresh'
 
-export function useGitStatus(projectDir: string, enabled: boolean): GitStatusResult | null {
+/** `projectId` routes the calls to a DevTool server's project. */
+export function useGitStatus(projectDir: string, enabled: boolean, projectId?: string): GitStatusResult | null {
   const [gitStatus, setGitStatus] = useState<GitStatusResult | null>(null)
   const requestIdRef = useRef(0)
 
@@ -16,7 +17,7 @@ export function useGitStatus(projectDir: string, enabled: boolean): GitStatusRes
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
 
-    window.api.fbGitStatus(projectDir)
+    window.api.fbGitStatus(projectDir, projectId)
       .then((status) => {
         if (requestId !== requestIdRef.current) return
         setGitStatus(status)
@@ -25,7 +26,7 @@ export function useGitStatus(projectDir: string, enabled: boolean): GitStatusRes
         if (requestId !== requestIdRef.current) return
         setGitStatus(null)
       })
-  }, [enabled, projectDir])
+  }, [enabled, projectDir, projectId])
 
   useEffect(() => {
     if (!enabled || !projectDir) {

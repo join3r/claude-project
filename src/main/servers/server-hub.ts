@@ -205,7 +205,9 @@ export class ServerHub {
           id: record.id,
           name: record.name,
           ...status,
-          ...(upload || (restarting && status.state !== 'incompatible') ? { state: 'updating' as const } : {}),
+          // An upload rides a live link, so the server stays usable (`upload` shows progress);
+          // `updating` is the restart into the new build, when the link is about to drop.
+          ...(restarting && status.state !== 'incompatible' ? { state: 'updating' as const } : {}),
           ...(upload ? { upload: { ...upload } } : {}),
           ...(update?.state === 'staged' && !restarting ? { updateReady: { version: update.version, commit: update.commit, builtAt: update.builtAt } } : {}),
           pairedAt: record.pairedAt,

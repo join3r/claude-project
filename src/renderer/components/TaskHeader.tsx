@@ -15,6 +15,7 @@ import { landingActionBlocker } from './sidebar/closeRules'
 import { useTaskLandingActions } from './useTaskLandingActions'
 import { canLandTask, useLandingOp, useStreamAhead } from '../taskLanding'
 import { useTabStatusStore } from '../context/TabStatusContext'
+import { featureUnavailableReason } from '../../shared/project-features'
 
 const iconBtnCls = 'bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
@@ -104,8 +105,11 @@ export default function TaskHeader({
     // Same session, other face: the Claude tab flips between terminal and chat.
     if (agentTab && (agentTab.type === 'claude' || agentTab.type === 'claude-chat')) {
       const to = agentTab.type === 'claude' ? 'claude-chat' : 'claude'
+      const blocked = to === 'claude-chat' ? featureUnavailableReason(project, 'chat') : null
       items.push({
         label: to === 'claude' ? 'Switch to terminal' : 'Switch to chat',
+        disabled: !!blocked,
+        hint: blocked ?? undefined,
         onSelect: () => convertClaudeTab(project.id, task.id, agentTab.id, to)
       })
     }

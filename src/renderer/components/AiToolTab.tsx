@@ -32,6 +32,7 @@ import { buildXtermTheme } from './terminalThemes'
 import { noteAgentTabTyped } from '../agentLink/agentTabRecency'
 import { agentTerminalReady, onAgentInsert, showAgentLinkNotice } from '../agentLink/linkToAgent'
 import { initialPromptArgs, takePendingPrompt } from './promptBox'
+import ServerOfflineOverlay, { useServerOnline } from './ServerOfflineOverlay'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -53,6 +54,8 @@ interface Props {
   taskId: string
   projectDir: string
   sshConfig?: SshConfig
+  /** The DevTool server the project is on (`Project.host`): the agent runs there. */
+  serverId?: string
   extraArgs?: string
 }
 
@@ -142,7 +145,7 @@ function ensureBeforeUnloadHandler(): void {
   })
 }
 
-export default function AiToolTab({ tabId, toolType, visible, sessionId, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
+export default function AiToolTab({ tabId, toolType, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
@@ -170,6 +173,11 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
   const prevSshReadyRef = useRef(sshReady)
   const [searchOpen, setSearchOpen] = useState(false)
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
+  // A server tab waits for its server, and attaches again (a new xterm, fed the
+  // scrollback) each time the server comes back.
+  const serverOnline = useServerOnline(serverId)
+  const prevServerOnlineRef = useRef(serverOnline)
+  const [attachEpoch, setAttachEpoch] = useState(0)
   const isClaudeTab = toolType === 'claude'
   const isCodexTab = toolType === 'codex'
   const isPiTab = toolType === 'pi'
@@ -196,10 +204,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
   }, [statusStore, tabId, isHookTab])
 
   // Hook tabs reach main on their own; for the rest (Codex) this window's
-  // heuristics are the only status there is.
+  // heuristics are the only status there is. A server runs those heuristics itself.
   useEffect(() => {
-    if (!isHookTab) return statusStore.mirrorToMain(tabId)
-  }, [statusStore, tabId, isHookTab])
+    if (!isHookTab && !serverId) return statusStore.mirrorToMain(tabId)
+  }, [statusStore, tabId, isHookTab, serverId])
 
   // Restarted by anything that proves the agent is still alive (output, a hook).
   const restartStaleTimer = useCallback(() => {
@@ -285,7 +293,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
       const { sessionId: latestSessionId } = await window.api.codexReadSession(
         cwd,
         codexSpawnTsRef.current,
-        sshConfig ? projectId : undefined,
+        projectId,
         sshConfig
       )
 
@@ -313,6 +321,22 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
     const interval = setInterval(check, 500)
     return () => { cancelled = true; clearInterval(interval) }
   }, [sshConfig, projectId])
+
+  // Back online: the server let go of this window when the link dropped, so attach
+  // again. A hidden tab has no xterm and attaches when it is shown.
+  useEffect(() => {
+    const wasOnline = prevServerOnlineRef.current
+    prevServerOnlineRef.current = serverOnline
+    if (!serverId || !serverOnline || wasOnline) return
+    if (!terminals.has(tabId)) return
+    disposeAiToolTerminal(tabId, { killRuntime: false, persistScrollback: false })
+    initializedRef.current = false
+    spawnedRef.current = false
+    attachedAtRef.current = null
+    scrollbackPreloadedRef.current = false
+    statusStore.setStatus(tabId, null, 'server-reattach')
+    setAttachEpoch(n => n + 1)
+  }, [serverOnline, serverId, tabId, statusStore])
 
   // Respawn PTY after SSH reconnection (detect false→true transition)
   useEffect(() => {
@@ -548,7 +572,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
     ensurePtySizeListener()
     ensureExitListener()
     ensureBeforeUnloadHandler()
-  }, [tabId, toolType, config, addTab, projectId, taskId, visible, markTaskInteracted, markTaskEvent, applyStatus, restartStaleTimer])
+  }, [tabId, toolType, config, addTab, projectId, taskId, visible, markTaskInteracted, markTaskEvent, applyStatus, restartStaleTimer, attachEpoch])
 
   // Show stored scrollback in the xterm before the user clicks Resume so they
   // can see what the session was about. Skipped if the tab will auto-spawn
@@ -624,6 +648,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
         }
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
+          if (!serverOnline) return // wait for the DevTool server
           if (activationDecisionPending) return // wait until we've checked disk for prior scrollback
           if (requiresActivation && !userActivatedRef.current) return // wait for explicit user activation
           spawnedRef.current = true
@@ -639,7 +664,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
                 const exists = await window.api.claudeSessionExists(
                   projectDir,
                   resumeSessionId,
-                  sshConfig ? projectId : undefined,
+                  projectId,
                   sshConfig
                 )
                 if (!exists) {
@@ -657,7 +682,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
             // as an argument, except locally on Windows, where a `.cmd` shim runs under
             // cmd.exe and would reinterpret it; there it is pasted once the TUI is up.
             const first = takePendingPrompt(tabId)
-            const pasteFirst = !!first && window.api.platform === 'win32' && !sshConfig
+            // A server is never Windows (step 7 asks the server for its platform).
+            const pasteFirst = !!first && window.api.platform === 'win32' && !sshConfig && !serverId
             const args = [
               ...buildAiToolArgs(toolType, parsedExtra, resumeSessionId),
               ...(first ? initialPromptArgs(toolType, first, parsedExtra, !pasteFirst) : [])
@@ -741,7 +767,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible])
+  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible, serverOnline, attachEpoch])
 
   // Agent links (Ctrl+L from an editor/notebook): paste into the TUI's input as a
   // bracketed paste, never with a newline, and focus. Held until the PTY is
@@ -854,7 +880,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
           if (sshConfig) {
             window.api.hooksCleanupRemote(projectId, sshConfig, projectDir, tabId)
           } else {
-            window.api.hooksCleanup(projectDir, tabId)
+            window.api.hooksCleanup(projectDir, tabId, projectId)
           }
         }
       }
@@ -893,6 +919,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
       style={{ display: visible ? 'block' : 'none', position: 'relative' }}
     >
       <div ref={hostRef} className="w-full h-full" />
+      {serverId && <ServerOfflineOverlay serverId={serverId} />}
       {requiresActivation && !userActivated && visible && (
         <div
           className="absolute inset-x-0 bottom-0 flex items-center justify-center cursor-pointer z-10 py-3 bg-gradient-to-t from-bg/95 via-bg/70 to-transparent"
