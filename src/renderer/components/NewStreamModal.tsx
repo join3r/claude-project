@@ -84,6 +84,8 @@ export default function NewStreamModal({ project, onCreate, onClose }: Props): R
       }
       // Even when the dialog went away while git worked: the stream was asked for.
       onCreate(name.trim(), workspace)
+      // The worktree is there and the stream works; say what setup didn't do.
+      if (result.setupError) window.alert(`The worktree was created, but its setup failed:\n\n${result.setupError}`)
     } catch (err) {
       if (!mountedRef.current) return
       setError(err instanceof Error ? err.message : 'Failed to create the worktree')

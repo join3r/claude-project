@@ -1,10 +1,9 @@
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs'
 import type { WorkspaceDeleteResult, WorkspaceRestoreResult } from '../shared/types'
-
-const execFileAsync = promisify(execFile)
+import { GitError, gitOutput, LocalGitRunner, type GitRunner } from './git-runner'
+import { runWorktreeSetup, type WorktreeSetupResult } from './worktree-setup'
+import { MemorySetupApprovals, type SetupApprovals } from './worktree-setup-approvals'
 
 function errorText(err: unknown): string {
   const stderr = (err as { stderr?: string } | null)?.stderr
@@ -33,35 +32,74 @@ export function canonicalFilePath(target: string): string {
   }
 }
 
+export interface WorkspaceCreateOptions {
+  /**
+   * Checkout `.devtool/worktree.json` and its symlinked/copied files come
+   * from. Defaults to the repo root (a stream worktree); a task worktree
+   * passes its stream's worktree.
+   */
+  setupSource?: string
+}
+
+export interface CreatedWorktree {
+  worktreePath: string
+  branchName: string
+  relativeProjectPath: string
+  /** The repo's worktree setup. Whatever it says, the worktree exists and is kept. */
+  setup: WorktreeSetupResult
+}
+
+export interface WorkspaceManagerOptions {
+  runner?: GitRunner
+  /** Which repo configs may run `setup` commands. Default: none survive the process. */
+  approvals?: SetupApprovals
+}
+
+/** Local git worktrees, through a {@link GitRunner}. SSH projects use RemoteWorkspaceManager. */
 export class WorkspaceManager {
+  private readonly runner: GitRunner
+  private readonly approvals: SetupApprovals
+
+  constructor(options: WorkspaceManagerOptions = {}) {
+    this.runner = options.runner ?? new LocalGitRunner()
+    this.approvals = options.approvals ?? new MemorySetupApprovals()
+  }
+
+  /** stdout of a git call that must succeed; throws a {@link GitError} with git's stderr. */
+  private git(cwd: string, args: string[], timeoutMs = 5000): Promise<string> {
+    return gitOutput(this.runner, args, { cwd, timeoutMs })
+  }
+
   private async getRepoRoot(projectDir: string): Promise<string> {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd: projectDir, timeout: 5000 })
+    const stdout = await this.git(projectDir, ['rev-parse', '--show-toplevel'])
     return canonicalFilePath(stdout.trim())
   }
 
   async listBranches(projectDir: string): Promise<string[]> {
     const repoRoot = await this.getRepoRoot(projectDir)
-    const { stdout } = await execFileAsync('git', ['branch', '--format=%(refname:short)'], { cwd: repoRoot, timeout: 5000 })
+    const stdout = await this.git(repoRoot, ['branch', '--format=%(refname:short)'])
     return stdout.trim().split('\n').filter(Boolean)
   }
 
-  async create(projectDir: string, name: string, baseBranch: string): Promise<{ worktreePath: string; branchName: string; relativeProjectPath: string }> {
+  /**
+   * A worktree at `<repoRoot>/.worktrees/<name>` on a new branch `name` off
+   * `baseBranch`, then the repo's worktree setup. A failed or unapproved
+   * setup does not fail the create: it comes back in `setup` next to the new
+   * worktree.
+   */
+  async create(projectDir: string, name: string, baseBranch: string, options: WorkspaceCreateOptions = {}): Promise<CreatedWorktree> {
     const repoRoot = await this.getRepoRoot(projectDir)
 
     // Validate branch name
-    try {
-      await execFileAsync('git', ['check-ref-format', '--branch', name], { cwd: repoRoot, timeout: 5000 })
-    } catch {
-      throw new Error(`Invalid branch name: "${name}"`)
-    }
+    const valid = await this.runner.run(['check-ref-format', '--branch', name], { cwd: repoRoot, timeoutMs: 5000 })
+    if (valid.code !== 0) throw new Error(`Invalid branch name: "${name}"`)
 
     const worktreePath = path.join(repoRoot, '.worktrees', name)
 
     // Create worktree with new branch
-    try {
-      await execFileAsync('git', ['worktree', 'add', worktreePath, '-b', name, baseBranch], { cwd: repoRoot, timeout: 10000 })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+    const added = await this.runner.run(['worktree', 'add', worktreePath, '-b', name, baseBranch], { cwd: repoRoot, timeoutMs: 10000 })
+    if (added.code !== 0) {
+      const msg = new GitError(['worktree', 'add'], added).message
       if (msg.includes('already exists')) {
         throw new Error(`Branch "${name}" already exists`)
       }
@@ -70,12 +108,29 @@ export class WorkspaceManager {
 
     // Compute relative project path
     const rel = path.relative(repoRoot, canonicalFilePath(projectDir))
+    const worktreeRoot = canonicalFilePath(worktreePath)
+
+    const setup = await this.runSetup({ sourceRoot: options.setupSource ?? repoRoot, worktreeRoot, branch: name })
 
     return {
-      worktreePath: canonicalFilePath(worktreePath),
+      worktreePath: worktreeRoot,
       branchName: name,
-      relativeProjectPath: rel.split(path.sep).join('/')
+      relativeProjectPath: rel.split(path.sep).join('/'),
+      setup
     }
+  }
+
+  /**
+   * The repo's worktree setup on an existing worktree. Idempotent, so after
+   * {@link approveSetup} this runs the commands a `needs-approval` result held back.
+   */
+  runSetup(request: { sourceRoot: string; worktreeRoot: string; branch: string }): Promise<WorktreeSetupResult> {
+    return runWorktreeSetup({ ...request, runner: this.runner, approvals: this.approvals })
+  }
+
+  /** Lets this exact config content (`hash`, from a `needs-approval` result) run its commands in the repo `repoKey`. */
+  approveSetup(repoKey: string, hash: string): void {
+    this.approvals.approve(repoKey, hash)
   }
 
   /**
@@ -91,17 +146,14 @@ export class WorkspaceManager {
     if (fs.existsSync(worktreePath) && registered.some(entry => realpathOrSelf(entry) === target)) {
       return { status: 'ok', worktreePath: canonicalFilePath(worktreePath), branchName, relativeProjectPath: rel }
     }
-    try {
-      await execFileAsync('git', ['-C', repoRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { timeout: 5000 })
-    } catch {
-      return { status: 'branch-missing' }
-    }
+    const branch = await this.runner.run(['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { cwd: repoRoot, timeoutMs: 5000 })
+    if (branch.code !== 0) return { status: 'branch-missing' }
     const dest = fs.existsSync(worktreePath) ? path.join(repoRoot, '.worktrees', branchName) : worktreePath
     if (fs.existsSync(dest)) throw new Error(`Cannot restore the worktree: "${dest}" already exists`)
     // Metadata of a worktree whose folder is gone would block the add.
-    await execFileAsync('git', ['-C', repoRoot, 'worktree', 'prune'], { timeout: 5000 }).catch(() => {})
+    await this.runner.run(['worktree', 'prune'], { cwd: repoRoot, timeoutMs: 5000 })
     try {
-      await execFileAsync('git', ['-C', repoRoot, 'worktree', 'add', dest, branchName], { timeout: 10000 })
+      await this.git(repoRoot, ['worktree', 'add', dest, branchName], 10000)
     } catch (err) {
       throw new Error(`Failed to restore the worktree: ${errorText(err)}`, { cause: err })
     }
@@ -110,7 +162,7 @@ export class WorkspaceManager {
 
   /** Absolute paths of every worktree git currently has registered for this repo. */
   private async listWorktreePaths(repoRoot: string): Promise<string[]> {
-    const { stdout } = await execFileAsync('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain'], { timeout: 5000 })
+    const stdout = await this.git(repoRoot, ['worktree', 'list', '--porcelain'])
     return stdout
       .split('\n')
       .filter(line => line.startsWith('worktree '))
@@ -134,7 +186,7 @@ export class WorkspaceManager {
       let hasUncommitted = false
       if (fs.existsSync(opts.worktreePath)) {
         try {
-          const { stdout } = await execFileAsync('git', ['-C', opts.worktreePath, 'status', '--porcelain'], { timeout: 5000 })
+          const stdout = await this.git(opts.worktreePath, ['status', '--porcelain'])
           hasUncommitted = stdout.trim().length > 0
         } catch (err) {
           return {
@@ -148,7 +200,7 @@ export class WorkspaceManager {
       // `git branch --merged` fail, and that must never read as "merged".
       let isUnmerged: boolean
       try {
-        const { stdout } = await execFileAsync('git', ['-C', repoRoot, 'branch', '--merged', opts.baseBranch], { timeout: 5000 })
+        const stdout = await this.git(repoRoot, ['branch', '--merged', opts.baseBranch])
         const mergedBranches = stdout.split('\n').map(b => b.trim().replace(/^[*+] /, ''))
         isUnmerged = !mergedBranches.includes(opts.branchName)
       } catch (err) {
@@ -165,9 +217,8 @@ export class WorkspaceManager {
     }
 
     // Remove worktree
-    try {
-      await execFileAsync('git', ['-C', repoRoot, 'worktree', 'remove', '--force', opts.worktreePath], { timeout: 10000 })
-    } catch {
+    const removed = await this.runner.run(['worktree', 'remove', '--force', opts.worktreePath], { cwd: repoRoot, timeoutMs: 10000 })
+    if (removed.code !== 0) {
       // `git worktree remove` refused. Before recursively deleting anything, prove the path is
       // really a worktree of this repo — a stale workspace record can point at a directory that
       // was removed and later reused for unrelated files.
@@ -195,16 +246,13 @@ export class WorkspaceManager {
         }
       }
       // Drop whatever stale worktree metadata git is still holding.
-      await execFileAsync('git', ['-C', repoRoot, 'worktree', 'prune'], { timeout: 5000 })
+      await this.git(repoRoot, ['worktree', 'prune'])
     }
 
     // Remove branch unless keepBranch
     if (!opts.keepBranch) {
-      try {
-        await execFileAsync('git', ['-C', repoRoot, 'branch', '-D', opts.branchName], { timeout: 5000 })
-      } catch {
-        // Branch may already be gone
-      }
+      // Branch may already be gone
+      await this.runner.run(['branch', '-D', opts.branchName], { cwd: repoRoot, timeoutMs: 5000 })
     }
 
     return { status: 'ok' }

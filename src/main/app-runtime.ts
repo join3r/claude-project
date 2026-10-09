@@ -17,6 +17,7 @@ import { SshConnectionManager } from './ssh-connection-manager'
 import { CodexSessionManager } from './codex-session-manager'
 import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
+import { FileSetupApprovals } from './worktree-setup-approvals'
 import { NotesStorage } from './notes-storage'
 import { RevisionStore } from './revision-store'
 import { TabActivityRegistry } from './tab-activity-registry'
@@ -147,7 +148,7 @@ export class AppRuntime {
   private notebookStartCounter = 0
   private readonly hookServer = new HookServer((message) => this.logDebug(message))
   private readonly codexSessionManager = new CodexSessionManager()
-  private readonly workspaceManager = new WorkspaceManager()
+  private readonly workspaceManager = new WorkspaceManager({ approvals: new FileSetupApprovals(CONFIG_DIR) })
   private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
   private readonly windows = new Map<number, BrowserWindow>()
   private readonly windowStates = new Map<number, PersistedWindowState>()

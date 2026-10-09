@@ -18,6 +18,7 @@ import type {
   TunnelConfig,
   TunnelState,
   WorkspaceCreateRequest,
+  WorkspaceCreateResult,
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
   WorkspaceListBranchesRequest,
@@ -410,12 +411,9 @@ const api = {
   // Workspaces
   workspaceListBranches: (request: WorkspaceListBranchesRequest): Promise<string[]> =>
     ipcRenderer.invoke('workspace-list-branches', request),
-  workspaceCreate: (request: WorkspaceCreateRequest): Promise<{
-    worktreePath: string
-    branchName: string
-    baseBranch: string
-    relativeProjectPath: string
-  }> => ipcRenderer.invoke('workspace-create', request),
+  /** `setupError`: the worktree exists, but the repo's `.devtool/worktree.json` setup failed. */
+  workspaceCreate: (request: WorkspaceCreateRequest): Promise<WorkspaceCreateResult> =>
+    ipcRenderer.invoke('workspace-create', request),
   workspaceDelete: (request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> =>
     ipcRenderer.invoke('workspace-delete', request),
   /** An archived stream's worktree back from its branch (`branch-missing` when it was discarded). */

@@ -196,6 +196,30 @@ export interface WorkspaceCreateRequest extends WorkspaceTarget {
   baseBranch: string
 }
 
+/**
+ * `setup` commands from a repo's `.devtool/worktree.json` that did not run
+ * because this exact content (`hash`) is not approved for the repo yet.
+ * Show `commands`, and on a yes approve `repoKey` + `hash` and run setup again.
+ */
+export interface PendingWorktreeSetup {
+  /** The repo's git common dir (realpath): one approval covers all its worktrees. */
+  repoKey: string
+  /** sha256 of the config file's bytes. */
+  hash: string
+  commands: string[]
+}
+
+export interface WorkspaceCreateResult {
+  worktreePath: string
+  branchName: string
+  baseBranch: string
+  relativeProjectPath: string
+  /** The worktree was made, but the repo's `.devtool/worktree.json` setup failed (local only). */
+  setupError?: string
+  /** The worktree was made; its setup commands wait for approval (local only). */
+  setupPending?: PendingWorktreeSetup
+}
+
 /** Bring back an archived stream's worktree from its branch (no new branch). */
 export interface WorkspaceRestoreRequest extends WorkspaceTarget {
   worktreePath: string

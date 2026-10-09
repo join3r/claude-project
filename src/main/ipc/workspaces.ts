@@ -1,4 +1,4 @@
-import type { SshConfig, WorkspaceCreateRequest, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceRestoreRequest, WorkspaceRestoreResult, WorkspaceTarget } from '../../shared/types'
+import type { SshConfig, WorkspaceCreateRequest, WorkspaceCreateResult, WorkspaceDeleteRequest, WorkspaceDeleteResult, WorkspaceRestoreRequest, WorkspaceRestoreResult, WorkspaceTarget } from '../../shared/types'
 import type { RemoteWorkspaceManager } from '../remote-workspace-manager'
 import type { WorkspaceManager } from '../workspace-manager'
 import type { IpcRegistrar } from './registrar'
@@ -48,20 +48,30 @@ export async function listWorkspaceBranches(deps: WorkspaceGit, request: Workspa
   return deps.workspaceManager.listBranches(request.projectDir)
 }
 
-/** A worktree on a new branch, over SSH for a remote project. Also used by the phone's `stream.new`. */
-export async function createWorkspace(deps: WorkspaceGit, request: WorkspaceCreateRequest) {
+/**
+ * A worktree on a new branch, over SSH for a remote project. Also used by the
+ * phone's `stream.new`. A local worktree also gets the repo's setup
+ * (`.devtool/worktree.json`); when that fails or its commands await approval
+ * the worktree is still returned, with `setupError`/`setupPending`.
+ */
+export async function createWorkspace(deps: WorkspaceGit, request: WorkspaceCreateRequest): Promise<WorkspaceCreateResult> {
   const { projectId, sshConfig } = request
-  const result = sshConfig && projectId
-    ? await (async () => {
-        await deps.ensureSshConnected(projectId, sshConfig)
-        return deps.remoteWorkspaceManager.create(deps.socketPath(projectId), {
-          ...request,
-          projectId,
-          sshConfig
-        })
-      })()
-    : await deps.workspaceManager.create(request.projectDir, request.name, request.baseBranch)
-  return { ...result, baseBranch: request.baseBranch }
+  if (sshConfig && projectId) {
+    await deps.ensureSshConnected(projectId, sshConfig)
+    const result = await deps.remoteWorkspaceManager.create(deps.socketPath(projectId), {
+      ...request,
+      projectId,
+      sshConfig
+    })
+    return { ...result, baseBranch: request.baseBranch }
+  }
+  const { worktreePath, branchName, relativeProjectPath, setup } =
+    await deps.workspaceManager.create(request.projectDir, request.name, request.baseBranch)
+  return {
+    worktreePath, branchName, relativeProjectPath, baseBranch: request.baseBranch,
+    ...(setup.status === 'failed' ? { setupError: setup.error } : {}),
+    ...(setup.status === 'needs-approval' ? { setupPending: setup.pending } : {})
+  }
 }
 
 /** An archived stream's worktree back from its branch, over SSH for a remote project. */
