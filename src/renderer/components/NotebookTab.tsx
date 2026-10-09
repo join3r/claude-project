@@ -63,6 +63,7 @@ import { agentLinkPath, agentLinkShortcut, formatAgentLink, selectionLines } fro
 import { showAgentLinkNotice, useLinkToAgent } from '../agentLink/linkToAgent'
 import { paletteEvents } from '../palette/paletteEvents'
 import { findTaskInProject, taskTabs } from '../../shared/streams'
+import { useHostPlatform } from '../hostPlatform'
 
 interface Props {
   tabId: string
@@ -96,6 +97,7 @@ export default function NotebookTab({
   const monacoConfig = config ?? DEFAULT_CONFIG
   const projectRecord = projects.find((item) => item.id === projectId)
   const taskRecord = findTaskInProject(projectRecord, taskId)
+  const hostPlatformName = useHostPlatform(projectRecord?.host)
   const projectConda: ProjectCondaSelection = {
     condaEnvName: projectRecord?.condaEnvName,
     condaEnvPrefix: projectRecord?.condaEnvPrefix
@@ -605,7 +607,8 @@ export default function NotebookTab({
     void window.api.notebookKernelInterrupt(tabId)
   }, [clearRunQueue, tabId])
 
-  const condaPlatform = window.api?.platform ?? ''
+  // The kernel and its envs are on the project's host (a DevTool server's, or here).
+  const condaPlatform = hostPlatformName
   const condaOverride = notebookCondaEnvFromMetadata(doc?.metadata)
   const effectiveConda = notebookKernelCondaSelection(condaOverride, projectConda)
   const condaValue = condaOverride

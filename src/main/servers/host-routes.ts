@@ -90,7 +90,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-move-prepare': projectAt(4),
   'chat-attach': { by: [{ projectField: [1, 'projectId'] }, { tab: 0 }], pin: 'set' },
   'chat-detach': tab0,
-  'chat-send': tab0,
+  // A server chat's images are scaled down here first (desktop-routing.ts).
+  'chat-send': { by: [{ tab: 0 }], remote: 'custom' },
   'chat-bash': tab0,
   'chat-login': tab0,
   'chat-login-code': tab0,
@@ -190,7 +191,11 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   // adding a server project (ipc/host-fs.ts): the first argument names the host
   'server-list-dirs': { by: [{ host: 0 }] },
   'server-discover-repos': { by: [{ host: 0 }] },
-  'server-clone-repo': { by: [{ host: 0 }] }
+  'server-clone-repo': { by: [{ host: 0 }] },
+
+  // agent CLIs on a host, and its login env after an install (ipc/host-agents.ts): the first argument names the host
+  'host-agent-clis': { by: [{ host: 0 }] },
+  'host-refresh-env': { by: [{ host: 0 }] }
 }
 
 /**

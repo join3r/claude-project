@@ -11,6 +11,8 @@ interface Props {
   /** Routes the git calls to a DevTool server's project. */
   projectId?: string
   onFileClick: (filePath: string) => void
+  /** Reveal in Finder: only for folders on this computer (not a DevTool server's). */
+  canReveal?: boolean
 }
 
 const BADGE_CLASSES = {
@@ -34,7 +36,7 @@ const EMPTY_ROOT: GitRepoStatus = { path: '', staged: [], unstaged: [], untracke
  * before; one with nested repos (or only nested repos) gets a header per repo,
  * each with its own Pull/Push and commit box.
  */
-export default function GitStatus({ gitStatus, projectDir, projectId, onFileClick }: Props) {
+export default function GitStatus({ gitStatus, projectDir, projectId, onFileClick, canReveal = true }: Props) {
   const repos = gitStatus ? gitStatus.repos : [EMPTY_ROOT]
   if (repos.length === 0) {
     return <div className="flex items-center justify-center p-6 text-text-muted text-base">Not a git repository</div>
@@ -51,6 +53,7 @@ export default function GitStatus({ gitStatus, projectDir, projectId, onFileClic
           projectDir={projectDir}
           projectId={projectId}
           onFileClick={onFileClick}
+          canReveal={canReveal}
         />
       ))}
     </div>
@@ -64,9 +67,10 @@ interface RepoPanelProps {
   projectDir: string
   projectId?: string
   onFileClick: (filePath: string) => void
+  canReveal: boolean
 }
 
-function RepoPanel({ repo, title, projectDir, projectId, onFileClick }: RepoPanelProps) {
+function RepoPanel({ repo, title, projectDir, projectId, onFileClick, canReveal }: RepoPanelProps) {
   const [repoCollapsed, setRepoCollapsed] = useState(false)
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -338,7 +342,7 @@ function RepoPanel({ repo, title, projectDir, projectId, onFileClick }: RepoPane
       { label: sectionKey === 'staged' ? 'Unstage' : 'Stage', disabled: busy, onSelect: () => { void handleFileAction(sectionKey, entry) } }
     ]
     // A deleted file has nothing on disk to show.
-    if (entry.status !== 'D') {
+    if (entry.status !== 'D' && canReveal) {
       items.push({
         label: revealInFolderLabel(),
         onSelect: () => {

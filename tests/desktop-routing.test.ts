@@ -8,6 +8,7 @@ import type { IpcContext, IpcRegistrar } from '../src/main/ipc/registrar'
 import type { ProjectsData } from '../src/shared/types'
 import type { ServersState } from '../src/shared/servers'
 import { fixtureProject } from './helpers/streams-fixtures'
+import type { DecodedImage, ImageCodec } from '../src/main/mobile/chat-image'
 
 /**
  * A desktop's routing put together around a fake ServerHub: the server's
@@ -22,7 +23,7 @@ afterEach(() => {
 
 type Handler = (ctx: IpcContext, ...args: unknown[]) => unknown
 
-function setup() {
+function setup(options: { images?: ImageCodec } = {}) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-routing-'))
   dirs.push(configDir)
   const serverData: ProjectsData = {
@@ -58,7 +59,8 @@ function setup() {
       send: (clientId, channel, ...args) => { sent.push([clientId, channel, ...args]) },
       broadcast: (channel, ...args) => { broadcast.push([channel, ...args]) }
     },
-    log: () => {}
+    log: () => {},
+    images: options.images
   })
   const localData: ProjectsData = { projects: [fixtureProject({ id: 'local-p', directory: '/Users/me/l' })], tags: [], projectOrder: ['local-p'], pinnedItems: [] }
   routing.attachHost({ getProjectsData: () => localData, onProjectsChanged: () => () => {} })
@@ -72,6 +74,8 @@ function setup() {
   const wrapped = routing.wrap(inner)
   wrapped.handle('load-projects', [], (() => ({ local: { revision: 3, data: localData } })) as never)
   wrapped.handle('pty-spawn', [], (() => 'spawned here') as never)
+  wrapped.handle('chat-attach', [], (() => 'attached here') as never)
+  wrapped.handle('chat-send', [], (() => 'sent here') as never)
   const emit = (event: ServerEvent) => { for (const listener of eventListeners) listener(event) }
   return { routing, hub, calls, sent, broadcast, handlers, emit }
 }
@@ -102,5 +106,31 @@ describe('DesktopRouting', () => {
     // The server's own broadcasts of its settings never reach the windows.
     t.emit({ serverId: 'srvA', client: '*', ch: 'config-updated', args: [{}] })
     expect(t.broadcast.filter(b => b[0] === 'config-updated')).toEqual([])
+  })
+
+  it('scales a server chat\'s images down to fit one link message, and leaves small ones as they are', async () => {
+    // Any bytes decode as a 4000x3000 picture whose PNG is 100 KB.
+    const decoded = (width: number, height: number): DecodedImage => ({
+      width, height, resize: (w, h) => decoded(w, h), png: () => Buffer.alloc(100_000, 1), jpeg: () => Buffer.alloc(10, 1)
+    })
+    const t = setup({ images: { decode: () => decoded(4000, 3000) } })
+    t.routing.attachHub(t.hub)
+    await flush()
+    const ctx: IpcContext = { clientId: 'win:1', isFocused: () => true }
+    await t.handlers.get('chat-attach')!(ctx, 'chat-1', { cwd: '/home/srv/app', sessionId: 's', projectId: 'srv-p' })
+    expect(t.routing.index.pinnedHost('chat-1')).toBe('srvA')
+
+    const small = { mediaType: 'image/png', data: 'aGVsbG8=', id: 'x', preview: 'data:image/png;base64,aGVsbG8=' }
+    await t.handlers.get('chat-send')!(ctx, 'chat-1', 'look', [small])
+    expect(t.calls.filter(c => c.ch === 'chat-send').at(-1)!.args).toEqual(['chat-1', 'look', [{ mediaType: 'image/png', data: 'aGVsbG8=' }]])
+
+    const huge = { mediaType: 'image/png', data: 'A'.repeat(5_000_000) }
+    await t.handlers.get('chat-send')!(ctx, 'chat-1', 'and this', [huge])
+    const sentImages = t.calls.filter(c => c.ch === 'chat-send').at(-1)!.args[2] as Array<{ mediaType: string; data: string }>
+    expect(sentImages).toEqual([{ mediaType: 'image/png', data: Buffer.alloc(100_000, 1).toString('base64') }])
+
+    // A local chat's images stay as the window sent them.
+    await t.handlers.get('chat-attach')!(ctx, 'chat-2', { cwd: '/Users/me/l', sessionId: 's', projectId: 'local-p' })
+    expect(await t.handlers.get('chat-send')!(ctx, 'chat-2', 'local', [huge])).toBe('sent here')
   })
 })
