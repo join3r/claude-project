@@ -3,6 +3,7 @@ import { DEFAULT_PUSH_GATEWAY, b64uDecode } from '../../protocol/ts/index.ts'
 import { parseLogLevel } from './log.ts'
 import type { LogLevel } from './log.ts'
 import { DEFAULT_APNS_TOPIC } from './push/apns.ts'
+import type { RelayLimits } from './relay.ts'
 
 export type PushSenderConfig =
   | { mode: 'apns'; keyFile: string; keyId: string; teamId: string; topic: string }
@@ -23,6 +24,8 @@ export interface RelayConfig {
   trustProxy: boolean
   logLevel: LogLevel
   push: PushConfig
+  /** Limits set in the environment (see LIMIT_ENV); absent when none are. */
+  limits?: Partial<RelayLimits>
 }
 
 type Env = Record<string, string | undefined>
@@ -85,19 +88,52 @@ export function parsePushConfig(env: Env): PushConfig {
   return { role: 'forward', upstream: parseUpstream(upstream) }
 }
 
+/** Limits an operator may set, by environment variable. Sizes take a K, M or G suffix (×1024). */
+export const LIMIT_ENV = {
+  RELAY_HOST_BYTES_PER_SECOND: { key: 'hostBytesPerSecond', size: true },
+  RELAY_HOST_BYTES_BURST: { key: 'hostBytesBurst', size: true },
+  RELAY_IP_BYTES_PER_SECOND: { key: 'ipBytesPerSecond', size: true },
+  RELAY_IP_BYTES_BURST: { key: 'ipBytesBurst', size: true },
+  RELAY_MAX_QUEUED_BYTES: { key: 'maxQueuedBytes', size: true },
+  RELAY_MAX_CONNECTIONS_PER_IP: { key: 'maxConnectionsPerIp', size: false },
+  RELAY_NEW_PAIRS_PER_IP_PER_HOUR: { key: 'newPairsPerIpPerHour', size: false },
+  RELAY_STALL_TIMEOUT_MS: { key: 'stallTimeoutMs', size: false }
+} as const satisfies Record<string, { key: keyof RelayLimits; size: boolean }>
+
+const SIZE_RE = /^(\d+)([kmg])?$/i
+const SIZE_UNITS: Record<string, number> = { k: 1024, m: 1024 ** 2, g: 1024 ** 3 }
+
+export function parseLimits(env: Env): Partial<RelayLimits> {
+  const limits: Partial<RelayLimits> = {}
+  for (const [name, { key, size }] of Object.entries(LIMIT_ENV)) {
+    const raw = env[name]?.trim()
+    if (!raw) continue
+    const match = (size ? SIZE_RE : /^(\d+)()$/).exec(raw)
+    const value = match ? Number(match[1]) * (match[2] ? SIZE_UNITS[match[2].toLowerCase()] : 1) : NaN
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new Error(`${name} must be a positive whole number${size ? ' of bytes (K, M or G suffix allowed)' : ''}, got ${raw}`)
+    }
+    limits[key] = value
+  }
+  return limits
+}
+
 /**
- * Reads PORT, HOST, RELAY_DATA, RELAY_TRUST_PROXY, LOG_LEVEL and the push settings
- * (RELAY_PUSH_SEAL_KEY, RELAY_APNS_*, RELAY_SIMCTL_DEVICE, RELAY_PUSH_UPSTREAM).
+ * Reads PORT, HOST, RELAY_DATA, RELAY_TRUST_PROXY, LOG_LEVEL, the push settings
+ * (RELAY_PUSH_SEAL_KEY, RELAY_APNS_*, RELAY_SIMCTL_DEVICE, RELAY_PUSH_UPSTREAM) and the
+ * limits in LIMIT_ENV.
  */
 export function loadConfig(env: Env = process.env): RelayConfig {
   const port = env.PORT === undefined || env.PORT === '' ? 8787 : Number(env.PORT)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`PORT must be a port number, got ${env.PORT}`)
+  const limits = parseLimits(env)
   return {
     port,
     host: env.HOST || '0.0.0.0',
     dataDir: resolve(env.RELAY_DATA || './data'),
     trustProxy: env.RELAY_TRUST_PROXY === '1' || env.RELAY_TRUST_PROXY === 'true',
     logLevel: parseLogLevel(env.LOG_LEVEL),
-    push: parsePushConfig(env)
+    push: parsePushConfig(env),
+    ...(Object.keys(limits).length > 0 ? { limits } : {})
   }
 }

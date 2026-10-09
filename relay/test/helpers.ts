@@ -5,8 +5,10 @@ import {
   RELAY_PATH,
   b64uEncode,
   buildHello,
+  decodeRelayBinaryFrame,
   deriveRelayToken,
   deviceId,
+  encodeRelayBinaryFrame,
   encodeRelayMessage,
   generateEd25519,
   generateX25519,
@@ -56,6 +58,12 @@ export interface CloseInfo {
 
 type Pred = (m: ServerMessage) => boolean
 
+/** A binary frame from the relay (§3.9): `peer` is the sender. */
+export interface BinaryIn {
+  peer: string
+  envelope: Uint8Array
+}
+
 /**
  * A relay client over Node's global WebSocket that queues every server message, so
  * tests can `await next(...)` in any order and assert that nothing else arrived.
@@ -67,10 +75,13 @@ export class TestClient {
   id = ''
   #queue: ServerMessage[] = []
   #waiters: Array<{ pred: Pred; resolve: (m: ServerMessage) => void }> = []
+  #binary: BinaryIn[] = []
+  #binaryWaiters: Array<(m: BinaryIn) => void> = []
   #closeInfo: CloseInfo | null = null
 
   private constructor(ws: WebSocket) {
     this.ws = ws
+    ws.binaryType = 'arraybuffer'
     this.closed = new Promise((resolve) => {
       ws.addEventListener('close', (e) => {
         this.#closeInfo = { code: e.code, reason: e.reason }
@@ -78,6 +89,13 @@ export class TestClient {
       })
     })
     ws.addEventListener('message', (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        const frame = decodeRelayBinaryFrame(new Uint8Array(e.data))
+        const waiter = this.#binaryWaiters.shift()
+        if (waiter) waiter(frame)
+        else this.#binary.push(frame)
+        return
+      }
       const msg = parseServerMessage(String(e.data))
       if (!msg) return
       const i = this.#waiters.findIndex((w) => w.pred(msg))
@@ -104,14 +122,47 @@ export class TestClient {
     return client
   }
 
-  /** Connects and authenticates; resolves once `ready` arrives. */
-  static async auth(server: RelayServer | string, role: Role, device: Device, pair?: { to: string; token: Uint8Array }): Promise<TestClient> {
+  /** Connects and authenticates; resolves once `ready` arrives. `binary` asks for binary frames (§3.9). */
+  static async auth(
+    server: RelayServer | string,
+    role: Role,
+    device: Device,
+    pair?: { to: string; token: Uint8Array },
+    options: { binary?: boolean } = {}
+  ): Promise<TestClient> {
     const client = await TestClient.connect(server)
-    client.send(buildHello({ role, nonce: client.nonce, ed25519Priv: device.ed.priv, ed25519Pub: device.ed.pub, pair }))
+    client.send(buildHello({ role, nonce: client.nonce, ed25519Priv: device.ed.priv, ed25519Pub: device.ed.pub, pair, binary: options.binary }))
     const ready = await client.next((m) => m.t === 'ready' || (m.t === 'error' && m.code === 'auth'))
     if (ready.t !== 'ready') throw new Error(`auth failed: ${JSON.stringify(ready)}`)
     client.id = ready.id
     return client
+  }
+
+  /** Sends `envelope` to `to` as a binary frame. */
+  sendBinary(to: string, envelope: Uint8Array): void {
+    this.ws.send(encodeRelayBinaryFrame(to, envelope))
+  }
+
+  /** Resolves with (and consumes) the next binary frame. */
+  nextBinary(timeoutMs = 3000): Promise<BinaryIn> {
+    const queued = this.#binary.shift()
+    if (queued) return Promise.resolve(queued)
+    return new Promise((resolve, reject) => {
+      const waiter = (m: BinaryIn): void => {
+        clearTimeout(timer)
+        resolve(m)
+      }
+      const timer = setTimeout(() => {
+        this.#binaryWaiters.splice(this.#binaryWaiters.indexOf(waiter), 1)
+        reject(new Error('timed out waiting for a binary frame'))
+      }, timeoutMs)
+      this.#binaryWaiters.push(waiter)
+    })
+  }
+
+  /** Binary frames that arrived and nobody claimed yet. */
+  get binaryQueued(): number {
+    return this.#binary.length
   }
 
   send(message: ClientMessage | string): void {
@@ -150,6 +201,12 @@ export class TestClient {
   async drain(ms = 100): Promise<ServerMessage[]> {
     await sleep(ms)
     return this.#queue.splice(0)
+  }
+
+  /** Waits `ms`, then returns (and drains) the binary frames nobody claimed. */
+  async drainBinary(ms = 100): Promise<BinaryIn[]> {
+    await sleep(ms)
+    return this.#binary.splice(0)
   }
 
   get isClosed(): boolean {
@@ -195,4 +252,18 @@ export async function authorizedPair(server: RelayServer, desktopDevice = makeDe
   p.desktop.send({ t: 'ping' })
   await p.desktop.nextOfType('pong')
   return p
+}
+
+/** Pings and waits for the pong, so everything sent before it has been handled. */
+export async function roundTrip(client: TestClient): Promise<void> {
+  client.send({ t: 'ping' })
+  await client.nextOfType('pong')
+}
+
+/** `owner` (desktop or server) sends a fresh offer and waits until the relay holds it. */
+export async function offer(owner: TestClient): Promise<{ token: Uint8Array; tokenHash: string }> {
+  const secret = makeSecret()
+  owner.send({ t: 'offer', tokenHash: secret.tokenHash, exp: Math.floor(Date.now() / 1000) + 300 })
+  await roundTrip(owner)
+  return secret
 }

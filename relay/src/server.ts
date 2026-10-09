@@ -158,6 +158,9 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
     res.writeHead(404, { 'Content-Type': 'text/plain' })
     res.end('not found')
   })
+  // A socket that never finishes its request headers (the upgrade included) isn't a
+  // relay connection yet, so the per-IP caps don't see it: don't hold it for long.
+  http.headersTimeout = 10_000
   http.on('connection', (socket: Socket) => {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
@@ -172,12 +175,22 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
     if (pathOf(req) !== RELAY_PATH) return rejectUpgrade(socket, 404, 'Not Found')
     const ip = clientIp(req, trustProxy)
     if (!relay.admit(ip)) return rejectUpgrade(socket, 429, 'Too Many Requests')
-    const ws = upgradeToWebSocket(req, socket, head, { maxPayload: relay.limits.maxFrameBytes })
+    const ws = upgradeToWebSocket(req, socket, head, {
+      maxPayload: relay.limits.maxFrameBytes,
+      maxBufferedBytes: relay.limits.phoneBufferCapBytes
+    })
     if (!ws) return
     const handle = relay.open(
       {
         send: (text) => ws.sendText(text),
-        close: (code, reason) => ws.close(code, reason)
+        sendBinary: (data) => ws.sendBinary(data),
+        close: (code, reason) => ws.close(code, reason),
+        terminate: () => ws.terminate(),
+        bufferedBytes: () => ws.bufferedAmount,
+        onBufferBelow: (bytes, fn) => ws.onBufferBelow(bytes, fn),
+        setBufferCap: (bytes) => ws.setMaxBufferedBytes(bytes),
+        pause: () => ws.pause(),
+        resume: () => ws.resume()
       },
       { ip }
     )

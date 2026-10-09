@@ -2,7 +2,7 @@
 
 This is the normative wire spec for the DevTool mobile client: identities, the pairing URI, the relay protocol, the encrypted phone ↔ desktop channel, and the test vectors. `protocol/ts`, `relay/`, the desktop (`src/main/mobile/`) and the iOS `DevToolKit` implement exactly what it says. If an implementation has to deviate, change this file in the same change. [PROTOCOL.md](PROTOCOL.md) is the short map.
 
-Section numbers (§1–§9) are the ones code comments cite. §6 (chat) was added in M2 and §7 (push) in M3. Nothing had shipped yet, so both are part of protocol v1 with no version bump or feature flag. Version 2 (§9) moved the channel to the desktop's Project › Stream › Task model in one hard cutover; the relay protocol (§3), Noise (§4.2) and push (§7) did not change. Version 3 (§11) adds task worktrees and still accepts version 2 peers.
+Section numbers (§1–§11) are the ones code comments cite. §6 (chat) was added in M2 and §7 (push) in M3. Nothing had shipped yet, so both are part of protocol v1 with no version bump or feature flag. Version 2 (§9) moved the channel to the desktop's Project › Stream › Task model in one hard cutover; the relay protocol (§3), Noise (§4.2) and push (§7) did not change. Version 3 (§11) adds task worktrees and still accepts version 2 peers. §3.8–§3.11 (the `server` role, binary frames, per-role budgets and flow control) came with DevTool servers. They are additive and opt-in, so phones and older desktops see the same bytes as before.
 
 ## 1. Identities and encodings
 
@@ -37,55 +37,108 @@ Decoders reject a URI whose `v` isn't 1, whose `relay` isn't a `ws://` or `wss:/
 
 ## 3. Relay protocol v1
 
-WebSocket at `<relay>/v1`. Text frames, one JSON object each, with discriminator `t`. The relay treats everything inside `frame.data` as opaque.
+WebSocket at `<relay>/v1`. Text frames, one JSON object each, with discriminator `t`. After `ready`, frames can also travel as binary WebSocket messages (§3.9). The relay treats everything inside a frame's data as opaque.
+
+There are three roles. A **phone** is the iOS app. A **desktop** is DevTool. A **server** is a headless DevTool host on another machine: toward phones it behaves exactly like a desktop, and desktops pair with it too. Desktops and servers are **hosts**. §3.8 has the pairing rules, and §3.8–§3.11 were added with servers. They are additive: still `/v1`, and phones see no difference.
 
 ### 3.1 Auth
-1. Server → `{ "t":"challenge", "nonce":"<b64u 32>" }` immediately on open.
-2. Client → `{ "t":"hello", "role":"desktop"|"phone", "pub":"<b64u ed25519 pub>", "sig":"<b64u>", "pair"?: { "to":"<desktopId>", "token":"<b64u relayToken>" } }`
+1. Relay → `{ "t":"challenge", "nonce":"<b64u 32>" }` immediately on open.
+2. Client → `{ "t":"hello", "role":"desktop"|"phone"|"server", "pub":"<b64u ed25519 pub>", "sig":"<b64u>", "pair"?: { "to":"<hostId>", "token":"<b64u relayToken>" }, "binary"?: true }`
    - `sig = Ed25519.sign(utf8("devtool-relay-v1\n" + role + "\n" + nonce))`, where `nonce` is the b64u string exactly as received.
-   - `pair` is sent only by a phone that is not yet authorized for that desktop.
-3. Server → `{ "t":"ready", "id":"<deviceId>" }`, or `{ "t":"error", "code":"auth", ... }` and close (code 4401).
-   - Hello must arrive within 10 s, or the server closes with 4408.
+   - `pair` makes the client pending under `to`'s live offer (§3.8). A phone sends it while it isn't yet authorized for that host. A server sends it when it installs against a desktop's offer.
+   - `binary: true` asks for frames as binary messages (§3.9).
+3. Relay → `{ "t":"ready", "id":"<deviceId>", "binary"?: true }`, or `{ "t":"error", "code":"auth", ... }` and close (code 4401).
+   - `binary: true` is present only when the hello asked for it, so a phone's or older desktop's `ready` is unchanged.
+   - A hello whose `role` this relay doesn't know gets `{ "t":"error", "code":"unsupported" }` and close 4401 (§3.11).
+   - Hello must arrive within 10 s, or the relay closes with 4408.
 
-### 3.2 Desktop → server
-- `{ "t":"offer", "tokenHash":"<b64u SHA-256(relayToken)>", "exp":<unix s> }`: replaces any previous offer from this desktop. Held in memory only.
-- `{ "t":"authorize", "phone":"<phoneId>", "pub":"<b64u phone ed25519 pub>" }`: persists the (desktop, phone) pair. Only valid for a phone that is currently connected under this desktop's offer or already authorized.
-- `{ "t":"revoke", "phone":"<phoneId>" }`: deletes the pair. If that phone is connected, the server sends it `{ "t":"peer", "id":<desktopId>, "state":"revoked" }` and drops routing.
+### 3.2 Host → relay (desktops and servers)
+- `{ "t":"offer", "tokenHash":"<b64u SHA-256(relayToken)>", "exp":<unix s> }`: replaces any previous offer from this host. Held in memory only.
+- `{ "t":"authorize", "peer":"<deviceId>", "pub":"<b64u its ed25519 pub>" }`: persists the pair (this host as owner, `peer`). Only valid for a device that is pending under this host's offer, or that this host already authorized. Desktops from before servers send `"phone"` instead of `"peer"`. The relay accepts either one, but not both.
+- `{ "t":"revoke", "peer":"<deviceId>" }` (or `"phone"`): deletes the pair with that device, whichever side owns it, and cancels a pending pair in either direction. If the other device is connected, the relay sends it `{ "t":"peer", "id":<revoker's id>, "state":"revoked" }` and stops routing between them.
+- `push` (§7.2).
 
-### 3.3 Phone → server
-- `{ "t":"watch", "desktops":["<desktopId>", ...] }`: subscribe to presence. Unauthorized IDs are ignored. The server replies with one `peer` message per authorized ID.
+### 3.3 Client → relay
+- `{ "t":"watch", "desktops":["<hostId>", ...] }`, from phones and desktops: subscribe to the presence of hosts. A phone watches desktops and servers, and a desktop watches servers. IDs the sender has no authorized pair with, and IDs that aren't its host (§3.8), are ignored. The relay replies with one `peer` message per ID it kept. The field is called `desktops` because it predates servers.
+- `{ "t":"pair", "to":"<hostId>", "token":"<b64u relayToken>" }`, any role, after `ready`: the same as hello `pair`, for a device that is already connected. A desktop uses it to pair with a server's offer (§3.8, code flow). There is no reply on success. Failures are the hello `pair` errors (§3.7).
 
 ### 3.4 Both directions
-- `{ "t":"frame", "to":"<id>", "data":"<b64u>" }` → recipient gets `{ "t":"frame", "from":"<id>", "data":"<b64u>" }`. Allowed only between an authorized pair, or between a desktop and a phone whose hello carried a `pair` token matching that desktop's live offer ("pending phone"). A pending phone that isn't authorized within the offer's lifetime is disconnected. The server consumes the offer (deletes it) when the first pending phone attaches, so it is one use only.
-- If the recipient is offline, the server replies to the sender `{ "t":"error", "code":"offline", "to":"<id>" }` and drops the frame. **Nothing is queued.**
-- Presence: `{ "t":"peer", "id":"<id>", "state":"online"|"offline"|"revoked", "lastSeen"?:<unix ms> }`. Desktops receive it for their authorized and pending phones. Phones receive it for watched desktops.
-- `{ "t":"ping" }` / `{ "t":"pong" }` keepalive. Clients ping every 25 s, and the server closes sockets silent for 60 s.
-- Errors: `{ "t":"error", "code":"auth"|"offline"|"forbidden"|"rate"|"bad-request", "message"?:string, "to"?:string }`.
+- `{ "t":"frame", "to":"<id>", "data":"<b64u>" }` → the recipient gets `{ "t":"frame", "from":"<id>", "data":"<b64u>" }` (or a binary frame, §3.9). Frames are allowed only between two devices with an authorized pair (in either direction), or with a pending one: the peer presented a token matching the owner's live offer (§3.8). A pending peer that isn't authorized within the offer's lifetime is no longer routed (§3.7). The relay consumes the offer (deletes it) when the first peer attaches, so each offer works once.
+- If the recipient is offline, the relay replies to the sender `{ "t":"error", "code":"offline", "to":"<id>" }` and drops the frame. **Nothing is queued.**
+- Presence: `{ "t":"peer", "id":"<id>", "state":"online"|"offline"|"revoked", "lastSeen"?:<unix ms> }`. A host receives it for the devices it hosts (§3.8), authorized or pending, without asking: desktops for their phones, servers for their phones and desktops. Phones and desktops receive it for the hosts they `watch`.
+- `{ "t":"ping" }` / `{ "t":"pong" }` keepalive. Clients ping every 25 s, and the relay closes sockets silent for 60 s.
+- Errors: `{ "t":"error", "code":"auth"|"offline"|"forbidden"|"rate"|"bad-request"|"unsupported", "message"?:string, "to"?:string }`.
 - Forward compatibility: clients treat an error `code` they don't know as a generic error (it is still routed by `to`), and ignore a `peer` message whose `state` they don't know. The relay sends only the values listed here.
 
 ### 3.5 Limits
-- Max frame 256 KiB (close 1009).
-- Per connection 50 msgs/s burst 200 (error `rate`, then close 4429 on repeat).
-- Per IP 20 new connections/min.
+| | phones (and any socket before its hello) | desktops and servers |
+|---|---|---|
+| Message size | 256 KiB, text or binary (close 1009) | same |
+| Messages | 50/s, burst 200. Over it: `error rate`, then close 4429 on a repeat (§3.7) | 1000/s, burst 4000 |
+| Payload bytes | no separate limit | 8 MiB/s, burst 32 MiB |
+| Over budget | refused | throttled: the relay stops reading the socket until it is back in budget (§3.10). No `rate`, no 4429 |
+| Send queue cap | 8 MiB, then disconnected | 32 MiB, then disconnected |
+| Pushes (§7.2) | not allowed | 50/s, burst 200, then `pushed rate` |
+
+- Backpressure (§3.10): senders to a receiver whose send queue is over 4 MiB are paused until it is back at 1 MiB. A receiver that doesn't get back to 1 MiB within 15 s is disconnected.
+- Per IP: 20 new connections/min and 64 open connections at once (HTTP 429 at the upgrade beyond either). All connections from one IP, any role, share 16 MiB/s of payload bytes (burst 64 MiB), throttled like a host's.
+- Per device: at most 16 pending pairs at once (`forbidden` "too many pending pairs") and 256 authorized pairs (`forbidden` "too many pairs" on `authorize`). Per IP, at most 60 new pairs an hour (`rate` on `authorize`). Repeating `authorize` for a stored pair costs nothing.
+- A `watch` from a desktop costs one message token per ID it names.
+- Relay-wide, the send queues together may hold 512 MiB. Past that the relay drops the connections with the largest queues first.
 - A second connection with the same device ID replaces the first (the old one is closed with 4409).
+- The numbers are constants in `protocol/ts/relay-messages.ts`: `RELAY_MAX_FRAME_BYTES`, `RELAY_RATE_PER_SECOND`/`_BURST` (phones), `RELAY_HOST_RATE_PER_SECOND`/`_BURST`, `RELAY_HOST_BYTES_PER_SECOND`/`_BURST`, `RELAY_IP_BYTES_PER_SECOND`/`_BURST`, `RELAY_PUSH_RATE_PER_SECOND`/`_BURST`, `RELAY_BUFFER_HIGH_WATER_BYTES`/`LOW_WATER_BYTES`, `RELAY_STALL_TIMEOUT_MS`, `RELAY_PHONE_BUFFER_CAP_BYTES`, `RELAY_HOST_BUFFER_CAP_BYTES`, `RELAY_MAX_CONNECTIONS_PER_IP`, `RELAY_MAX_PENDING_PER_DEVICE`, `RELAY_MAX_PAIRS_PER_DEVICE`, `RELAY_NEW_PAIRS_PER_IP_PER_HOUR`. These are defaults: an operator may change some of them (relay/README.md, Environment), so clients must not depend on exact values.
 
 ### 3.6 Persistence
-`node:sqlite` at `$RELAY_DATA/relay.db`, with one table: `pairs(desktop_id, phone_id, phone_pub, desktop_pub, created_at, PRIMARY KEY(desktop_id, phone_id))`. `lastSeen` is kept in memory.
+`node:sqlite` at `$RELAY_DATA/relay.db`. The pairs table is `pairs(owner_id, owner_role, owner_pub, peer_id, kind, peer_pub, created_at, PRIMARY KEY(owner_id, peer_id))`, indexed on `peer_id`, with `PRAGMA user_version = 2`. The owner made the offer and sent `authorize`, and `kind` is the peer's role. Two devices have at most one row, in one direction. `lastSeen` is kept in memory. A push gateway also keeps `push_devices` (§7.1).
+
+A database from before servers has `pairs(desktop_id, phone_id, phone_pub, desktop_pub, created_at)`. The relay migrates it when it opens the file, in one transaction: each row becomes owner = `desktop_id` (role `desktop`), peer = `phone_id`, kind `phone`. The migration is one way. A relay from before servers can't open the migrated file, so back up `relay.db` before upgrading if you may roll back.
 
 ### 3.7 Details settled by the relay implementation
 The rules above left these open. `relay/` implements them, and clients may rely on them.
-- **Pair token that doesn't match.** If the token is wrong, the offer is already consumed or expired, or the desktop has no offer, the phone still gets `ready`. Right after it comes `{ "t":"error", "code":"forbidden", "to":<desktopId> }`, and the phone isn't pending. A phone already authorized for `pair.to` has its `pair` ignored.
-- **Pending lifetime.** Pending status belongs to the (desktop, phone) pair and lasts until the offer's `exp`. The relay clamps `exp` to at most 15 minutes ahead. An `exp` already in the past means there is no offer. Pending status survives a phone reconnect within the window, and the phone doesn't send the token again. `authorize` works for a pending phone even while it is briefly disconnected.
-- **Lapse.** When the window ends without `authorize`, a connected phone gets `{ "t":"error", "code":"forbidden", "to":<desktopId>, "message":"pairing window expired" }` and the desktop gets `peer offline` for it. The relay then closes the phone with **4403**, unless the phone is authorized or pending with another desktop, in which case its socket stays open for those.
-- **Offers** are dropped when the desktop's connection closes or is replaced.
-- **`authorize`** returns `bad-request` if `pub` doesn't hash to `phone`, and `forbidden` if the phone is neither pending nor authorized, or if `pub` differs from the key the phone authenticated with (or the stored one). Success has no reply, and repeating it is harmless. **`revoke`** is idempotent, and it also cancels a pending phone. The phone gets `peer revoked` only if something was actually removed.
-- **`watch`** replaces the previous watch set and carries at most 256 IDs (`bad-request` otherwise). For an offline desktop the reply is `offline`, with `lastSeen` when the relay knows it.
-- **Desktop roster.** Right after `ready`, a desktop gets `peer online` for each authorized or pending phone that is connected, and `peer offline` with `lastSeen` for each one whose `lastSeen` the relay knows.
+- **Pair token that doesn't match.** If the token is wrong, the offer is already consumed or expired, or the host has no offer, a hello `pair` still gets `ready`. Right after it comes `{ "t":"error", "code":"forbidden", "to":<hostId> }`, and the device isn't pending. The `pair` message gets the same error. So does pairing with oneself, or two roles that may not pair (§3.8), and in that last case the offer is not used up. A device already paired with `to` (in either direction) has its `pair` ignored.
+- **Pending lifetime.** Pending status belongs to the (owner, peer) pair and lasts until the offer's `exp`. The relay clamps `exp` to at most 15 minutes ahead. An `exp` already in the past means there is no offer. Pending status survives a reconnect of either side within the window, and the peer doesn't send the token again. `authorize` works for a pending peer even while it is briefly disconnected.
+- **Lapse.** When the window ends without `authorize`, a connected peer gets `{ "t":"error", "code":"forbidden", "to":<ownerId>, "message":"pairing window expired" }`. If the owner is connected too, the host of the two gets `peer offline` for the other. The relay then closes a phone with **4403**, unless it is authorized or pending with another host, in which case its socket stays open for those. Desktops and servers stay connected.
+- **Offers** are dropped when the host's connection closes or is replaced.
+- **`authorize`** returns `bad-request` if `pub` doesn't hash to `peer`. It returns `forbidden` if the peer is neither pending under this host's offer nor authorized by this host, or if `pub` differs from the key the peer authenticated with (or the stored one). Success has no reply, and repeating it is harmless. **`revoke`** is idempotent, and it also cancels a pending pair. The other device gets `peer revoked` only if something was actually removed.
+- **`watch`** replaces the previous watch set and carries at most 256 IDs (`bad-request` otherwise). For an offline host the reply is `offline`, with `lastSeen` when the relay knows it.
+- **Host roster.** Right after `ready`, a host gets `peer online` for each device it hosts (authorized or pending) that is connected, and `peer offline` with `lastSeen` for each one whose `lastSeen` the relay knows. A device that becomes pending through the `pair` message, while both sides are connected, is announced to the host with `peer online` at once.
 - **Replacement.** A connection replaced by the same device ID (4409) doesn't announce `offline`. The new connection announces `online` again.
-- **Close codes.** Idle timeout and server shutdown close with **1001**. The others are 1009, 4401, 4403, 4408, 4409 and 4429. `RelayCloseCode` in `protocol/ts` (and `RelayProtocol.CloseCode` in Swift) lists all of them, 1001 as `GoingAway` and 4403 as `PairingExpired`.
-- **Rate.** Every client message costs a token, including `hello` and `ping`. The first message over the limit is dropped and answered with `error rate`. Another over-limit message within 10 s of it gets `error rate` again and the relay closes with 4429. The per-IP limit counts refused attempts too. It answers HTTP 429 during the upgrade. With `RELAY_TRUST_PROXY=1` the client IP is the **last** `X-Forwarded-For` entry.
-- **Errors.** The relay checks `forbidden` before `offline`, so an unpaired device can't probe presence. A frame addressed to oneself is `forbidden`. Before auth, anything except a valid `hello` (including binary or malformed JSON) gets `error auth` and 4401. After auth, binary frames and malformed messages get `bad-request` and the socket stays open. Role violations (a phone sending `offer`/`authorize`/`revoke`, or a desktop sending `watch`) get `forbidden`.
-- **HTTP.** `GET /healthz` returns 200 `ok`. A plain GET on `/v1` returns 426. `/v1/push/register` and `/v1/push/send` (§7) answer 503 `{"error":"unavailable"}` on a relay that isn't a gateway. On the gateway they take `POST` only (405 otherwise) with a JSON body of at most 16 KiB (413 beyond, 400 `bad-request` if it isn't JSON). `/v1/push/send` answers 200 `{"result":"bad-request"}` when `cap` or `data` isn't a string. Every other path returns 404 (including upgrades).
+- **Close codes.** Idle timeout and relay shutdown close with **1001**. The others are 1009, 4401, 4403, 4408, 4409 and 4429. `RelayCloseCode` in `protocol/ts` (and `RelayProtocol.CloseCode` in Swift) lists all of them, 1001 as `GoingAway` and 4403 as `PairingExpired`. A receiver the relay drops for not reading (its send queue cap, the stall timeout, or the relay-wide ceiling, §3.10) gets no close frame, because it would sit behind the data the receiver isn't reading. The client sees the connection end (1006).
+- **Rate.** Every client message costs a token, including `hello` and `ping`. For a phone, the first message over the limit is dropped and answered with `error rate`. Another over-limit message within 10 s of it gets `error rate` again and the relay closes with 4429. Desktops and servers are throttled instead (§3.10). The per-IP limit counts refused attempts too. It answers HTTP 429 during the upgrade. With `RELAY_TRUST_PROXY=1` the client IP is the **last** `X-Forwarded-For` entry.
+- **Errors.** The relay checks `forbidden` before `offline`, so an unpaired device can't probe presence. A frame addressed to oneself is `forbidden`. Before auth, anything except a valid `hello` (including binary or malformed JSON) gets `error auth` and 4401, except a hello with an unknown role, which gets `error unsupported` and 4401. After auth, malformed messages get `bad-request`, a message type the relay doesn't know gets `unsupported`, and the socket stays open in both cases. A binary message is a frame (§3.9); one too short to be a frame gets `bad-request`. Role violations get `forbidden`: a phone sending `offer`, `authorize`, `revoke` or `push`, or a server sending `watch`.
+- **HTTP.** `GET /healthz` returns 200 `ok`. A plain GET on `/v1` returns 426. `/v1/push/register` and `/v1/push/send` (§7) answer 503 `{"error":"unavailable"}` on a relay that isn't a gateway. On the gateway they take `POST` only (405 otherwise) with a JSON body of at most 16 KiB (413 beyond, 400 `bad-request` if it isn't JSON). `/v1/push/send` answers 200 `{"result":"bad-request"}` when `cap` or `data` isn't a string. Every other path returns 404 (including upgrades). Request headers, the upgrade's included, must arrive within 10 s.
+
+### 3.8 Roles and pairs
+- **Allowed pairs.** Phone↔desktop, phone↔server and desktop↔server. Two devices with the same role never pair. Phones never offer, so a phone is always the peer.
+- **Owner and peer.** The host that made the offer is the owner. The device that presented the token is the peer, and is pending until the owner sends `authorize`. Both sides may `revoke`.
+- **Who hosts whom.** Of the two roles, the higher one in `phone < desktop < server` is the host. The host gets the other side's presence by itself (roster and `peer` messages). The other side `watch`es the host. This doesn't depend on who owns the pair.
+- **Desktop↔server, token flow.** The desktop sends `offer`. The server connects with `hello { role: "server", pair: { to: <desktopId>, token } }` and is pending. Right after `ready` it gets `peer online` for the desktop. The desktop sends `authorize { peer: <serverId>, pub }`.
+- **Desktop↔server, code flow.** The server sends `offer`. A connected desktop sends `{ "t":"pair", "to":<serverId>, "token":... }` and is pending, and the server gets `peer online` for it. The server sends `authorize { peer: <desktopId>, pub }`.
+- **Phone↔server.** It works exactly as phone↔desktop: the server offers and authorizes, and the phone pairs in its hello and watches the server.
+- The relay only routes. Proof of the pairing secret and the end-to-end handshake between the two devices belong to the channel above it (§2, §4 for phones).
+
+### 3.9 Binary frames
+- After `ready`, any client may send a binary WebSocket message `[16 bytes][envelope]`. The 16 bytes are the destination's device ID as raw bytes (the ID is their lowercase hex). The envelope is what `frame.data` would carry (§4.1), at least 1 byte. Routing, checks and errors are those of `frame`. Errors stay JSON `error` messages, with `to` set to the destination.
+- The relay delivers each frame in the format its receiver chose in hello. With `binary: true`, the receiver gets a binary message `[16 bytes of the source's ID][envelope]`. Without it (phones, older desktops), the receiver gets `{ "t":"frame", "from", "data" }` as before. The relay converts in both directions.
+- The 256 KiB cap applies to what a client sends. A binary frame converted to JSON grows to about 4/3 of its size, plus the JSON around it, and receivers must accept that. Phones only ever get envelopes of at most 65536 bytes (§4.2).
+- `encodeRelayBinaryFrame` and `decodeRelayBinaryFrame` in `protocol/ts` implement the format.
+
+### 3.10 Flow control
+- **Host budgets.** When a desktop's or server's message or byte budget (§3.5) runs out, the relay finishes the message in hand. It then stops reading that socket until both budgets are back. The client sees only TCP backpressure, and nothing is dropped or answered `rate`.
+- **IP budget.** Every connection from one IP, phones included, spends from a shared byte budget (§3.5) and is throttled the same way when it runs out.
+- **Backpressure.** After the relay queues a frame for a receiver, if the receiver's send queue (bytes the relay wrote that the OS hasn't taken) is over 4 MiB, the relay stops reading the sender's socket. When the queue is back at 1 MiB, every sender held back by that receiver is read again. Nothing is dropped. The queue can pass 4 MiB by at most one message per sender.
+- **Stalls.** Once a connection's send queue is over 4 MiB, for whatever reason, the connection has 15 s to drain it to 1 MiB. If it doesn't, the relay drops it: a receiver that keeps writing (pings, say) but never reads can't hold memory or its senders for longer than that. Its senders are read again, and their next frames to it get `offline`. A receiver must therefore read at least 3 MiB in 15 s whenever it is that far behind.
+- **Caps.** A receiver whose queue still passes 32 MiB (desktops, servers) or 8 MiB (phones) is disconnected at once. So are the largest queues when all queues together pass the relay-wide ceiling (§3.5). The held-back senders are read again.
+- **Head-of-line blocking.** Pausing a sender stops everything it sends, including frames to other peers and its pings, so its pongs arrive late. This is accepted in v1. The stall timeout bounds it at 15 s per receiver. A link that keeps at most about 1 MiB in flight never reaches the high-water mark in normal operation, unless several senders write to one slow receiver at once.
+- The relay doesn't apply its idle timeout to a socket it isn't reading. A client may get its pongs late while it is held back. It should only give up on the relay when nothing at all has arrived for the idle timeout.
+- **Roles are claimed, not proven.** Any key may say `desktop` or `server` and get the host budgets. It can still only reach devices it is paired with, so the most it can do is move its own data through the relay, within its connection, IP and pair budgets. An operator who needs less can lower the host and IP byte budgets (relay/README.md).
+
+### 3.11 Relays from before servers
+A client from this version can tell an old relay apart:
+- **Desktops** send `binary: true` in hello. An old relay ignores the field, so its `ready` has no `binary`. A desktop that gets `ready` without `binary: true` treats the relay as too old for servers ("This relay is too old for servers"). It sends no `pair`, `watch` or binary frames there, and keeps its phones working.
+- **Servers.** An old relay can't parse role `server`. It answers `{ "t":"error", "code":"auth", "message":"malformed hello" }` and closes with 4401. A server's hello is always signed correctly, so a server that gets `auth` treats the relay as too old.
+- On an old relay, `pair`, `authorize { peer }` and `revoke { peer }` get `bad-request`. A desktop's `watch` gets `forbidden`, and binary messages get `bad-request` ("text frames only").
+- From this version on, an unknown message type gets `unsupported`, and so does a hello with an unknown role (then 4401). A newer client that gets `unsupported` knows the relay is older than it is.
 
 ## 4. Channel between phone and desktop
 
@@ -338,12 +391,12 @@ Three parties are involved, and none of them reads the notification's content ex
 
 ### 7.2 Relay socket messages (extends §3)
 
-- Desktop → relay: `{ "t":"push", "id":<int ≥ 0>, "cap":"<string, 1–1024 chars>", "data":"<b64u, 1–3072 chars>" }`. From a phone it is `forbidden`.
+- Desktop or server → relay: `{ "t":"push", "id":<int ≥ 0>, "cap":"<string, 1–1024 chars>", "data":"<b64u, 1–3072 chars>" }`. From a phone it is `forbidden`.
 - Relay → desktop: `{ "t":"pushed", "id":<int>, "result":"ok"|"gone"|"rate"|"unavailable"|"bad-request"|"error" }`, one per `push`, in any order.
   - `gone`: the `cap` is stale (a newer registration, or APNs said the token is dead). The desktop forgets that phone's registration.
   - `rate`: the device is over its budget. `unavailable`: this relay has no gateway. `error`: the gateway or APNs failed; nothing is retried.
 - A relay that is not the gateway forwards as `POST <upstream>/v1/push/send` with body `{"cap","data"}`, and the gateway answers `200 {"result":…}` with the same values. A transport failure or timeout (10 s) is `error`. The upstream defaults to `https://relay.devtool.awantech.sk`, and an empty setting turns push off (`unavailable`).
-- A connection may have at most 64 pushes awaiting a result. Further pushes are answered `rate` right away.
+- A connection may have at most 64 pushes awaiting a result, and may push at most 50 times a second (burst 200). Further pushes are answered `rate` right away.
 - Clients from before M3 never send `push`. A client that gets a server message type it doesn't know ignores it.
 
 ### 7.3 Delivery (gateway → APNs)

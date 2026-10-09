@@ -11,12 +11,17 @@ import {
   encodeFrame,
   isValidCloseCode
 } from './frames.ts'
+import type { Frame } from './frames.ts'
 
 /**
  * A minimal RFC 6455 server connection over a socket handed over by `http`'s `upgrade`
  * event. It supports what the relay needs: text and binary messages (with
  * fragmentation), ping/pong, the close handshake and a hard payload cap. No extensions
  * and no subprotocols.
+ *
+ * For the relay's flow control (SPEC.md §3.10), `pause()` stops delivering messages at
+ * once (frames already parsed wait, in order) and stops reading the socket, and
+ * `onBufferBelow` reports when our send queue has drained.
  */
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
@@ -86,7 +91,7 @@ export class WebSocketConnection {
   readonly #parser: FrameParser
   readonly #maxPayload: number
   readonly #closeTimeoutMs: number
-  readonly #maxBufferedBytes: number
+  #maxBufferedBytes: number
   #handlers: WebSocketHandlers | null = null
   #state: State = 'open'
   #fragments: Buffer[] = []
@@ -99,6 +104,11 @@ export class WebSocketConnection {
   #closeNotified = false
   /** Set once we've failed the connection: the parser state is garbage from here on. */
   #failed = false
+  #paused = false
+  /** Frames parsed while paused, delivered in order on `resume`. */
+  #held: Frame[] = []
+  #drainWatch: { bytes: number; fn: () => void } | null = null
+  readonly #afterWrite = (): void => this.#checkDrain()
 
   constructor(socket: Duplex, head: Buffer, options: WebSocketOptions) {
     this.#socket = socket
@@ -121,6 +131,45 @@ export class WebSocketConnection {
 
   get readyState(): State {
     return this.#state
+  }
+
+  /** Bytes we've written that the OS hasn't taken yet. */
+  get bufferedAmount(): number {
+    return this.#socket.writableLength
+  }
+
+  /** Changes the send-queue cap; a queue already past it drops the socket. */
+  setMaxBufferedBytes(bytes: number): void {
+    this.#maxBufferedBytes = bytes
+    if (this.#socket.writableLength > bytes) this.#socket.destroy()
+  }
+
+  /** Calls `fn` once, as soon as the send queue is at or below `bytes`. Replaces an earlier watch. */
+  onBufferBelow(bytes: number, fn: () => void): void {
+    this.#drainWatch = { bytes, fn }
+    this.#checkDrain()
+  }
+
+  /** Stops delivering messages and reading the socket. Idempotent. */
+  pause(): void {
+    if (this.#paused) return
+    this.#paused = true
+    this.#socket.pause()
+  }
+
+  /** Delivers held frames (unless a handler pauses again), then reads the socket again. */
+  resume(): void {
+    if (!this.#paused) return
+    this.#paused = false
+    while (this.#held.length > 0 && !this.#paused) {
+      const frame = this.#held.shift()!
+      if (this.#failed || this.#socket.destroyed) {
+        this.#held = []
+        return
+      }
+      this.#onFrame(frame.fin, frame.opcode, frame.payload)
+    }
+    if (!this.#paused) this.#socket.resume()
   }
 
   /** Starts delivering events. Bytes that arrive before this are buffered. */
@@ -165,8 +214,15 @@ export class WebSocketConnection {
 
   #write(bytes: Buffer): void {
     if (this.#socket.destroyed) return
-    this.#socket.write(bytes)
+    this.#socket.write(bytes, this.#afterWrite)
     if (this.#socket.writableLength > this.#maxBufferedBytes) this.#socket.destroy()
+  }
+
+  #checkDrain(): void {
+    const watch = this.#drainWatch
+    if (!watch || this.#socket.writableLength > watch.bytes) return
+    this.#drainWatch = null
+    watch.fn()
   }
 
   #fail(code: number, reason: string): void {
@@ -201,7 +257,8 @@ export class WebSocketConnection {
     }
     for (const frame of frames) {
       if (this.#failed || this.#socket.destroyed) return
-      this.#onFrame(frame.fin, frame.opcode, frame.payload)
+      if (this.#paused) this.#held.push(frame)
+      else this.#onFrame(frame.fin, frame.opcode, frame.payload)
     }
   }
 
