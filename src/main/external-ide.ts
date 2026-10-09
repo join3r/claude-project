@@ -298,21 +298,28 @@ export function isVsCodeFamilyEditor(editor: Pick<ExternalEditor, 'name' | 'comm
     || /visual studio code|cursor\.app|vscodium|windsurf/i.test(editor.command)
 }
 
-/** `vscode-remote://ssh-remote+<alias><folder>`, each path segment percent-encoded. */
+/**
+ * `vscode-remote://ssh-remote+<alias><folder>`. The folder is the server's
+ * project directory (server data): every segment is percent-encoded, so spaces,
+ * `#`, `?`, `%` and even newlines stay inside the path.
+ */
 export function sshRemoteFolderUri(alias: string, folder: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(alias)) throw new Error(`Bad ssh host alias ${alias}`)
-  if (!folder.startsWith('/') || /[\0\n\r]/.test(folder)) throw new Error('The server folder must be an absolute path')
+  if (!/^devtool-[0-9a-f]{12}$/.test(alias)) throw new Error(`Bad ssh host alias ${alias}`)
+  if (!folder.startsWith('/') || folder.includes('\0') || folder.length > 4096) throw new Error('The server folder must be an absolute path')
   return `vscode-remote://ssh-remote+${alias}${folder.split('/').map(encodeURIComponent).join('/')}`
 }
 
 /**
  * Opens `folder` on a DevTool server in a VS Code-family editor, over the ssh
  * host `alias` (DevTool's ssh config): `--folder-uri vscode-remote://ssh-remote+…`.
- * The editor command is found as for a local folder.
+ * The editor command is found as for a local folder, and spawned with an
+ * argument array: no shell ever sees the server's path.
  */
 export function prepareOpenRemoteSpawn(editor: ExternalEditor, alias: string, folder: string, deps: ExternalIdeDeps = {}): PreparedSpawn {
   const platform = deps.platform ?? process.platform
   const existsSync = deps.existsSync ?? fs.existsSync
+  // A .cmd shim would put the server's path through cmd.exe; v1 has no Windows here anyway.
+  if (platform === 'win32') throw new Error('Open in IDE for DevTool server projects needs macOS or Linux on this computer.')
   if (!isVsCodeFamilyEditor(editor)) {
     throw new Error(`Open in IDE on a DevTool server works with VS Code and Cursor (Remote - SSH), not ${editor.name || editor.command}.`)
   }

@@ -160,10 +160,10 @@ describe.skipIf(process.platform === 'win32')('Open in IDE for server projects',
     const sshDir = path.join(r.configDir, 'ssh')
     const socket = r.ide.socketPath(SERVER)
     const config = fs.readFileSync(path.join(sshDir, 'config'), 'utf8')
-    expect(config).toContain('Host devtool-box\n  HostName box-host\n  User dev\n')
+    expect(config).toContain('Host devtool-abababababab\n  HostName devtool-abababababab.invalid\n  User dev\n')
     expect(config).toContain(`  ProxyCommand /usr/bin/nc -U ${socket}\n`)
-    expect(config).toContain(`  IdentityFile ${path.join(sshDir, 'id_ed25519')}\n  IdentitiesOnly yes\n  HostKeyAlias devtool-box\n`)
-    expect(fs.readFileSync(path.join(sshDir, 'known_hosts'), 'utf8')).toBe('devtool-box ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKey\n')
+    expect(config).toContain(`  IdentityFile ${path.join(sshDir, 'id_ed25519')}\n  IdentitiesOnly yes\n  HostKeyAlias devtool-abababababab\n`)
+    expect(fs.readFileSync(path.join(sshDir, 'known_hosts'), 'utf8')).toBe('devtool-abababababab ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKey\n')
     expect(mode(sshDir)).toBe(0o700)
     expect(mode(path.join(sshDir, 'config'))).toBe(0o600)
     expect(mode(path.dirname(socket))).toBe(0o700)
@@ -179,9 +179,24 @@ describe.skipIf(process.platform === 'win32')('Open in IDE for server projects',
     await r.ide.setup(SERVER, { include: true, key: true })
     await r.ide.open(editor, SERVER, '/home/dev/my app')
     await r.ide.open(editor, SERVER, '/home/dev/my app')
-    expect(r.launched).toEqual([{ alias: 'devtool-box', folder: '/home/dev/my app' }, { alias: 'devtool-box', folder: '/home/dev/my app' }])
+    expect(r.launched).toEqual([{ alias: 'devtool-abababababab', folder: '/home/dev/my app' }, { alias: 'devtool-abababababab', folder: '/home/dev/my app' }])
     expect(r.calls.filter((c) => c === 'host-ssh-authorize-key')).toHaveLength(3)
     expect(fs.readFileSync(path.join(r.serverHome.home, '.ssh', 'authorized_keys'), 'utf8').trim().split('\n')).toHaveLength(1)
+  })
+
+  it('refuses a server that reports a user name that isn\'t plain, writing no Host block', async () => {
+    const r = await rig({ sshdPort: await fakeSshd() })
+    r.state.servers = [status({ host: { os: 'linux', arch: 'arm64', hostname: 'x', node: '24', user: 'dev\nProxyCommand touch /tmp/pwned' } })]
+    await expect(r.ide.setup(SERVER, { include: true, key: true })).rejects.toThrow(/isn't a plain user name/)
+    expect(fs.existsSync(path.join(r.configDir, 'ssh', 'config'))).toBe(false)
+    expect(r.ide.aliasOf(SERVER)).toBeUndefined()
+
+    // The same from the authorize answer itself.
+    const lying = await rig({ sshdPort: await fakeSshd() })
+    lying.state.servers = [status({ host: null })]
+    lying.serverHome.user = 'dev\nMatch exec "touch /tmp/pwned"'
+    await expect(lying.ide.setup(SERVER, { include: true, key: true })).rejects.toThrow(/isn't a plain user name/)
+    expect(fs.existsSync(path.join(lying.configDir, 'ssh', 'config'))).toBe(false)
   })
 
   it('keeps an alias when the server is renamed, and survives a restart of DevTool', async () => {
@@ -189,7 +204,7 @@ describe.skipIf(process.platform === 'win32')('Open in IDE for server projects',
     await r.ide.setup(SERVER, { include: true, key: true })
     r.state.servers = [status({ name: 'Renamed' })]
     await r.ide.open(editor, SERVER, '/srv')
-    expect(r.launched.at(-1)?.alias).toBe('devtool-box')
+    expect(r.launched.at(-1)?.alias).toBe('devtool-abababababab')
     await r.ide.stop()
     const again = new ServerIde({
       configDir: r.configDir, userSshConfig: r.userConfig, home: '/nowhere', platform: 'darwin',
@@ -201,7 +216,7 @@ describe.skipIf(process.platform === 'win32')('Open in IDE for server projects',
     })
     cleanups.push(() => again.stop())
     await again.start()
-    expect(again.aliasOf(SERVER)).toBe('devtool-box')
+    expect(again.aliasOf(SERVER)).toBe('devtool-abababababab')
     expect(fs.lstatSync(again.socketPath(SERVER)).isSocket()).toBe(true)
   })
 

@@ -5,24 +5,28 @@ import { atomicWriteFileSync } from '../atomic-write'
 /**
  * Open in IDE on a DevTool server (plan step 9), the ssh config side.
  *
- * DevTool keeps its own `<configDir>/ssh/config` with one `Host devtool-<slug>`
+ * DevTool keeps its own `<configDir>/ssh/config` with one `Host devtool-<id12>`
  * per server, whose ProxyCommand reaches the desktop's socket for that server
  * (and through it, the server's sshd). The user's `~/.ssh/config` gets a single
  * `Include` of that file at the top, so VS Code, Cursor and plain `ssh` see the
  * hosts. Both writes are idempotent; the user's file is backed up before the
  * first change.
+ *
+ * A server's words never reach the config as they are: an ssh config line can
+ * run commands (ProxyCommand, LocalCommand, Match exec), so a server that could
+ * smuggle a newline in would run code here. The alias and HostName come from
+ * the server's id, the paths are this desktop's, the user must be a plain POSIX
+ * login, and the whole file is checked line by line before it is written
+ * ({@link assertSafeSshConfig}).
  */
 
 /** Marks the lines DevTool put in the user's ssh config. */
 export const INCLUDE_COMMENT = '# Added by DevTool: Open in IDE on DevTool servers (Host devtool-*)'
 
-/** A server's entry in DevTool's ssh config. */
+/** A server's entry in DevTool's ssh config (`<configDir>/ssh/hosts.json`). */
 export interface SshHostEntry {
   serverId: string
-  /** `devtool-<slug>`: what VS Code's `ssh-remote+` names. */
-  alias: string
-  /** The server's hostname, from its handshake (cosmetic: the ProxyCommand does the connecting). */
-  hostName: string
+  /** The login on the server; a plain POSIX user name ({@link isPlainUserName}). */
   user: string
   /** sshd's host keys (`<type> <base64>`), pinned in DevTool's known_hosts under the alias. */
   hostKeys: string[]
@@ -35,68 +39,109 @@ export interface SshConfigPaths {
   knownHostsFile: string
 }
 
+const SERVER_ID = /^[0-9a-f]{32}$/
+const ALIAS = /^devtool-[0-9a-f]{12}$/
+/** POSIX-ish login names (useradd's default rule), with Samba's trailing `$`. */
+const PLAIN_USER = /^[a-z_][a-z0-9_-]{0,31}\$?$/i
 const PLAIN_SSH_WORD = /^[A-Za-z0-9_./:@+,=~-]+$/
+/** What a desktop path may hold to be quoted safely for ssh_config and its shell. */
+const QUOTABLE_PATH = /^[^\0-\x1f\x7f"\\]+$/
+const KEY_LINE = /^(ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa) [A-Za-z0-9+/]+={0,3}$/
+const EMITTED = new Set(['HostName', 'User', 'ProxyCommand', 'IdentityFile', 'IdentitiesOnly', 'HostKeyAlias', 'UserKnownHostsFile', 'StrictHostKeyChecking'])
+const HEADER = [
+  '# Written by DevTool for Open in IDE on DevTool servers. DevTool rewrites this file;',
+  '# edits are lost. Each host reaches a server\'s sshd through the running DevTool.'
+]
 
-/** One ssh_config argument: as is when plain, else double-quoted. `%` is doubled (ssh expands tokens). */
+/** `devtool-<first 12 hex of the server id>`: the Host alias, never the server's name. */
+export function serverAlias(serverId: string): string {
+  if (!SERVER_ID.test(serverId)) throw new Error('Not a server id')
+  return `devtool-${serverId.slice(0, 12)}`
+}
+
+/** A placeholder HostName: the ProxyCommand does the connecting, and `.invalid` never resolves. */
+export function placeholderHostName(serverId: string): string {
+  return `${serverAlias(serverId)}.invalid`
+}
+
+export function isPlainUserName(user: string): boolean {
+  return PLAIN_USER.test(user)
+}
+
+function assertDesktopPath(value: string): void {
+  if (!QUOTABLE_PATH.test(value)) throw new Error(`DevTool can't use the path ${JSON.stringify(value)} in an ssh config`)
+}
+
+/** One ssh_config argument (a desktop path): as is when plain, else double-quoted. `%` is doubled (ssh expands tokens). */
 export function sshConfigWord(value: string): string {
-  if (/["\n\r\0]/.test(value)) throw new Error(`Can't put ${JSON.stringify(value)} in an ssh config`)
+  assertDesktopPath(value)
   const escaped = value.replace(/%/g, '%%')
   return PLAIN_SSH_WORD.test(value) ? escaped : `"${escaped}"`
 }
 
-/** One word for the shell ssh runs a ProxyCommand with. */
+/** One word (a desktop path) for the shell ssh runs a ProxyCommand with. */
 export function shellWord(value: string): string {
-  if (/[\n\r\0]/.test(value)) throw new Error(`Can't put ${JSON.stringify(value)} in a ProxyCommand`)
+  assertDesktopPath(value)
   const escaped = value.replace(/%/g, '%%')
   return PLAIN_SSH_WORD.test(value) ? escaped : `'${escaped.replace(/'/g, `'\\''`)}'`
 }
 
-/** `devtool-<slug>` from the server's name, unique among `taken`. */
-export function aliasForServer(name: string, serverId: string, taken: Iterable<string> = []): string {
-  const slug = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32).replace(/-+$/, '')
-  const base = `devtool-${slug || serverId.slice(0, 8)}`
-  const used = new Set(taken)
-  if (!used.has(base)) return base
-  const withId = `${base}-${serverId.slice(0, 6)}`
-  if (!used.has(withId)) return withId
-  return `devtool-${serverId}`
-}
-
-/** The `Host` block for one server. */
+/** The `Host` block for one server. `proxyCommand` is built from desktop paths only ({@link shellWord}). */
 export function renderHostBlock(entry: SshHostEntry, proxyCommand: string, paths: SshConfigPaths): string {
-  if (!/^devtool-[a-z0-9-]+$/.test(entry.alias)) throw new Error(`Bad ssh alias ${entry.alias}`)
+  const alias = serverAlias(entry.serverId)
+  if (!isPlainUserName(entry.user)) throw new Error(`${JSON.stringify(entry.user)} is not a plain user name`)
+  if (/[\0-\x1f\x7f]/.test(proxyCommand)) throw new Error('The ProxyCommand has control characters')
   const lines = [
     `# DevTool server ${entry.serverId}`,
-    `Host ${entry.alias}`,
-    `  HostName ${sshConfigWord(entry.hostName || entry.alias)}`,
-    ...(entry.user ? [`  User ${sshConfigWord(entry.user)}`] : []),
+    `Host ${alias}`,
+    `  HostName ${placeholderHostName(entry.serverId)}`,
+    `  User ${entry.user}`,
     `  ProxyCommand ${proxyCommand}`,
     `  IdentityFile ${sshConfigWord(paths.identityFile)}`,
     '  IdentitiesOnly yes',
     // Host keys are pinned per alias in DevTool's own known_hosts, never the user's.
-    `  HostKeyAlias ${entry.alias}`,
+    `  HostKeyAlias ${alias}`,
     `  UserKnownHostsFile ${sshConfigWord(paths.knownHostsFile)}`,
     '  StrictHostKeyChecking accept-new'
   ]
   return lines.join('\n') + '\n'
 }
 
-/** DevTool's whole ssh config: a header and one block per server. */
-export function renderDevtoolSshConfig(blocks: string[]): string {
-  return [
-    '# Written by DevTool for Open in IDE on DevTool servers. DevTool rewrites this file;',
-    '# edits are lost. Each host reaches a server\'s sshd through the running DevTool.',
-    '',
-    ...blocks.map((block) => block)
-  ].join('\n')
+/**
+ * Checks DevTool's ssh config before it is written: only the header, the
+ * per-server comment, `Host devtool-<id12>` (each once) and the directives
+ * {@link renderHostBlock} emits, one per line, with no control characters.
+ */
+export function assertSafeSshConfig(text: string): void {
+  const aliases = new Set<string>()
+  for (const line of text.split('\n')) {
+    if (/[\0-\x08\x0b-\x1f\x7f]/.test(line)) throw new Error('The ssh config has control characters')
+    if (line === '' || HEADER.includes(line) || /^# DevTool server [0-9a-f]{32}$/.test(line)) continue
+    const host = /^Host (\S+)$/.exec(line)
+    if (host) {
+      if (!ALIAS.test(host[1]) || aliases.has(host[1])) throw new Error(`Unexpected Host line ${JSON.stringify(line)}`)
+      aliases.add(host[1])
+      continue
+    }
+    const directive = /^ {2}([A-Za-z]+) (\S.*)$/.exec(line)
+    if (!directive || !EMITTED.has(directive[1]) || aliases.size === 0) throw new Error(`Unexpected ssh config line ${JSON.stringify(line)}`)
+    if (directive[1] === 'User' && !isPlainUserName(directive[2])) throw new Error(`Unexpected ssh config line ${JSON.stringify(line)}`)
+  }
 }
 
-/** DevTool's known_hosts: each server's sshd keys under its alias. */
+/** DevTool's whole ssh config: a header and one block per server, checked. */
+export function renderDevtoolSshConfig(blocks: string[]): string {
+  const text = [...HEADER, '', ...blocks].join('\n')
+  assertSafeSshConfig(text)
+  return text
+}
+
+/** DevTool's known_hosts: each server's sshd keys under its alias; anything that isn't a plain key line is left out. */
 export function renderKnownHosts(entries: SshHostEntry[]): string {
   const lines: string[] = []
   for (const entry of entries) {
     for (const key of entry.hostKeys) {
-      if (/^[a-z0-9-]+ [A-Za-z0-9+/]+={0,3}$/.test(key)) lines.push(`${entry.alias} ${key}`)
+      if (KEY_LINE.test(key)) lines.push(`${serverAlias(entry.serverId)} ${key}`)
     }
   }
   return lines.length > 0 ? lines.join('\n') + '\n' : ''

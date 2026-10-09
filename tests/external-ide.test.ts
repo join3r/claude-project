@@ -228,19 +228,32 @@ describe('opening a DevTool server\'s folder over SSH (plan step 9)', () => {
   const mac = { platform: 'darwin' as const, env: { PATH: '/usr/bin' }, existsSync: (p: string) => p.startsWith('/Applications/') }
 
   it('builds the vscode-remote URI, percent-encoding each path segment', () => {
-    expect(sshRemoteFolderUri('devtool-box', '/home/dev/my app#1')).toBe('vscode-remote://ssh-remote+devtool-box/home/dev/my%20app%231')
-    expect(() => sshRemoteFolderUri('devtool-box', 'relative')).toThrow(/absolute/)
+    expect(sshRemoteFolderUri('devtool-0123456789ab', '/home/dev/my app#1')).toBe('vscode-remote://ssh-remote+devtool-0123456789ab/home/dev/my%20app%231')
+    // A hostile server directory stays one path: ? # % and newlines are encoded, nothing splits.
+    expect(sshRemoteFolderUri('devtool-0123456789ab', '/srv/a b/q?x=1#frag/100%/line\nbreak'))
+      .toBe('vscode-remote://ssh-remote+devtool-0123456789ab/srv/a%20b/q%3Fx%3D1%23frag/100%25/line%0Abreak')
+    expect(() => sshRemoteFolderUri('devtool-0123456789ab', 'relative')).toThrow(/absolute/)
+    expect(() => sshRemoteFolderUri('devtool-0123456789ab', '/x\0y')).toThrow(/absolute/)
     expect(() => sshRemoteFolderUri('bad host', '/x')).toThrow()
+    expect(() => sshRemoteFolderUri('devtool-box', '/x')).toThrow()
   })
 
   it('opens VS Code and Cursor with --folder-uri, extra args first', () => {
     const code = { id: 'c', name: 'Visual Studio Code', command: '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code', extraArgs: '--new-window' }
-    expect(prepareOpenRemoteSpawn(code, 'devtool-box', '/srv/app', mac)).toEqual({
+    expect(prepareOpenRemoteSpawn(code, 'devtool-0123456789ab', '/srv/app', mac)).toEqual({
       file: code.command,
-      args: ['--new-window', '--folder-uri', 'vscode-remote://ssh-remote+devtool-box/srv/app']
+      args: ['--new-window', '--folder-uri', 'vscode-remote://ssh-remote+devtool-0123456789ab/srv/app']
     })
     const cursor = { id: 'u', name: 'Cursor', command: '/Applications/Cursor.app/Contents/MacOS/Cursor', extraArgs: '' }
-    expect(prepareOpenRemoteSpawn(cursor, 'devtool-box', '/srv/app', mac).args).toEqual(['--folder-uri', 'vscode-remote://ssh-remote+devtool-box/srv/app'])
+    expect(prepareOpenRemoteSpawn(cursor, 'devtool-0123456789ab', '/srv/app', mac).args).toEqual(['--folder-uri', 'vscode-remote://ssh-remote+devtool-0123456789ab/srv/app'])
+  })
+
+  it('passes the URI as one argument, never through a shell, and refuses Windows', () => {
+    const code = { id: 'c', name: 'Visual Studio Code', command: '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code', extraArgs: '' }
+    const prepared = prepareOpenRemoteSpawn(code, 'devtool-0123456789ab', '/srv/$(touch pwned); x', mac)
+    expect(prepared.file).toBe(code.command)
+    expect(prepared.args).toEqual(['--folder-uri', 'vscode-remote://ssh-remote+devtool-0123456789ab/srv/%24(touch%20pwned)%3B%20x'])
+    expect(() => prepareOpenRemoteSpawn(code, 'devtool-0123456789ab', '/srv', { ...mac, platform: 'win32' })).toThrow(/macOS or Linux/)
   })
 
   it('refuses editors without Remote - SSH', () => {
@@ -248,6 +261,6 @@ describe('opening a DevTool server\'s folder over SSH (plan step 9)', () => {
     expect(isVsCodeFamilyEditor({ name: 'My editor', command: '/usr/local/bin/codium' })).toBe(true)
     expect(isVsCodeFamilyEditor({ name: 'Zed', command: '/usr/local/bin/zed' })).toBe(false)
     expect(isVsCodeFamilyEditor({ name: 'Xcode', command: '/usr/bin/xed' })).toBe(false)
-    expect(() => prepareOpenRemoteSpawn({ id: 'z', name: 'Zed', command: '/usr/local/bin/zed', extraArgs: '' }, 'devtool-box', '/srv', mac)).toThrow(/VS Code and Cursor/)
+    expect(() => prepareOpenRemoteSpawn({ id: 'z', name: 'Zed', command: '/usr/local/bin/zed', extraArgs: '' }, 'devtool-0123456789ab', '/srv', mac)).toThrow(/VS Code and Cursor/)
   })
 })

@@ -5,11 +5,14 @@ import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   INCLUDE_COMMENT,
-  aliasForServer,
+  assertSafeSshConfig,
   ensureUserSshInclude,
   hasInclude,
+  isPlainUserName,
+  renderDevtoolSshConfig,
   renderHostBlock,
   renderKnownHosts,
+  serverAlias,
   shellWord,
   sshConfigWord,
   type SshHostEntry
@@ -29,43 +32,75 @@ function tempHome(): string {
 }
 
 const mode = (file: string) => fs.statSync(file).mode & 0o777
-const entry: SshHostEntry = { serverId: 'ab'.repeat(16), alias: 'devtool-box', hostName: 'box', user: 'dev', hostKeys: ['ssh-ed25519 AAAAC3Nza', 'ssh-rsa AAAAB3=='] }
+const ID = '0123456789abcdef'.repeat(2)
+const entry: SshHostEntry = { serverId: ID, user: 'dev', hostKeys: ['ssh-ed25519 AAAAC3Nza', 'ssh-rsa AAAAB3=='] }
 const paths = { identityFile: '/Users/me/.devtool/ssh/id_ed25519', knownHostsFile: '/Users/me/.devtool/ssh/known_hosts' }
 
 describe('ssh config for Open in IDE', () => {
-  it('names hosts devtool-<slug>, unique', () => {
-    expect(aliasForServer('My Box (prod)', 'ab'.repeat(16))).toBe('devtool-my-box-prod')
-    expect(aliasForServer('Ünïcode', 'ab'.repeat(16))).toBe('devtool-unicode')
-    expect(aliasForServer('!!!', 'cd'.repeat(16))).toBe('devtool-cdcdcdcd')
-    expect(aliasForServer('box', 'ef'.repeat(16), ['devtool-box'])).toBe('devtool-box-efefef')
-    expect(aliasForServer('x'.repeat(80), 'ab'.repeat(16))).toBe(`devtool-${'x'.repeat(32)}`)
+  it('names hosts after the server id, never its name', () => {
+    expect(serverAlias(ID)).toBe('devtool-0123456789ab')
+    expect(() => serverAlias('box\nProxyCommand evil')).toThrow()
   })
 
-  it('quotes words for ssh and its shell, and doubles % (ssh expands tokens)', () => {
+  it('quotes desktop paths for ssh and its shell, doubles % (ssh expands tokens), and refuses what it can\'t quote', () => {
     expect(sshConfigWord('/a/b')).toBe('/a/b')
     expect(sshConfigWord('/a b/c%d')).toBe('"/a b/c%%d"')
-    expect(() => sshConfigWord('a"b')).toThrow()
     expect(shellWord('/usr/bin/nc')).toBe('/usr/bin/nc')
     expect(shellWord("/it's here")).toBe("'/it'\\''s here'")
+    for (const bad of ['a"b', 'a\nb', 'a\rb', 'a\\b', 'a\u0000b', 'a\u001bb']) {
+      expect(() => sshConfigWord(bad), JSON.stringify(bad)).toThrow()
+      expect(() => shellWord(bad), JSON.stringify(bad)).toThrow()
+    }
+  })
+
+  it('takes only plain POSIX user names from a server', () => {
+    for (const ok of ['dev', 'join3r', '_svc', 'a-b_c', 'machine$', 'Dev']) expect(isPlainUserName(ok), ok).toBe(true)
+    for (const bad of ['', '3dev', 'dev\nProxyCommand evil', 'dev ProxyCommand', 'de%h', '"dev"', 'dév', 'a'.repeat(40), 'dev;rm', '-oProxyCommand=x']) {
+      expect(isPlainUserName(bad), JSON.stringify(bad)).toBe(false)
+    }
+  })
+
+  it('refuses or neutralises hostile server values in the rendered config', () => {
+    const hostile = [
+      'dev\nProxyCommand touch /tmp/pwned',
+      'dev\n  LocalCommand touch /tmp/pwned',
+      'dev\nMatch exec "touch /tmp/pwned"',
+      'dev\nInclude /tmp/evil',
+      'de"v',
+      'de%hv',
+      'dév',
+      'dev\r\n  PermitLocalCommand yes'
+    ]
+    for (const user of hostile) {
+      expect(() => renderHostBlock({ ...entry, user }, '/usr/bin/nc -U /s.sock', paths), JSON.stringify(user)).toThrow()
+    }
+    // Host keys from the server only ever become `<alias> <type> <base64>` lines.
+    expect(renderKnownHosts([{ ...entry, hostKeys: ['ssh-ed25519 AAAA\n@cert-authority * ssh-rsa AAAA', '@revoked ssh-rsa AAAA', 'ssh-ed25519 AAAA=='] }]))
+      .toBe('devtool-0123456789ab ssh-ed25519 AAAA==\n')
+    // And the whole file is checked line by line.
+    const good = renderHostBlock(entry, '/usr/bin/nc -U /s.sock', paths)
+    expect(() => renderDevtoolSshConfig([good])).not.toThrow()
+    for (const extra of ['  LocalCommand touch /tmp/pwned', 'Match exec "true"', 'Include /tmp/evil', '  PermitLocalCommand yes', 'Host *', `Host ${serverAlias(ID)}`, '  User dev\u0007', '  User de"v']) {
+      expect(() => assertSafeSshConfig(`${good}${extra}\n`), JSON.stringify(extra)).toThrow()
+    }
   })
 
   it('writes a Host block that logs in with DevTool\'s key and pins the host keys under the alias', () => {
     const block = renderHostBlock(entry, '/usr/bin/nc -U /Users/me/.devtool/servers/x/ssh.sock', paths)
     expect(block).toBe([
       `# DevTool server ${entry.serverId}`,
-      'Host devtool-box',
-      '  HostName box',
+      'Host devtool-0123456789ab',
+      '  HostName devtool-0123456789ab.invalid',
       '  User dev',
       '  ProxyCommand /usr/bin/nc -U /Users/me/.devtool/servers/x/ssh.sock',
       '  IdentityFile /Users/me/.devtool/ssh/id_ed25519',
       '  IdentitiesOnly yes',
-      '  HostKeyAlias devtool-box',
+      '  HostKeyAlias devtool-0123456789ab',
       '  UserKnownHostsFile /Users/me/.devtool/ssh/known_hosts',
       '  StrictHostKeyChecking accept-new',
       ''
     ].join('\n'))
-    expect(renderKnownHosts([entry])).toBe('devtool-box ssh-ed25519 AAAAC3Nza\ndevtool-box ssh-rsa AAAAB3==\n')
-    expect(() => renderHostBlock({ ...entry, alias: 'evil\nHost *' }, 'x', paths)).toThrow()
+    expect(renderKnownHosts([entry])).toBe('devtool-0123456789ab ssh-ed25519 AAAAC3Nza\ndevtool-0123456789ab ssh-rsa AAAAB3==\n')
   })
 
   it('finds an existing Include in any form ssh reads', () => {
@@ -128,12 +163,13 @@ describe('ssh config for Open in IDE', () => {
     ensureUserSshInclude(userConfig, devtoolConfig, { home })
     let out: string
     try {
-      out = execFileSync('ssh', ['-G', '-F', userConfig, 'devtool-box'], { encoding: 'utf8' })
+      out = execFileSync('ssh', ['-G', '-F', userConfig, 'devtool-0123456789ab'], { encoding: 'utf8' })
     } catch {
       return // no ssh client here
     }
     expect(out).toMatch(/^user dev$/m)
-    expect(out).toMatch(/^hostkeyalias devtool-box$/m)
+    expect(out).toMatch(/^hostkeyalias devtool-0123456789ab$/m)
+    expect(out).toMatch(/^hostname devtool-0123456789ab\.invalid$/m)
     expect(out).toMatch(new RegExp(`^proxycommand /usr/bin/nc -U ${path.join(home, 'ssh.sock').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'))
     expect(out).toMatch(/^serveraliveinterval 15$/m)
   })

@@ -9,7 +9,8 @@ import { atomicWriteFileSync } from '../atomic-write'
 import { TcpConnectError, type TcpTarget } from '../host/link/tcp-stream'
 import type { LinkStream } from '../host/link/stream'
 import {
-  aliasForServer,
+  isPlainUserName,
+  serverAlias,
   ensureUserSshInclude,
   hasInclude,
   renderDevtoolSshConfig,
@@ -73,9 +74,12 @@ function isEntry(value: unknown): value is SshHostEntry {
   if (typeof value !== 'object' || value === null) return false
   const o = value as Record<string, unknown>
   return typeof o.serverId === 'string' && /^[0-9a-f]{32}$/.test(o.serverId)
-    && typeof o.alias === 'string' && /^devtool-[a-z0-9-]+$/.test(o.alias)
-    && typeof o.hostName === 'string' && typeof o.user === 'string'
+    && typeof o.user === 'string' && isPlainUserName(o.user)
     && Array.isArray(o.hostKeys) && o.hostKeys.every((k) => typeof k === 'string')
+}
+
+function notPlainUser(serverName: string): string {
+  return `Open in IDE can't log in on ${serverName}: the user it runs as isn't a plain user name.`
 }
 
 /** `devtool-<desktop name>`: the key's comment, so the server's owner can tell whose it is. */
@@ -156,8 +160,9 @@ export class ServerIde {
     if (state.needsInclude || state.needsKey) throw new Error(`Open in IDE on ${server.name} isn't set up yet`)
     await this.probeSshd(serverId, server.name)
     const entry = await this.authorize(serverId, server.name)
-    await this.deps.launch(editor, entry.alias, folder)
-    this.deps.log(`serverIde opened server=${serverId} alias=${entry.alias} folder=${folder}`)
+    const alias = serverAlias(entry.serverId)
+    await this.deps.launch(editor, alias, folder)
+    this.deps.log(`serverIde opened server=${serverId} alias=${alias}`)
   }
 
   /** Where this run listens for a server's ssh connections. */
@@ -165,9 +170,9 @@ export class ServerIde {
     return this.sockets.socketPath(serverId)
   }
 
-  /** The ssh alias of a set-up server. */
+  /** The ssh alias of a set-up server (`devtool-<id12>`). */
   aliasOf(serverId: string): string | undefined {
-    return this.entries.find((e) => e.serverId === serverId)?.alias
+    return this.entries.some((e) => e.serverId === serverId) ? serverAlias(serverId) : undefined
   }
 
   /**
@@ -279,19 +284,15 @@ export class ServerIde {
 
   /** Our key on the server (idempotent), and the server's entry and pinned host keys here. */
   private async authorize(serverId: string, serverName: string): Promise<SshHostEntry> {
+    const reported = this.deps.servers().servers.find((s) => s.id === serverId)?.host?.user
+    if (reported && !isPlainUserName(reported)) throw new Error(notPlainUser(serverName))
     const publicKey = await this.ensureKey()
     const answer = await this.deps.call(serverId, 'host-ssh-authorize-key', [serverId, { publicKey, comment: desktopKeyComment(this.deps.desktopName()) }])
     if (!isAuthorizeAnswer(answer)) throw new Error(`${serverName} gave no answer about DevTool's key`)
     if (answer.added) this.deps.log(`serverIde key authorized on server=${serverId} user=${answer.user}`)
-    const status = this.deps.servers().servers.find((s) => s.id === serverId)
-    const existing = this.entries.find((e) => e.serverId === serverId)
-    const entry: SshHostEntry = {
-      serverId,
-      alias: existing?.alias ?? aliasForServer(serverName, serverId, this.entries.map((e) => e.alias)),
-      hostName: status?.host?.hostname ?? existing?.hostName ?? '',
-      user: answer.user || status?.host?.user || existing?.user || '',
-      hostKeys: answer.hostKeys
-    }
+    // The server says who it runs as; only a plain login name goes into the ssh config.
+    if (!isPlainUserName(answer.user)) throw new Error(notPlainUser(serverName))
+    const entry: SshHostEntry = { serverId, user: answer.user, hostKeys: answer.hostKeys.slice(0, 8) }
     this.entries = [...this.entries.filter((e) => e.serverId !== serverId), entry]
     this.saveRegistry()
     await this.writeConfig()
