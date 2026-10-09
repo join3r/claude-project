@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import type { MobileConnectionState, MobileState, MobileUpdateSide } from '../../../shared/mobile'
-import { isUnencryptedRemoteRelay, isValidRelayUrl, normalizeRelayUrl, UNENCRYPTED_RELAY_WARNING } from '../../../shared/mobile'
-import { Field, FormGroup, Group, GroupRow, GrpHead, HelperText, InlineConfirm, LinkBtn, SetBlock, Switch } from '../ui'
+import { FormGroup, Group, GroupRow, GrpHead, HelperText, InlineConfirm, LinkBtn, SetBlock, Switch } from '../ui'
+import { RelayLine } from './RelaySettings'
 import {
   formatCountdown,
   formatLastSeen,
@@ -42,10 +42,8 @@ function errorMessage(err: unknown): string {
   return raw.replace(/^Error invoking remote method '[^']+': (\w+Error: )?/, '')
 }
 
-export default function MobileSettings(): React.ReactElement {
+export default function MobileSettings({ onOpenRelay }: { onOpenRelay: () => void }): React.ReactElement {
   const [state, setState] = useMobileState()
-  const [relayDraft, setRelayDraft] = useState<string | null>(null)
-  const [relayError, setRelayError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [qr, setQr] = useState<{ uri: string; image: string | null } | null>(null)
   const [copied, setCopied] = useState(false)
@@ -86,16 +84,6 @@ export default function MobileSettings(): React.ReactElement {
       .catch(err => setActionError(errorMessage(err)))
   }
 
-  const commitRelay = () => {
-    if (relayDraft === null) return
-    const url = normalizeRelayUrl(relayDraft)
-    if (url === state.relayUrl) { setRelayDraft(null); setRelayError(null); return }
-    if (!isValidRelayUrl(url)) { setRelayError('Use a ws:// or wss:// address.'); return }
-    setRelayError(null)
-    setRelayDraft(null)
-    run(() => window.api.mobileSetRelayUrl(url))
-  }
-
   const copyLink = (uri: string) => {
     void navigator.clipboard.writeText(uri).then(() => {
       setCopied(true)
@@ -122,27 +110,7 @@ export default function MobileSettings(): React.ReactElement {
       </Group>
       <HelperText>Paired phones see your projects, tasks and agent status. Traffic is end-to-end encrypted.</HelperText>
 
-      <FormGroup>
-        <SetBlock label="Relay">
-          <Field
-            value={relayDraft ?? state.relayUrl}
-            onChange={(e) => { setRelayDraft(e.target.value); setRelayError(null) }}
-            onBlur={commitRelay}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRelay()
-              if (e.key === 'Escape') { setRelayDraft(null); setRelayError(null) }
-            }}
-            spellCheck={false}
-            placeholder="wss://relay.example.com"
-          />
-          <HelperText>
-            {relayError ?? 'Phones reach this desktop through the relay. It only ever sees encrypted traffic.'}
-          </HelperText>
-          {!relayError && isUnencryptedRemoteRelay(relayDraft ?? state.relayUrl) && (
-            <HelperText><span className="text-warn">{UNENCRYPTED_RELAY_WARNING}</span></HelperText>
-          )}
-        </SetBlock>
-      </FormGroup>
+      <RelayLine onOpenRelay={onOpenRelay} />
 
       <GrpHead
         actions={inviteLive && !pending ? <LinkBtn onClick={() => run(() => window.api.mobileCancelPairing())}>Cancel</LinkBtn> : undefined}

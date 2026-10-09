@@ -11,10 +11,14 @@ import {
 import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, LinkBtn } from './ui'
 import ExternalIdesSettings from './ExternalIdesSettings'
 import MobileSettings from './settings/MobileSettings'
+import ServersSettings from './settings/ServersSettings'
+import RelaySettings from './settings/RelaySettings'
 import UpdatesSettings from './settings/UpdatesSettings'
 
 interface Props {
   onClose: () => void
+  /** The page to open on; Appearance when missing or unknown. */
+  initialTab?: string
 }
 
 const editorWordWrapOptions: Array<{ value: EditorWordWrap; label: string }> = [
@@ -50,7 +54,7 @@ function parseNumberInput(value: string, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, parsed))
 }
 
-type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'mobile' | 'updates'
+export type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'mobile' | 'servers' | 'relay' | 'updates'
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'appearance', label: 'Appearance' },
@@ -59,12 +63,14 @@ const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'ai', label: 'AI Tools' },
   { id: 'sidebar', label: 'Sidebar' },
   { id: 'mobile', label: 'Mobile' },
+  { id: 'servers', label: 'Servers' },
+  { id: 'relay', label: 'Relay' },
   { id: 'updates', label: 'Updates' }
 ]
 
-export default function Settings({ onClose }: Props): React.ReactElement {
+export default function Settings({ onClose, initialTab }: Props): React.ReactElement {
   const { config, updateConfig, clearStreamExpansion } = useApp()
-  const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => tabs.find(t => t.id === initialTab)?.id ?? 'appearance')
 
   if (!config) return <div />
 
@@ -482,7 +488,13 @@ export default function Settings({ onClose }: Props): React.ReactElement {
         )
 
       case 'mobile':
-        return <MobileSettings />
+        return <MobileSettings onOpenRelay={() => setActiveTab('relay')} />
+
+      case 'servers':
+        return <ServersSettings onOpenRelay={() => setActiveTab('relay')} />
+
+      case 'relay':
+        return <RelaySettings />
 
       case 'updates':
         return <UpdatesSettings />
