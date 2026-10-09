@@ -11,12 +11,13 @@ import NoteTab from './NoteTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
-import { findStreamOfTask, needsTaskWorktree, tabSpawnDir, taskTabs, waitsForTaskWorktree } from '../../shared/streams'
+import { findStreamOfTask, needsTaskWorktree, tabSpawnDir, taskTabs, taskWorktreesSupported, waitsForTaskWorktree } from '../../shared/streams'
 import { isStatusTab } from '../../shared/inbox-state'
 import { featureAvailable } from '../../shared/project-features'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
 import TaskWorktreePanel from './TaskWorktreePanel'
+import ServerOfflineOverlay, { useServerOnline } from './ServerOfflineOverlay'
 import { ensureTaskWorktree, useTaskSpawnHeld, useTaskWorktreeState } from '../taskWorktrees'
 import { useTaskClosing } from '../taskLanding'
 import type { Tab, AiTabType, Project, Task } from '../../shared/types'
@@ -216,9 +217,11 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           <TaskWorktreePanel
             state={worktree.state}
             closing={worktree.closing}
+            serverId={project.host}
             onDecide={(decision) => window.api.taskWorktreeDecide(task.id, decision)}
             onRetry={worktree.retry}
           />
+          {project.host && <ServerOfflineOverlay serverId={project.host} />}
         </div>
       )}
       {worktree.state?.phase === 'setup-failed' && (
@@ -299,7 +302,8 @@ function ChatUnavailable({ visible, onSwitch }: { visible: boolean; onSwitch: ()
  * worktree for every task at once. A task being closed never asks: its
  * worktree went because it is closing. A reopened task whose recorded
  * worktree couldn't be restored waits on its error and Retry, so nothing
- * spawns in a folder that isn't there.
+ * spawns in a folder that isn't there. A DevTool server's task gets its
+ * worktree there, asked for once the server is online.
  */
 function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
   waiting: boolean
@@ -308,9 +312,10 @@ function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
   retry: () => void
 } {
   const stream = findStreamOfTask(project, task.id)
-  const possible = !!stream?.workspace && !!stream.taskWorktrees && !project.ssh && !task.sharesStreamWorktree
-    && featureAvailable(project, 'task-worktrees')
+  const possible = !!stream?.workspace && !!stream.taskWorktrees && taskWorktreesSupported(project) && !task.sharesStreamWorktree
   const state = useTaskWorktreeState(task.id, possible)
+  // A DevTool server's task is made there: asked once the server can answer.
+  const hostOnline = useServerOnline(project.host)
   const held = useTaskSpawnHeld(task.id)
   // Being closed: its worktree just went (landed or discarded) and the task goes next.
   const closing = useTaskClosing(task.id)
@@ -328,9 +333,9 @@ function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
 
   useEffect(() => {
     // An existing state is main at work, or a failure waiting for Retry.
-    if (!visible || !needed || !hasWaitingTabs || state || closing) return
+    if (!visible || !needed || !hasWaitingTabs || state || closing || !hostOnline) return
     ask()
-  }, [visible, needed, hasWaitingTabs, state, closing, ask])
+  }, [visible, needed, hasWaitingTabs, state, closing, hostOnline, ask])
 
   return { waiting, state, closing, retry: ask }
 }

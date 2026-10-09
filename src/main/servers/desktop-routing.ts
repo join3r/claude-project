@@ -117,8 +117,11 @@ export class DesktopRouting {
   attachHub(hub: RoutingHub): void {
     this.hub = hub
     hub.onEvent((event) => this.router.deliver(event))
-    hub.onStateChange((state) => this.onServersState(state))
+    // ServerProjects first: a server that comes online is asked for its projects
+    // before anything below, and one link answers in order, so the refreshes
+    // know its tasks and tabs by the time their answers arrive.
     this.projects.attach(hub)
+    hub.onStateChange((state) => this.onServersState(state))
     this.onServersState(hub.getState())
   }
 
@@ -141,7 +144,50 @@ export class DesktopRouting {
     const now = new Set(state.servers.filter(s => s.state === 'online').map(s => s.id))
     const came = [...now].filter(id => !this.online.has(id))
     this.online = now
-    for (const serverId of came) void this.refreshActivity(serverId)
+    for (const serverId of came) {
+      void this.refreshActivity(serverId)
+      void this.refreshWorktreeStates(serverId)
+    }
+  }
+
+  /**
+   * A server came (back) online: its tasks' worktree states (a setup waiting
+   * for approval, one being made) go to the windows again, and whatever they
+   * still show from before that the server no longer has is cleared: a window
+   * opened while it was away, or a server that restarted (held setups live in
+   * its memory only), would otherwise wait on a prompt nobody can answer.
+   */
+  private async refreshWorktreeStates(serverId: string): Promise<void> {
+    const hub = this.hub
+    if (!hub) return
+    try {
+      const answer = await hub.call(serverId, MAIN_CLIENT_ID, 'task-worktree-states')
+      const states = typeof answer === 'object' && answer !== null && !Array.isArray(answer) ? answer as Record<string, unknown> : {}
+      for (const [taskId, state] of Object.entries(states)) {
+        // Only its own tasks: a server can't put a prompt on a local task.
+        if (this.index.taskOf(taskId, serverId)) this.deps.windows.broadcast('task-worktree-state', taskId, state)
+      }
+      for (const taskId of this.worktreeTaskIds(serverId)) {
+        if (!(taskId in states)) this.deps.windows.broadcast('task-worktree-state', taskId, null)
+      }
+    } catch (err) {
+      this.deps.log(`servers worktreeStatesRefresh server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /** The server's tasks that can have a worktree of their own (a window may show a state for them). */
+  private worktreeTaskIds(serverId: string): string[] {
+    const ids: string[] = []
+    for (const project of this.projects.foreignProjects()) {
+      if (project.host !== serverId) continue
+      for (const stream of project.streams) {
+        if (!stream.workspace || !stream.taskWorktrees) continue
+        for (const task of stream.tasks) {
+          if (!task.sharesStreamWorktree && this.index.taskOf(task.id, serverId)) ids.push(task.id)
+        }
+      }
+    }
+    return ids
   }
 
   /**

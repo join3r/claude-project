@@ -32,7 +32,8 @@ const SERVER_FEATURES: Record<ProjectFeature, boolean> = {
   notebooks: true,
   // The conda env is the server's; Browse… browses the server's folders.
   'project-settings-local': true,
-  'task-worktrees': false, // step 8
+  // Streams, task worktrees and landing run on the server's own git (step 8).
+  'task-worktrees': true,
   chat: true,
   'git-posture': true,
   'local-folder': false // step 9 (Open in IDE over SSH)

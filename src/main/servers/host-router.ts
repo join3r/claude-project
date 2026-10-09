@@ -32,18 +32,21 @@ function soleOwner(owners: ReadonlySet<string> | undefined): string | undefined 
  * - A tab is pinned to its host when its process starts there (`pty-spawn`,
  *   `chat-attach`, a kernel start, routed by project), and unpinned when it ends.
  *   A pinned tab's calls and pushes follow the pin, not the data.
- * - An id that left the data keeps its last sole owner, so a tab closed
- *   before it ever started still reaches its host.
+ * - A tab or task that left the data keeps its last sole owner, so a tab
+ *   closed before it ever started still reaches its host, and a server's
+ *   pushes about a task it just archived (a landing's last state) still pass.
  */
 export class RouteIndex {
   private projects: Owners = new Map()
   private tasks: Owners = new Map()
   private tabs: Owners = new Map()
   private readonly retired = new Map<string, string>()
+  private readonly retiredTasks = new Map<string, string>()
   private readonly pins = new Map<string, string>()
 
   update(projects: readonly Project[]): void {
     const before = this.tabs
+    const tasksBefore = this.tasks
     const nextProjects: Owners = new Map()
     const nextTasks: Owners = new Map()
     const nextTabs: Owners = new Map()
@@ -65,6 +68,12 @@ export class RouteIndex {
       if (owner) this.retired.set(tabId, owner)
     }
     for (const tabId of nextTabs.keys()) this.retired.delete(tabId)
+    for (const [taskId, owners] of tasksBefore) {
+      if (nextTasks.has(taskId)) continue
+      const owner = soleOwner(owners)
+      if (owner) this.retiredTasks.set(taskId, owner)
+    }
+    for (const taskId of nextTasks.keys()) this.retiredTasks.delete(taskId)
     this.projects = nextProjects
     this.tasks = nextTasks
     this.tabs = nextTabs
@@ -87,7 +96,7 @@ export class RouteIndex {
   }
 
   hostOfTask(id: string): string | undefined {
-    return soleOwner(this.tasks.get(id))
+    return soleOwner(this.tasks.get(id)) ?? (this.tasks.has(id) ? undefined : this.retiredTasks.get(id))
   }
 
   hostOfTab(id: string): string | undefined {
@@ -101,8 +110,11 @@ export class RouteIndex {
     return soleOwner(this.tabs.get(tabId)) === serverId
   }
 
+  /** The task is that server's: only its data has it, or (gone from the data) only its data had it last. */
   taskOf(taskId: string, serverId: string): boolean {
-    return soleOwner(this.tasks.get(taskId)) === serverId
+    const owners = this.tasks.get(taskId)
+    if (owners) return soleOwner(owners) === serverId
+    return this.retiredTasks.get(taskId) === serverId
   }
 
   projectOf(projectId: string, serverId: string): boolean {

@@ -20,6 +20,25 @@ const pendingSetup = v.object({
 }) as Validator<PendingWorktreeSetup>
 
 /**
+ * A window: `win:<n>` on this machine, or `link:<desktop>:win:<n>` on a DevTool
+ * server (a paired desktop's window, through the link). Not desktop main's own
+ * calls (`main`), nor anything else that may call a host one day (a phone).
+ */
+export function isWindowClient(clientId: string): boolean {
+  return /^(?:link:[A-Za-z0-9_-]{1,128}:)?win:\d+$/.test(clientId)
+}
+
+/**
+ * Setup commands come from the repo, so they run only once the user said yes
+ * in a window (the task's panel, or the New stream dialog). On a DevTool server
+ * the prompt is shown on the desktop and its answer arrives as this call from
+ * that window; the approval is then stored here, where the commands run.
+ */
+function assertApprovedInWindow(clientId: string): void {
+  if (!isWindowClient(clientId)) throw new Error('Worktree setup commands are approved from a DevTool window')
+}
+
+/**
  * Task worktrees (`task-worktree.ts`): a window asks for one before a task's
  * tabs spawn, answers the setup approval, and mirrors every task's state.
  * The ids name tasks and streams main looks up itself; nothing here takes a path.
@@ -28,8 +47,10 @@ export function registerTaskWorktreeHandlers(ipc: IpcRegistrar, deps: TaskWorktr
   ipc.handle('task-worktree-ensure', [safeId, safeId, v.optional(ensureOptions)], (_event, projectId, taskId, options) =>
     deps.taskWorktrees.ensureTaskWorktree(projectId, taskId, options ?? {}))
 
-  ipc.handle('task-worktree-decide', [safeId, v.literal('run', 'skip')], (_event, taskId, decision) =>
-    deps.taskWorktrees.decideSetup(taskId, decision))
+  ipc.handle('task-worktree-decide', [safeId, v.literal('run', 'skip')], (ctx, taskId, decision) => {
+    if (decision === 'run') assertApprovedInWindow(ctx.clientId)
+    return deps.taskWorktrees.decideSetup(taskId, decision)
+  })
 
   ipc.handle('task-worktree-dismiss', [safeId], (_event, taskId) => {
     deps.taskWorktrees.dismiss(taskId)
@@ -37,6 +58,8 @@ export function registerTaskWorktreeHandlers(ipc: IpcRegistrar, deps: TaskWorktr
 
   ipc.handle('task-worktree-states', [], () => deps.taskWorktrees.getStates())
 
-  ipc.handle('stream-worktree-setup-run', [safeId, safeId, pendingSetup], (_event, projectId, streamId, pending) =>
-    deps.taskWorktrees.runStreamSetup(projectId, streamId, pending))
+  ipc.handle('stream-worktree-setup-run', [safeId, safeId, pendingSetup], (ctx, projectId, streamId, pending) => {
+    assertApprovedInWindow(ctx.clientId)
+    return deps.taskWorktrees.runStreamSetup(projectId, streamId, pending)
+  })
 }

@@ -25,7 +25,9 @@ vi.mock('../src/renderer/context/AppContext', () => ({
 
 import TaskPanes from '../src/renderer/components/TaskPanes'
 import { markTaskClosing } from '../src/renderer/taskLanding'
+import { resetServersStateForTests } from '../src/renderer/serversState'
 import { taskDirectory } from '../src/shared/streams'
+import type { ServerConnectionKind, ServersState } from '../src/shared/servers'
 
 const chat: Tab = { id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 's1' }
 const streamWs: WorkspaceConfig = { worktreePath: '/repo/.worktrees/rel', branchName: 'rel', baseBranch: 'main', relativeProjectPath: '' }
@@ -139,6 +141,56 @@ describe('TaskPanes and task worktrees', () => {
     const hidden = setup()
     mount(hidden.project, hidden.task, false)
     expect(screen.queryByTestId('chat-body')).toBeNull()
+    expect(api.taskWorktreeEnsure).not.toHaveBeenCalled()
+  })
+})
+
+describe('TaskPanes and a DevTool server\'s task worktrees', () => {
+  const servers = (state: ServerConnectionKind): ServersState => ({
+    relay: { kind: 'online' },
+    servers: [{ id: 'srvA', name: 'build-box', state, pairedAt: 1, lastSeen: 2, build: null, host: null }],
+    invite: null
+  })
+  const onServer = (task: Partial<Task> & { ownWorkspace?: WorkspaceConfig } = {}) => {
+    const made = setup(task)
+    return { project: { ...made.project, host: 'srvA' }, task: made.task }
+  }
+
+  afterEach(() => act(() => resetServersStateForTests()))
+
+  it('asks the server for the worktree once it is online, and waits behind its offline notice until then', () => {
+    act(() => resetServersStateForTests(servers('connecting')))
+    const { project, task } = onServer()
+    const view = mount(project, task)
+    expect(screen.getByText('Preparing worktree…')).toBeTruthy()
+    expect(screen.getByText('Reconnecting to build-box…')).toBeTruthy()
+    expect(screen.queryByTestId('chat-body')).toBeNull()
+    expect(api.taskWorktreeEnsure).not.toHaveBeenCalled()
+
+    act(() => resetServersStateForTests(servers('online')))
+    view.rerender(<TaskPanes project={project} task={task} visible projectDir={taskDirectory(project, task)} />)
+    expect(screen.queryByTestId('server-offline-overlay')).toBeNull()
+    expect(api.taskWorktreeEnsure).toHaveBeenCalledWith('p1', 't1', { name: 'Fix it', streamId: 'stream-rel' })
+  })
+
+  it('names the server the setup commands run on, and sends the answer for it', async () => {
+    act(() => resetServersStateForTests(servers('online')))
+    const { project, task } = onServer({ ownWorkspace: ownWs })
+    mount(project, task)
+    act(() => pushState('t1', { phase: 'needs-approval', branch: 'rel--fix', pending: { repoKey: '/srv/repo/.git', hash: 'h', commands: ['npm ci'] } }))
+    expect(screen.getByText('build-box')).toBeTruthy()
+    expect(screen.getByText(/approves this exact file for the repository on build-box/)).toBeTruthy()
+
+    await act(async () => { fireEvent.click(screen.getByText('Run setup')) })
+    expect(api.taskWorktreeDecide).toHaveBeenCalledWith('t1', 'run')
+  })
+
+  it('makes no worktree for an SSH project\'s task', () => {
+    const made = setup()
+    const project = { ...made.project, ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } }
+    mount(project, made.task)
+    expect(screen.queryByTestId('task-worktree-panel')).toBeNull()
+    expect(screen.getByTestId('chat-body').textContent).toBe('/repo/.worktrees/rel')
     expect(api.taskWorktreeEnsure).not.toHaveBeenCalled()
   })
 })

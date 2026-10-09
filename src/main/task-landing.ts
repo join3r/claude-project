@@ -14,7 +14,7 @@ import type {
   TaskLandingResult,
   WorkspaceConfig
 } from '../shared/types'
-import { findStreamOfTask, findTaskInProject, mapTaskInProject, projectTasks, taskTabs } from '../shared/streams'
+import { findStreamOfTask, findTaskInProject, mapTaskInProject, projectTasks, taskTabs, taskWorktreesSupported } from '../shared/streams'
 import { joinWorkspaceDir } from '../shared/workspace-path'
 import { gitErrorText, gitOutput, type GitResult, type GitRunner } from './git-runner'
 import type { WorkspaceManager } from './workspace-manager'
@@ -712,7 +712,7 @@ export class TaskLandingManager {
     const stream = findStreamOfTask(project, taskId)
     const task = findTaskInProject(project, taskId)
     if (!project || !stream || !task) return 'No such task'
-    if (project.ssh) return 'Landing is not supported for SSH projects yet'
+    if (!taskWorktreesSupported(project)) return 'Landing is not supported for SSH projects yet'
     if (!task.workspace) return 'This task has no worktree of its own'
     if (!stream.workspace) return 'The task\'s stream has no worktree'
     return { project, stream, task, own: task.workspace, target: stream.workspace }
