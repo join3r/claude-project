@@ -31,7 +31,8 @@ const STATE_DOT_CLS: Record<TaskChipTone, string> = {
  * The bar above a task, on one line: **project** › stream › task (the stream is
  * left out when it is `main`), then a quiet state label. Right side: the
  * caller's tools (new terminal / browser, Files / Git / Notes, IDE) and the
- * task menu, which also closes the task. On a project's Home it is just the project.
+ * task menu, which also closes the task. The project name opens the project's
+ * Home. On a project's Home it is just the project.
  */
 export default function TaskHeader({
   project,
@@ -49,7 +50,7 @@ export default function TaskHeader({
 }): React.ReactElement {
   const {
     config, effectiveTheme, renameTask, convertClaudeTab, pinnedItems, togglePinnedItem,
-    settleTask, unsettleTask, snoozeTask, unsnoozeTask
+    settleTask, unsettleTask, snoozeTask, unsnoozeTask, setSelectedTaskId
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const statusSince = useAllTabStatusSince()
@@ -159,7 +160,19 @@ export default function TaskHeader({
       <div className="content-toolbar flex items-center gap-2 h-[38px] shrink-0 pl-3 pr-1.5 border-b-[0.5px] border-border [-webkit-app-region:drag]">
         {showIcon && <ProjectTileBadge project={project} theme={effectiveTheme} size={16} />}
         <div className="flex-1 min-w-0 flex items-center gap-1.5 whitespace-nowrap text-sm text-text-muted" title={title}>
-          <span className="font-semibold text-text truncate shrink-0 max-w-[40%]">{project.name}</span>
+          {task ? (
+            <button
+              type="button"
+              className="bg-transparent border-0 p-0 font-semibold text-sm text-text truncate shrink-0 max-w-[40%] cursor-pointer hover:underline [-webkit-app-region:no-drag]"
+              title={`Open ${project.name} home`}
+              onClick={() => setSelectedTaskId(null)}
+              data-testid="task-header-project"
+            >
+              {project.name}
+            </button>
+          ) : (
+            <span className="font-semibold text-text truncate shrink-0 max-w-[40%]">{project.name}</span>
+          )}
           {showStream && (
             <>
               <span className="text-text-subtle">›</span>
