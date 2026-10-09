@@ -42,10 +42,19 @@ export interface PhoneHello extends VersionInfo {
 
 /** Noise message 2 payload (desktop → phone). */
 export interface DesktopHello extends VersionInfo {
+  /** `devtool/<version>` from a desktop, `devtool-server/<version>` from a DevTool server (§4.3). */
   app: string
   features: string[]
   desktopName: string
   result: HandshakeResult
+}
+
+/** The app name a DevTool server puts before `/<version>` in message 2's `app` (SPEC.md §4.3). */
+export const SERVER_APP_NAME = 'devtool-server'
+
+/** Whether message 2's `app` names a DevTool server rather than a desktop (SPEC.md §4.3). */
+export function isServerApp(app: string): boolean {
+  return app === SERVER_APP_NAME || app.startsWith(`${SERVER_APP_NAME}/`)
 }
 
 export type InboxTabStatus = 'working' | 'attention' | 'exited' | 'idle'

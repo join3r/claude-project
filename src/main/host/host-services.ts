@@ -58,7 +58,7 @@ import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from '../notebook-c
 import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv } from '../conda-env'
 import { NOTEBOOK_KERNEL_HELPER_RESOURCE, NotebookKernelManager } from '../notebook-kernel'
 import type { CondaEnvInfo } from '../../shared/conda'
-import { registerMobileHandlers } from '../ipc/mobile'
+import { registerHostMobileHandlers, registerMobileHandlers } from '../ipc/mobile'
 import { registerTaskWorktreeHandlers } from '../ipc/task-worktrees'
 import { registerTaskLandingHandlers } from '../ipc/task-landing'
 import { findTaskInProject, removeTaskFromProject } from '../../shared/streams'
@@ -89,9 +89,11 @@ import {
   TASK_CLOSE_FEATURE,
   TASK_LAND_FEATURE,
   TASK_NEW_FEATURE,
-  TASK_TRIAGE_FEATURE
+  TASK_TRIAGE_FEATURE,
+  SERVER_APP_NAME
 } from '../../../protocol/ts/index.ts'
-import { normalizeMobileConfig } from '../../shared/mobile'
+import { normalizeMobileConfig, normalizeRelayUrl, type MobileConfig } from '../../shared/mobile'
+import { SERVER_MOBILE_STATE_CHANNEL } from '../../shared/servers'
 import { LOCAL_SOURCE } from '../../shared/projects-sources'
 import type {
   AppConfig,
@@ -148,6 +150,17 @@ export interface HostServicesOptions {
    * `/login` can't finish in a browser here, so it asks for the pasted code.
    */
   remoteClients?: boolean
+  /**
+   * A DevTool server's phones (plan step 10): the relay they reach it on and the
+   * name they see come from the server's own `server.json`, not the Mobile
+   * setting. With `relayRole: 'server'` its handshake says `devtool-server/<version>`
+   * (SPEC.md §4.3), its phone state goes to its desktops on
+   * `server-mobile-state-changed`, and a phone's `task.new` needs no Claude switch.
+   */
+  phones?: {
+    relayUrl: () => string
+    name: () => string
+  }
 }
 
 /**
@@ -207,11 +220,15 @@ export class HostServices {
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
   private readonly remoteClients: boolean
+  private readonly isServer: boolean
+  private readonly phones: HostServicesOptions['phones']
 
-  constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus, remoteClients }: HostServicesOptions) {
+  constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus, remoteClients, phones }: HostServicesOptions) {
     this.env = env
     this.clients = clients
     this.remoteClients = remoteClients === true
+    this.isServer = relayRole === 'server'
+    this.phones = phones
     this.onTaskArchived = onTaskArchived ?? (() => {})
     const configDir = env.configDir
     const identity = new IdentityStore(path.join(configDir, 'mobile'), env.secrets, (message) => this.logDebug(message))
@@ -376,7 +393,8 @@ export class HostServices {
     // Loaded on first use (Mobile on, or a pairing started), never at startup:
     // safeStorage can raise a Keychain prompt on macOS.
     const identity = this.identity
-    const desktopName = () => normalizeMobileConfig(this.config.mobile).desktopName?.trim() || os.hostname().replace(/\.local$/, '')
+    const hostName = () => this.phones?.name() || os.hostname().replace(/\.local$/, '')
+    const desktopName = () => this.mobileConfig().desktopName?.trim() || hostName()
     // The emitter and the service need each other: it sends through the service, and
     // the bridge (inside the service's deps) tells it which turns a phone started.
     let service: MobileService | null = null
@@ -412,7 +430,7 @@ export class HostServices {
     })
     push.start()
     service = new MobileService({
-      getConfig: () => normalizeMobileConfig(this.config.mobile),
+      getConfig: () => this.mobileConfig(),
       saveConfig: (mobile) => this.applyConfig({ mobile }),
       projects: {
         peek: () => this.projectsStore.peek(),
@@ -421,21 +439,24 @@ export class HostServices {
       activity: this.activityRegistry,
       pairings: new PairingsStore(mobileDir, log),
       getDesktopId: () => identity.peekId(),
-      defaultDesktopName: () => os.hostname().replace(/\.local$/, ''),
+      defaultDesktopName: hostName,
       createTransport: () => this.relay.mobileTransport(),
       channels: createNoiseChannelFactory({
         staticKey: () => identity.get().x25519,
-        app: `devtool/${this.env.appVersion}`,
+        // A phone shows a server as one (SPEC.md §4.3).
+        app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
         features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
-      broadcastState: (state) => this.clients.broadcast('mobile-state-changed', state),
+      // A server's own state is not a desktop's Settings › Mobile: its desktops show it under Servers.
+      broadcastState: (state) => this.clients.broadcast(this.isServer ? SERVER_MOBILE_STATE_CHANNEL : 'mobile-state-changed', state),
       log,
       chat: bridge,
       newTask: async (phoneId, { projectId, streamId, prompt, mode }) => {
-        if (!this.config.enableClaude) {
+        // A server has no Claude switch: its desktops' settings are theirs.
+        if (!this.isServer && !this.config.enableClaude) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
         }
         const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId)
@@ -502,6 +523,35 @@ export class HostServices {
       }, projectId)
     })
     return service
+  }
+
+  /** The Mobile setting; a server's phones take the relay and name from its own settings. */
+  private mobileConfig(): MobileConfig {
+    const config = normalizeMobileConfig(this.config.mobile)
+    if (!this.phones) return config
+    const name = this.phones.name()
+    return { ...config, relayUrl: normalizeRelayUrl(this.phones.relayUrl()), ...(name ? { desktopName: name } : {}) }
+  }
+
+  /** This host's phones: pairing, Accept and Reject, the paired list (a server's CLI and its desktops drive it). */
+  get mobile(): MobileService {
+    return this.mobileService
+  }
+
+  /**
+   * Unpairs every phone (a server deleting its data takes its identity with it,
+   * so the relay's pairs would be useless). Answers how many there were.
+   */
+  revokeAllPhones(): number {
+    const phones = this.mobileService.getState().devices
+    for (const phone of phones) {
+      try {
+        this.mobileService.revoke(phone.id)
+      } catch (err) {
+        this.logDebug(`revokeAllPhones phone=${phone.id} error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    return phones.length
   }
 
   /**
@@ -900,6 +950,7 @@ export class HostServices {
       listCondaEnvs: () => listCondaEnvs({}, { force: true })
     })
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
+    registerHostMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
     registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
     registerHostFsHandlers(ipc, {

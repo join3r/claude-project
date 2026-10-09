@@ -47,7 +47,8 @@ Rules:
 ## 3. Relay
 
 - A host has one relay socket and one identity (`<configDir>/mobile/identity.json`, plaintext 0600 on a server). The phones and the link share it. `RelayMux` (`src/main/host/link/relay-mux.ts`) routes by peer ID: `frame`, `peer` and `error { to }` about a peer the link owns go to the link, everything else to the mobile service. Errors without `to` go to both.
-- The desktop owns the IDs in `servers.json` and the servers it is proving a code to. A `0x05` pairing hello from a peer nobody owns goes to the desktop's hub (§7.3). A server owns every peer that is not a phone. There are no phones on a server before step 10, so it answers any unknown desktop with `unknown-device`.
+- The desktop owns the IDs in `servers.json` and the servers it is proving a code to. A `0x05` pairing hello from a peer nobody owns goes to the desktop's hub (§7.3).
+- A server's link owns the desktops in `desktops.json` and the desktop it is pairing with by install token. Every other peer is the phones' (the server's own MobileService, SPEC §2 and §4, on the same socket and identity), with two exceptions for a peer nobody owns: a `0x05` pairing hello goes to the link (a desktop proving the server's code, §7.4), and so does a Noise message 1 (`0x01`) that opens under this link's prologue. Only the prologue tells a link handshake from a phone's, since nothing in message 1 is readable before it, so the server trial-reads an unowned message 1 with `devtool-server-v1` (`isLinkHandshake`, one X25519 and one AES-GCM). A desktop the server has forgotten therefore still hears `unknown-device`, and a phone it has forgotten hears the phone channel's `unknown-device`.
 - Both ends say `binary: true` in hello and send binary frames (SPEC §3.9). A desktop whose `ready` lacks `binary: true` is on a relay from before servers. It reports "This relay is too old for servers", keeps its phones on JSON and sends no `pair`, `watch` or binary frames.
 - The desktop's socket runs while Mobile is on, any server is paired, an invite is live or a code is being proven. It uses the Mobile relay URL setting until step 5 makes it a shared Relay setting. The server's relay URL is in `<data>/server.json`.
 - Presence: the desktop sends one `watch` with all its server IDs after every `ready` (SPEC §3.3). It handshakes with each server the relay reports online. A server gets its desktops' presence without asking, and drops a desktop's session on `peer offline`, `peer revoked` or `error offline`.
@@ -194,7 +195,7 @@ A desktop already paired with a server asks it for a code with the link call `se
 
 ### 7.5 One offer per host
 
-The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phone QR and its server invite, and by a server's desktop code and (later) phone QR. A host has one invite at a time: whoever sends `offer` last holds it, and the shared socket (`RelayMux`) tells the one before, which drops its invite. Cancelling an invite doesn't withdraw the relay offer. A desktop with no server paired leaves the relay when its invite ends, which drops the offer; otherwise the desktop answers a late pairing hello `no-offer`.
+The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phone QR and its server invite, and by a server's desktop code (`devtool-server pair`, Add another device) and its phone QR (`devtool-server pair --phone`, Settings › Servers › Pair a phone). A host has one invite at a time: whoever sends `offer` last holds it, and the shared socket (`RelayMux`) tells the one before, which drops its invite. Cancelling an invite doesn't withdraw the relay offer. A desktop with no server paired leaves the relay when its invite ends, which drops the offer; otherwise the desktop answers a late pairing hello `no-offer`.
 
 ## 8. Terminal output
 
@@ -218,6 +219,7 @@ The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phon
 | `src/main/host/link/pairing.ts` | §7: tickets, the pairing handshake, offers |
 | `src/main/servers/` | the desktop: `ServerHub`, one `ServerConnection` per server |
 | `src/server/server-link.ts` | the server: responder, one session per desktop, client registration, holds |
+| `src/main/mobile/`, `src/main/ipc/mobile.ts` | a server's phones: the desktop's MobileService with the server's relay, name and `app` (§12) |
 | `src/server/server-config.ts` | `<data>/server.json` |
 | `src/main/host/link/bundle-archive.ts`, `update-policy.ts` | §10: the archive, when to upload |
 | `src/server/updater.ts`, `node-install.ts`, `restart.ts` | §10: staging, Node, switching, restarting |
@@ -271,3 +273,12 @@ The desktop shows `updating` from `restarting` until the server's next handshake
 - The `bundle` stream (§10.1) and the link calls `server-info` (`{update: null}`) and `server-bootstrap-done`.
 
 A desktop that connects to a server with the `bootstrap` feature runs its update check (§10.2; an empty build always uploads), then calls `server-bootstrap-done {uploaded}`. The bootstrap then checks that `current/main.js --check` runs, gives up its relay socket and installs the service, which connects with the same identity. Any future desktop must keep accepting bootstrap protocol 1 like this, or bump `BOOTSTRAP_PROTOCOL` together with a new `site/server/bootstrap.mjs`.
+
+## 12. Phones on a server
+
+A phone pairs with a server exactly as with a desktop (SPEC §2, §3.8, §4), and the server's message 2 says `app: "devtool-server/<version>"` (SPEC §4.3). The server runs the desktop's `MobileService` on its relay socket (§3), with its relay URL and name from `server.json`, its own projects, chats, activity and push, and its pairings in `<data>/mobile/pairings.json`. It stays off until the first phone pairing turns it on.
+
+- Phones on a server see the server's own data: its projects, and the tags, order and Pinned list the server keeps for itself (`save-projects-slice` leaves them alone), so a phone's `pin.set` and `task.triage` change the server's data and reach every desktop's copy through `projects-updated`. `task.new` needs no Claude switch on a server.
+- Pushes go out through the server's relay socket like a desktop's (SPEC §7.2).
+- A desktop drives a server's phones through host channels routed by their first argument (the server id, `{host: 0}`): `server-mobile-get-state`, `server-mobile-start-pairing` (answers `{uri, exp}`), `server-mobile-cancel-pairing`, `server-mobile-accept`, `server-mobile-reject` and `server-mobile-revoke` (the last three take the phone id). Each answers the server's `MobileState`. The server pushes that state to its desktops as `server-mobile-state-changed`, never `mobile-state-changed` (a desktop's own Settings › Mobile). The desktop forwards it to its windows as `(serverId, state)`, the id being the server it came from (`SERVER_EVENTS` scope `server-self`).
+- On the server, `devtool-server pair --phone [--no-wait]` prints the pairing link and a terminal QR code, then asks Accept or Reject in the terminal (without a terminal it waits for Accept in DevTool). `devtool-server status` lists the phones, `unpair` takes a phone's name or id too, and `uninstall --delete-data` revokes the phones with the desktops.

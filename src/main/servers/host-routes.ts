@@ -163,7 +163,7 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'notebook-kernel-restart': { by: [{ project: 1 }, { tab: 0 }], pin: 'set' },
   'notebook-kernel-shutdown': { by: [{ tab: 0 }], pin: 'clear' },
 
-  // phones pair with this desktop (step 10 pairs them with servers)
+  // phones pair with this desktop
   'mobile-get-state': 'local',
   'mobile-set-enabled': 'local',
   'mobile-set-relay-url': 'local',
@@ -172,6 +172,13 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'mobile-accept': 'local',
   'mobile-reject': 'local',
   'mobile-revoke': 'local',
+  // a server's phones (Settings › Servers › Pair a phone): the first argument names the host
+  'server-mobile-get-state': { by: [{ host: 0 }] },
+  'server-mobile-start-pairing': { by: [{ host: 0 }] },
+  'server-mobile-cancel-pairing': { by: [{ host: 0 }] },
+  'server-mobile-accept': { by: [{ host: 0 }] },
+  'server-mobile-reject': { by: [{ host: 0 }] },
+  'server-mobile-revoke': { by: [{ host: 0 }] },
 
   // task worktrees and landing (ipc/task-worktrees.ts, ipc/task-landing.ts)
   'task-worktree-ensure': project0,
@@ -216,6 +223,9 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
  *   tab ids it doesn't own are left out.
  * - `tab-list`: args[0] is `{tabIds}`, cut down to that server's tabs.
  * - `own-window`: to the one window it names, never a broadcast (a clone's progress).
+ * - `server-self`: about the server itself (its phones). Windows get it with the
+ *   id of the server it came from in front, `(serverId, ...args)`, so a server
+ *   only ever speaks for itself.
  */
 export type ServerEventScope =
   | 'projects'
@@ -226,6 +236,7 @@ export type ServerEventScope =
   | 'removal'
   | 'tab-list'
   | 'own-window'
+  | 'server-self'
 
 export const SERVER_EVENTS: Readonly<Record<string, ServerEventScope>> = {
   'projects-updated': 'projects',
@@ -246,10 +257,15 @@ export const SERVER_EVENTS: Readonly<Record<string, ServerEventScope>> = {
   'tasks-removed': 'removal',
   'tabs-removed': 'removal',
   'tabs-restart': 'tab-list',
-  'server-clone-progress': 'own-window'
+  'server-clone-progress': 'own-window',
+  'server-mobile-state-changed': 'server-self'
 }
 
-/** Pushes a server sends that are about it alone (its config, notes, phones, SSH): never forwarded. */
+/**
+ * Pushes a server sends that are about it alone (its config, notes, SSH): never
+ * forwarded. A server's phones reach windows as `server-mobile-state-changed`;
+ * `mobile-state-changed` is a desktop's own Settings › Mobile.
+ */
 export const SERVER_PRIVATE_EVENTS: readonly string[] = [
   'config-updated',
   'notes-updated',

@@ -7,7 +7,7 @@ import {
 } from './relay-messages.ts'
 import { decodePairingUri, encodePairingUri, isPairingExpired, PAIRING_URI_PREFIX } from './pairing-uri.ts'
 import type { PairingPayload } from './pairing-uri.ts'
-import { encodeJson, negotiateVersion, parseAppMessage, parseHelloVersion, parseInbox, parsePhoneHello } from './app-messages.ts'
+import { encodeJson, isServerApp, negotiateVersion, parseAppMessage, parseHelloVersion, parseInbox, parsePhoneHello } from './app-messages.ts'
 
 const ID = 'a'.repeat(32)
 const K32 = b64uEncode(new Uint8Array(32).fill(1))
@@ -142,6 +142,14 @@ describe('app messages', () => {
     expect(parsePhoneHello(JSON.stringify({ ...base, kind: 'resume' }))).toEqual({ ...base, kind: 'resume', features: [] })
     expect(() => parsePhoneHello(JSON.stringify({ ...base, kind: 'pair' }))).toThrow(ProtocolError)
     expect(parsePhoneHello(encodeJson({ ...base, features: [], kind: 'pair', proof: K32 })).proof).toBe(K32)
+  })
+
+  it('tells a server from a desktop by message 2\'s app (§4.3)', () => {
+    expect(isServerApp('devtool-server/0.3.2')).toBe(true)
+    expect(isServerApp('devtool-server')).toBe(true)
+    expect(isServerApp('devtool/0.3.2')).toBe(false)
+    expect(isServerApp('devtool-serverx/1')).toBe(false)
+    expect(isServerApp('')).toBe(false)
   })
 
   it('reads the version before anything else', () => {

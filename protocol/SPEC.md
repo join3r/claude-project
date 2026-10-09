@@ -114,7 +114,7 @@ The rules above left these open. `relay/` implements them, and clients may rely 
 - **Who hosts whom.** Of the two roles, the higher one in `phone < desktop < server` is the host. The host gets the other side's presence by itself (roster and `peer` messages). The other side `watch`es the host. This doesn't depend on who owns the pair.
 - **Desktop↔server, token flow.** The desktop sends `offer`. The server connects with `hello { role: "server", pair: { to: <desktopId>, token } }` and is pending. Right after `ready` it gets `peer online` for the desktop. The desktop sends `authorize { peer: <serverId>, pub }`.
 - **Desktop↔server, code flow.** The server sends `offer`. A connected desktop sends `{ "t":"pair", "to":<serverId>, "token":... }` and is pending, and the server gets `peer online` for it. The server sends `authorize { peer: <desktopId>, pub }`.
-- **Phone↔server.** It works exactly as phone↔desktop: the server offers and authorizes, and the phone pairs in its hello and watches the server.
+- **Phone↔server.** It works exactly as phone↔desktop: the server offers and authorizes, and the phone pairs in its hello and watches the server. The server's message 2 says `app: "devtool-server/<version>"` (§4.3), which is how the phone knows. A server's phone QR and its desktop pairing codes share its one offer (§3.2).
 - The relay only routes. Proof of the pairing secret and the end-to-end handshake between the two devices belong to the channel above it (§2, §4 for phones).
 
 ### 3.9 Binary frames
@@ -172,7 +172,9 @@ Message 2 payload (desktop):
   "desktopName": "join3r-mbp",
   "result": "ok" | "pending" | "rejected" | "incompatible" | "unknown-device" }
 ```
-Desktop rules:
+- `app` names the host's app and version: `devtool/<version>` for a desktop, `devtool-server/<version>` for a DevTool server (§3.8). A phone treats a host whose `app` is `devtool-server` or starts with `devtool-server/` as a server, and any other value as a desktop; it may say so in its UI (a server glyph, "Server offline"). Nothing else in the channel differs, and a phone that ignores `app` works with both. `isServerApp` in `protocol/ts` implements the check. The `desktopName` field is the server's name for a server.
+
+Desktop rules (a server follows them too):
 - `resume`: the phone's Noise static key must match a stored pairing. If it doesn't, the desktop answers `unknown-device`.
 - `pair`: the `proof` must equal (constant-time compare) the live offer's `pairProof`, and the offer must be unexpired. Then the desktop answers `pending` and asks the user to Accept.
   - On Accept, it stores the pairing, sends relay `authorize`, and sends the app message `pairing` with `status: "accepted"`.

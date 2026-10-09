@@ -2125,25 +2125,53 @@ var RelayMux = class {
     for (const lease of this.hostLeases) if (lease.wanted && lease.handlers.pairing) return lease;
     return null;
   }
+  /** A Noise message 1 from a peer nobody owns: the port that recognises it as its own, if any. */
+  handshakeOwner(from, envelope2) {
+    if (envelope2[0] !== FrameKind.Handshake1) return null;
+    for (const lease of this.hostLeases) {
+      if (!lease.wanted || !lease.handlers.claimHandshake) continue;
+      try {
+        if (lease.handlers.claimHandshake(from, envelope2)) return lease;
+      } catch (err) {
+        this.log(`relayMux claimHandshake error=${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return null;
+  }
+  /** Bytes from a peer no port owns: a pairing hello or a handshake a port claims, else null (the phones'). */
+  unownedFrame(from, envelope2) {
+    const pairing = this.pairingOwner(envelope2);
+    if (pairing) {
+      pairing.handlers.pairing(from, envelope2);
+      return true;
+    }
+    const handshake = this.handshakeOwner(from, envelope2);
+    if (handshake) {
+      handshake.handlers.frame(from, envelope2);
+      return true;
+    }
+    return false;
+  }
   route(message) {
     switch (message.t) {
       case "frame": {
         const owner = this.ownerOf(message.from);
         if (owner) {
-          let bytes;
+          let bytes2;
           try {
-            bytes = b64uDecode(message.data);
+            bytes2 = b64uDecode(message.data);
           } catch {
             return;
           }
-          if (bytes.length > 0) owner.handlers.frame(message.from, bytes);
+          if (bytes2.length > 0) owner.handlers.frame(message.from, bytes2);
           return;
         }
-        const pairing = this.pairingOwnerOfJson(message.data);
-        if (pairing) {
-          pairing.lease.handlers.pairing(message.from, pairing.bytes);
-          return;
+        let bytes = null;
+        try {
+          bytes = b64uDecode(message.data);
+        } catch {
         }
+        if (bytes && bytes.length > 0 && this.unownedFrame(message.from, bytes)) return;
         break;
       }
       case "peer": {
@@ -2171,27 +2199,13 @@ var RelayMux = class {
     }
     this.toMobile(message);
   }
-  pairingOwnerOfJson(data) {
-    let bytes;
-    try {
-      bytes = b64uDecode(data);
-    } catch {
-      return null;
-    }
-    const lease = bytes.length > 0 ? this.pairingOwner(bytes) : null;
-    return lease ? { lease, bytes } : null;
-  }
   routeBinary(from, envelope2) {
     const owner = this.ownerOf(from);
     if (owner) {
       owner.handlers.frame(from, envelope2);
       return;
     }
-    const pairing = this.pairingOwner(envelope2);
-    if (pairing) {
-      pairing.handlers.pairing(from, envelope2);
-      return;
-    }
+    if (this.unownedFrame(from, envelope2)) return;
     this.toMobile({ t: "frame", from, data: b64uEncode(envelope2) });
   }
   toMobile(message) {
@@ -2810,6 +2824,14 @@ var SealedChannel = class {
 function sealed(handshake, log) {
   return new SealedChannel(new FramedTransport(handshake.split(), { log, isWhole: isLinkMessageByte }));
 }
+function isLinkHandshake(staticKey, body) {
+  try {
+    createResponder({ prologue: PROLOGUE2, s: staticKey }).readMessage(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function answerHandshake(staticKey, body, reply, decide, log, local = LOCAL_VERSION) {
   const handshake = createResponder({ prologue: PROLOGUE2, s: staticKey });
   const payload = handshake.readMessage(body);
@@ -3274,11 +3296,12 @@ var ServerLink = class {
     this.streams = options.streams ?? diagnosticStreamKinds();
     this.version = options.version ?? { v: HOST_LINK_PROTOCOL_VERSION, min: HOST_LINK_MIN_VERSION };
     this.now = options.now ?? Date.now;
-    const isPhone = options.isPhone ?? (() => false);
-    this.port = options.relay.hostPort((peerId) => this.desktops.has(peerId) || !isPhone(peerId), {
+    this.port = options.relay.hostPort((peerId) => this.desktops.has(peerId) || this.tokenPairing?.desktopId === peerId, {
       frame: (from, envelope2) => this.onFrame(from, envelope2),
       peer: (message) => this.onPeer(message),
-      error: (message) => this.onRelayError(message)
+      error: (message) => this.onRelayError(message),
+      pairing: (from, envelope2) => this.onFrame(from, envelope2),
+      claimHandshake: (_from, envelope2) => isLinkHandshake(this.options.identity.get().x25519, envelope2.subarray(1))
     });
     this.port.onStateChange((state) => this.onRelayState(state));
     this.port.onOfferTaken(() => {
