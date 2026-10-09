@@ -1,4 +1,3 @@
-import { BrowserWindow } from 'electron'
 import type { AppConfig, NotesRecord, ProjectsData, TabStatusValue } from '../../shared/types'
 import type { AgentActivity } from '../../shared/agent-activity'
 import type { RevisionStore } from '../revision-store'
@@ -13,14 +12,14 @@ export interface AppStateDeps {
   notesStore: RevisionStore<NotesRecord>
   paletteFrecency: PaletteFrecencyStorage
   getAgentActivity: () => Record<string, AgentActivity>
-  setDirtyTabs: (windowId: number, tabIds: string[]) => void
+  setDirtyTabs: (clientId: string, tabIds: string[]) => void
   /** A window's status for a tab without hooks (see `TabActivityRegistry.reported`). */
-  reportTabStatus: (windowId: number, tabId: string, status: TabStatusValue) => void
+  reportTabStatus: (clientId: string, tabId: string, status: TabStatusValue) => void
   /**
    * A window moved a task to another directory: end these tabs' processes and tell
    * every other window, so each restarts them in the new directory.
    */
-  restartTabs: (windowId: number, tabIds: string[]) => void
+  restartTabs: (clientId: string, tabIds: string[]) => void
   backupProjects: () => boolean
   getConfig: () => AppConfig
   /** Merge a validated partial config, persist it and tell every window. */
@@ -42,26 +41,20 @@ export function registerAppStateHandlers(ipc: IpcRegistrar, deps: AppStateDeps):
 
   // Windows publish their unsaved editors: a phone closing a task has nobody to show
   // a Save/Discard dialog to, so a dirty buffer comes back to it as a blocker.
-  ipc.handle('report-dirty-tabs', [v.array(v.string())], (event, tabIds) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (!window) return undefined
-    deps.setDirtyTabs(window.id, tabIds)
+  ipc.handle('report-dirty-tabs', [v.array(v.string())], (ctx, tabIds) => {
+    deps.setDirtyTabs(ctx.clientId, tabIds)
     return undefined
   })
 
-  ipc.handle('tabs-restart', [v.array(v.string({ max: 200 }), { max: 500 })], (event, tabIds) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (!window) return undefined
-    deps.restartTabs(window.id, tabIds)
+  ipc.handle('tabs-restart', [v.array(v.string({ max: 200 }), { max: 500 })], (ctx, tabIds) => {
+    deps.restartTabs(ctx.clientId, tabIds)
     return undefined
   })
 
   // Codex and shell tabs have no hooks: their status is the window's PTY heuristics,
   // which main (and through it the phone) would otherwise never see.
-  ipc.handle('report-tab-status', [v.string({ max: 200 }), v.nullable(v.literal('working', 'attention', 'exited'))], (event, tabId, status) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (!window) return undefined
-    deps.reportTabStatus(window.id, tabId, status)
+  ipc.handle('report-tab-status', [v.string({ max: 200 }), v.nullable(v.literal('working', 'attention', 'exited'))], (ctx, tabId, status) => {
+    deps.reportTabStatus(ctx.clientId, tabId, status)
     return undefined
   })
 

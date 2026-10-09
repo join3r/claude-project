@@ -1,4 +1,3 @@
-import { BrowserWindow } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -195,14 +194,10 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
     }
   )
 
-  ipc.handle('chat-attach', [safeId, chatTabConfig], (event, tabId, config) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (!window) throw new Error('Unable to resolve window for chat attach')
-    return deps.chatManager().attach(window.id, tabId, config)
-  })
-  ipc.on('chat-detach', [safeId], (event, tabId) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (window) deps.chatManager().detach(window.id, tabId)
+  ipc.handle('chat-attach', [safeId, chatTabConfig], (ctx, tabId, config) =>
+    deps.chatManager().attach(ctx.clientId, tabId, config))
+  ipc.on('chat-detach', [safeId], (ctx, tabId) => {
+    deps.chatManager().detach(ctx.clientId, tabId)
   })
   ipc.handle('chat-send', [safeId, str, chatImages], (_event, tabId, text, images) =>
     deps.chatManager().send(tabId, text, images ?? []))

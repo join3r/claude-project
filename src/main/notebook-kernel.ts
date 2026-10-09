@@ -1,6 +1,5 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileException, type SpawnOptions } from 'child_process'
 import fs from 'fs'
-import path from 'path'
 import type { CondaEnvInfo } from '../shared/conda'
 import { NotebookExecuteGate, parseNotebookExecuteIpc } from '../shared/notebook-execute'
 import {
@@ -36,21 +35,14 @@ export interface NotebookKernelPrepareDeps extends CondaEnvDeps, ShellEnvDeps {
   helperExistsSync?: (filePath: string) => boolean
 }
 
-/**
- * Path to the bundled jupyter_client helper. Same asarUnpack trick as the Pi
- * status extension: an external python cannot read files inside app.asar.
- */
-export function notebookKernelHelperPath(): string {
-  const p = path.join(__dirname, 'notebook-kernel.py')
-  const packed = `app.asar${path.sep}`
-  return p.includes(packed) ? p.replace(packed, `app.asar.unpacked${path.sep}`) : p
-}
+/** The bundled jupyter_client helper's file name next to the main bundle (`HostEnv.resourcePath`). */
+export const NOTEBOOK_KERNEL_HELPER_RESOURCE = 'notebook-kernel.py'
 
 export function prepareNotebookKernelSpawn(
   condaEnv: CondaEnvInfo | null | undefined,
   cwd: string,
   deps: NotebookKernelPrepareDeps = {},
-  helperPath = notebookKernelHelperPath()
+  helperPath = ''
 ): NotebookKernelPrepareResult {
   const name = condaEnv?.name?.trim() ?? ''
   const prefix = condaEnv?.prefix?.trim() ?? ''
@@ -97,6 +89,8 @@ export type NotebookKernelSpawnFn = (
 export interface NotebookKernelManagerDeps {
   spawn?: NotebookKernelSpawnFn
   prepare?: typeof prepareNotebookKernelSpawn
+  /** The bundled helper script (`HostEnv.resourcePath(NOTEBOOK_KERNEL_HELPER_RESOURCE)`). */
+  helperPath?: string
 }
 
 interface KernelSession {
@@ -184,12 +178,14 @@ export class NotebookKernelManager {
   private listener: NotebookKernelListener | null = null
   private readonly spawnFn: NotebookKernelSpawnFn
   private readonly prepareFn: typeof prepareNotebookKernelSpawn
+  private readonly helperPath: string
 
   constructor(deps: NotebookKernelManagerDeps = {}) {
     this.spawnFn =
       deps.spawn ??
       ((command, args, options) => spawn(command, args, options) as ChildProcessWithoutNullStreams)
     this.prepareFn = deps.prepare ?? prepareNotebookKernelSpawn
+    this.helperPath = deps.helperPath ?? ''
   }
 
   onEvent(listener: NotebookKernelListener): void {
@@ -211,7 +207,7 @@ export class NotebookKernelManager {
     cwd: string
   ): { error?: string; code?: string } {
     this.shutdown(tabId)
-    const prepared = this.prepareFn(condaEnv, cwd)
+    const prepared = this.prepareFn(condaEnv, cwd, {}, this.helperPath)
     if (!prepared.ok) {
       this.emit(tabId, { event: 'fail', code: prepared.code, message: prepared.error })
       return { error: prepared.error, code: prepared.code }

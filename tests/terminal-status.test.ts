@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hasBell, terminalStatusFromOutput } from '../src/renderer/components/terminalStatus'
+import { hasBell, terminalStatusFromOutput } from '../src/shared/terminal-status'
 
 describe('hasBell', () => {
   it('detects a bare bell', () => {

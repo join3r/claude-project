@@ -9,11 +9,7 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { wrapInteractiveShellWithCondaActivate } from './conda-env'
 import type { CondaEnvInfo } from '../shared/conda'
-import {
-  buildRemotePiExtensionScript,
-  piExtensionLocalPath,
-  piExtensionRemotePath
-} from './pi-extension-injector'
+import { buildRemotePiExtensionScript, piExtensionRemotePath } from './pi-extension-injector'
 
 export const MAX_SCROLLBACK_CHARS = 2_000_000
 
@@ -23,8 +19,8 @@ export function trimScrollback(scrollback: string): string {
 }
 
 interface PtyRuntime {
-  attachedWindowIds: Set<number>
-  controllerWindowId: number | null
+  attachedClientIds: Set<string>
+  controllerClientId: string | null
   cols: number
   rows: number
   scrollback: string
@@ -61,8 +57,10 @@ export interface PtySessionsDeps {
   getConfig: () => AppConfig
   /** Push the tab's current agent activity to every window. */
   broadcastAgentActivity: (tabId: string) => void
-  sendToWindow: (windowId: number, channel: string, ...args: unknown[]) => void
+  sendToClient: (clientId: string, channel: string, ...args: unknown[]) => void
   log: (message: string) => void
+  /** The pi status extension shipped with the app (`pi -e <path>`). */
+  piExtensionPath: () => string
   /** The project's conda env, activated for local PTYs (remote ones use the host's). */
   condaEnvForProject?: (projectId?: string) => CondaEnvInfo | undefined
   /** A tab's process was killed (closing a notebook tab also stops its kernel). */
@@ -71,8 +69,8 @@ export interface PtySessionsDeps {
 
 /**
  * Terminal tabs' processes, owned by main so they outlive the window showing
- * them: several windows can attach to one PTY, one of which (the last to type
- * or resize) controls its size.
+ * them: several windows (clients) can attach to one PTY, one of which (the
+ * last to type or resize) controls its size.
  */
 export class PtySessions {
   private readonly runtimes = new Map<string, PtyRuntime>()
@@ -83,8 +81,8 @@ export class PtySessions {
     return this.runtimes.has(tabId)
   }
 
-  attachedWindows(tabId: string): ReadonlySet<number> | undefined {
-    return this.runtimes.get(tabId)?.attachedWindowIds
+  attachedClients(tabId: string): ReadonlySet<string> | undefined {
+    return this.runtimes.get(tabId)?.attachedClientIds
   }
 
   /** Tabs whose process is still running, including ones no window currently shows. */
@@ -96,14 +94,14 @@ export class PtySessions {
     return ids
   }
 
-  /** A window closed: it no longer sees any PTY, and hands control to another viewer. */
-  detachWindow(windowId: number): void {
+  /** A client (window) went away: it no longer sees any PTY, and hands control to another viewer. */
+  detachClient(clientId: string): void {
     for (const [tabId, runtime] of this.runtimes.entries()) {
-      runtime.attachedWindowIds.delete(windowId)
-      if (runtime.controllerWindowId === windowId) {
-        const nextController = runtime.attachedWindowIds.values().next().value ?? null
-        runtime.controllerWindowId = nextController
-        this.deps.log(`ptyControllerReassigned id=${tabId} windowId=${nextController ?? 'none'}`)
+      runtime.attachedClientIds.delete(clientId)
+      if (runtime.controllerClientId === clientId) {
+        const nextController = runtime.attachedClientIds.values().next().value ?? null
+        runtime.controllerClientId = nextController
+        this.deps.log(`ptyControllerReassigned id=${tabId} clientId=${nextController ?? 'none'}`)
       }
     }
   }
@@ -140,10 +138,10 @@ export class PtySessions {
     this.deps.ptyManager.killAll()
   }
 
-  write(windowId: number, id: string, data: string): void {
+  write(clientId: string, id: string, data: string): void {
     const runtime = this.runtimes.get(id)
-    if (!runtime || !runtime.attachedWindowIds.has(windowId)) return
-    this.claimControl(id, windowId)
+    if (!runtime || !runtime.attachedClientIds.has(clientId)) return
+    this.claimControl(id, clientId)
     this.deps.ptyManager.write(id, data)
   }
 
@@ -155,14 +153,14 @@ export class PtySessions {
     return true
   }
 
-  resize(windowId: number, windowFocused: boolean, id: string, cols: number, rows: number): void {
+  resize(clientId: string, clientFocused: boolean, id: string, cols: number, rows: number): void {
     const runtime = this.runtimes.get(id)
-    if (!runtime || !runtime.attachedWindowIds.has(windowId)) return
-    if (!windowFocused && runtime.controllerWindowId !== windowId) {
-      this.deps.log(`ptyResizeIgnored id=${id} windowId=${windowId} cols=${cols} rows=${rows}`)
+    if (!runtime || !runtime.attachedClientIds.has(clientId)) return
+    if (!clientFocused && runtime.controllerClientId !== clientId) {
+      this.deps.log(`ptyResizeIgnored id=${id} clientId=${clientId} cols=${cols} rows=${rows}`)
       return
     }
-    this.claimControl(id, windowId)
+    this.claimControl(id, clientId)
     runtime.cols = cols
     runtime.rows = rows
     this.broadcastToAttached(id, 'pty-size-sync', id, cols, rows)
@@ -184,7 +182,7 @@ export class PtySessions {
     this.deps.broadcastAgentActivity(id)
   }
 
-  attachOrCreate(windowId: number, request: PtySpawnRequest): PtyAttachResult {
+  attachOrCreate(clientId: string, request: PtySpawnRequest): PtyAttachResult {
     const { id, cols, rows, projectId, sshConfig } = request
     let runtime = this.runtimes.get(id)
     // If the stored runtime's PTY has already exited and this tab is an SSH tab
@@ -203,21 +201,21 @@ export class PtySessions {
       runtime = undefined
     }
     if (!runtime) {
-      this.deps.log(`ptyAttach create windowId=${windowId} id=${id}`)
+      this.deps.log(`ptyAttach create clientId=${clientId} id=${id}`)
       runtime = {
-        attachedWindowIds: new Set<number>(),
-        controllerWindowId: windowId,
+        attachedClientIds: new Set<string>(),
+        controllerClientId: clientId,
         cols,
         rows,
         scrollback: this.deps.scrollbackStorage.load(id) ?? '',
         exitCode: null
       }
       this.runtimes.set(id, runtime)
-      runtime.attachedWindowIds.add(windowId)
+      runtime.attachedClientIds.add(clientId)
       this.spawn(request)
     } else {
-      this.deps.log(`ptyAttach reuse windowId=${windowId} id=${id} scrollback=${runtime.scrollback.length} exit=${runtime.exitCode}`)
-      runtime.attachedWindowIds.add(windowId)
+      this.deps.log(`ptyAttach reuse clientId=${clientId} id=${id} scrollback=${runtime.scrollback.length} exit=${runtime.exitCode}`)
+      runtime.attachedClientIds.add(clientId)
     }
     return {
       cols: runtime.cols,
@@ -294,7 +292,7 @@ export class PtySessions {
         const remotePort = sshManager.getRemotePort(projectId)
         if (remotePort) {
           const remoteExtPath = piExtensionRemotePath()
-          hookInjectPrefix = buildRemotePiExtensionScript() + ' && '
+          hookInjectPrefix = buildRemotePiExtensionScript(deps.piExtensionPath()) + ' && '
           // Ahead of the caller's args, so a first prompt stays the last argument.
           remoteArgs = ['-e', remoteExtPath, ...(args ?? [])]
           remoteEnv = {
@@ -326,7 +324,7 @@ export class PtySessions {
       let localEnv = extraEnv
       if (isPiLocal) {
         // Ahead of the caller's args, so a first prompt stays the last argument.
-        localArgs = ['-e', piExtensionLocalPath(), ...(args ?? [])]
+        localArgs = ['-e', deps.piExtensionPath(), ...(args ?? [])]
         localEnv = {
           ...extraEnv,
           DEVTOOL_HOOK_PORT: String(deps.hookPort()),
@@ -357,18 +355,18 @@ export class PtySessions {
     }
   }
 
-  private claimControl(tabId: string, windowId: number): void {
+  private claimControl(tabId: string, clientId: string): void {
     const runtime = this.runtimes.get(tabId)
     if (!runtime) return
-    if (runtime.controllerWindowId !== windowId) {
-      runtime.controllerWindowId = windowId
-      this.deps.log(`ptyController id=${tabId} windowId=${windowId}`)
+    if (runtime.controllerClientId !== clientId) {
+      runtime.controllerClientId = clientId
+      this.deps.log(`ptyController id=${tabId} clientId=${clientId}`)
     }
   }
 
   private broadcastToAttached(tabId: string, channel: string, ...args: unknown[]): void {
-    const windowIds = this.runtimes.get(tabId)?.attachedWindowIds
-    if (!windowIds) return
-    for (const windowId of windowIds) this.deps.sendToWindow(windowId, channel, ...args)
+    const clientIds = this.runtimes.get(tabId)?.attachedClientIds
+    if (!clientIds) return
+    for (const clientId of clientIds) this.deps.sendToClient(clientId, channel, ...args)
   }
 }

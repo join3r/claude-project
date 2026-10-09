@@ -1,4 +1,4 @@
-import type { TabStatusValue } from '../context/TabStatusContext'
+import type { TabStatusValue } from './types'
 
 // Shells and TUIs set the window title with OSC <text> BEL, so a raw \x07 only
 // counts as a bell once those sequences are stripped — otherwise every prompt rings.

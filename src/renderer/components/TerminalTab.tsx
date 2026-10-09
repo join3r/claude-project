@@ -23,7 +23,7 @@ import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import { disarmXtermDocMouseListeners } from './xtermDisposal'
 import { buildXtermTheme } from './terminalThemes'
 import { useTabStatusStore } from '../context/TabStatusContext'
-import { hasBell, terminalStatusFromOutput } from './terminalStatus'
+import { hasBell, terminalStatusFromOutput } from '../../shared/terminal-status'
 import { takePendingCommand } from './terminalStartup'
 
 const ENABLE_XTERM_WEBGL = false

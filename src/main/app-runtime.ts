@@ -1,116 +1,21 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, powerMonitor, shell } from 'electron'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-import { Storage } from './storage'
-import { CONFIG_DIR } from './config-dir'
-import { ScrollbackStorage } from './scrollback-storage'
-import { ArchiveStorage } from './archive-storage'
-import { PtyManager } from './pty-manager'
-import { PtySessions } from './pty-sessions'
-import { HookServer } from './hook-server'
-import { HookInjector, hookEndpointFor } from './hook-injector'
-import { ClaudeChatManager } from './claude-chat/chat-manager'
-import { SshConnectionManager } from './ssh-connection-manager'
-import { CodexSessionManager } from './codex-session-manager'
-import { RemoteWorkspaceManager } from './remote-workspace-manager'
-import { WorkspaceManager } from './workspace-manager'
-import { FileSetupApprovals } from './worktree-setup-approvals'
-import { TaskWorktreeManager } from './task-worktree'
-import { recordSetupArtifacts, TaskLandingManager } from './task-landing'
-import { LocalGitRunner } from './git-runner'
-import { bracketedPaste } from './pty-paste'
-import { NotesStorage } from './notes-storage'
-import { RevisionStore } from './revision-store'
-import { TabActivityRegistry } from './tab-activity-registry'
-import { SleepBlocker } from './sleep-blocker'
-import type { ActivityUpdate } from '../shared/agent-activity'
-import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from './task-teardown'
-import { PaletteFrecencyStorage } from './palette-frecency-storage'
-import { agentCommandOverride, resolveAgentCommand } from './resolve-agent-command'
-import { findGitBashExe, getShellEnv, setPortableNodeDir } from './shell-env'
+import { HostServices } from './host/host-services'
+import { createDesktopHostEnv, logDebug } from './desktop-host-env'
+import { WindowClientHub, windowClientId } from './window-client-hub'
 import { createIpcRegistrar } from './ipc/registrar'
 import { createAppUrlMatcher } from './ipc/sender'
-import { allowedLocalRoots, resolveAllowedDirectory } from './ipc/path-allowlist'
-import { registerAppStateHandlers } from './ipc/app-state'
-import { registerWindowHandlers } from './ipc/window'
-import { registerSshHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/ssh'
-import { registerAgentHandlers } from './ipc/agents'
-import { registerTerminalHandlers } from './ipc/terminals'
-import { createWorkspace, listWorkspaceBranches, registerWorkspaceHandlers } from './ipc/workspaces'
-import { registerArchiveHandlers } from './ipc/archive'
-import { readLocalTranscript, readRemoteTranscript } from './claude-chat/transcript'
-import { readPermissionSettings, updatePermissionRule } from './claude-chat/permission-settings'
-import { registerFileBrowserHandlers } from './ipc/file-browser'
-import { registerGitHandlers } from './ipc/git'
-import { registerNotebookHandlers } from './ipc/notebooks'
-import { isRemoteProject, isShellCommandProject } from '../shared/types'
-import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../shared/archive'
-import {
-  NOTEBOOK_ERROR_REMOTE,
-  NOTEBOOK_ERROR_SHELL_PROJECT,
-  resolveNotebookKernelCondaEnv,
-  type NotebookKernelCondaOverride
-} from '../shared/notebook'
-import { notebookAllowedCwdRoots, resolveNotebookKernelCwd } from './notebook-cwd'
-import { listCondaEnvs, listCondaEnvsForNotebookKernel, resolveProjectCondaEnv } from './conda-env'
-import { NotebookKernelManager } from './notebook-kernel'
-import { safeWebContentsSend } from './safe-ipc-send'
-import type { CondaEnvInfo } from '../shared/conda'
-import { registerMobileHandlers } from './ipc/mobile'
+import { registerWindowHandlers, type WindowIpcContext } from './ipc/window'
+import { registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/socks-proxy'
 import { registerUpdateHandlers } from './ipc/updates'
-import { registerTaskWorktreeHandlers } from './ipc/task-worktrees'
-import { registerTaskLandingHandlers } from './ipc/task-landing'
 import { createUpdates, type Updates } from './updates'
 import { probeRedirect } from './release-redirect'
 import { decideUpdateMode } from '../shared/updates'
-import { findTaskInProject, removeTaskFromProject } from '../shared/streams'
-import { chatTabConfig } from '../shared/chat-tab-config'
-import { MobileService } from './mobile/mobile-service'
-import { PairingsStore } from './mobile/pairings-store'
-import { IdentityStore } from './mobile/identity'
-import { createInvite } from './mobile/invite'
-import { RelayClient } from './mobile/relay-client'
-import { createNoiseChannelFactory } from './mobile/channel'
-import { ChatBridge } from './mobile/chat-bridge'
-import { nativeImageCodec } from './mobile/image-codec'
-import { PushEmitter } from './mobile/push-emitter'
-import { createStream, listProjectBranches, type StreamGit } from './mobile/new-stream'
-import { addTaskWithChat } from './mobile/new-task'
-import { closeTask, findClosableTab, landTask, removeTabFromData } from './mobile/close-task'
-import { setPinInData } from './mobile/pin'
-import { triageTaskInData } from './mobile/triage'
-import {
-  AppErrorCode,
-  BRANCHES_LIST_FEATURE,
-  CHAT_COMMANDS_FEATURE,
-  CHAT_IMAGE_FEATURE,
-  CHAT_SETTINGS_FEATURE,
-  PIN_FEATURE,
-  STREAM_NEW_FEATURE,
-  TAB_CLOSE_FEATURE,
-  TASK_CLOSE_FEATURE,
-  TASK_LAND_FEATURE,
-  TASK_NEW_FEATURE,
-  TASK_TRIAGE_FEATURE
-} from '../../protocol/ts/index.ts'
-import { normalizeMobileConfig } from '../shared/mobile'
 import type {
-  AppConfig,
   PersistedWindowState,
-  Project,
-  ProjectsData,
-  SshConfig,
-  Tab,
-  Task,
-  TunnelConfig,
-  WorkspaceDeleteRequest,
-  WorkspaceDeleteResult,
   WindowGeometry,
-  WindowViewState,
-  NotesRecord
+  WindowViewState
 } from '../shared/types'
 import {
   buildWindowViewState,
@@ -118,19 +23,6 @@ import {
   cloneWindowGeometry,
   cloneWindowViewState
 } from '../shared/types'
-
-const execFileAsync = promisify(execFile)
-
-/**
- * Let the windows come up before the first sweep: what is on screen, which
- * buffers are unsaved and which PTYs are alive are all safeguards main only
- * learns once the renderers have reported in.
- */
-const DEBUG_LOG_PATH = path.join(CONFIG_DIR, 'debug.log')
-
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T
-}
 
 function getWindowGeometry(window: BrowserWindow): WindowGeometry {
   const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds()
@@ -143,165 +35,43 @@ function getWindowGeometry(window: BrowserWindow): WindowGeometry {
   }
 }
 
+/**
+ * The desktop shell: windows and their persisted state, native dialogs, the
+ * theme, updates and the browser tabs' SOCKS routing, around a local
+ * {@link HostServices} that does everything else.
+ */
 export class AppRuntime {
-  private readonly storage = new Storage(CONFIG_DIR)
-  private readonly scrollbackStorage = new ScrollbackStorage(path.join(CONFIG_DIR, 'scrollback'))
-  private readonly archiveStorage = new ArchiveStorage(path.join(CONFIG_DIR, 'archive'))
-  private readonly notesStorage = new NotesStorage(CONFIG_DIR)
-  private readonly paletteFrecencyStorage = new PaletteFrecencyStorage(CONFIG_DIR)
-  private readonly ptyManager = new PtyManager()
-  /** Native notebook tabs' Jupyter kernels, one per tab. */
-  private readonly notebookKernels = new NotebookKernelManager()
-  /** tabId -> token of a kernel start still awaiting its conda lookup. */
-  private readonly pendingNotebookStarts = new Map<string, number>()
-  private notebookStartCounter = 0
-  private readonly hookServer = new HookServer((message) => this.logDebug(message))
-  private readonly codexSessionManager = new CodexSessionManager()
-  private readonly workspaceManager = new WorkspaceManager({ approvals: new FileSetupApprovals(CONFIG_DIR) })
-  private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
-  private readonly windows = new Map<number, BrowserWindow>()
+  /** The windows, as the host's clients. */
+  private readonly clients = new WindowClientHub<BrowserWindow>()
+  private readonly host: HostServices
   private readonly windowStates = new Map<number, PersistedWindowState>()
-  private readonly ptySessions: PtySessions
-  /** Main's authoritative view of what every tab's agent is doing. */
-  private readonly activityRegistry = new TabActivityRegistry()
-  private readonly sleepBlocker: SleepBlocker
-  /** Tabs with an unsaved editor buffer, per window — a task holding one is not swept. */
-  private readonly dirtyTabsByWindow = new Map<number, Set<string>>()
-  /** Which window last reported each hook-less tab's status (`report-tab-status`). */
-  private readonly statusReporters = new Map<string, number>()
-  private hookInjector!: HookInjector
-  private sshManager!: SshConnectionManager
-  /** Claude chat tabs' processes — the Agent SDK counterpart of `ptySessions`. */
-  private chatManager!: ClaudeChatManager
-  /** Phones: relay connection, pairing and the inbox they see. Dormant while Mobile is off. */
-  private mobileService!: MobileService
   private updates!: Updates
   private started = false
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
   private socksProxyStarting = new Map<string, Promise<number>>()
-  private readonly projectsStore: RevisionStore<ProjectsData>
-  /** Tasks' own worktrees, made just before their first spawn. */
-  private readonly taskWorktrees: TaskWorktreeManager
-  /** Tasks' worktrees landing back into their streams. */
-  private readonly taskLanding: TaskLandingManager
-  private readonly notesStore: RevisionStore<NotesRecord>
-  private config: AppConfig
   private startupWindowStates: PersistedWindowState[]
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
-    this.storage.backupProjectsOnStartup()
-    this.projectsStore = new RevisionStore<ProjectsData>({
-      initial: this.storage.loadProjects(),
-      normalize: (data) => Storage.normalizeProjectsData(data as unknown as Record<string, unknown>),
-      persist: (data) => this.storage.saveProjects(data),
-      broadcast: (envelope) => this.broadcastToAllWindows('projects-updated', envelope)
+    this.host = new HostServices({
+      env: createDesktopHostEnv(),
+      clients: this.clients,
+      onTaskArchived: (taskId) => this.forgetTaskInWindowStates(taskId)
     })
-    // Notes only gained a canonical copy in main when they gained a revision: before
-    // that `notes-save` proxied straight to disk, which is why note changes never
-    // reached the other windows at all.
-    this.notesStore = new RevisionStore<NotesRecord>({
-      initial: this.notesStorage.load(),
-      persist: (data) => this.notesStorage.save(data),
-      broadcast: (envelope) => this.broadcastToAllWindows('notes-updated', envelope)
-    })
-    const gitRunner = new LocalGitRunner()
-    this.taskWorktrees = new TaskWorktreeManager({
-      projects: {
-        peek: () => this.projectsStore.peek(),
-        commit: (data) => { this.commitProjects(data) },
-        subscribe: (listener) => this.projectsStore.subscribe(() => listener())
-      },
-      git: this.workspaceManager,
-      onState: (taskId, state) => this.broadcastToAllWindows('task-worktree-state', taskId, state),
-      log: (message) => this.logDebug(message),
-      recordSetupArtifacts: (worktreeRoot) => recordSetupArtifacts(gitRunner, worktreeRoot),
-      // Made just below; only asked once something calls ensure.
-      isLanding: (taskId) => this.taskLanding.isBusy(taskId)
-    })
-    this.taskLanding = new TaskLandingManager({
-      projects: {
-        peek: () => this.projectsStore.peek(),
-        commit: (data) => { this.commitProjects(data) }
-      },
-      runner: gitRunner,
-      git: this.workspaceManager,
-      activity: this.activityRegistry,
-      sendToAgent: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
-      forgetWorktree: (taskId) => this.taskWorktrees.forget(taskId),
-      stopTabs: (project, task) => this.stopTaskTabs(project, task),
-      // Every close a landing finishes is archived here, whoever asked for it (a
-      // window, a phone, the agent that fixed a conflict).
-      archiveTask: async (projectId, taskId, closed, dir) => {
-        const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
-        const task = findTaskInProject(project, taskId)
-        if (project && task) await this.archiveTaskFromMain(project, task, { task: closed, dir })
-      },
-      onState: (taskId, landing) => this.broadcastToAllWindows('task-landing-state', taskId, landing),
-      log: (message) => this.logDebug(message)
-    })
-    this.forgetArchivesOfVanishedProjects()
-    this.config = this.storage.loadConfig()
-    setPortableNodeDir(this.config.portableNodeDir)
-    this.sleepBlocker = new SleepBlocker(
-      powerSaveBlocker,
-      () => this.activityRegistry.getSnapshot(),
-      () => this.config.keepAwakeWhileWorking !== false,
-      (message) => this.logDebug(message)
-    )
-    this.activityRegistry.subscribe(() => this.sleepBlocker.update())
-    this.ptySessions = new PtySessions({
-      ptyManager: this.ptyManager,
-      scrollbackStorage: this.scrollbackStorage,
-      activityRegistry: this.activityRegistry,
-      sshManager: () => this.sshManager,
-      hookInjector: () => this.hookInjector,
-      hookPort: () => this.hookServer.getPort(),
-      hookToken: () => this.hookServer.getToken(),
-      getConfig: () => this.config,
-      broadcastAgentActivity: (tabId) => this.broadcastAgentActivity(tabId),
-      sendToWindow: (windowId, channel, ...args) => this.sendToWindow(windowId, channel, ...args),
-      log: (message) => this.logDebug(message),
-      condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
-      onKill: (tabId) => this.shutdownNotebookKernel(tabId)
-    })
-    this.startupWindowStates = this.storage.loadWindowSession(
-      this.projectsStore.peek(),
-      this.config.defaultSidebarTab
+    this.startupWindowStates = this.host.storage.loadWindowSession(
+      this.host.getProjectsData(),
+      this.host.getConfig().defaultSidebarTab
     ).windows
-  }
-
-  /**
-   * The one write path for canonical projects state from inside main (a phone's
-   * and anything after it). Going through here is what bumps the revision and tells
-   * the windows, so a main-side deletion cannot be resurrected by a stale renderer.
-   */
-  commitProjects(next: ProjectsData): ProjectsData {
-    return this.projectsStore.commit(next).data
-  }
-
-  getProjectsData(): ProjectsData {
-    return this.projectsStore.peek()
   }
 
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
 
-    await this.hookServer.start()
-    this.logDebug(`start hookPort=${this.hookServer.getPort()}`)
-    this.hookInjector = new HookInjector(this.hookServer.getPort(), this.hookServer.getToken())
-    this.sshManager = new SshConnectionManager(path.join(CONFIG_DIR, 'ssh'), this.hookServer.getPort())
-    this.notebookKernels.onEvent((tabId, event) => {
-      this.broadcastToAllWindows('notebook-kernel-event', tabId, event)
-    })
-    this.chatManager = this.createChatManager()
-    this.mobileService = this.createMobileService()
+    await this.host.start()
     this.updates = this.createUpdates()
     this.registerEventForwarders()
     this.registerIpcHandlers()
-    void this.taskLanding.reconcile()
-    this.mobileService.start()
     this.updates.start()
   }
 
@@ -327,8 +97,8 @@ export class AppRuntime {
     return createUpdates({
       mode,
       appVersion: app.getVersion(),
-      autoCheck: () => this.config.autoCheckUpdates !== false,
-      broadcast: (status) => this.broadcastToAllWindows('updates-status', status),
+      autoCheck: () => this.host.getConfig().autoCheckUpdates !== false,
+      broadcast: (status) => this.clients.broadcast('updates-status', status),
       openExternal: (url) => { void shell.openExternal(url).catch(() => {}) },
       probeRedirect: (url) => probeRedirect(url),
       now: () => Date.now(),
@@ -342,155 +112,13 @@ export class AppRuntime {
     })
   }
 
-  private createMobileService(): MobileService {
-    const mobileDir = path.join(CONFIG_DIR, 'mobile')
-    const log = (message: string) => this.logDebug(message)
-    // Loaded on first use (Mobile on, or a pairing started), never at startup:
-    // safeStorage can raise a Keychain prompt on macOS.
-    const identity = new IdentityStore(mobileDir, {
-      isAvailable: () => safeStorage.isEncryptionAvailable(),
-      encrypt: (plaintext) => safeStorage.encryptString(plaintext),
-      decrypt: (ciphertext) => safeStorage.decryptString(ciphertext)
-    }, log)
-    const desktopName = () => normalizeMobileConfig(this.config.mobile).desktopName?.trim() || os.hostname().replace(/\.local$/, '')
-    // The emitter and the service need each other: it sends through the service, and
-    // the bridge (inside the service's deps) tells it which turns a phone started.
-    let service: MobileService | null = null
-    let bridge: ChatBridge | null = null
-    const push = new PushEmitter({
-      chats: this.chatManager,
-      projects: { peek: () => this.projectsStore.peek() },
-      targets: () => service?.pushTargets() ?? [],
-      openTab: (phoneId) => bridge?.openTab(phoneId) ?? null,
-      send: (phoneId, data) => service?.sendPush(phoneId, data) ?? Promise.resolve('not-sent'),
-      desktopId: () => identity.peekId(),
-      now: () => Date.now(),
-      log
-    })
-    bridge = new ChatBridge({
-      chats: this.chatManager,
-      projects: { peek: () => this.projectsStore.peek() },
-      timers: {
-        now: () => Date.now(),
-        setTimeout: (fn, ms) => setTimeout(fn, ms),
-        clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
-      },
-      log,
-      onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId),
-      worktrees: { ensure: (projectId, taskId) => this.taskWorktrees.ensureTaskWorktree(projectId, taskId) },
-      images: nativeImageCodec,
-      // The same folder check as the chat tab's /permissions IPC.
-      permissions: {
-        read: async (cwd) => readPermissionSettings(await this.resolveAllowedDirectory(cwd)),
-        update: async (cwd, kind, behavior, rule, action) =>
-          updatePermissionRule(await this.resolveAllowedDirectory(cwd), kind, behavior, rule, action)
-      }
-    })
-    push.start()
-    service = new MobileService({
-      getConfig: () => normalizeMobileConfig(this.config.mobile),
-      saveConfig: (mobile) => this.applyConfig({ mobile }),
-      projects: {
-        peek: () => this.projectsStore.peek(),
-        subscribe: (listener) => this.projectsStore.subscribe(() => listener())
-      },
-      activity: this.activityRegistry,
-      pairings: new PairingsStore(mobileDir, log),
-      getDesktopId: () => identity.peekId(),
-      defaultDesktopName: () => os.hostname().replace(/\.local$/, ''),
-      createTransport: () => new RelayClient({
-        ed25519: () => identity.get().ed25519,
-        deviceId: () => identity.get().id,
-        log: (message) => this.logDebug(`mobile ${message}`)
-      }),
-      channels: createNoiseChannelFactory({
-        staticKey: () => identity.get().x25519,
-        app: `devtool/${app.getVersion()}`,
-        desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE],
-        log
-      }),
-      createInvite: (options) => createInvite(identity.get(), options),
-      broadcastState: (state) => this.broadcastToAllWindows('mobile-state-changed', state),
-      log,
-      chat: bridge,
-      newTask: async (phoneId, { projectId, streamId, prompt, mode }) => {
-        if (!this.config.enableClaude) {
-          return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
-        }
-        const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId)
-        if (!added.ok) return added
-        this.commitProjects(added.data)
-        // In a worktree stream the chat starts in the task's own worktree. Setup
-        // commands awaiting approval don't hold it up: that question is the desktop's.
-        const worktree = await this.taskWorktrees.ensureTaskWorktree(projectId, added.taskId)
-        if (worktree.status === 'failed') {
-          // Nothing ran in it yet and the phone gets the error, so the task goes again.
-          const data = this.projectsStore.peek()
-          this.commitProjects({
-            ...data,
-            projects: data.projects.map(p => (p.id === projectId ? removeTaskFromProject(p, added.taskId) : p))
-          })
-          return { ok: false, code: AppErrorCode.Internal, message: `Couldn't create the task's worktree: ${worktree.error}` }
-        }
-        // The task exists from here on, so a failed start is logged rather than
-        // reported: the phone opens the chat either way and sees its state there,
-        // where a retry of task.new would only make a second task.
-        try {
-          await bridge.startTask(phoneId, added.tabId, prompt, mode)
-        } catch (err) {
-          log(`task.new start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
-        }
-        return { ok: true, taskId: added.taskId, tabId: added.tabId }
-      },
-      closeTask: (params, phone) => closeTask({
-        peek: () => this.projectsStore.peek(),
-        dirtyTabIds: () => this.getDirtyTabIds(),
-        statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
-        removeTask: (project, task) => this.archiveTaskFromMain(project, task),
-        // A task with its own worktree lands, as the sidebar's Close does.
-        landing: this.taskLanding,
-        stopTabs: (project, task) => this.stopTaskTabs(project, task)
-      }, params, phone),
-      landTask: (params) => landTask({ peek: () => this.projectsStore.peek(), landing: this.taskLanding }, params),
-      closeTab: async (tabId) => {
-        const found = findClosableTab(this.projectsStore.peek(), tabId)
-        if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab. A task\'s own agent or terminal closes with the task.' }
-        await this.removeTabFromMain(found.project, found.task, found.tab)
-        return { ok: true }
-      },
-      setPin: (params) => {
-        const outcome = setPinInData(this.projectsStore.peek(), params)
-        if (!outcome.ok) return outcome
-        if (outcome.changed) this.commitProjects(outcome.data)
-        return { ok: true }
-      },
-      triageTask: (params) => {
-        const outcome = triageTaskInData(this.projectsStore.peek(), params, Date.now())
-        if (!outcome.ok) return outcome
-        if (outcome.changed) this.commitProjects(outcome.data)
-        return { ok: true }
-      },
-      newStream: (params) => createStream({
-        ...this.streamGit(),
-        peek: () => this.projectsStore.peek(),
-        commit: (data) => this.commitProjects(data)
-      }, params),
-      listBranches: (projectId) => listProjectBranches({
-        ...this.streamGit(),
-        peek: () => this.projectsStore.peek()
-      }, projectId)
-    })
-    return service
-  }
-
   registerWindow(window: BrowserWindow, initialViewState?: WindowViewState | null): void {
-    this.windows.set(window.id, window)
+    const clientId = this.clients.add(window)
     this.windowStates.set(window.id, {
       geometry: getWindowGeometry(window),
       viewState: initialViewState
         ? cloneWindowViewState(initialViewState)
-        : buildWindowViewState(this.projectsStore.peek().projects, this.config)
+        : buildWindowViewState(this.host.getProjectsData().projects, this.host.getConfig())
     })
     this.logDebug(`registerWindow windowId=${window.id}`)
     const syncGeometry = () => {
@@ -502,21 +130,12 @@ export class AppRuntime {
     window.on('unmaximize', syncGeometry)
     window.on('closed', () => {
       this.logDebug(`windowClosed windowId=${window.id}`)
-      this.windows.delete(window.id)
-      // A closed window's unsaved buffers went with it; leaving them behind would
-      // block a phone's close of their tasks forever.
-      this.dirtyTabsByWindow.delete(window.id)
-      for (const [tabId, windowId] of this.statusReporters) {
-        if (windowId !== window.id) continue
-        this.statusReporters.delete(tabId)
-        this.activityRegistry.unreported(tabId)
-      }
+      this.clients.remove(clientId)
       if (!this.quitting) {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
       }
-      this.chatManager.detachWindow(window.id)
-      this.ptySessions.detachWindow(window.id)
+      this.host.detachClient(clientId)
     })
   }
 
@@ -528,53 +147,17 @@ export class AppRuntime {
     this.quitting = true
   }
 
-  private getDirtyTabIds(): string[] {
-    const ids = new Set<string>()
-    for (const tabIds of this.dirtyTabsByWindow.values()) {
-      for (const tabId of tabIds) ids.add(tabId)
-    }
-    return [...ids]
-  }
-
   /**
-   * Archive a task on main's own behalf (a phone's `task.close`), doing here every
-   * piece of teardown a window does when it closes one — the PTYs (which outlive a
-   * hidden tab), the hook injections and the activity entries. The scrollback
-   * stays, for Reopen. A renderer only tears down tabs it has mounted, so nothing
-   * here may be left to the broadcast; the broadcast covers only what is
-   * renderer-local (xterm instances, per-window status entries, view state).
-   * A landing's close passes `closed`: the task as it left its worktree, and
-   * the directory its sessions ran in.
+   * Main's own copy of each window's selection is what gets persisted on quit,
+   * so a task main archived (a phone's close, a landing) has to leave it too.
    */
-  private async archiveTaskFromMain(project: Project, task: Task, closed?: { task: Task; dir: string }): Promise<void> {
-    const found = archivedTaskEntry(project, task.id, Date.now())
-    const entry = found && closed ? { ...found, task: closed.task, dir: closed.dir } : found
-    const tabIds = await tearDownTaskTabs(project, task, { ...this.teardownTargets(), deleteScrollback: () => {} })
-
-    // Sent before the state commit, and on the same ordered channel: a window that
-    // learns the task is gone first unmounts its tabs, and the components that own
-    // the xterm instances and status entries would no longer be listening.
-    this.broadcastToAllWindows('tasks-removed', { projectId: project.id, taskId: task.id, tabIds })
-
-    // The file first, then the data: a crash in between leaves the task in both
-    // (the archive view hides it), never in neither.
-    const data = this.projectsStore.peek()
-    const next = archiveTasksInData(data, project.id, [task.id])
-    const retired = !next.projects.some(candidate => candidate.id === project.id)
-    if (entry && !retired) {
-      this.archiveStorage.update(project.id, archive => withArchivedTasks(archive, [entry]))
-      this.broadcastToAllWindows('archive-changed', project.id)
-    }
-    this.commitProjects(next)
-
-    // Main's own copy of each window's selection is what gets persisted on quit,
-    // so it has to forget the task too.
+  private forgetTaskInWindowStates(taskId: string): void {
     for (const [windowId, state] of this.windowStates.entries()) {
       const taskStates = { ...state.viewState.taskStates }
-      const hadTaskState = task.id in taskStates
-      const wasSelected = state.viewState.selectedTaskId === task.id
+      const hadTaskState = taskId in taskStates
+      const wasSelected = state.viewState.selectedTaskId === taskId
       if (!hadTaskState && !wasSelected) continue
-      delete taskStates[task.id]
+      delete taskStates[taskId]
       this.windowStates.set(windowId, {
         geometry: cloneWindowGeometry(state.geometry),
         viewState: {
@@ -587,125 +170,20 @@ export class AppRuntime {
     this.persistWindowSession()
   }
 
-  /**
-   * A project that leaves the data (deleted, or a spent hidden one swept away)
-   * takes its archive with it, and the scrollback of the archived tabs: its Done
-   * rows are unreachable from then on.
-   */
-  private forgetArchivesOfVanishedProjects(): void {
-    let before = this.projectsStore.peek().projects
-    this.projectsStore.subscribe((data) => {
-      const gone = vanishedProjectIds(before, data.projects)
-      before = data.projects
-      for (const projectId of gone) {
-        try {
-          for (const tabId of archivedTabIds(this.archiveStorage.load(projectId))) this.scrollbackStorage.delete(tabId)
-          this.archiveStorage.delete(projectId)
-        } catch (err) {
-          this.logDebug(`archiveForget projectId=${projectId} error=${err instanceof Error ? err.message : String(err)}`)
-        }
-      }
-    })
-  }
-
-  /**
-   * End a task's processes before its worktree is removed (a landing's close):
-   * the teardown archiving does, keeping the scrollback. Windows can't delete a
-   * folder a process still runs in, so there they get a moment to exit.
-   */
-  private async stopTaskTabs(project: Project, task: Task): Promise<void> {
-    const tabIds = await tearDownTaskTabs(project, task, { ...this.teardownTargets(), deleteScrollback: () => {} })
-    if (process.platform === 'win32' && tabIds.length > 0) await new Promise(resolve => setTimeout(resolve, 500))
-  }
-
-  /** What a window does for the tabs it closes, done by main for tabs no window may be showing. */
-  private teardownTargets(): TaskTeardownTargets {
-    return {
-      killPty: (tabId) => {
-        this.ptySessions.discard(tabId)
-        this.chatManager.close(tabId)
-      },
-      deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
-      forgetActivity: (tabId) => {
-        this.statusReporters.delete(tabId)
-        this.activityRegistry.remove(tabId)
-        this.broadcastAgentActivity(tabId)
-      },
-      releaseHooks: (owner, dir, tabId) => owner.ssh
-        ? this.cleanupRemoteHooks(owner.id, owner.ssh, dir, tabId)
-        : this.hookInjector.cleanup(dir, tabId)
-    }
-  }
-
-  /**
-   * Close one tab on main's own behalf (the phone's `tab.close`): the same teardown
-   * as {@link archiveTaskFromMain}, for one tab (a closed tab's scrollback goes), with the task left in place.
-   */
-  private async removeTabFromMain(project: Project, task: Task, tab: Tab): Promise<void> {
-    const tabIds = await tearDownTabs(project, task, [tab], this.teardownTargets())
-    // Before the commit, for the same reason as `tasks-removed`.
-    this.broadcastToAllWindows('tabs-removed', { projectId: project.id, taskId: task.id, tabIds })
-    this.commitProjects(removeTabFromData(this.projectsStore.peek(), task.id, tab.id))
-  }
-
-  /**
-   * Type a prompt into an agent tab and submit it, from main (a landing's
-   * "Ask agent to fix"): a chat tab gets its runtime started if no window has
-   * it; a terminal agent gets it pasted (bracketed, as a window's link insert
-   * does, control characters replaced) and Enter a beat later. A terminal agent must be running already.
-   */
-  private async sendToAgentTab(project: Project, task: Task, tab: Tab, text: string): Promise<void> {
-    if (tab.type === 'claude-chat') {
-      if (!tab.sessionId) throw new Error('Open the task\'s chat once, then ask again')
-      if (!this.chatManager.snapshot(tab.id)) {
-        const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
-        stop()
-      }
-      await this.chatManager.send(tab.id, text)
-      return
-    }
-    if (!this.ptySessions.writeFromMain(tab.id, bracketedPaste(text))) {
-      throw new Error('The task\'s agent is not running. Open the task, then ask again.')
-    }
-    setTimeout(() => this.ptySessions.writeFromMain(tab.id, '\r'), 150)
-  }
-
-  /** Run a shell script on a remote project's host over its control socket; resolves its stdout. */
-  private async remoteExec(projectId: string, sshConfig: SshConfig, script: string): Promise<string> {
-    const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
-      '-S', this.sshManager.getSocketPath(projectId),
-      `${sshConfig.username}@${sshConfig.host}`,
-      script
-    ], { timeout: 30_000, maxBuffer: 512 * 1024 * 1024 })
-    return stdout
-  }
-
   async shutdown(): Promise<void> {
     this.persistWindowSession()
-    this.mobileService?.stop()
     this.updates?.close()
-    this.ptySessions.saveAllScrollback()
-    this.ptySessions.killAll()
-    this.notebookKernels.shutdownAll()
-    this.chatManager.closeAll()
-    this.sleepBlocker.release()
-    this.hookInjector.cleanupAll()
-    await this.hookServer.stop()
-    await this.sshManager.disconnectAll().catch(() => {})
+    await this.host.shutdown()
   }
 
   private registerEventForwarders(): void {
-    for (const endpoint of ['session-start', 'working', 'stopped', 'notification', 'activity']) {
-      this.hookServer.on(endpoint, (tabId: string, body: Record<string, unknown>) => this.handleHook(endpoint, tabId, body))
-    }
+    const sshManager = this.host.sshManager
 
-    this.sshManager.on('status-changed', async (projectId: string, status: string) => {
-      this.logDebug(`sshStatus projectId=${projectId} status=${status}`)
-      this.broadcastToAllWindows('ssh-status-changed', projectId, status)
-
+    // After the host's own listener, which tells the windows the new status.
+    sshManager.on('status-changed', async (projectId: string, status: string) => {
       if (status === 'disconnected' && this.socksProxyEnabled.get(projectId)) {
         await routeBrowserDirectQuietly(projectId)
-        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+        this.clients.broadcast('socks-proxy-status-changed', projectId, false)
       }
 
       if (status === 'connected') {
@@ -717,25 +195,20 @@ export class AppRuntime {
     // health check's `-O check`; probe end to end so it is replaced right away.
     powerMonitor.on('resume', () => {
       this.logDebug('powerResume verifying ssh connections')
-      this.sshManager.verifyAll()
+      sshManager.verifyAll()
     })
 
-    this.sshManager.on('tunnel-status-changed', (projectId: string, status: string, error?: string) => {
-      this.logDebug(`tunnelStatus projectId=${projectId} status=${status}${error ? ` error=${error}` : ''}`)
-      this.broadcastToAllWindows('ssh-tunnel-status-changed', projectId, status, error)
-    })
-
-    this.sshManager.on('socks-proxy-status-changed', async (projectId: string, enabled: boolean) => {
+    sshManager.on('socks-proxy-status-changed', async (projectId: string, enabled: boolean) => {
       if (!enabled) {
         await routeBrowserDirectQuietly(projectId)
-        this.broadcastToAllWindows('socks-proxy-status-changed', projectId, false)
+        this.clients.broadcast('socks-proxy-status-changed', projectId, false)
 
-        const config = this.sshManager.getConfig(projectId)
-        if (this.socksProxyEnabled.get(projectId) && config && this.sshManager.getStatus(projectId) === 'connected') {
+        const config = sshManager.getConfig(projectId)
+        if (this.socksProxyEnabled.get(projectId) && config && sshManager.getStatus(projectId) === 'connected') {
           try {
-            const port = await this.sshManager.startSocksProxy(projectId, config)
+            const port = await sshManager.startSocksProxy(projectId, config)
             await routeBrowserThroughSocks(projectId, port)
-            this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
+            this.clients.broadcast('socks-proxy-status-changed', projectId, true, port)
           } catch {
             // Auto-restart failed — stay in direct mode
           }
@@ -744,110 +217,8 @@ export class AppRuntime {
     })
 
     nativeTheme.on('updated', () => {
-      this.broadcastToAllWindows('theme-changed', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+      this.clients.broadcast('theme-changed', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
     })
-  }
-
-  /**
-   * One hook event, from a terminal tab's curl (hook server) or a chat tab's SDK
-   * process (in-process). Each has two consumers: the windows, which draw the
-   * status dot for the tabs they mount, and the activity registry, which is what
-   * the phone's inbox and the sidebar's activity line read.
-   */
-  private handleHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
-    switch (endpoint) {
-      case 'session-start':
-        this.activityRegistry.touch(tabId)
-        this.recordAgentActivity(tabId, body)
-        this.broadcastToAttachedWindows(tabId, 'hook-session-start', tabId, body)
-        return
-      case 'working':
-        this.activityRegistry.working(tabId)
-        this.recordAgentActivity(tabId, body)
-        this.broadcastToAttachedWindows(tabId, 'hook-working', tabId)
-        return
-      case 'stopped':
-        this.activityRegistry.stopped(tabId)
-        this.recordAgentActivity(tabId, body)
-        this.broadcastToAttachedWindows(tabId, 'hook-stopped', tabId, this.activityRegistry.backgroundTasks(tabId))
-        return
-      case 'notification':
-        this.activityRegistry.notification(tabId, body)
-        this.recordAgentActivity(tabId, body)
-        this.broadcastToAttachedWindows(tabId, 'hook-notification', tabId, body)
-        return
-      default: {
-        // Everything else Claude reports (tools, permission dialogs, API failures,
-        // subagents, compaction). `hook-activity` is sent even without a status
-        // change, because any hook proves the agent is alive (the stale-working timer).
-        const update = this.recordAgentActivity(tabId, body)
-        const statusEvent = update?.statusEvent ?? null
-        if (statusEvent) this.activityRegistry.statusEvent(tabId, statusEvent)
-        this.broadcastToAttachedWindows(tabId, 'hook-activity', tabId, statusEvent)
-      }
-    }
-  }
-
-  private createChatManager(): ClaudeChatManager {
-    return new ClaudeChatManager({
-      sendToWindow: (windowId, channel, ...args) => this.sendToWindow(windowId, channel, ...args),
-      resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
-      localEnv: () => getShellEnv(),
-      // A chat spawns a fresh remote process per session, so check the master
-      // actually reaches the host first: a stale one fails the spawn with 255.
-      ensureSsh: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig, { verify: true }),
-      remoteCommand: (projectId, sshConfig, cwd, claudeArgs, env) => ({
-        file: this.sshManager.getSshCommand(),
-        args: this.sshManager.buildStdioSpawnArgs(projectId, sshConfig, 'claude', claudeArgs, env, cwd)
-      }),
-      bashSpawn: (config, command) => {
-        if (config.sshConfig && config.projectId) {
-          return {
-            file: this.sshManager.getSshCommand(),
-            args: this.sshManager.buildStdioSpawnArgs(config.projectId, config.sshConfig, 'bash', ['-c', command], {}, config.cwd)
-          }
-        }
-        const env = getShellEnv()
-        const shell = process.platform === 'win32'
-          ? findGitBashExe() ?? 'bash.exe'
-          : env.SHELL || '/bin/sh'
-        return { file: shell, args: ['-c', command], cwd: config.cwd, env }
-      },
-      claudeSpawn: (config, args) => {
-        if (config.sshConfig && config.projectId) {
-          return {
-            file: this.sshManager.getSshCommand(),
-            args: this.sshManager.buildStdioSpawnArgs(config.projectId, config.sshConfig, 'claude', args, {}, config.cwd)
-          }
-        }
-        const file = resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude')
-        return { file, args, cwd: config.cwd, env: getShellEnv() }
-      },
-      remoteExec: (projectId, sshConfig, script) => this.remoteExec(projectId, sshConfig, script),
-      onHook: (tabId, body) => {
-        const event = typeof body.hook_event_name === 'string' ? body.hook_event_name : ''
-        this.handleHook(hookEndpointFor(event), tabId, body)
-      },
-      onPromptResolved: (tabId, prompt) => {
-        this.handleHook('activity', tabId, { hook_event_name: 'DevtoolPromptResolved', tool_use_id: prompt.toolUseId })
-      },
-      onProcessChange: (tabId, running, error) => {
-        // A fresh process says nothing about the old one's status; an ended one is
-        // 'exited' only when it died on its own — a chat restarts on the next send.
-        if (running || !error) this.activityRegistry.reset(tabId)
-        else this.activityRegistry.exited(tabId)
-        this.broadcastAgentActivity(tabId)
-      },
-      log: (message) => this.logDebug(message)
-    })
-  }
-
-  private async ensureSshConnected(projectId: string, sshConfig: SshConfig, options?: { verify?: boolean }): Promise<void> {
-    if (this.sshManager.getStatus(projectId) === 'connected') {
-      if (!options?.verify || await this.sshManager.verifyConnection(projectId, sshConfig)) return
-    }
-    await this.sshManager.connect(projectId, sshConfig, { tunnel: this.getProjectTunnel(projectId) ?? null })
-    this.sshManager.startHealthChecks(projectId, sshConfig)
   }
 
   /** Restore the SOCKS proxy the user enabled for a project. Runs on every
@@ -855,13 +226,14 @@ export class AppRuntime {
    *  a recovered connection isn't left without the proxy that was configured. */
   private async restoreSocksProxy(projectId: string): Promise<void> {
     if (!this.socksProxyEnabled.get(projectId)) return
-    if (this.sshManager.getSocksProxy(projectId)) return
-    const sshConfig = this.sshManager.getConfig(projectId)
+    const sshManager = this.host.sshManager
+    if (sshManager.getSocksProxy(projectId)) return
+    const sshConfig = sshManager.getConfig(projectId)
     if (!sshConfig) return
     try {
-      const port = await this.sshManager.startSocksProxy(projectId, sshConfig)
+      const port = await sshManager.startSocksProxy(projectId, sshConfig)
       await routeBrowserThroughSocks(projectId, port)
-      this.broadcastToAllWindows('socks-proxy-status-changed', projectId, true, port)
+      this.clients.broadcast('socks-proxy-status-changed', projectId, true, port)
     } catch {
       // Keep SSH connected even when restoring the SOCKS proxy fails.
     }
@@ -870,47 +242,29 @@ export class AppRuntime {
   private registerIpcHandlers(): void {
     const log = (message: string) => this.logDebug(message)
     const isAppUrl = createAppUrlMatcher(process.env.ELECTRON_RENDERER_URL)
-    const ipc = createIpcRegistrar({
+    const ipc = createIpcRegistrar<WindowIpcContext>({
       ipcMain,
       senderPolicy: {
-        isAppWebContents: (webContentsId) => {
-          for (const window of this.windows.values()) {
-            if (!window.isDestroyed() && window.webContents.id === webContentsId) return true
-          }
-          return false
-        },
+        isAppWebContents: (webContentsId) => this.clients.forWebContents(webContentsId) !== null,
         isAppUrl
       },
+      context: (event) => {
+        const window = this.clients.forWebContents(event.sender.id)
+        if (!window) throw new Error('sender is not a DevTool window')
+        return { clientId: windowClientId(window.id), isFocused: () => window.isFocused(), window }
+      },
       log
     })
-    const resolveRoot = (dir: string) => this.resolveAllowedDirectory(dir)
+    const resolveRoot = (dir: string) => this.host.resolveAllowedDirectory(dir)
 
-    registerAppStateHandlers(ipc, {
-      projectsStore: this.projectsStore,
-      notesStore: this.notesStore,
-      paletteFrecency: this.paletteFrecencyStorage,
-      getAgentActivity: () => this.activityRegistry.getActivitySnapshot(),
-      restartTabs: (windowId, tabIds) => this.restartTabs(windowId, tabIds),
-      reportTabStatus: (windowId, tabId, status) => {
-        this.statusReporters.set(tabId, windowId)
-        this.activityRegistry.reported(tabId, status)
-      },
-      setDirtyTabs: (windowId, tabIds) => {
-        if (tabIds.length === 0) this.dirtyTabsByWindow.delete(windowId)
-        else this.dirtyTabsByWindow.set(windowId, new Set(tabIds))
-      },
-      backupProjects: () => this.storage.backupProjectsOnStartup(),
-      getConfig: () => this.config,
-      applyConfig: (patch) => this.applyConfig(patch),
-      log
-    })
+    this.host.registerIpcHandlers(ipc)
 
     registerWindowHandlers(ipc, {
       loadViewState: (windowId) => {
-        const state = windowId !== null ? this.windowStates.get(windowId) ?? null : null
+        const state = this.windowStates.get(windowId) ?? null
         return state
           ? cloneWindowViewState(state.viewState)
-          : buildWindowViewState(this.projectsStore.peek().projects, this.config)
+          : buildWindowViewState(this.host.getProjectsData().projects, this.host.getConfig())
       },
       saveViewState: (window, viewState) => {
         const current = this.windowStates.get(window.id)
@@ -924,160 +278,23 @@ export class AppRuntime {
         this.logDebug(`openWindow seeded=${viewState ? 'yes' : 'no'}`)
         this.createWindow(viewState, null)
       },
-      getConfig: () => this.config,
+      getConfig: () => this.host.getConfig(),
       assertAllowedDirectory: resolveRoot
     })
 
-    registerSshHandlers(ipc, {
-      sshManager: () => this.sshManager,
-      getProjectTunnel: (projectId) => this.getProjectTunnel(projectId),
+    registerSocksProxyHandlers(ipc, {
+      sshManager: () => this.host.sshManager,
       socksProxyEnabled: this.socksProxyEnabled,
       socksProxyStarting: this.socksProxyStarting,
-      broadcast: (channel, ...args) => this.broadcastToAllWindows(channel, ...args),
+      broadcast: (channel, ...args) => this.clients.broadcast(channel, ...args),
       log
     })
 
-    registerAgentHandlers(ipc, {
-      sshManager: () => this.sshManager,
-      hookInjector: () => this.hookInjector,
-      codexSessionManager: this.codexSessionManager,
-      chatManager: () => this.chatManager,
-      ensureSshConnected: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
-      cleanupRemoteHooks: (projectId, sshConfig, remoteDir, tabId) =>
-        this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId),
-      forgetActivity: (tabId) => {
-        this.statusReporters.delete(tabId)
-        this.activityRegistry.remove(tabId)
-        this.broadcastAgentActivity(tabId)
-      },
-      assertAllowedDirectory: resolveRoot
-    })
-
-    registerTerminalHandlers(ipc, { ptySessions: this.ptySessions, log })
-
-    registerWorkspaceHandlers(ipc, {
-      ...this.workspaceGit(),
-      deleteWorkspace: (request) => this.deleteWorkspace(request)
-    })
-
-    registerArchiveHandlers(ipc, {
-      archive: this.archiveStorage,
-      broadcastChanged: (projectId) => this.broadcastToAllWindows('archive-changed', projectId),
-      deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
-      readTranscript: async (sessionId, cwd, projectId, sshConfig) => {
-        if (projectId && sshConfig) {
-          await this.ensureSshConnected(projectId, sshConfig)
-          return readRemoteTranscript(sessionId, (script) => this.remoteExec(projectId, sshConfig, script))
-        }
-        return readLocalTranscript(sessionId, cwd)
-      }
-    })
-
-    registerFileBrowserHandlers(ipc, { resolveRoot })
-    registerGitHandlers(ipc, { resolveRoot })
-    registerNotebookHandlers(ipc, {
-      startKernel: (tabId, projectId, cwd, override) => this.startNotebookKernel(tabId, projectId, cwd, override),
-      execute: (tabId, requestId, code, cellId) => this.notebookKernels.execute(tabId, requestId, code, cellId),
-      interrupt: (tabId) => this.notebookKernels.interrupt(tabId),
-      shutdown: (tabId) => this.shutdownNotebookKernel(tabId),
-      listCondaEnvs: () => listCondaEnvs({}, { force: true })
-    })
-    registerMobileHandlers(ipc, { mobile: () => this.mobileService })
-    registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
-    registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
     registerUpdateHandlers(ipc, { updates: () => this.updates })
   }
 
-  /**
-   * A renderer-supplied local directory, accepted only when it is (inside) a
-   * known local project or one of its task worktrees; returns its real path.
-   */
-  private resolveAllowedDirectory(dir: string): Promise<string> {
-    return resolveAllowedDirectory(dir, allowedLocalRoots(this.projectsStore.peek().projects))
-  }
-
-  /**
-   * End these tabs' processes (a PTY keeps its scrollback) and tell every window but
-   * `windowId`, which already let go of them, to drop its copy: each then mounts
-   * them again in the task's new directory and spawns there.
-   */
-  private restartTabs(windowId: number, tabIds: string[]): void {
-    for (const tabId of tabIds) {
-      if (this.ptySessions.has(tabId)) this.ptySessions.kill(tabId)
-      this.chatManager.close(tabId)
-    }
-    for (const [id, window] of this.windows) {
-      if (id !== windowId) safeWebContentsSend(window, 'tabs-restart', { tabIds })
-    }
-  }
-
-  private applyConfig(patch: Partial<AppConfig>): void {
-    this.config = { ...this.config, ...patch }
-    this.storage.saveConfig(this.config)
-    setPortableNodeDir(this.config.portableNodeDir)
-    this.sleepBlocker.update()
-    this.broadcastToAllWindows('config-updated', clone(this.config))
-  }
-
-  /** Behind the `workspace-delete` IPC; without `force` it is the pre-flight. */
-  /** What the workspace IPC handlers need for git, local or over SSH. */
-  private workspaceGit() {
-    return {
-      workspaceManager: this.workspaceManager,
-      remoteWorkspaceManager: this.remoteWorkspaceManager,
-      ensureSshConnected: (projectId: string, sshConfig: SshConfig) => this.ensureSshConnected(projectId, sshConfig),
-      socketPath: (projectId: string) => this.sshManager.getSocketPath(projectId)
-    }
-  }
-
-  /** The New stream dialog's git calls, for a phone's `stream.new` and `branches.list`: the same functions its IPC runs. */
-  private streamGit(): StreamGit {
-    const git = this.workspaceGit()
-    return {
-      listBranches: (target) => listWorkspaceBranches(git, target),
-      createWorkspace: (request) => createWorkspace(git, request)
-    }
-  }
-
-  private async deleteWorkspace(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteResult> {
-    if (request.sshConfig && request.projectId) {
-      await this.ensureSshConnected(request.projectId, request.sshConfig)
-      return this.remoteWorkspaceManager.delete(this.sshManager.getSocketPath(request.projectId), {
-        ...request,
-        projectId: request.projectId,
-        sshConfig: request.sshConfig
-      })
-    }
-    return this.workspaceManager.delete(request)
-  }
-
-  /** Release a tab's remote hook injection, running the remote script for the last owner. */
-  private async cleanupRemoteHooks(
-    projectId: string,
-    sshConfig: SshConfig,
-    remoteDir: string | undefined,
-    tabId: string
-  ): Promise<void> {
-    const effectiveRemoteDir = remoteDir || sshConfig.remoteDir
-    const isLast = this.hookInjector.remoteCleanup(projectId, effectiveRemoteDir, tabId)
-    if (!isLast) return
-
-    if (this.sshManager.getStatus(projectId) !== 'connected') return
-    const cleanupScript = this.hookInjector.buildRemoteCleanupScript(effectiveRemoteDir)
-    const cleanupArgs = [
-      '-S', this.sshManager.getSocketPath(projectId),
-      `${sshConfig.username}@${sshConfig.host}`,
-      cleanupScript
-    ]
-    try {
-      await execFileAsync(this.sshManager.getSshCommand(), cleanupArgs, { timeout: 5000 })
-    } catch {
-      // Best-effort cleanup
-    }
-  }
-
   private updateWindowGeometry(windowId: number): void {
-    const window = this.windows.get(windowId)
+    const window = this.clients.get(windowClientId(windowId))
     const current = this.windowStates.get(windowId)
     if (!window || window.isDestroyed() || !current) return
 
@@ -1088,115 +305,12 @@ export class AppRuntime {
   }
 
   private persistWindowSession(): void {
-    this.storage.saveWindowSession({
+    this.host.storage.saveWindowSession({
       windows: Array.from(this.windowStates.values()).map((state) => clonePersistedWindowState(state))
     })
   }
 
   private logDebug(message: string): void {
-    try {
-      if (!fs.existsSync(CONFIG_DIR)) {
-        fs.mkdirSync(CONFIG_DIR, { recursive: true })
-      }
-      fs.appendFileSync(DEBUG_LOG_PATH, `[${new Date().toISOString()}] ${message}\n`)
-    } catch {
-      // Best-effort logging only.
-    }
-  }
-
-  /**
-   * Fold a hook body into the tab's activity and push it to every window — the
-   * sidebar lists tasks that are not mounted in the window showing them.
-   */
-  private recordAgentActivity(tabId: string, body: Record<string, unknown>): ActivityUpdate | null {
-    const update = this.activityRegistry.applyHook(tabId, body)
-    if (update) this.broadcastToAllWindows('agent-activity', tabId, update.activity)
-    return update
-  }
-
-  private broadcastAgentActivity(tabId: string): void {
-    this.broadcastToAllWindows('agent-activity', tabId, this.activityRegistry.getActivity(tabId))
-  }
-
-  private broadcastToAllWindows(channel: string, ...args: unknown[]): void {
-    for (const window of this.windows.values()) {
-      safeWebContentsSend(window, channel, ...args)
-    }
-  }
-
-  /** Local PTYs only. Remote tabs run on the SSH host, which has its own python. */
-  private condaEnvForLocalProject(projectId?: string): CondaEnvInfo | undefined {
-    if (!projectId) return undefined
-    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
-    if (!project) return undefined
-    const resolved = resolveProjectCondaEnv(project)
-    if (!resolved) {
-      if (project.condaEnvName?.trim() || project.condaEnvPrefix?.trim()) {
-        this.logDebug(
-          `condaEnv missing name=${project.condaEnvName ?? ''} prefix=${project.condaEnvPrefix ?? ''} projectId=${projectId}`
-        )
-      }
-      return undefined
-    }
-    this.logDebug(`condaEnv name=${resolved.name} prefix=${resolved.prefix} projectId=${projectId}`)
-    return resolved
-  }
-
-  /** Cancels a start still waiting on the conda lookup, then stops a running kernel. */
-  private shutdownNotebookKernel(tabId: string): void {
-    this.pendingNotebookStarts.delete(tabId)
-    this.notebookKernels.shutdown(tabId)
-  }
-
-  private async startNotebookKernel(
-    tabId: string,
-    projectId: string,
-    cwd: string,
-    condaOverride?: NotebookKernelCondaOverride | null
-  ): Promise<{ error?: string; code?: string }> {
-    const fail = (code: string, message: string): { error: string; code: string } => {
-      this.broadcastToAllWindows('notebook-kernel-event', tabId, { event: 'fail', code, message })
-      return { error: message, code }
-    }
-    const project = this.projectsStore.peek().projects.find((item) => item.id === projectId)
-    if (!project) return { error: 'Project not found.', code: 'no-project' }
-    if (isRemoteProject(project)) return fail('remote', NOTEBOOK_ERROR_REMOTE)
-    if (isShellCommandProject(project)) return fail('shell-project', NOTEBOOK_ERROR_SHELL_PROJECT)
-    const cwdResult = resolveNotebookKernelCwd(cwd, notebookAllowedCwdRoots(project))
-    if (!cwdResult.ok) return fail('cwd', cwdResult.error)
-    const override = condaOverride
-      ? { condaEnvName: condaOverride.name, condaEnvPrefix: condaOverride.prefix }
-      : null
-    const hasOverride = !!(override?.condaEnvName?.trim() || override?.condaEnvPrefix?.trim())
-    const token = ++this.notebookStartCounter
-    this.pendingNotebookStarts.set(tabId, token)
-    // Override: live conda list only. No override: existing project-default resolve.
-    const listedEnvs = hasOverride ? await listCondaEnvsForNotebookKernel() : []
-    // The tab was closed (or a newer start began) while conda was listing envs.
-    if (this.pendingNotebookStarts.get(tabId) !== token) return {}
-    this.pendingNotebookStarts.delete(tabId)
-    const projectResolved = hasOverride ? null : resolveProjectCondaEnv(project)
-    const resolved = resolveNotebookKernelCondaEnv(override, project, listedEnvs, projectResolved, process.platform)
-    if (!resolved.ok) return fail(resolved.code, resolved.error)
-    const condaEnv = resolved.env ?? undefined
-    this.logDebug(
-      `notebookKernelStart tabId=${tabId} projectId=${projectId} cwd=${cwdResult.cwd} conda=${condaEnv?.name ?? ''} prefix=${condaEnv?.prefix ?? ''}`
-    )
-    return this.notebookKernels.start(tabId, condaEnv, cwdResult.cwd)
-  }
-
-  private getProjectTunnel(projectId: string): TunnelConfig | undefined {
-    return this.projectsStore.peek().projects.find((project) => project.id === projectId)?.tunnel
-  }
-
-  private broadcastToAttachedWindows(tabId: string, channel: string, ...args: unknown[]): void {
-    const windowIds = this.ptySessions.attachedWindows(tabId) ?? this.chatManager?.attachedWindows(tabId)
-    if (!windowIds) return
-    for (const windowId of windowIds) this.sendToWindow(windowId, channel, ...args)
-  }
-
-  private sendToWindow(windowId: number, channel: string, ...args: unknown[]): void {
-    const window = this.windows.get(windowId)
-    if (window) safeWebContentsSend(window, channel, ...args)
+    logDebug(message)
   }
 }

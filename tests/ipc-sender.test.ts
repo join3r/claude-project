@@ -85,9 +85,25 @@ describe('createIpcRegistrar', () => {
   function setup() {
     const fake = fakeIpcMain()
     const log = vi.fn()
-    const ipc = createIpcRegistrar({ ipcMain: fake.ipcMain, senderPolicy: policy, log })
+    const ipc = createIpcRegistrar({
+      ipcMain: fake.ipcMain,
+      senderPolicy: policy,
+      context: (e) => ({ clientId: `win:${e.sender.id}`, isFocused: () => true }),
+      log
+    })
     return { ...fake, ipc, log }
   }
+
+  it('hands the handler the caller\'s context', async () => {
+    const { ipc, handles, ons } = setup()
+    const handler = vi.fn((ctx: { clientId: string }) => ctx.clientId)
+    ipc.handle('ch', [], handler)
+    expect(await handles.get('ch')!(event())).toBe('win:1')
+    const onHandler = vi.fn()
+    ipc.on('pty-write', [v.string()], onHandler)
+    ons.get('pty-write')!(event(), 'id')
+    expect(onHandler).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'win:1' }), 'id')
+  })
 
   it('runs a handler with validated arguments for a trusted sender', async () => {
     const { ipc, handles } = setup()

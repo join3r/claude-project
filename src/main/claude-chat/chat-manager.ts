@@ -33,7 +33,7 @@ export interface ChatTabConfig {
 }
 
 export interface ChatManagerDeps {
-  sendToWindow: (windowId: number, channel: string, ...args: unknown[]) => void
+  sendToClient: (clientId: string, channel: string, ...args: unknown[]) => void
   /** The local `claude` to run (Settings override, else PATH). */
   resolveLocalClaude: () => string
   /** Env for a local `claude`: the login shell's, as terminal tabs get. */
@@ -73,7 +73,8 @@ interface ChatRuntime {
   config: ChatTabConfig
   state: ChatState
   seq: number
-  attached: Set<number>
+  /** Clients (windows) mounting the tab. */
+  attached: Set<string>
   listeners: Set<ChatListener>
   session: ChatSession | null
   /** History loaded (or being loaded); later attaches wait on it. */
@@ -107,9 +108,9 @@ export class ClaudeChatManager {
 
   constructor(private readonly deps: ChatManagerDeps) {}
 
-  async attach(windowId: number, tabId: string, config: ChatTabConfig): Promise<ChatSnapshot> {
+  async attach(clientId: string, tabId: string, config: ChatTabConfig): Promise<ChatSnapshot> {
     const runtime = this.runtimeFor(tabId, config)
-    runtime.attached.add(windowId)
+    runtime.attached.add(clientId)
     return this.ready(runtime)
   }
 
@@ -164,15 +165,15 @@ export class ClaudeChatManager {
     return { seq: runtime.seq, state: runtime.state }
   }
 
-  detach(windowId: number, tabId: string): void {
-    this.runtimes.get(tabId)?.attached.delete(windowId)
+  detach(clientId: string, tabId: string): void {
+    this.runtimes.get(tabId)?.attached.delete(clientId)
   }
 
-  detachWindow(windowId: number): void {
-    for (const runtime of this.runtimes.values()) runtime.attached.delete(windowId)
+  detachClient(clientId: string): void {
+    for (const runtime of this.runtimes.values()) runtime.attached.delete(clientId)
   }
 
-  attachedWindows(tabId: string): Set<number> | undefined {
+  attachedClients(tabId: string): Set<string> | undefined {
     return this.runtimes.get(tabId)?.attached
   }
 
@@ -542,8 +543,8 @@ export class ClaudeChatManager {
   private emit(runtime: ChatRuntime, event: ChatEvent): void {
     runtime.state = reduceChat(runtime.state, event)
     runtime.seq += 1
-    for (const windowId of runtime.attached) {
-      this.deps.sendToWindow(windowId, 'chat-event', runtime.tabId, runtime.seq, event)
+    for (const clientId of runtime.attached) {
+      this.deps.sendToClient(clientId, 'chat-event', runtime.tabId, runtime.seq, event)
     }
     for (const listener of runtime.listeners) {
       try {

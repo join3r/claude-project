@@ -50,6 +50,19 @@ export default tseslint.config(
     }
   },
   {
+    // The host runs without Electron too (the DevTool server): it reaches the process
+    // through HostEnv and the windows through ClientHub, never through Electron itself.
+    files: ['src/main/host/**'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [
+          { name: 'electron', message: 'src/main/host runs without Electron; add what you need to HostEnv or ClientHub.' },
+          { name: 'electron-updater', message: 'Updates are the desktop shell\'s (app-runtime.ts), not the host\'s.' }
+        ]
+      }]
+    }
+  },
+  {
     files: ['tests/**'],
     rules: {
       // Test doubles cast freely (window.api mocks, partial fixtures).

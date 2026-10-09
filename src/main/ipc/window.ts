@@ -2,13 +2,18 @@ import { app, BrowserWindow, clipboard, dialog, nativeTheme, shell } from 'elect
 import type { AppConfig, WindowViewState } from '../../shared/types'
 import { detectExternalEditors, openFolderInEditor } from '../external-ide'
 import { resolveSafeProjectPath } from '../project-fs-path'
-import type { IpcRegistrar } from './registrar'
+import type { IpcContext, IpcRegistrar } from './registrar'
 import { str, windowViewState } from './schemas'
 import { v } from './validate'
 
+/** A desktop call's context: the local window it came from. */
+export interface WindowIpcContext extends IpcContext {
+  window: BrowserWindow
+}
+
 export interface WindowDeps {
   /** The view state main holds for `windowId`, or a fresh one for an unknown window. */
-  loadViewState: (windowId: number | null) => WindowViewState
+  loadViewState: (windowId: number) => WindowViewState
   saveViewState: (window: BrowserWindow, viewState: WindowViewState) => void
   openWindow: (viewState: WindowViewState | null) => void
   getConfig: () => AppConfig
@@ -31,16 +36,11 @@ export function parseExternalUrl(url: string): URL {
 }
 
 /** Window state, native dialogs, clipboard, theme, external links and IDE launching. */
-export function registerWindowHandlers(ipc: IpcRegistrar, deps: WindowDeps): void {
-  ipc.handle('load-window-state', [], (event) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    return deps.loadViewState(window ? window.id : null)
-  })
+export function registerWindowHandlers(ipc: IpcRegistrar<WindowIpcContext>, deps: WindowDeps): void {
+  ipc.handle('load-window-state', [], (ctx) => deps.loadViewState(ctx.window.id))
 
-  ipc.handle('save-window-state', [windowViewState], (event, viewState) => {
-    const window = BrowserWindow.fromWebContents(event.sender)
-    if (!window) return undefined
-    deps.saveViewState(window, viewState)
+  ipc.handle('save-window-state', [windowViewState], (ctx, viewState) => {
+    deps.saveViewState(ctx.window, viewState)
     return undefined
   })
 
@@ -48,26 +48,18 @@ export function registerWindowHandlers(ipc: IpcRegistrar, deps: WindowDeps): voi
     deps.openWindow(viewState ?? null)
   })
 
-  ipc.handle('pick-directory', [], async (event) => {
-    // `showOpenDialog` is overloaded on arity, not on an optional owner, so the
-    // ownerless case has to be a separate call rather than passing undefined.
-    const owner = BrowserWindow.fromWebContents(event.sender)
+  ipc.handle('pick-directory', [], async (ctx) => {
     const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
-    const result = owner
-      ? await dialog.showOpenDialog(owner, options)
-      : await dialog.showOpenDialog(options)
+    const result = await dialog.showOpenDialog(ctx.window, options)
     return result.canceled ? null : result.filePaths[0]
   })
 
-  ipc.handle('pick-file', [v.optional(v.string({ max: 500 }))], async (event, title) => {
-    const owner = BrowserWindow.fromWebContents(event.sender)
+  ipc.handle('pick-file', [v.optional(v.string({ max: 500 }))], async (ctx, title) => {
     const options: Electron.OpenDialogOptions = {
       title: title || 'Select file',
       properties: ['openFile', 'showHiddenFiles']
     }
-    const result = owner
-      ? await dialog.showOpenDialog(owner, options)
-      : await dialog.showOpenDialog(options)
+    const result = await dialog.showOpenDialog(ctx.window, options)
     return result.canceled ? null : result.filePaths[0]
   })
 
@@ -81,8 +73,8 @@ export function registerWindowHandlers(ipc: IpcRegistrar, deps: WindowDeps): voi
     await shell.openExternal(parseExternalUrl(url).toString())
   })
 
-  ipc.handle('app:open-devtools', [], (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.webContents.openDevTools()
+  ipc.handle('app:open-devtools', [], (ctx) => {
+    ctx.window.webContents.openDevTools()
   })
   ipc.handle('app:quit', [], () => app.quit())
 
