@@ -29,6 +29,7 @@ import type {
   PendingWorktreeSetup,
   StreamSetupResult,
   TaskLanding,
+  TaskLandingPreview,
   TaskLandingResult,
   TaskWorktreeResult,
   TaskWorktreeState,
@@ -461,6 +462,9 @@ const api = {
   /** Commits on the stream the task's branch doesn't have yet ("<stream> +N"); null when unknown. */
   taskStreamAhead: (projectId: string, taskId: string): Promise<number | null> =>
     ipcRenderer.invoke('task-stream-ahead', projectId, taskId),
+  /** What closing would land (commits the stream lacks, uncommitted paths); null when unknown. */
+  taskLandingPreview: (projectId: string, taskId: string): Promise<TaskLandingPreview | null> =>
+    ipcRenderer.invoke('task-landing-preview', projectId, taskId),
   /** Close without landing: `keep` the branch (and `Task.workspace`, for reopen) or `discard` both. */
   taskWorktreeClose: (projectId: string, taskId: string, mode: 'keep' | 'discard'): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-worktree-close', projectId, taskId, mode),

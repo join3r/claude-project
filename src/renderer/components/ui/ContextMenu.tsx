@@ -10,6 +10,8 @@ export interface ContextMenuItem {
   disabled?: boolean
   /** An accelerator (`CmdOrCtrl+T`), shown on the right as this platform writes it. */
   shortcut?: string
+  /** A short note on the right, e.g. why the item is disabled. */
+  hint?: string
   /** A rule above this item, starting a new group. */
   dividerBefore?: boolean
 }
@@ -48,16 +50,16 @@ export default function ContextMenu({ menu, items, onClose }: {
               type="button"
               role="menuitem"
               disabled={item.disabled}
-              className={`${menuItemCls}${item.danger ? ' text-danger' : ''}${item.shortcut ? ' flex items-center gap-6' : ''} disabled:opacity-50 disabled:cursor-default`}
+              className={`${menuItemCls}${item.danger ? ' text-danger' : ''}${item.shortcut || item.hint ? ' flex items-center gap-6' : ''} disabled:opacity-50 disabled:cursor-default`}
               onClick={() => {
                 onClose()
                 item.onSelect()
               }}
             >
-              {item.shortcut ? (
+              {item.shortcut || item.hint ? (
                 <>
                   <span className="flex-1">{item.label}</span>
-                  <span className="text-xs text-text-subtle">{formatShortcutForApp(item.shortcut)}</span>
+                  <span className="text-xs text-text-subtle">{item.shortcut ? formatShortcutForApp(item.shortcut) : item.hint}</span>
                 </>
               ) : item.label}
             </button>

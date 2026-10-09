@@ -60,7 +60,8 @@ export interface TasksActions {
    * the rest. Resolves false when that question was cancelled, or the archive
    * could not be written (nothing is closed then).
    */
-  archiveTask: (projectId: string, taskId: string) => Promise<boolean>
+  /** `dirtyChecked`: the caller already asked about unsaved editors (a landing saves them first). */
+  archiveTask: (projectId: string, taskId: string, options?: { dirtyChecked?: boolean }) => Promise<boolean>
   renameTask: (projectId: string, taskId: string, name: string) => void
   /**
    * Move a task to `toIndex` of stream `toStreamId` (counted without the task).
@@ -154,12 +155,12 @@ export function useTasks(
     return stream
   }, [mutateProjects])
 
-  const archiveTask = useCallback(async (projectId: string, taskId: string) => {
+  const archiveTask = useCallback(async (projectId: string, taskId: string, options: { dirtyChecked?: boolean } = {}) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = findTaskInProject(project, taskId)
     if (!project || !task) return false
     // One dialog for every unsaved editor under the task, not one per tab.
-    if (await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
+    if (!options.dirtyChecked && await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
 
     // A hidden ad-hoc project exists only to give its tasks somewhere to live —
     // once the last open one is gone it goes with them, in the same mutation so

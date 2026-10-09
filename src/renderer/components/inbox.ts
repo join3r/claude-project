@@ -7,6 +7,8 @@ import {
   isStatusTab,
   isUnread,
   isYourTurn,
+  landingNeedsYou,
+  landingStatusLabel,
   lastActivityAt,
   statusTabs,
   taskStatus
@@ -16,7 +18,9 @@ import { describeActivity, type AgentActivity } from '../../shared/agent-activit
 // The triage predicates themselves moved to shared/inbox-state.ts when idle
 // cleanup moved into main — both processes must answer them identically. They
 // are re-exported here because this module is the inbox's façade.
-export { inboxState, isSettled, isSnoozed, isStatusTab, isUnread, isYourTurn, lastActivityAt, statusTabs, taskStatus }
+export {
+  inboxState, isSettled, isSnoozed, isStatusTab, isUnread, isYourTurn, landingNeedsYou, landingStatusLabel, lastActivityAt, statusTabs, taskStatus
+}
 
 /** Oldest `since` stamp across the task's status tabs — how long it has been waiting. */
 export function taskStatusSince(
@@ -94,7 +98,7 @@ export interface InboxEntry extends InboxSource {
 export interface InboxPartition {
   /** Blocked on you: a question, a permission prompt, a terminal bell. */
   needsYou: InboxEntry[]
-  /** The agent finished and you haven't answered (`isYourTurn`, not attention). */
+  /** The agent finished and you haven't answered (`isYourTurn`, not attention), or its landing stopped. */
   yourTurn: InboxEntry[]
   /** The agent is running: nothing for you to do yet. */
   working: InboxEntry[]
@@ -107,7 +111,8 @@ export interface InboxPartition {
 /**
  * Splits tasks into the inbox groups. A live agent wins over snooze and settle:
  * a task that needs you or is working shows there, the same as its header chip,
- * and drops back to Snoozed / Done for now once the agent goes quiet. Snooze wins over
+ * and drops back to Snoozed / Done for now once the agent goes quiet. So does a
+ * landing stopped on a conflict or a blocked stream (Your turn). Snooze wins over
  * settle (an explicitly snoozed task stays hidden even if it was settled earlier).
  */
 export function partitionInbox(
@@ -132,6 +137,10 @@ export function partitionInbox(
     if (status === 'attention') {
       entry.yourTurn = true
       partition.needsYou.push(entry)
+    } else if (landingNeedsYou(task)) {
+      // A stopped landing waits for you whatever else goes on (a busy terminal) or was put away.
+      entry.yourTurn = true
+      partition.yourTurn.push(entry)
     } else if (status === 'working') partition.working.push(entry)
     else if (isSnoozed(task, now)) partition.snoozed.push(entry)
     else if (isSettled(task)) partition.settled.push(entry)

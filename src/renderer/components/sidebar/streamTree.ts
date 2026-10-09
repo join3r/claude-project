@@ -55,9 +55,9 @@ export function isLiveState(state: SidebarTaskState): boolean {
   return state === 'attention' || state === 'working' || state === 'unread'
 }
 
-/** No task in the stream needs you, runs or has news. */
+/** No task in the stream needs you, runs or has news, and none is landing (a stopped landing waits for you). */
 export function isQuietStream(stream: Stream, stateOf: (task: Task) => SidebarTaskState): boolean {
-  return !stream.tasks.some(task => isLiveState(stateOf(task)))
+  return !stream.tasks.some(task => !!task.landing || isLiveState(stateOf(task)))
 }
 
 /**

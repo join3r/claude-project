@@ -146,6 +146,17 @@ export type TaskLandingResult =
   | { status: 'failed'; error: string }
 
 /**
+ * What landing the task would take into its stream right now, for the close
+ * question: its commits the stream doesn't have, and how many paths are
+ * uncommitted (DevTool's hooks file and setup leftovers not counted, as the
+ * auto-commit leaves them out too).
+ */
+export interface TaskLandingPreview {
+  commits: number
+  uncommitted: number
+}
+
+/**
  * One agent session (or one terminal) and the tabs that came with it. Lives in a
  * stream. In a worktree stream it gets a worktree of its own, on a branch off the
  * stream's, and closing it lands that branch back into the stream.

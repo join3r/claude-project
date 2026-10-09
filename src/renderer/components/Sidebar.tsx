@@ -30,6 +30,7 @@ import {
   STREAM_ROW_PL,
   TASK_ROW_ML,
   TASK_ROW_PL,
+  LandingBadges,
   ProjectIconSlot,
   SidebarTabButton,
   StateDot,
@@ -37,6 +38,7 @@ import {
   headerIconCls,
   type SidebarContextMenuState
 } from './sidebar/SidebarParts'
+import { useStreamAheadPolling } from '../taskLanding'
 import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
 import { confirmWorktreeRemoval, forceRemoveWorktree } from './sidebar/workspaceRemoval'
@@ -172,6 +174,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [streamSetup, setStreamSetup] = useState<{ projectId: string; streamId: string; branch: string; pending: PendingWorktreeSetup } | null>(null)
   const worktreeChoice = useWorktreeChoice()
   const closeTaskFlow = useCloseTask()
+  useStreamAheadPolling(projects, selectedProjectId, selectedTaskId)
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
   const expandedProjects = new Set(expandedProjectIds)
@@ -638,6 +641,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             {extra > 0 && (
               <span className="text-2xs font-mono text-text-subtle shrink-0" title={extra === 1 ? '1 more tab' : `${extra} more tabs`}>+{extra}</span>
             )}
+            <LandingBadges task={task} streamName={stream.name} />
             <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {age && <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{age}</span>}
               <RowActions>

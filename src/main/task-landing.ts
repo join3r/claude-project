@@ -10,6 +10,7 @@ import type {
   Task,
   TaskLanding,
   TaskLandingIntent,
+  TaskLandingPreview,
   TaskLandingResult,
   WorkspaceConfig
 } from '../shared/types'
@@ -306,6 +307,27 @@ export class TaskLandingManager {
     )
     const count = Number.parseInt(result.stdout.trim(), 10)
     return result.code === 0 && Number.isFinite(count) ? count : null
+  }
+
+  /**
+   * What closing would land (the close question's "Squash N commits…"); null
+   * when it can't tell. Read only and not queued, like {@link streamAhead}.
+   */
+  async preview(projectId: string, taskId: string): Promise<TaskLandingPreview | null> {
+    const at = this.locate(projectId, taskId)
+    if (typeof at === 'string') return null
+    const root = at.own.worktreePath
+    try {
+      const count = Number.parseInt(await this.git(root, ['rev-list', '--count', `refs/heads/${at.target.branchName}..HEAD`]), 10)
+      const artifacts = readSetupArtifacts(await absoluteGitDir(this.deps.runner, root))
+      // Every file, not collapsed folders: a new `.claude/` holding only the hooks file is nothing.
+      const uncommitted = porcelainEntries(await this.git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']))
+        .map(entry => entry.path)
+        .filter(file => !isHookFile(file) && !artifacts.some(entry => file === entry || file.startsWith(`${entry}/`)))
+      return Number.isFinite(count) ? { commits: count, uncommitted: uncommitted.length } : null
+    } catch {
+      return null
+    }
   }
 
   /**

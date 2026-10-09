@@ -1,6 +1,8 @@
 /** Small presentational pieces and status helpers shared by the sidebar tree. */
 import React, { useState } from 'react'
-import type { Project } from '../../../shared/types'
+import type { Project, Task } from '../../../shared/types'
+import { landingStatusLabel } from '../../../shared/inbox-state'
+import { useLandingOp, useStreamAhead } from '../../taskLanding'
 import { projectSwatch, projectTile } from '../../../shared/project-label'
 import { dashboardIconUrl, type DashboardIconsMetadata } from '../dashboardIcons'
 import type { SidebarTaskState, TaskDropSlot } from './streamTree'
@@ -169,5 +171,48 @@ export function StateDot({ state, hollow, hideOnHover }: {
       className={`w-1.5 h-1.5 rounded-full shrink-0 ${cls} ${hideOnHover ? 'group-hover:hidden' : ''}`}
       title={state ? STATE_LABEL[state] : undefined}
     />
+  )
+}
+
+const LANDING_BADGE: Record<NonNullable<Task['landing']>['state'], { label: string; cls: string }> = {
+  landing: { label: 'landing…', cls: 'text-text-subtle' },
+  fixing: { label: 'fixing…', cls: 'text-info' },
+  conflict: { label: 'conflict', cls: 'text-danger' },
+  blocked: { label: 'blocked', cls: 'text-warn' }
+}
+
+/**
+ * A task row's landing badges: where its landing into the stream stands
+ * (`Task.landing`, or a call this window is still waiting on), and
+ * "<stream> +N" when the stream has commits the task's branch doesn't.
+ */
+export function LandingBadges({ task, streamName }: { task: Task; streamName: string }): React.ReactElement | null {
+  const op = useLandingOp(task.id)
+  const ahead = useStreamAhead(task.id)
+  const state = task.landing?.state ?? (op === 'close' || op === 'land' || op === 'update' ? 'landing' : undefined)
+  const showAhead = !!task.workspace && !!ahead
+  if (!state && !showAhead) return null
+  const badge = state ? LANDING_BADGE[state] : null
+  return (
+    <>
+      {badge && (
+        <span
+          className={`text-2xs shrink-0 ${badge.cls}`}
+          title={landingStatusLabel(task.landing, streamName) ?? undefined}
+          data-testid="task-landing-badge"
+        >
+          {badge.label}
+        </span>
+      )}
+      {showAhead && (
+        <span
+          className="text-2xs font-mono text-text-subtle min-w-0 shrink-[4] max-w-[96px] overflow-hidden text-ellipsis whitespace-nowrap"
+          title={`${streamName} has ${ahead === 1 ? '1 commit' : `${ahead} commits`} this task doesn't`}
+          data-testid="task-stream-ahead"
+        >
+          {streamName} +{ahead}
+        </span>
+      )}
+    </>
   )
 }

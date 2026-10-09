@@ -486,6 +486,24 @@ describe('TaskLandingManager', () => {
     expect(read(ws.worktreePath, '.claude/settings.local.json')).toBe('{"hooks":{}}\n')
   })
 
+  it('previews what closing would land, without the hooks file', async () => {
+    const ws = taskWorktree('t1')
+    setTasks([task('t1', 'Task', ws)])
+    expect(await manager.preview('p1', 't1')).toEqual({ commits: 0, uncommitted: 0 })
+
+    write(ws.worktreePath, 'c.txt', '1\n')
+    commitAll(ws.worktreePath, 'One')
+    write(ws.worktreePath, 'd.txt', '2\n')
+    commitAll(ws.worktreePath, 'Two')
+    write(ws.worktreePath, 'e.txt', 'new\n')
+    write(ws.worktreePath, 'c.txt', 'changed\n')
+    write(ws.worktreePath, '.claude/settings.local.json', '{"hooks":{}}\n')
+    expect(await manager.preview('p1', 't1')).toEqual({ commits: 2, uncommitted: 2 })
+    // Read only: nothing was committed.
+    expect(subjectsSinceMaster(repo, 'release--t1')).toEqual(['Two', 'One'])
+    expect(await manager.preview('p1', 'nope')).toBeNull()
+  })
+
   it('updates from the stream without squashing, and stops on a conflict the same way', async () => {
     const ws = taskWorktree('t1')
     write(ws.worktreePath, 'c.txt', '1\n')

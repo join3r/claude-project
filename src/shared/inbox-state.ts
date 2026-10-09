@@ -1,6 +1,6 @@
 import { resolveMainTabId, taskTabs } from './streams'
 import { isAgentTabType } from './types'
-import type { Tab, Task, TabStatusValue, TaskInboxState } from './types'
+import type { Tab, Task, TabStatusValue, TaskInboxState, TaskLanding } from './types'
 
 /**
  * The triage predicates the inbox is built on. They live in shared rather than
@@ -94,12 +94,46 @@ export function lastActivityAt(task: Task): number {
 }
 
 /**
+ * The task's landing into its stream stopped and waits for you: a rebase
+ * conflict, or the stream's worktree in the way. Unlike an agent's turn this
+ * holds until the landing is retried or aborted, whatever you type meanwhile.
+ * (`fixing` is the agent's, and `landing` is still running.)
+ */
+export function landingNeedsYou(task: Task): boolean {
+  const state = task.landing?.state
+  return state === 'conflict' || state === 'blocked'
+}
+
+/**
+ * One line for where a task's landing is, naming the stream: "conflicts with
+ * 0.5.0 in 2 files", "landing into 0.5.0…". Null when it isn't landing.
+ */
+export function landingStatusLabel(landing: TaskLanding | undefined, streamName: string): string | null {
+  if (!landing) return null
+  const files = landing.files?.length ?? 0
+  const inFiles = files === 0 ? '' : files === 1 ? ' in 1 file' : ` in ${files} files`
+  switch (landing.state) {
+    case 'landing':
+      return landing.intent === 'update' ? `updating from ${streamName}…` : `landing into ${streamName}…`
+    case 'conflict':
+      return `conflicts with ${streamName}${inFiles}`
+    case 'fixing':
+      return `agent fixing conflicts with ${streamName}`
+    case 'blocked':
+      return files > 0 ? `${streamName} has local changes${inFiles}` : `can't land into ${streamName}`
+  }
+}
+
+/**
  * The ball is in your court: the agent is not running, and the last thing that
  * happened in the task was the agent (a Stop, a question, a bell, an exit) rather
  * than you. Unlike unread this survives a visit — looking at the reply is not
  * answering it. Typing into the task (or settling/snoozing it) hands it back.
+ * A stopped landing (`landingNeedsYou`) is your turn too, even while a tab
+ * works: nothing lands until you retry or abort it.
  */
 export function isYourTurn(task: Task, status: TabStatusValue): boolean {
+  if (landingNeedsYou(task)) return true
   if (status === 'working') return false
   if (status === 'attention') return true
   const eventAt = inboxState(task).eventAt

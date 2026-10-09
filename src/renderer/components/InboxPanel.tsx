@@ -13,6 +13,7 @@ import {
   groupInboxByProject,
   inboxSources,
   inboxState,
+  landingStatusLabel,
   lastActivityAt,
   partitionInbox,
   taskActivity,
@@ -71,6 +72,8 @@ function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey, agent: Tas
     const what = agent.line ?? 'working'
     return entry.since !== null ? `${what} · ${formatWaitTime(now - entry.since)}` : what
   }
+  const landing = landingStatusLabel(entry.task.landing, entry.stream.name)
+  if (landing) return landing
   if (entry.status === 'exited') return agent.line ? `exited · ${agent.line}` : 'exited'
   if (agent.line) return agent.line
   return lastActivityAt(entry.task) > 0 ? null : 'no activity yet'

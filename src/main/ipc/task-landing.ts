@@ -35,6 +35,9 @@ export function registerTaskLandingHandlers(ipc: IpcRegistrar, deps: TaskLanding
   ipc.handle('task-stream-ahead', [safeId, safeId], (_event, projectId, taskId) =>
     deps.taskLanding.streamAhead(projectId, taskId))
 
+  ipc.handle('task-landing-preview', [safeId, safeId], (_event, projectId, taskId) =>
+    deps.taskLanding.preview(projectId, taskId))
+
   ipc.handle('task-worktree-close', [safeId, safeId, v.literal('keep', 'discard')], (_event, projectId, taskId, mode) =>
     deps.taskLanding.closeWorktree(projectId, taskId, mode))
 }

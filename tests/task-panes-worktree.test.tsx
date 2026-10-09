@@ -24,6 +24,7 @@ vi.mock('../src/renderer/context/AppContext', () => ({
 }))
 
 import TaskPanes from '../src/renderer/components/TaskPanes'
+import { markTaskClosing } from '../src/renderer/taskLanding'
 import { taskDirectory } from '../src/shared/streams'
 
 const chat: Tab = { id: 'tab-chat', type: 'claude-chat', title: 'Claude', sessionId: 's1' }
@@ -115,6 +116,18 @@ describe('TaskPanes and task worktrees', () => {
 
     fireEvent.click(screen.getByText('Retry'))
     expect(api.taskWorktreeEnsure).toHaveBeenCalledTimes(1)
+  })
+
+  it('never makes a worktree for a task that is closing (its own just went)', () => {
+    const release = markTaskClosing('t1')
+    try {
+      const { project, task } = setup()
+      mount(project, task)
+      expect(screen.getByText('Closing…')).toBeTruthy()
+      expect(api.taskWorktreeEnsure).not.toHaveBeenCalled()
+    } finally {
+      act(() => release())
+    }
   })
 
   it('starts a legacy task in the stream\'s worktree, and asks nothing for a hidden task', () => {

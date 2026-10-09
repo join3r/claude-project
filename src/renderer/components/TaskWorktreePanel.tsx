@@ -26,6 +26,8 @@ export function SetupCommands({ commands }: { commands: string[] }): React.React
 interface Props {
   /** Undefined while the request is on its way to main. */
   state: TaskWorktreeState | undefined
+  /** The task is closing and its worktree is gone already. */
+  closing?: boolean
   onDecide: (decision: WorktreeSetupDecision) => Promise<unknown>
   onRetry: () => void
 }
@@ -34,7 +36,7 @@ interface Props {
  * What a task's tab area shows while its own worktree is being made: progress
  * with the tail of the setup output, the setup approval, or why git refused.
  */
-export default function TaskWorktreePanel({ state, onDecide, onRetry }: Props): React.ReactElement {
+export default function TaskWorktreePanel({ state, closing, onDecide, onRetry }: Props): React.ReactElement {
   const [deciding, setDeciding] = useState(false)
   const decide = (decision: WorktreeSetupDecision): void => {
     setDeciding(true)
@@ -42,7 +44,9 @@ export default function TaskWorktreePanel({ state, onDecide, onRetry }: Props): 
   }
 
   let body: React.ReactNode
-  if (state?.phase === 'needs-approval') {
+  if (closing) {
+    body = <div className="text-md text-text" role="status">Closing…</div>
+  } else if (state?.phase === 'needs-approval') {
     body = (
       <>
         <div className="text-md text-text">Run the worktree setup?</div>

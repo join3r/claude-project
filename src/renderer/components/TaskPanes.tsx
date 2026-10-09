@@ -17,6 +17,7 @@ import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
 import TaskWorktreePanel from './TaskWorktreePanel'
 import { ensureTaskWorktree, useTaskSpawnHeld, useTaskWorktreeState } from '../taskWorktrees'
+import { useTaskClosing } from '../taskLanding'
 import type { Tab, AiTabType, Project, Task } from '../../shared/types'
 import { paneIndexOfElement, setFocusedPane, useFocusedPane } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -209,6 +210,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
         <div className="relative min-w-0 min-h-0 overflow-hidden z-(--z-sticky)" style={{ gridColumn: '1 / -1', gridRow: bodyRow }}>
           <TaskWorktreePanel
             state={worktree.state}
+            closing={worktree.closing}
             onDecide={(decision) => window.api.taskWorktreeDecide(task.id, decision)}
             onRetry={worktree.retry}
           />
@@ -273,17 +275,21 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
  * first tab spawns. Until then (and while its setup runs or awaits approval,
  * or a move holds it back) the tabs that work in its folder wait. Asked for
  * while the task is on screen, so restoring a session doesn't make a
- * worktree for every task at once.
+ * worktree for every task at once. A task being closed never asks: its
+ * worktree went because it is closing.
  */
 function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
   waiting: boolean
   state: ReturnType<typeof useTaskWorktreeState>
+  closing: boolean
   retry: () => void
 } {
   const stream = findStreamOfTask(project, task.id)
   const possible = !!stream?.workspace && !!stream.taskWorktrees && !project.ssh && !task.sharesStreamWorktree
   const state = useTaskWorktreeState(task.id, possible)
   const held = useTaskSpawnHeld(task.id)
+  // Being closed: its worktree just went (landed or discarded) and the task goes next.
+  const closing = useTaskClosing(task.id)
   const needed = !!stream && needsTaskWorktree(project, stream, task)
   const hasWaitingTabs = taskTabs(task).some(waitsForTaskWorktree)
   const busy = state?.phase === 'creating' || state?.phase === 'needs-approval' || state?.phase === 'setup'
@@ -298,9 +304,9 @@ function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
 
   useEffect(() => {
     // An existing state is main at work, or a failure waiting for Retry.
-    if (!visible || !needed || !hasWaitingTabs || state) return
+    if (!visible || !needed || !hasWaitingTabs || state || closing) return
     ask()
-  }, [visible, needed, hasWaitingTabs, state, ask])
+  }, [visible, needed, hasWaitingTabs, state, closing, ask])
 
-  return { waiting, state, retry: ask }
+  return { waiting, state, closing, retry: ask }
 }

@@ -6,6 +6,8 @@ import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import { localProjectFolder } from '../../shared/external-editors'
 import TaskPanes from './TaskPanes'
+import TaskLandingBanner from './TaskLandingBanner'
+import { canLandTask } from '../taskLanding'
 import TaskHeader from './TaskHeader'
 import { ProjectHome } from './ProjectHome'
 import { ArchivedView } from './ArchivedView'
@@ -499,6 +501,9 @@ export default function ContentArea(): React.ReactElement {
                     </button>
                   </div>
                 </div>
+              )}
+              {canLandTask(project, task) && (
+                <TaskLandingBanner project={project} stream={findStreamOfTask(project, task.id)!} task={task} />
               )}
               <TaskPanes project={project} task={task} visible={isVisible} projectDir={effectiveDir} />
             </div>

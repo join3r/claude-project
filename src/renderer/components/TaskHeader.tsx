@@ -11,6 +11,10 @@ import ProjectTileBadge from './ProjectTileBadge'
 import { isSettled, isSnoozed, snoozePresets, taskActivity } from './inbox'
 import { taskAgentTab, taskStatusChip, type TaskChipTone } from './taskHeaderState'
 import { useCloseTask } from './sidebar/useCloseTask'
+import { landingActionBlocker } from './sidebar/closeRules'
+import { useTaskLandingActions } from './useTaskLandingActions'
+import { canLandTask, useLandingOp, useStreamAhead } from '../taskLanding'
+import { useTabStatusStore } from '../context/TabStatusContext'
 
 const iconBtnCls = 'bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
@@ -50,6 +54,10 @@ export default function TaskHeader({
   const statusSince = useAllTabStatusSince()
   const activities = useAllAgentActivity()
   const closeTaskFlow = useCloseTask()
+  const landingActions = useTaskLandingActions()
+  const tabStatusStore = useTabStatusStore()
+  const landingOp = useLandingOp(task?.id ?? '')
+  const streamAhead = useStreamAhead(task?.id ?? '')
   const [menu, setMenu] = useState<(MenuAnchor & { page: 'main' | 'snooze' }) | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const renameRef = useRef<HTMLInputElement>(null)
@@ -101,6 +109,23 @@ export default function TaskHeader({
         onSelect: () => convertClaudeTab(project.id, task.id, agentTab.id, to)
       })
     }
+    // A task with a worktree of its own lands into its stream; not while its agent works.
+    if (stream && canLandTask(project, task)) {
+      const blocked = landingActionBlocker(task, (tabId) => tabStatusStore.getStatus(tabId), !!landingOp)
+      items.push({
+        label: `Land into ${stream.name}`,
+        dividerBefore: items.length > 0,
+        disabled: !!blocked,
+        hint: blocked ?? undefined,
+        onSelect: () => { void landingActions.land(project, task) }
+      })
+      items.push({
+        label: `Update from ${stream.name}`,
+        disabled: !!blocked,
+        hint: blocked ?? undefined,
+        onSelect: () => { void landingActions.update(project, task) }
+      })
+    }
     items.push({ label: 'Rename', dividerBefore: items.length > 0, onSelect: () => setRenaming(task.name) })
     const pin: PinnedItem = { type: 'task', projectId: project.id, streamId: stream?.id ?? '', taskId: task.id }
     const pinned = (pinnedItems ?? []).some(item => pinnedItemKey(item) === pinnedItemKey(pin))
@@ -135,6 +160,15 @@ export default function TaskHeader({
             <>
               <span className="text-text-subtle">›</span>
               <span className="font-mono text-text truncate shrink-0 max-w-[30%]">{stream.name}</span>
+              {!!streamAhead && task.workspace && (
+                <span
+                  className="font-mono text-xs text-text-subtle shrink-0"
+                  title={`${stream.name} has ${streamAhead === 1 ? '1 commit' : `${streamAhead} commits`} this task doesn't. Update from ${stream.name} in the task menu.`}
+                  data-testid="task-header-stream-ahead"
+                >
+                  +{streamAhead}
+                </span>
+              )}
             </>
           )}
           {task && <span className="text-text-subtle">›</span>}

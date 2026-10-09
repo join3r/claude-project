@@ -10,6 +10,10 @@ import { revealInFolderLabel } from '../../utils/revealLabel'
 import { joinWorkspaceDir } from '../../../shared/workspace-path'
 import type { SidebarContextMenuState } from './SidebarParts'
 import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from '../../../shared/streams'
+import { useTabStatusStore } from '../../context/TabStatusContext'
+import { canLandTask, getLandingOp } from '../../taskLanding'
+import { useTaskLandingActions } from '../useTaskLandingActions'
+import { landingActionBlocker } from './closeRules'
 
 /**
  * The local folder a project, stream or task works in, for "Reveal in Finder":
@@ -90,6 +94,8 @@ export default function SidebarContextMenu({
   } = useApp()
   // Keeps the popup inside the window — a right-click near the bottom of the
   // sidebar would otherwise render items below the edge, unreachable.
+  const tabStatusStore = useTabStatusStore()
+  const landingActions = useTaskLandingActions()
   const contextMenuPos = useMenuPosition<HTMLDivElement>(contextMenu)
   const snoozeMenuPos = useMenuPosition<HTMLDivElement>(contextMenu)
 
@@ -179,6 +185,33 @@ export default function SidebarContextMenu({
                       closeContextMenu()
                     }}>Mark unread</button>
                   )}
+                </div>
+              )
+            })()}
+            {/* A task with a worktree of its own lands into its stream; not while its agent works. */}
+            {contextMenu.type === 'task' && (() => {
+              const project = projects.find(p => p.id === contextMenu.projectId)
+              const task = findTaskInProject(project, contextMenu.taskId)
+              const stream = findStreamOfTask(project, contextMenu.taskId)
+              if (!project || !task || !stream || !canLandTask(project, task)) return null
+              const blocked = landingActionBlocker(task, (tabId) => tabStatusStore.getStatus(tabId), !!getLandingOp(task.id))
+              const item = (label: string, run: () => Promise<void>) => (
+                <button
+                  className={`${menuItemCls} flex items-center gap-6 justify-between disabled:opacity-50 disabled:cursor-default`}
+                  disabled={!!blocked}
+                  onClick={() => {
+                    closeContextMenu()
+                    void run()
+                  }}
+                >
+                  <span>{label}</span>
+                  {blocked && <span className="text-text-subtle text-xs">{blocked}</span>}
+                </button>
+              )
+              return (
+                <div className="border-b border-hair pb-1 mb-1">
+                  {item(`Land into ${stream.name}`, () => landingActions.land(project, task))}
+                  {item(`Update from ${stream.name}`, () => landingActions.update(project, task))}
                 </div>
               )
             })()}
