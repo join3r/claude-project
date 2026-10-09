@@ -187,7 +187,7 @@ function InboxRow({
           >
             {showProject && (
               <span
-                className="font-semibold text-text overflow-hidden text-ellipsis min-w-0 shrink-0 max-w-[60%]"
+                className="text-base font-semibold text-text overflow-hidden text-ellipsis min-w-0 shrink-0 max-w-[60%]"
                 title={ephemeral ? project.directory : undefined}
               >
                 {project.name}
@@ -257,7 +257,7 @@ function ProjectHeader({ project, theme, count, showIcon, selected, onOpen }: {
       data-testid="inbox-project-header"
     >
       {showIcon && <ProjectTileBadge project={project} theme={theme} size={TILE} />}
-      <span className="font-semibold text-text overflow-hidden text-ellipsis min-w-0">{project.name}</span>
+      <span className="text-base font-semibold text-text overflow-hidden text-ellipsis min-w-0">{project.name}</span>
       <span className="text-2xs text-text-subtle">{count}</span>
     </div>
   )
