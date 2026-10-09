@@ -132,6 +132,36 @@ describe('InboxPanel', () => {
     expect(row('a').querySelector('[data-testid="inbox-row-place"]')).toBeNull()
   })
 
+  it('grouped: a project header opens the project home', () => {
+    const onOpenProject = vi.fn()
+    render(
+      <InboxPanel
+        projects={[devtool, stem]}
+        selectedTaskId={null}
+        onSelectTask={vi.fn()}
+        onOpenProject={onOpenProject}
+        selectedProjectHomeId="q"
+        onTaskContextMenu={vi.fn()}
+        onSettle={vi.fn()}
+        onSnooze={vi.fn()}
+        onClose={vi.fn()}
+        onNewTask={vi.fn()}
+        allStatuses={statuses}
+        statusSince={since}
+        activities={{}}
+        now={NOW}
+        theme="dark"
+        layout="grouped"
+      />
+    )
+    const [devtoolHeader, stemHeader] = screen.getAllByTestId('inbox-project-header')
+    fireEvent.click(devtoolHeader)
+    expect(onOpenProject).toHaveBeenCalledWith('p')
+    // The project whose home is showing is highlighted, like its sidebar row.
+    expect(stemHeader.className).toContain('bg-sel')
+    expect(devtoolHeader.className).not.toContain('bg-sel')
+  })
+
   it('shows project tiles when Settings asks for them', () => {
     renderPanel('grouped', {}, true)
     const groups = screen.getAllByTestId('inbox-project-group')

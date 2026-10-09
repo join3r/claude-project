@@ -26,6 +26,10 @@ type Props = {
   projects: Project[]
   selectedTaskId: string | null
   onSelectTask: (projectId: string, task: Task) => void
+  /** Grouped layout: a project header opens that project's home page. */
+  onOpenProject?: (projectId: string) => void
+  /** The project whose home page is showing (no task selected), highlighted in the grouped layout. */
+  selectedProjectHomeId?: string | null
   onTaskContextMenu: (e: React.MouseEvent, projectId: string, taskId: string) => void
   onSettle: (projectId: string, taskId: string) => void
   /** Snooze (opens the presets at the click) or, on a snoozed row, wake it now. */
@@ -232,16 +236,24 @@ function InboxRow({
   )
 }
 
-/** The grouped layout's header: the project's tile and name. */
-function ProjectHeader({ project, theme, count, showIcon }: {
+/** The grouped layout's header: the project's tile and name. Clicking it opens the project's home page. */
+function ProjectHeader({ project, theme, count, showIcon, selected, onOpen }: {
   project: Project
   theme: 'dark' | 'light'
   count: number
   showIcon: boolean
+  selected: boolean
+  onOpen?: () => void
 }): React.ReactElement {
   return (
     <div
-      className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 text-xs overflow-hidden whitespace-nowrap"
+      className={[
+        'flex items-center gap-1.5 mx-1.5 mt-1.5 px-1.5 py-1 rounded-md text-xs overflow-hidden whitespace-nowrap',
+        onOpen ? 'cursor-pointer transition-colors duration-(--motion-fast)' : '',
+        selected ? 'bg-sel' : onOpen ? 'hover:bg-surface-3' : ''
+      ].join(' ')}
+      onClick={onOpen}
+      title={onOpen ? `Open ${project.name}` : undefined}
       data-testid="inbox-project-header"
     >
       {showIcon && <ProjectTileBadge project={project} theme={theme} size={TILE} />}
@@ -284,6 +296,8 @@ export default function InboxPanel({
   projects,
   selectedTaskId,
   onSelectTask,
+  onOpenProject,
+  selectedProjectHomeId = null,
   onTaskContextMenu,
   onSettle,
   onSnooze,
@@ -384,7 +398,14 @@ export default function InboxPanel({
       {grouped ? (<>
         {projectGroups.map(({ project, entries }) => (
           <div key={project.id} data-testid="inbox-project-group">
-            <ProjectHeader project={project} theme={theme} count={entries.length} showIcon={showIcons} />
+            <ProjectHeader
+              project={project}
+              theme={theme}
+              count={entries.length}
+              showIcon={showIcons}
+              selected={selectedProjectHomeId === project.id}
+              onOpen={onOpenProject ? () => onOpenProject(project.id) : undefined}
+            />
             {entries.map(entry => renderRow(entry, groupOf(entry), false))}
           </div>
         ))}
