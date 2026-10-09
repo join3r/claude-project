@@ -146,8 +146,10 @@ describe('pairing', () => {
     desktop.send({ t: 'ping' })
     await desktop.nextOfType('pong')
     expect(store.getPair(desktopDevice.id, phoneDevice.id)).toMatchObject({
-      phonePub: b64uEncode(phoneDevice.ed.pub),
-      desktopPub: b64uEncode(desktopDevice.ed.pub)
+      ownerRole: 'desktop',
+      kind: 'phone',
+      peerPub: b64uEncode(phoneDevice.ed.pub),
+      ownerPub: b64uEncode(desktopDevice.ed.pub)
     })
     expect(await desktop.drain(50)).toEqual([])
 
@@ -259,14 +261,16 @@ describe('pairing', () => {
     expect(await desktop.drain(50)).toEqual([])
   })
 
-  it('does not let phones send desktop messages or desktops send watch', async () => {
+  it('does not let phones send desktop messages or servers send watch', async () => {
     const server = await relay()
     const phone = await auth(server, 'phone', makeDevice())
     phone.send({ t: 'offer', tokenHash: makeSecret().tokenHash, exp: 1 })
     expect(await phone.nextOfType('error')).toMatchObject({ code: 'forbidden' })
+    // Desktops may watch (servers); servers have nobody to watch.
+    const host = await auth(server, 'server', makeDevice())
+    host.send({ t: 'watch', desktops: [] })
+    expect(await host.nextOfType('error')).toMatchObject({ code: 'forbidden' })
     const desktop = await auth(server, 'desktop', makeDevice())
-    desktop.send({ t: 'watch', desktops: [] })
-    expect(await desktop.nextOfType('error')).toMatchObject({ code: 'forbidden' })
     desktop.send('{"t":"frame","to":"nope","data":"AA"}')
     expect(await desktop.nextOfType('error')).toMatchObject({ code: 'bad-request' })
     desktop.send('garbage')
@@ -406,30 +410,31 @@ describe('limits', () => {
 
   it('answers rate once, then closes with 4429 when the client keeps going', async () => {
     const server = await relay({ limits: { ratePerSecond: 1, rateBurst: 3 } })
-    const desktop = await auth(server, 'desktop', makeDevice())
+    // Phones keep the two-strike rule; desktops and servers are throttled instead (server-role.test.ts).
+    const phone = await auth(server, 'phone', makeDevice())
     // The hello used one token.
-    desktop.send({ t: 'ping' })
-    desktop.send({ t: 'ping' })
-    desktop.send({ t: 'ping' })
-    expect(await desktop.nextOfType('pong')).toEqual({ t: 'pong' })
-    expect(await desktop.nextOfType('pong')).toEqual({ t: 'pong' })
-    expect(await desktop.nextOfType('error')).toMatchObject({ code: 'rate' })
-    desktop.send({ t: 'ping' })
-    expect((await closedWithin(desktop)).code).toBe(RelayCloseCode.Rate)
+    phone.send({ t: 'ping' })
+    phone.send({ t: 'ping' })
+    phone.send({ t: 'ping' })
+    expect(await phone.nextOfType('pong')).toEqual({ t: 'pong' })
+    expect(await phone.nextOfType('pong')).toEqual({ t: 'pong' })
+    expect(await phone.nextOfType('error')).toMatchObject({ code: 'rate' })
+    phone.send({ t: 'ping' })
+    expect((await closedWithin(phone)).code).toBe(RelayCloseCode.Rate)
   })
 
   it('forgives a rate violation once the client backs off', async () => {
     const server = await relay({ limits: { ratePerSecond: 20, rateBurst: 2, rateStrikeWindowMs: 100 } })
-    const desktop = await auth(server, 'desktop', makeDevice())
-    desktop.send({ t: 'ping' })
-    desktop.send({ t: 'ping' })
-    expect(await desktop.nextOfType('error')).toMatchObject({ code: 'rate' })
+    const phone = await auth(server, 'phone', makeDevice())
+    phone.send({ t: 'ping' })
+    phone.send({ t: 'ping' })
+    expect(await phone.nextOfType('error')).toMatchObject({ code: 'rate' })
     await sleep(200)
-    desktop.send({ t: 'ping' })
-    desktop.send({ t: 'ping' })
-    desktop.send({ t: 'ping' })
-    expect(await desktop.nextOfType('error')).toMatchObject({ code: 'rate' })
-    expect(desktop.isClosed).toBe(false)
+    phone.send({ t: 'ping' })
+    phone.send({ t: 'ping' })
+    phone.send({ t: 'ping' })
+    expect(await phone.nextOfType('error')).toMatchObject({ code: 'rate' })
+    expect(phone.isClosed).toBe(false)
   })
 
   it('limits new connections per IP', async () => {

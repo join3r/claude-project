@@ -1,13 +1,38 @@
 # DevTool relay
 
-The relay connects DevTool desktops and the iOS app across the internet. Each device keeps a WebSocket open to it, authenticates with its Ed25519 key, and the relay forwards opaque frames between a desktop and the phones paired with it. Traffic is end-to-end encrypted with Noise IK between phone and desktop, so the relay can't read any of it.
+The relay connects DevTool desktops, DevTool servers and the iOS app across the internet. Each device keeps a WebSocket open to it, authenticates with its Ed25519 key, and the relay forwards opaque frames between paired devices. Traffic is end-to-end encrypted between the two ends (Noise IK between phone and desktop), so the relay can't read any of it.
 
-It also carries push notifications (§7 of the spec): desktops send `push` over the socket, and the relay hands it to the **push gateway**, which only our hosted relay runs because only our APNs key can reach our app. A self-hosted relay forwards pushes to the hosted gateway over HTTPS.
+It also carries push notifications (§7 of the spec): desktops and servers send `push` over the socket, and the relay hands it to the **push gateway**, which only our hosted relay runs because only our APNs key can reach our app. A self-hosted relay forwards pushes to the hosted gateway over HTTPS.
 
 The normative protocol is §3 of [`../protocol/SPEC.md`](../protocol/SPEC.md), summarized in [`../protocol/PROTOCOL.md`](../protocol/PROTOCOL.md). The relay reuses the message parsers, auth check and limits in `../protocol/ts`.
 
 - **No runtime dependencies.** The WebSocket server is a small RFC 6455 implementation in `src/ws/`, on top of `node:http`. Persistence is `node:sqlite`.
 - **No build step.** Node ≥ 24 runs the TypeScript sources directly (type stripping). The code sticks to erasable syntax: no `enum`, no `namespace`, no parameter properties.
+
+## Roles
+
+| role | is | may |
+|---|---|---|
+| `phone` | the iOS app | pair with a desktop or server (hello `pair`), `watch` desktops and servers |
+| `desktop` | DevTool | `offer`, `authorize`, `revoke`, `push`; pair with a server (`pair` message, code flow); `watch` servers |
+| `server` | a headless DevTool host | everything a desktop may do toward phones; pair with a desktop (hello `pair`, token flow) |
+
+Any two different roles may pair; two of a kind may not. The device that made the offer owns the pair and sends `authorize`, and either side may `revoke`. Of the two, the higher role in `phone < desktop < server` hosts the other: it gets the other's presence without asking, and the other `watch`es it. Frames flow between any authorized or pending pair, in either direction. SPEC.md §3.8 has the details.
+
+A client that sends `binary: true` in hello gets frames as binary WebSocket messages, `[16 raw bytes of the peer's device ID][envelope]`, and its `ready` says `binary: true`. Any client may send frames that way. The relay converts between binary and JSON for receivers that didn't ask (phones, older desktops). See SPEC.md §3.9.
+
+## Limits
+
+| | phones (and any socket before hello) | desktops and servers |
+|---|---|---|
+| Message size | 256 KiB (close 1009) | 256 KiB (close 1009) |
+| Messages | 50/s, burst 200; `error rate`, then 4429 on a repeat within 10 s | 1000/s, burst 4000 |
+| Payload bytes | no separate budget | 8 MiB/s, burst 32 MiB |
+| Over budget | refused | throttled: the relay stops reading the socket until the budget refills |
+| Send queue | 8 MiB, then dropped | 32 MiB, then dropped |
+| Connections per IP | 20/min | 20/min |
+
+Backpressure: once a receiver's send queue passes 4 MiB, the relay stops reading each socket that sends it another frame, and reads them again when the queue is back at 1 MiB. A paused sender is paused for all its peers (head-of-line blocking, accepted for now), and its pongs come late. The relay doesn't idle-time-out a socket it isn't reading. The numbers are constants in `protocol/ts/relay-messages.ts` (`RELAY_HOST_*`, `RELAY_BUFFER_*`), and tests override them through `limits`.
 
 ## Layout
 
@@ -97,10 +122,11 @@ In this monorepo you can skip `npm install`. The dev dependencies (vitest, types
 
 The suites:
 
-- `test/relay.test.ts` covers HTTP routing, auth (success, bad signature, wrong role, non-hello, 10 s timeout), offers (one use, expired, replaced, wrong token), pending phones (routing both ways, reconnect, lapse), authorize (persisted, and still there after a restart on the same SQLite file), revoke, `forbidden` and `offline` routing errors, presence and `lastSeen`, watch filtering, max frame size, rate limiting, per-IP limits with and without `X-Forwarded-For`, replacing a duplicate connection, idle timeout and shutdown.
+- `test/relay.test.ts` covers HTTP routing, auth (success, bad signature, wrong role, non-hello, 10 s timeout), offers (one use, expired, replaced, wrong token), pending phones (routing both ways, reconnect, lapse), authorize (persisted, and still there after a restart on the same SQLite file), revoke, `forbidden` and `offline` routing errors, presence and `lastSeen`, watch filtering, max frame size, the phone rate limit, per-IP limits with and without `X-Forwarded-For`, replacing a duplicate connection, idle timeout and shutdown.
+- `test/server-role.test.ts` covers the `server` role: `ready` with and without `binary`, `unsupported` for unknown roles and messages, desktop↔server pairing by token and by code, a lapsed pending desktop, authorize and revoke from either side, the routing matrix over every role combination, phone↔server, binary frames and JSON↔binary conversion, per-role budgets, backpressure against a receiver that stops reading (sender paused, relay queue bounded, everything delivered in order once it reads again), the hard cap, and a relay started on a database from before servers.
 - `test/integration.test.ts` runs `protocol/tools/fake-desktop-core.ts` and a phone built from `protocol/ts` through the relay: a real Noise IK pair handshake, accept, `authorize`, the inbox, a resume handshake after reconnecting, a stale QR code refused, and revoke.
 - `test/ws.test.ts` covers the WebSocket layer: Node's own `WebSocket` client end to end, fragmentation, ping during a fragmented message, and the payload cap enforced from the frame header alone. It also checks unmasked frames, invalid UTF-8, stray continuations, the close handshake both ways, and bad upgrade requests.
-- `test/store.test.ts` covers both stores (pairs and push generations), the token bucket, the IP limiter and config parsing.
+- `test/store.test.ts` covers both stores (pairs and push generations), the migration of a `relay.db` from before servers, the token bucket (refusing and spending into debt), the IP limiter and config parsing.
 - `test/push.test.ts` covers the gateway (registration, skew, bad signatures, the per-IP limit, generations, every `send` result and the APNs response mapping), the HTTP/2 APNs client against a local cleartext fake (headers, body, the ES256 token and its 50-minute refresh, reconnects, timeouts), the `simctl` and `log` senders, `push` over the socket (forbidden for phones, `unavailable`, in-process, relay A forwarding to gateway B, upstream failures, the in-flight cap), the push HTTP endpoints, and push config.
 
 ## Docker
@@ -134,22 +160,25 @@ For the hosted gateway, add the push settings to step 2 and mount the key read-o
 
 The relay sends 1001 to every socket on `SIGTERM` (`docker stop`), and clients reconnect with backoff. Back up the `/data` volume if you want pairings to survive losing the machine. If it's lost, users pair their phones again.
 
+The first start of a relay with servers migrates `relay.db` from the old `pairs(desktop_id, phone_id, …)` table to `pairs(owner_id, owner_role, owner_pub, peer_id, kind, peer_pub, created_at)`, in one transaction, keeping every pair. Older relay images can't read the migrated file, so copy `relay.db` first if you may roll back.
+
 ## What the relay can and can't see
 
-**Sees:** device IDs and Ed25519 public keys, which desktop is paired with which phone (and when), client IPs, connection and disconnection times, and the size and timing of every frame. During pairing it holds `SHA-256(relayToken)` in memory. Only the pairs table is written to disk.
+**Sees:** device IDs, roles and Ed25519 public keys, which devices are paired with which (and when), client IPs, connection and disconnection times, and the size and timing of every frame. During pairing it holds `SHA-256(relayToken)` in memory. Only the pairs table is written to disk.
 
-**Can't see:** anything inside `frame.data`. That covers project, task and tab names, statuses, prompts and code, which are all Noise-encrypted between phone and desktop. It also never gets the pairing secret or the `pairProof`, so it can't forge a pairing. Even a malicious relay that let a stranger's phone through would fail the desktop's proof check inside the handshake. A relay can drop, delay or refuse to route frames, but it can't read or alter them undetected.
+**Can't see:** anything inside a frame's data. That covers project, task and tab names, statuses, prompts and code, which are all encrypted end to end between the two devices. It also never gets the pairing secret or the `pairProof`, so it can't forge a pairing. Even a malicious relay that let a stranger's phone through would fail the desktop's proof check inside the handshake. A relay can drop, delay or refuse to route frames, but it can't read or alter them undetected.
 
 ## Behaviour beyond the wire spec
 
 These are decisions the original rules left open. They are recorded in SPEC.md §3.7:
 
-- A phone whose `pair` token doesn't match a live offer still gets `ready`, followed by `error forbidden` with `to` set to the desktop. It isn't pending.
-- Pending status belongs to the (desktop, phone) pair until the offer's `exp` (clamped to 15 min). It survives a phone reconnect without the token. When it lapses, the phone gets `error forbidden "pairing window expired"` and the desktop gets `peer offline`. The phone is then closed with **4403**, unless it's authorized or pending with another desktop.
-- A desktop's offer is dropped when the desktop disconnects or is replaced.
-- `authorize` checks that `pub` hashes to `phone` (`bad-request`) and equals the key that phone authenticated with (`forbidden`). It has no success reply. `revoke` is idempotent and also cancels a pending phone.
+- A device whose `pair` token doesn't match a live offer still gets `ready`, followed by `error forbidden` with `to` set to the host. It isn't pending. The same goes for two roles that may not pair, and that offer stays live.
+- Pending status belongs to the (owner, peer) pair until the offer's `exp` (clamped to 15 min). It survives a reconnect without the token. When it lapses, the peer gets `error forbidden "pairing window expired"` and the host of the two gets `peer offline`. A phone is then closed with **4403**, unless it's authorized or pending with another host. Desktops and servers stay connected.
+- A host's offer is dropped when it disconnects or is replaced.
+- `authorize` checks that `pub` hashes to `peer` (or `phone`) (`bad-request`) and equals the key that device authenticated with (`forbidden`). Only the owner may send it. It has no success reply. `revoke` works from either side, is idempotent and also cancels a pending pair.
 - `watch` replaces the previous set, carries at most 256 IDs, and reports `offline` with `lastSeen` when known.
-- On `ready` a desktop gets `peer` for each authorized or pending phone that is online, or offline with a known `lastSeen`.
+- On `ready` a host gets `peer` for each device it hosts (authorized or pending) that is online, or offline with a known `lastSeen`.
 - A replaced connection (4409) doesn't announce `offline`. The new one announces `online`.
 - Idle timeout and shutdown close with **1001**. Every message, including `hello` and `ping`, costs a rate token. The first message over the limit is dropped with `error rate`, and another within 10 s closes with 4429. Refused connection attempts count toward the per-IP limit, which answers HTTP 429 at the upgrade.
-- `forbidden` is checked before `offline`, so unpaired devices can't probe presence. Binary frames and malformed JSON after auth get `bad-request` and the socket stays open. Role violations (a phone sending `offer`, a desktop sending `watch`) get `forbidden`.
+- `forbidden` is checked before `offline`, so unpaired devices can't probe presence. Malformed JSON after auth gets `bad-request`, an unknown message type gets `unsupported`, and the socket stays open. Role violations (a phone sending `offer`, a server sending `watch`) get `forbidden`.
+- Relays from before servers answer role `server` with `auth` and 4401, ignore `binary` (their `ready` has no `binary`), and answer `pair` with `bad-request`. Clients use that to say "This relay is too old for servers" (SPEC.md §3.11).

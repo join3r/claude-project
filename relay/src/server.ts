@@ -172,12 +172,21 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
     if (pathOf(req) !== RELAY_PATH) return rejectUpgrade(socket, 404, 'Not Found')
     const ip = clientIp(req, trustProxy)
     if (!relay.admit(ip)) return rejectUpgrade(socket, 429, 'Too Many Requests')
-    const ws = upgradeToWebSocket(req, socket, head, { maxPayload: relay.limits.maxFrameBytes })
+    const ws = upgradeToWebSocket(req, socket, head, {
+      maxPayload: relay.limits.maxFrameBytes,
+      maxBufferedBytes: relay.limits.phoneBufferCapBytes
+    })
     if (!ws) return
     const handle = relay.open(
       {
         send: (text) => ws.sendText(text),
-        close: (code, reason) => ws.close(code, reason)
+        sendBinary: (data) => ws.sendBinary(data),
+        close: (code, reason) => ws.close(code, reason),
+        bufferedBytes: () => ws.bufferedAmount,
+        onBufferBelow: (bytes, fn) => ws.onBufferBelow(bytes, fn),
+        setBufferCap: (bytes) => ws.setMaxBufferedBytes(bytes),
+        pause: () => ws.pause(),
+        resume: () => ws.resume()
       },
       { ip }
     )
