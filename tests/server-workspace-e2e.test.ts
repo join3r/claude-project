@@ -15,7 +15,7 @@ import { fixtureProject } from './helpers/streams-fixtures'
 import { pairByCode, startTestDesktop, startTestRelay, startTestServer, waitFor, type TestDesktop, type TestServer } from './helpers/host-link'
 
 /**
- * Step 7 end to end: a server project's files, Git panel and chat
+ * Step 7 end to end: a server project's files, Git panel, chat and conda
  * through the desktop's real router (DesktopRouting: ServerProjects, RouteIndex,
  * HostRouter), its ServerHub, a real relay on an ephemeral port and the server's
  * host. Every call below is what a window's preload sends; none may run here.
@@ -110,7 +110,7 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
     const channels = [
       'save-projects', 'fb-read-directory', 'fb-read-file', 'fb-write-file', 'fb-create-file', 'fb-create-directory', 'fb-rename', 'fb-delete',
       'fb-git-status', 'fb-git-diff', 'fb-git-stage', 'fb-git-unstage', 'fb-git-discard', 'fb-git-commit', 'fb-git-push', 'fb-git-pull',
-      'git-project-posture', 'git-commit-history',
+      'git-project-posture', 'git-commit-history', 'conda-list-envs',
       'chat-attach', 'chat-send', 'chat-login', 'chat-login-dismiss', 'chat-list-files', 'chat-permissions-read', 'chat-permissions-update'
     ]
     for (const channel of channels) {
@@ -134,6 +134,13 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
     await server?.close()
     await relay?.close()
     if (root) fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  it('keeps the project\'s conda env on the server, where its spawns read it', async () => {
+    const { local } = await desktop.hub.call(server.id, 'win:1', 'load-projects') as { local: { data: ProjectsData } }
+    expect(local.data.projects.find(p => p.id === PROJECT_ID)).toMatchObject({ directory: repo, condaEnvName: 'ml', condaEnvPrefix: '/opt/conda/envs/ml' })
+    expect(local.data.projects.find(p => p.id === PROJECT_ID)).not.toHaveProperty('host')
+    expect(await invoke('conda-list-envs', PROJECT_ID)).toHaveProperty('envs')
   })
 
   it('browses, edits, creates, renames and deletes the server\'s files', async () => {

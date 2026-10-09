@@ -104,4 +104,43 @@ describe('ProjectSettings conda picker', () => {
     )
     expect(screen.queryByLabelText('Conda environment')).toBeNull()
   })
+
+  it('lists a server project\'s envs on its server, and browses the server\'s folders for its directory', async () => {
+    const api = window.api as unknown as Record<string, ReturnType<typeof vi.fn>>
+    api.condaListEnvs.mockResolvedValue({
+      executable: { kind: 'micromamba', file: '/home/me/bin/micromamba' },
+      envs: [{ name: 'torch', prefix: '/home/me/micromamba/envs/torch' }]
+    })
+    api.serverListDirs = vi.fn((_host: string, dir: string) => Promise.resolve(dir === '/home/me/apps'
+      ? { path: '/home/me/apps', parent: '/home/me', entries: [{ name: 'api', path: '/home/me/apps/api', git: true }] }
+      : { path: '/home/me/apps/api', parent: '/home/me/apps', entries: [] }))
+    const onSave = vi.fn()
+    render(
+      <ProjectSettings
+        project={localProject({ directory: '/home/me/apps', host: 'srvA' })}
+        onSave={onSave}
+        onClose={vi.fn()}
+      />
+    )
+    const picker = await screen.findByRole('combobox', { name: 'Conda environment' })
+    await waitFor(() => expect((picker as HTMLButtonElement).disabled).toBe(false))
+    expect(api.condaListEnvs).toHaveBeenCalledWith('p1')
+
+    // Browse… lists the server's folders (no native dialog for them).
+    fireEvent.click(screen.getByTitle('Browse'))
+    expect(api.pickDirectory).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByText('api'))
+    await waitFor(() => expect(api.serverListDirs).toHaveBeenLastCalledWith('srvA', '/home/me/apps/api', { showHidden: false }))
+    fireEvent.click(screen.getByText('Use this folder'))
+    expect((screen.getByPlaceholderText('/path/to/project') as HTMLInputElement).value).toBe('/home/me/apps/api')
+
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByRole('option', { name: 'torch' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/home/me/apps/api',
+      condaEnvName: 'torch',
+      condaEnvPrefix: '/home/me/micromamba/envs/torch'
+    }))
+  })
 })

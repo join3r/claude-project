@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
-import { ArrowUp, Folder, GitBranch } from 'lucide-react'
-import type { HostDirListing } from '../../../shared/host-fs'
 import type { ServerStatus } from '../../../shared/servers'
-import { Field, HelperText, LinkBtn, Modal, PrimaryButton, SegCtl, Select, SetBlock, Switch } from '../ui'
+import { Field, HelperText, LinkBtn, Modal, PrimaryButton, SegCtl, Select, SetBlock } from '../ui'
 import ServerRepoDiscovery from './ServerRepoDiscovery'
+import ServerFolderList from './ServerFolderList'
 
 type Mode = 'browse' | 'clone' | 'found'
 
@@ -86,78 +85,21 @@ function FolderBrowser({ serverId, existing, onAdd, onCancel }: {
   onAdd: (name: string, directory: string) => void
   onCancel: () => void
 }): React.ReactElement {
-  const [listing, setListing] = useState<HostDirListing | null>(null)
-  const [pathInput, setPathInput] = useState('')
-  const [showHidden, setShowHidden] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [dir, setDir] = useState('')
   const [name, setName] = useState('')
   const nameTouched = useRef(false)
-  const request = useRef(0)
-  /** The folder shown; '' (the home folder) until the first listing. */
-  const currentRef = useRef('')
-
-  const open = useCallback((dir: string) => {
-    const id = ++request.current
-    setError(null)
-    window.api.serverListDirs(serverId, dir, { showHidden })
-      .then((next) => {
-        if (id !== request.current) return
-        currentRef.current = next.path
-        setListing(next)
-        setPathInput(next.path)
-        if (!nameTouched.current) setName(baseName(next.path))
-      })
-      .catch((err: unknown) => { if (id === request.current) setError(errorText(err)) })
-  }, [serverId, showHidden])
-
-  // The home folder first; the hidden toggle lists the same folder again.
-  useEffect(() => { open(currentRef.current) }, [open])
-
-  const dir = listing?.path ?? ''
   const already = existing.has(dir)
 
   return (
     <>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className="h-(--ctl-h) px-2 rounded-md bg-field text-text-muted hover:text-text border border-border cursor-pointer disabled:opacity-50"
-          disabled={!listing?.parent}
-          onClick={() => listing?.parent && open(listing.parent)}
-          title="Up"
-        ><ArrowUp size={14} /></button>
-        <Field
-          className="flex-1 font-mono text-sm"
-          value={pathInput}
-          onChange={(e) => setPathInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') open(pathInput) }}
-          placeholder="~"
-          aria-label="Folder on the server"
-        />
-      </div>
-      {error && <HelperText>{error}</HelperText>}
-      <div className="flex flex-col h-[240px] overflow-y-auto rounded-md border border-border bg-field" data-testid="server-folder-list">
-        {listing && listing.entries.length === 0 && (
-          <div className="px-2.5 py-2 text-sm text-text-subtle">No folders here.</div>
-        )}
-        {listing?.entries.map(entry => (
-          <button
-            key={entry.path}
-            type="button"
-            className="flex items-center gap-2 px-2.5 py-1 text-left text-base text-text bg-transparent border-0 border-b border-hair last:border-b-0 cursor-pointer hover:bg-surface-3"
-            onClick={() => open(entry.path)}
-            title={entry.path}
-          >
-            {entry.git ? <GitBranch size={12} className="shrink-0 text-text-subtle" /> : <Folder size={12} className="shrink-0 text-text-subtle" />}
-            <span className="truncate">{entry.name}</span>
-            {existing.has(entry.path) && <span className="ml-auto text-2xs text-text-subtle shrink-0">added</span>}
-          </button>
-        ))}
-      </div>
-      <label className="flex items-center gap-2 text-sm text-text-muted self-start cursor-pointer">
-        <Switch checked={showHidden} onChange={setShowHidden} />
-        Show hidden folders
-      </label>
+      <ServerFolderList
+        serverId={serverId}
+        existing={existing}
+        onListing={(listing) => {
+          setDir(listing.path)
+          if (!nameTouched.current) setName(baseName(listing.path))
+        }}
+      />
       <SetBlock label="Project name">
         <Field value={name} onChange={(e) => { nameTouched.current = true; setName(e.target.value) }} placeholder="My Project" />
       </SetBlock>
