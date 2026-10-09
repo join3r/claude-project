@@ -12,6 +12,6 @@
     "rewriteRelativeImportExtensions": true,
     "types": ["node"]
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*", "protocol/ts/**/*"],
+  "include": ["src/main/**/*", "src/preload/**/*", "src/server/**/*", "src/shared/**/*", "protocol/ts/**/*"],
   "exclude": ["protocol/ts/**/*.test.ts"]
 }

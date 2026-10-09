@@ -90,6 +90,11 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run build
 
+      # Fails if the server's graph reaches electron; --check runs a PTY on the bundled node-pty.
+      - name: Build server bundle
+        if: runner.os == 'Linux'
+        run: npm run build:server && node out/server/main.js --check
+
   # Native notebooks run their kernel through conda + jupyter_client. This job
   # installs a real conda env and fails if the live kernel smoke cannot run.
   notebook-live-windows:
