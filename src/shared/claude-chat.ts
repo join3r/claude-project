@@ -201,6 +201,25 @@ export interface ChatState {
   tasks: Record<string, ChatTask>
   /** Set on a resume with a cold cache until the first send. */
   coldCache?: ChatColdCache
+  /** `/login` in progress or just finished; cleared when dismissed. */
+  login?: ChatLogin
+}
+
+/** How `/login` signs in: the `claude auth login` flags. */
+export type ChatLoginMethod = 'claudeai' | 'console' | 'sso'
+
+export interface ChatLogin {
+  /** running: waiting on the browser or a pasted code; verifying: code sent. */
+  status: 'running' | 'verifying' | 'done' | 'failed'
+  method: ChatLoginMethod
+  /** The project is on another host: its browser can't open, so the code has to be pasted. */
+  remote?: boolean
+  /** The sign-in page that ends with a code to paste, once the CLI printed it. */
+  url?: string
+  /** On done: who is signed in now. */
+  account?: string
+  /** On failed: what the CLI said. */
+  error?: string
 }
 
 export type ChatEvent =
@@ -219,6 +238,7 @@ export type ChatEvent =
   /** The `!command` context went out with a message. */
   | { t: 'bash-sent'; ids: string[] }
   | { t: 'cold-cache'; cache: ChatColdCache }
+  | { t: 'login'; login: ChatLogin | null }
 
 /** What `chat-attach` returns: the state so far and the seq it corresponds to. */
 export interface ChatSnapshot {
@@ -1030,7 +1050,7 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
     case 'sdk': {
       if (obj(event.m)?.type === 'conversation_reset') {
         // /clear starts a new conversation in the same process; its tasks run on.
-        return { ...emptyChatState(), process: state.process, info: state.info, models: state.models, commands: state.commands, usage: state.usage, tasks: state.tasks }
+        return { ...emptyChatState(), process: state.process, info: state.info, models: state.models, commands: state.commands, usage: state.usage, tasks: state.tasks, login: state.login }
       }
       const draft = new Draft(state, `i${state.items.length}-`)
       return draft.result(applySdkMessage(state, event.m, event.at, false, draft))
@@ -1131,7 +1151,13 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
     case 'interrupting':
       return state.busy ? { ...state, interrupting: true } : state
     case 'reset':
-      return { ...emptyChatState(), models: state.models, commands: state.commands, usage: state.usage }
+      return { ...emptyChatState(), models: state.models, commands: state.commands, usage: state.usage, login: state.login }
+    case 'login': {
+      if (event.login) return { ...state, login: event.login }
+      if (!state.login) return state
+      const { login: _login, ...rest } = state
+      return rest
+    }
     case 'bash': {
       const draft = new Draft(state, 'b')
       draft.push({ kind: 'bash', id: event.id, command: event.command, running: true })
@@ -1218,24 +1244,46 @@ export interface ChatSideAnswer {
   synthetic?: boolean
 }
 
-/** Built-in commands that only make sense in the terminal UI. */
 /** `/permissions`: the CLI's dialog is terminal UI; the chat tab has its own rules editor. */
 export const PERMISSIONS_COMMAND: ChatCommand = {
   name: 'permissions',
   description: 'View and edit allow, ask and deny rules'
 }
 
+/** `/login` and `/logout`: the chat tab runs `claude auth` itself. */
+export const LOGIN_COMMAND: ChatCommand = {
+  name: 'login',
+  description: 'Sign in to your Anthropic account',
+  argumentHint: '[console|sso]'
+}
+
+export const LOGOUT_COMMAND: ChatCommand = {
+  name: 'logout',
+  description: 'Sign out from your Anthropic account'
+}
+
+/** The method in `/login [console|sso]`, or null for anything else. */
+export function parseLoginCommand(text: string): ChatLoginMethod | null {
+  const match = /^\/login(?:\s+(\S+))?\s*$/i.exec(text.trim())
+  if (!match) return null
+  const arg = match[1]?.toLowerCase()
+  if (arg === 'console' || arg === 'sso') return arg
+  return 'claudeai'
+}
+
+/** Built-in commands that only make sense in the terminal UI. */
 export const TERMINAL_ONLY_COMMANDS = new Set([
-  'login', 'logout', 'config', 'settings', 'theme', 'terminal-setup', 'vim', 'doctor', 'ide',
+  'config', 'settings', 'theme', 'terminal-setup', 'vim', 'doctor', 'ide',
   'install-github-app', 'permissions', 'hooks', 'agents', 'mcp', 'plugin', 'resume', 'status',
   'statusline', 'upgrade', 'exit', 'quit', 'rewind', 'export', 'memory', 'privacy-settings'
 ])
 
 /**
- * The composer's `/` menu: the CLI doesn't list /btw or /permissions to SDK clients,
- * so the chat tab adds them (it runs both itself), then what the CLI reported.
+ * The composer's `/` menu: the CLI doesn't list /btw, /permissions, /login or
+ * /logout to SDK clients, so the chat tab adds them (it runs them itself), then
+ * what the CLI reported.
  */
 export function composerCommands(commands: ChatCommand[]): ChatCommand[] {
-  const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND].filter((command) => !commands.some((c) => c.name === command.name))
+  const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND, LOGIN_COMMAND, LOGOUT_COMMAND].filter((command) => !commands.some((c) => c.name === command.name))
   return own.length > 0 ? [...own, ...commands] : commands
 }

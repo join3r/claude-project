@@ -208,6 +208,12 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
     deps.chatManager().send(tabId, text, images ?? []))
   ipc.handle('chat-bash', [safeId, v.string({ nonEmpty: true, max: 20_000 })], (_event, tabId, command) =>
     deps.chatManager().runBash(tabId, command))
+  ipc.handle('chat-login', [safeId, v.literal('claudeai', 'console', 'sso')], (_event, tabId, method) =>
+    deps.chatManager().login(tabId, method))
+  ipc.handle('chat-login-code', [safeId, v.string({ nonEmpty: true, max: 4_000 })], (_event, tabId, code) =>
+    deps.chatManager().submitLoginCode(tabId, code))
+  ipc.handle('chat-login-dismiss', [safeId], (_event, tabId) => deps.chatManager().dismissLogin(tabId))
+  ipc.handle('chat-logout', [safeId], (_event, tabId) => deps.chatManager().logout(tabId))
   ipc.handle('chat-side-question', [safeId, v.string({ nonEmpty: true, max: 20_000 })], (_event, tabId, question) =>
     deps.chatManager().askSideQuestion(tabId, question))
   ipc.handle('chat-interrupt', [safeId], (_event, tabId) => deps.chatManager().interrupt(tabId))

@@ -6,6 +6,8 @@ import {
   reduceChat,
   type ChatEvent,
   type ChatImage,
+  type ChatLogin,
+  type ChatLoginMethod,
   type ChatPrompt,
   type ChatPromptResponse,
   type ChatSideAnswer,
@@ -15,6 +17,7 @@ import {
 import { randomUUID } from 'crypto'
 import { ChatSession } from './chat-session'
 import { runBash, type BashSpawn } from './bash-mode'
+import { accountFromStatus, loginArgs, loginUrlFrom, outputTail, startLogin, type LoginRun } from './auth'
 import { createRemoteSpawner, type RemoteCommand } from './remote-spawn'
 import { readLocalTranscript, readRemoteTranscript, SESSION_ID_RE } from './transcript'
 
@@ -41,6 +44,8 @@ export interface ChatManagerDeps {
   remoteCommand: (projectId: string, sshConfig: SshConfig, cwd: string, claudeArgs: string[], env: Record<string, string>) => RemoteCommand
   /** How to run a `!command` for this tab: its shell, locally or on the project's host. */
   bashSpawn: (config: ChatTabConfig, command: string) => BashSpawn
+  /** How to run `claude <args>` outside the session (`claude auth …`), locally or on the project's host. */
+  claudeSpawn: (config: ChatTabConfig, args: string[]) => BashSpawn
   /** Run a script on the project's host and return stdout. */
   remoteExec: (projectId: string, sshConfig: SshConfig, script: string) => Promise<string>
   /** A hook payload from the session, for the status/activity pipeline. */
@@ -50,6 +55,9 @@ export interface ChatManagerDeps {
   onProcessChange: (tabId: string, running: boolean, error?: string) => void
   log: (message: string) => void
 }
+
+/** `claude auth login` turning down a pasted code (it then waits for another). */
+const LOGIN_REJECTED_RE = /invalid|error|fail|expired/i
 
 /**
  * A non-window subscriber (the mobile bridge): called after every event, with the
@@ -77,6 +85,11 @@ interface ChatRuntime {
   effort?: string
   /** Finished `!command`s whose output goes to Claude with the next message. */
   bashContext: { id: string; blocks: string[] }[]
+  /** `/login` running `claude auth login`. */
+  loginRun?: LoginRun
+  /** Its output so far, and how long that was when the last code went in. */
+  loginOutput?: () => string
+  loginMark?: number
 }
 
 /**
@@ -215,6 +228,123 @@ export class ClaudeChatManager {
     this.emit(runtime, { t: 'bash-done', id, ...result })
   }
 
+  /**
+   * `/login`: run `claude auth login` where this tab's `claude` runs, show its
+   * progress as the tab's `login`, then restart an idle process so it signs in
+   * with the new account. A second `/login` replaces the first.
+   */
+  async login(tabId: string, method: ChatLoginMethod): Promise<void> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) throw new Error('chat tab not attached')
+    await runtime.ready
+    this.endLogin(runtime)
+    const { config } = runtime
+    const remote = !!(config.sshConfig && config.projectId)
+    const login: ChatLogin = { status: 'running', method, ...(remote ? { remote: true } : {}) }
+    this.emit(runtime, { t: 'login', login })
+    if (config.sshConfig && config.projectId) {
+      try {
+        await this.deps.ensureSsh(config.projectId, config.sshConfig)
+      } catch (err) {
+        this.emit(runtime, { t: 'login', login: { ...login, status: 'failed', error: err instanceof Error ? err.message : String(err) } })
+        return
+      }
+    }
+    // What the CLI has printed so far, and how much of it was there when a code went in.
+    let output = ''
+    const update = (patch: Partial<ChatLogin>): void => {
+      const current = runtime.state.login
+      if (current) this.emit(runtime, { t: 'login', login: { ...current, ...patch } })
+    }
+    const run: LoginRun = startLogin(this.deps.claudeSpawn(config, loginArgs(method)), (text) => {
+      output = text
+      if (runtime.loginRun !== run) return
+      const current = runtime.state.login
+      if (!current) return
+      if (!current.url) {
+        const url = loginUrlFrom(text)
+        if (url) update({ url })
+        return
+      }
+      // A bad code: the CLI says so and waits for another.
+      const reply = current.status === 'verifying' ? text.slice(runtime.loginMark ?? text.length) : ''
+      if (LOGIN_REJECTED_RE.test(reply)) update({ status: 'running', error: outputTail(reply, 2) })
+    })
+    runtime.loginRun = run
+    runtime.loginOutput = () => output
+    const result = await run.done
+    this.deps.log(`chatLogin tab=${tabId} method=${method} ok=${result.ok}`)
+    if (runtime.loginRun !== run || this.runtimes.get(tabId) !== runtime) return
+    runtime.loginRun = undefined
+    if (!result.ok) {
+      update({ status: 'failed', error: outputTail(result.output) || 'Sign-in failed.' })
+      return
+    }
+    const status = await runBash(this.deps.claudeSpawn(config, ['auth', 'status', '--json']))
+    if (this.runtimes.get(tabId) !== runtime) return
+    const account = accountFromStatus(status.stdout)
+    const { error: _error, ...done } = runtime.state.login ?? login
+    this.emit(runtime, { t: 'login', login: { ...done, status: 'done', ...(account ? { account } : {}) } })
+    this.restartForAuth(runtime)
+  }
+
+  /** The code the sign-in page showed, for a running `/login`. */
+  submitLoginCode(tabId: string, code: string): void {
+    const runtime = this.runtimes.get(tabId)
+    const login = runtime?.state.login
+    if (!runtime?.loginRun || !login || login.status !== 'running') return
+    runtime.loginMark = runtime.loginOutput?.().length
+    runtime.loginRun.submitCode(code)
+    const { error: _error, ...rest } = login
+    this.emit(runtime, { t: 'login', login: { ...rest, status: 'verifying' } })
+  }
+
+  /** Stop a running `/login`, or dismiss a finished one. */
+  dismissLogin(tabId: string): void {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) return
+    this.endLogin(runtime)
+    this.emit(runtime, { t: 'login', login: null })
+  }
+
+  /** `/logout`: `claude auth logout` where this tab's `claude` runs. */
+  async logout(tabId: string): Promise<void> {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) throw new Error('chat tab not attached')
+    await runtime.ready
+    this.endLogin(runtime)
+    if (runtime.state.login) this.emit(runtime, { t: 'login', login: null })
+    const { config } = runtime
+    if (config.sshConfig && config.projectId) await this.deps.ensureSsh(config.projectId, config.sshConfig)
+    const result = await runBash(this.deps.claudeSpawn(config, ['auth', 'logout']))
+    this.deps.log(`chatLogout tab=${tabId} exit=${result.exitCode}`)
+    if (this.runtimes.get(tabId) !== runtime) return
+    if (result.exitCode !== 0) {
+      this.emit(runtime, { t: 'notice', text: `Couldn't sign out: ${outputTail(result.stderr || result.stdout) || 'claude auth logout failed.'}`, tone: 'error' })
+      return
+    }
+    this.emit(runtime, { t: 'notice', text: 'Signed out. Use /login to sign in again.', tone: 'muted' })
+    this.restartForAuth(runtime)
+  }
+
+  private endLogin(runtime: ChatRuntime): void {
+    const run = runtime.loginRun
+    runtime.loginRun = undefined
+    runtime.loginOutput = undefined
+    runtime.loginMark = undefined
+    run?.cancel()
+  }
+
+  /**
+   * A running `claude` keeps the credentials it started with: restart it, resuming
+   * the conversation. Mid-turn it is left alone; the next process picks them up.
+   */
+  private restartForAuth(runtime: ChatRuntime): void {
+    if (!runtime.session || runtime.session.isEnded() || runtime.state.busy) return
+    runtime.session.close()
+    void this.startSession(runtime)
+  }
+
   async interrupt(tabId: string): Promise<void> {
     await this.runtimes.get(tabId)?.session?.interrupt()
   }
@@ -292,6 +422,7 @@ export class ClaudeChatManager {
   close(tabId: string): void {
     const runtime = this.runtimes.get(tabId)
     if (!runtime) return
+    this.endLogin(runtime)
     runtime.session?.close()
     this.runtimes.delete(tabId)
   }

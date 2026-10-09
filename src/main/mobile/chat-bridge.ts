@@ -1,5 +1,7 @@
 import {
   composerCommands,
+  LOGIN_COMMAND,
+  LOGOUT_COMMAND,
   PERMISSIONS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
   type ChatEvent,
@@ -489,14 +491,20 @@ export class ChatBridge {
   }
 }
 
-/** `chat.commands` (§8.14): the composer's `/` menu, as ClaudeChatTab builds it. */
+/** Desktop-only: the phone has no sign-in card yet, so it keeps these terminal only. */
+const DESKTOP_AUTH_COMMANDS = new Set([LOGIN_COMMAND.name, LOGOUT_COMMAND.name])
+
+/**
+ * `chat.commands` (§8.14): the composer's `/` menu, as ClaudeChatTab builds it,
+ * less the desktop's own /login and /logout.
+ */
 export function chatCommands(chat: ChatState): ChatCommandsResult {
   return {
-    commands: composerCommands(chat.commands).map((command) => {
+    commands: composerCommands(chat.commands).filter((command) => command !== LOGIN_COMMAND && command !== LOGOUT_COMMAND).map((command) => {
       const entry: ChatCommandEntry = { name: command.name }
       if (command.description) entry.description = command.description
       if (command.argumentHint) entry.argumentHint = command.argumentHint
-      if (TERMINAL_ONLY_COMMANDS.has(command.name) && command.name !== PERMISSIONS_COMMAND.name) entry.terminalOnly = true
+      if ((TERMINAL_ONLY_COMMANDS.has(command.name) || DESKTOP_AUTH_COMMANDS.has(command.name)) && command.name !== PERMISSIONS_COMMAND.name) entry.terminalOnly = true
       return entry
     })
   }

@@ -32,7 +32,7 @@ import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
 import type { AiStatusEvent } from '../shared/ai-status'
-import type { ChatEvent, ChatImage, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
+import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 
 const api = {
@@ -236,6 +236,10 @@ const api = {
   chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>
     ipcRenderer.invoke('chat-send', tabId, text, images),
   chatBash: (tabId: string, command: string): Promise<void> => ipcRenderer.invoke('chat-bash', tabId, command),
+  chatLogin: (tabId: string, method: ChatLoginMethod): Promise<void> => ipcRenderer.invoke('chat-login', tabId, method),
+  chatLoginCode: (tabId: string, code: string): Promise<void> => ipcRenderer.invoke('chat-login-code', tabId, code),
+  chatLoginDismiss: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-login-dismiss', tabId),
+  chatLogout: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-logout', tabId),
   chatSideQuestion: (tabId: string, question: string): Promise<ChatSideAnswer> =>
     ipcRenderer.invoke('chat-side-question', tabId, question),
   chatInterrupt: (tabId: string): Promise<void> => ipcRenderer.invoke('chat-interrupt', tabId),

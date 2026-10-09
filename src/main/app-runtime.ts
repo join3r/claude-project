@@ -711,6 +711,16 @@ export class AppRuntime {
           : env.SHELL || '/bin/sh'
         return { file: shell, args: ['-c', command], cwd: config.cwd, env }
       },
+      claudeSpawn: (config, args) => {
+        if (config.sshConfig && config.projectId) {
+          return {
+            file: this.sshManager.getSshCommand(),
+            args: this.sshManager.buildStdioSpawnArgs(config.projectId, config.sshConfig, 'claude', args, {}, config.cwd)
+          }
+        }
+        const file = resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude')
+        return { file, args, cwd: config.cwd, env: getShellEnv() }
+      },
       remoteExec: (projectId, sshConfig, script) => this.remoteExec(projectId, sshConfig, script),
       onHook: (tabId, body) => {
         const event = typeof body.hook_event_name === 'string' ? body.hook_event_name : ''

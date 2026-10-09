@@ -43,6 +43,8 @@ function renderComposer() {
     onSideQuestion: vi.fn(),
     onBash: vi.fn(),
     onPermissions: vi.fn(),
+    onLogin: vi.fn(),
+    onLogout: vi.fn(),
     onStop: vi.fn(),
     onSetModel: vi.fn(),
     onSetMode: vi.fn(),

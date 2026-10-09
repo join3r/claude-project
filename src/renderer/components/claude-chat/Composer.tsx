@@ -3,12 +3,15 @@ import { ArrowUp, Square, SquareTerminal } from 'lucide-react'
 import {
   CHAT_EFFORT_LEVELS,
   CHAT_PERMISSION_MODES,
+  LOGOUT_COMMAND,
   PERMISSIONS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
   findModelOption,
+  parseLoginCommand,
   parseSideQuestion,
   type ChatCommand,
   type ChatImage,
+  type ChatLoginMethod,
   type ChatModelOption,
   type ChatSessionInfo,
   type ChatUsage
@@ -35,6 +38,10 @@ interface Props {
   onBash: (command: string) => void
   /** `/permissions`: DevTool's own rules editor (the CLI's is terminal-only). */
   onPermissions: () => void
+  /** `/login [console|sso]`: sign in through `claude auth login`. */
+  onLogin: (method: ChatLoginMethod) => void
+  /** `/logout`: sign out through `claude auth logout`. */
+  onLogout: () => void
   onStop: () => void
   onSetModel: (model: string | undefined) => void
   onSetMode: (mode: string) => void
@@ -78,7 +85,7 @@ function rankFiles(files: string[], query: string): string[] {
 }
 
 export default function Composer(props: Props): React.ReactElement {
-  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
+  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onLogin, onLogout, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
   const [text, setText] = useState('')
   const textRef = useRef(text)
   textRef.current = text
@@ -165,6 +172,12 @@ export default function Composer(props: Props): React.ReactElement {
       onPermissions()
       return
     }
+    if (suggest.kind === 'command' && value === LOGOUT_COMMAND.name) {
+      setSuggest(null)
+      setText('')
+      onLogout()
+      return
+    }
     if (suggest.kind === 'command' && TERMINAL_ONLY_COMMANDS.has(value)) {
       setSuggest(null)
       onOpenInTerminal()
@@ -196,6 +209,19 @@ export default function Composer(props: Props): React.ReactElement {
     const command = /^\/(\S+)/.exec(trimmed)?.[1]
     if (command === PERMISSIONS_COMMAND.name) {
       onPermissions()
+      setText('')
+      setSuggest(null)
+      return
+    }
+    if (command === LOGOUT_COMMAND.name) {
+      onLogout()
+      setText('')
+      setSuggest(null)
+      return
+    }
+    const login = parseLoginCommand(trimmed)
+    if (login) {
+      onLogin(login)
       setText('')
       setSuggest(null)
       return

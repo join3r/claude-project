@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import { composerCommands, type ChatColdCache, type ChatImage, type ChatPromptResponse } from '../../../shared/claude-chat'
+import { composerCommands, type ChatColdCache, type ChatImage, type ChatLoginMethod, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
@@ -14,6 +14,7 @@ import TaskIndicator from './TaskIndicator'
 import PromptCard from './PromptCards'
 import SideQuestion, { type SideQuestionState } from './SideQuestion'
 import ColdCacheNotice from './ColdCacheNotice'
+import LoginCard from './LoginCard'
 import PermissionsDialog from './PermissionsDialog'
 import Composer from './Composer'
 import { noteAgentTabTyped } from '../../agentLink/agentTabRecency'
@@ -244,6 +245,17 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
 
   const commands = useMemo(() => composerCommands(state.commands), [state.commands])
 
+  const reportError = useCallback((err: unknown) => {
+    setAttachError(err instanceof Error ? err.message : String(err))
+  }, [])
+  const login = useCallback((method: ChatLoginMethod) => {
+    void window.api.chatLogin(tabId, method).catch(reportError)
+  }, [tabId, reportError])
+  const logout = useCallback(() => {
+    if (!window.confirm('Sign out of Claude? Every Claude tab and terminal on this machine uses the same login.')) return
+    void window.api.chatLogout(tabId).catch(reportError)
+  }, [tabId, reportError])
+
   const respond = useCallback((promptId: string, response: ChatPromptResponse) => {
     markTaskInteracted(projectId, taskId)
     void window.api.chatRespond(tabId, promptId, response)
@@ -368,6 +380,15 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
           </div>
         )}
         {coldCache && <ColdCacheNotice cache={coldCache} onDismiss={() => setDismissedCache(coldCache)} />}
+        {state.login && (
+          <LoginCard
+            login={state.login}
+            onSubmitCode={(code) => { void window.api.chatLoginCode(tabId, code).catch(reportError) }}
+            onRetry={login}
+            onOpenUrl={(url) => { void window.api.openExternal(url).catch(reportError) }}
+            onDismiss={() => { void window.api.chatLoginDismiss(tabId) }}
+          />
+        )}
         {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
         <Composer
           busy={state.busy}
@@ -380,6 +401,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
           onSideQuestion={askSideQuestion}
           onBash={runBash}
           onPermissions={() => setPermissionsOpen(true)}
+          onLogin={login}
+          onLogout={logout}
           onStop={() => { void window.api.chatInterrupt(tabId) }}
           onSetModel={(model) => { void window.api.chatSetModel(tabId, model) }}
           onSetMode={(mode) => { void window.api.chatSetMode(tabId, mode) }}
