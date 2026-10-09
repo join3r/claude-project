@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import readline from 'readline'
-import { NotRunningError, controlRequest, controlSocketPath } from './control'
+import { NotRunningError, UnsafeControlSocketError, controlRequest } from './control'
 import type { ServerUpdateState } from '../main/host/link/link-channels'
 import { loadServerManifest, serverPaths, type ServerPaths } from './server-env'
 import {
@@ -173,7 +173,6 @@ export async function runCli(argv: string[], options: { bundleDir: string; io?: 
   }
   const paths = options.paths ?? serverPaths()
   const ctx = options.ctx ?? serviceContext(paths)
-  const socket = controlSocketPath(paths)
   const record = readServiceRecord(paths)
   try {
     switch (command.cmd) {
@@ -192,13 +191,13 @@ export async function runCli(argv: string[], options: { bundleDir: string; io?: 
         return 0
       }
       case 'status':
-        return await status(io, socket, ctx, record)
+        return await status(io, paths, ctx, record)
       case 'logs':
         return await logs(io, paths, record, command.follow, command.lines)
       case 'pair':
-        return await pair(io, socket, command.wait)
+        return await pair(io, paths, command.wait)
       case 'unpair':
-        return await unpair(io, socket, command.target)
+        return await unpair(io, paths, command.target)
       case 'restart':
         if (!record) {
           io.err('No service is installed. Run the installer again.')
@@ -215,20 +214,23 @@ export async function runCli(argv: string[], options: { bundleDir: string; io?: 
         await startService(ctx, record)
         return 0
       case 'uninstall':
-        return await uninstall(io, paths, ctx, record, command.data, command.yes, socket)
+        return await uninstall(io, paths, ctx, record, command.data, command.yes)
     }
   } catch (err) {
-    io.err(err instanceof NotRunningError ? 'The DevTool server is not running. Start it with: devtool-server start' : err instanceof Error ? err.message : String(err))
+    io.err(err instanceof NotRunningError ? 'The DevTool server is not running. Start it with: devtool-server start'
+      : err instanceof UnsafeControlSocketError ? `Refusing to talk to the server: ${err.message}`
+        : err instanceof Error ? err.message : String(err))
     return 1
   }
 }
 
-async function status(io: CliIo, socket: string, ctx: ServiceContext, record: ServiceRecord | null): Promise<number> {
+async function status(io: CliIo, paths: ServerPaths, ctx: ServiceContext, record: ServiceRecord | null): Promise<number> {
   const service = await serviceState(ctx, record)
   let daemon: DaemonStatus | null = null
   try {
-    daemon = await controlRequest(socket, { cmd: 'status' }, 10_000) as DaemonStatus
+    daemon = await controlRequest(paths, { cmd: 'status' }, 10_000) as DaemonStatus
   } catch (err) {
+    if (err instanceof UnsafeControlSocketError) throw err
     if (!(err instanceof NotRunningError)) io.err(`(no answer from the server: ${err instanceof Error ? err.message : String(err)})`)
   }
   if (!daemon) {
@@ -269,8 +271,8 @@ async function logs(io: CliIo, paths: ServerPaths, record: ServiceRecord | null,
   })
 }
 
-async function pair(io: CliIo, socket: string, wait: boolean): Promise<number> {
-  const answer = await controlRequest(socket, { cmd: 'pair' }) as CodeAnswer
+async function pair(io: CliIo, paths: ServerPaths, wait: boolean): Promise<number> {
+  const answer = await controlRequest(paths, { cmd: 'pair' }) as CodeAnswer
   io.out('In DevTool: Add server, then "I have a code", and paste:')
   io.out('')
   io.out(`  ${answer.code}`)
@@ -280,7 +282,7 @@ async function pair(io: CliIo, socket: string, wait: boolean): Promise<number> {
   io.out('Waiting for DevTool... (Ctrl-C to stop waiting; the code stays valid)')
   for (;;) {
     await new Promise((resolve) => setTimeout(resolve, 1000))
-    const state = await controlRequest(socket, { cmd: 'pair-status' }) as CodeAnswer | null
+    const state = await controlRequest(paths, { cmd: 'pair-status' }) as CodeAnswer | null
     if (!state || state.code !== answer.code) {
       io.err('Another pairing code replaced this one.')
       return 1
@@ -296,8 +298,8 @@ async function pair(io: CliIo, socket: string, wait: boolean): Promise<number> {
   }
 }
 
-async function unpair(io: CliIo, socket: string, target: string): Promise<number> {
-  const daemon = await controlRequest(socket, { cmd: 'status' }) as DaemonStatus
+async function unpair(io: CliIo, paths: ServerPaths, target: string): Promise<number> {
+  const daemon = await controlRequest(paths, { cmd: 'status' }) as DaemonStatus
   const matches = daemon.desktops.filter((d) => d.id === target || d.id.startsWith(target.toLowerCase()) || d.name === target)
   if (matches.length === 0) {
     io.err(`No paired desktop matches "${target}". See: devtool-server status`)
@@ -307,7 +309,7 @@ async function unpair(io: CliIo, socket: string, target: string): Promise<number
     io.err(`"${target}" matches ${matches.length} desktops; use more of the id.`)
     return 1
   }
-  await controlRequest(socket, { cmd: 'unpair', id: matches[0].id })
+  await controlRequest(paths, { cmd: 'unpair', id: matches[0].id })
   io.out(`Removed ${matches[0].name} (${matches[0].id.slice(0, 8)}).`)
   return 0
 }
@@ -326,7 +328,7 @@ export function removeServerFiles(paths: ServerPaths, deleteData: boolean): void
   }
 }
 
-async function uninstall(io: CliIo, paths: ServerPaths, ctx: ServiceContext, record: ServiceRecord | null, data: 'keep' | 'delete' | 'ask', yes: boolean, socket: string): Promise<number> {
+async function uninstall(io: CliIo, paths: ServerPaths, ctx: ServiceContext, record: ServiceRecord | null, data: 'keep' | 'delete' | 'ask', yes: boolean): Promise<number> {
   let deleteData = data === 'delete'
   if (data === 'ask') {
     const answer = await io.confirm(`Also delete the server's data (paired desktops, projects and settings in ${paths.dataDir})?`)
@@ -339,7 +341,7 @@ async function uninstall(io: CliIo, paths: ServerPaths, ctx: ServiceContext, rec
   if (deleteData) {
     // Its identity goes away, so its pairs are useless: tell the relay (and the desktops) first.
     try {
-      const result = await controlRequest(socket, { cmd: 'revoke-all' }, 10_000) as { count?: number }
+      const result = await controlRequest(paths, { cmd: 'revoke-all' }, 10_000) as { count?: number }
       if (result?.count) io.out(`Unpaired ${result.count} desktop${result.count === 1 ? '' : 's'}.`)
     } catch {
       // Not running: the relay pairs stay until DevTool removes this server.

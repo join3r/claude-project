@@ -13,7 +13,7 @@ import { exitForRestart } from './restart'
 import { diagnosticStreamKinds } from '../main/host/link/diagnostic-streams'
 import { LinkChannel, LinkEvent } from '../main/host/link/link-channels'
 import { consoleError, consoleLog, ensureServerDirs, loadServerManifest, loginShell, passwdShell, serverPaths, logToFile, type ServerPaths } from './server-env'
-import { ControlServer, controlSocketPath, type ControlRequest } from './control'
+import { ControlServer, type ControlRequest } from './control'
 import { currentSupervisor } from './restart'
 import { pidFile, readServiceRecord, removeService, serviceContext, stopSelf, unlinkCliOnPath } from './service'
 import { removeServerFiles, type DaemonStatus } from './cli'
@@ -130,7 +130,7 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
     linkCall: (call) => daemonLinkCall(call, { link: link!, updater, uninstall })
   })
   link.start()
-  const control = new ControlServer(controlSocketPath(paths), (request) => controlCommand(request, { link: link!, updater, server, paths, manifest }), log)
+  const control = new ControlServer(paths, (request) => controlCommand(request, { link: link!, updater, server, paths, manifest }), log)
   try {
     await control.start()
   } catch (err) {

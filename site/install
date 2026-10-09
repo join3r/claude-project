@@ -1,18 +1,22 @@
 #!/bin/sh
 # DevTool server installer.
 #
-#   curl -fsSL https://devtool.awantech.sk/install | sh -s -- [<token>] [--allow-root] [--name NAME] [--relay URL]
+#   curl -fsSL https://devtool.awantech.sk/install | DEVTOOL_TOKEN=<token> sh
+#   curl -fsSL https://devtool.awantech.sk/install | sh -s -- [--allow-root] [--name NAME] [--relay URL]
 #
 # With the token DevTool shows under Add server, it pairs with that DevTool at once.
-# Without one it prints a pairing code to paste into DevTool. It installs Node (from
-# nodejs.org, checked against SHASUMS256.txt) into ~/.devtool-server/node/ and runs
-# the bootstrap, which pairs, receives the server from DevTool and installs the
-# service. Running it again on a machine with a server updates and re-pairs it.
+# The token travels in the environment, which other users can't read, never on a
+# command line, which `ps` shows them (a token also works as the first argument,
+# with a warning). Without one it prints a pairing code to paste into DevTool.
+# It installs Node (from nodejs.org, checked against SHASUMS256.txt) into
+# ~/.devtool-server/node/ and runs the bootstrap, which pairs, receives the server
+# from DevTool and installs the service. Running it again on a machine with a
+# server updates and re-pairs it.
 #
-# Environment: DEVTOOL_INSTALL_URL (where this script and the bootstrap live),
-# DEVTOOL_SERVER_HOME (default ~/.devtool-server), DEVTOOL_NODE_MIRROR (default
-# https://nodejs.org/dist), DEVTOOL_SERVER_SERVICE_SUFFIX (a test install's own
-# service name).
+# Environment: DEVTOOL_TOKEN (the install token), DEVTOOL_INSTALL_URL (where this
+# script and the bootstrap live), DEVTOOL_SERVER_HOME (default ~/.devtool-server),
+# DEVTOOL_NODE_MIRROR (default https://nodejs.org/dist),
+# DEVTOOL_SERVER_SERVICE_SUFFIX (a test install's own service name).
 #
 # site/install is generated from scripts/server-install.sh by
 # scripts/build-installer.mjs (npm run build:installer); edit the template.
@@ -23,7 +27,7 @@ main() {
   set -eu
 
   NODE_DEFAULT='24.21.0'
-  BOOTSTRAP_SHA256='ea1e39f7284c34fa1d36f6e6d808ef35612cc3c02874c53945a6f5236be660a9'
+  BOOTSTRAP_SHA256='2be45881b0addaaa06dde4783656d25b4ba1e1790873ec699c2d6b871ae70d02'
 
   BASE="${DEVTOOL_INSTALL_URL:-https://devtool.awantech.sk}"
   BASE="${BASE%/}"
@@ -31,7 +35,9 @@ main() {
   NODE_MIRROR="${DEVTOOL_NODE_MIRROR:-https://nodejs.org/dist}"
   NODE_MIRROR="${NODE_MIRROR%/}"
 
-  TOKEN=''
+  # Kept in an unexported variable: no child but the bootstrap gets it.
+  TOKEN="${DEVTOOL_TOKEN:-}"
+  unset DEVTOOL_TOKEN
   NAME=''
   RELAY=''
   ALLOW_ROOT=0
@@ -44,7 +50,11 @@ main() {
       --relay=*) RELAY="${1#--relay=}" ;;
       -h|--help) usage; return 0 ;;
       -*) die "unknown option: $1" ;;
-      *) [ -z "$TOKEN" ] || die "unexpected argument: $1"; TOKEN="$1" ;;
+      *)
+        [ -z "$TOKEN" ] || die "unexpected argument: $1 (the token is already in DEVTOOL_TOKEN)"
+        TOKEN="$1"
+        printf '%s\n' "warning: a token on the command line is visible to other users of this machine (ps). DevTool's command passes it as DEVTOOL_TOKEN instead." >&2
+        ;;
     esac
     shift
   done
@@ -87,12 +97,12 @@ main() {
   [ "$got" = "$BOOTSTRAP_SHA256" ] || die "the bootstrap does not match this install script (sha256 $got). The site may be mid-update: try again in a minute."
 
   set --
-  if [ -n "$TOKEN" ]; then set -- "$@" --token "$TOKEN"; fi
   if [ -n "$NAME" ]; then set -- "$@" --name "$NAME"; fi
   if [ -n "$RELAY" ]; then set -- "$@" --relay "$RELAY"; fi
   if [ "$ALLOW_ROOT" = 1 ]; then set -- "$@" --allow-root; fi
   status=0
-  DEVTOOL_SERVER_HOME="$HOME_DIR" "$NODE" "$TMP_DIR/bootstrap.mjs" "$@" </dev/null || status=$?
+  # The token goes in the bootstrap's environment only, never in its arguments.
+  DEVTOOL_TOKEN="$TOKEN" DEVTOOL_SERVER_HOME="$HOME_DIR" "$NODE" "$TMP_DIR/bootstrap.mjs" "$@" </dev/null || status=$?
   return "$status"
 }
 
@@ -104,7 +114,7 @@ die() {
 }
 
 usage() {
-  say "usage: curl -fsSL <base>/install | sh -s -- [<token>] [--allow-root] [--name NAME] [--relay URL]"
+  say "usage: curl -fsSL <base>/install | [DEVTOOL_TOKEN=<token>] sh -s -- [--allow-root] [--name NAME] [--relay URL]"
 }
 
 need() {

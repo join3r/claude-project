@@ -78,6 +78,9 @@ describe('service files', () => {
     expect(unit).toMatch(/^StartLimitIntervalSec=0$/m)
     expect(unit).toMatch(/^KillMode=mixed$/m)
     expect(unit).toMatch(/^WantedBy=default.target$/m)
+    // The service gets no install token: only its home and how it is supervised.
+    expect(unit).not.toContain('TOKEN')
+    expect(renderLaunchdPlist(paths, 'l', '/home/u')).not.toContain('TOKEN')
   })
 
   it('renders a LaunchAgent plist that restarts after a failed exit and logs to a file', () => {

@@ -205,7 +205,9 @@ describe.skipIf(process.platform === 'win32')('pairing through the relay', () =>
     const d = desktop(r.url)
     const s = await server(r.url)
     const invite = d.hub.createInvite()
-    expect(invite.oneLiner).toBe(`curl -fsSL https://devtool.awantech.sk/install | sh -s -- ${invite.token}`)
+    // The token rides in the environment, never in argv (other users can read argv from ps).
+    expect(invite.oneLiner).toBe(`curl -fsSL https://devtool.awantech.sk/install | DEVTOOL_TOKEN=${invite.token} sh`)
+    expect(installOneLiner('T.1.2.3', 'http://host.orb.internal:8799/')).toBe('curl -fsSL http://host.orb.internal:8799/install | DEVTOOL_INSTALL_URL=http://host.orb.internal:8799 DEVTOOL_TOKEN=T.1.2.3 sh')
     expect(d.hub.getState().invite).toMatchObject({ status: 'waiting', token: invite.token })
     await waitFor(() => d.hub.getState().relay.kind === 'online', 'desktop relay online')
 

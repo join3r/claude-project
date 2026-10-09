@@ -178,7 +178,7 @@ nameLength:u8   name (UTF-8, at most 64 bytes, cut on a character boundary)
 
 ### 7.3 Token flow
 
-1. The desktop mints a secret and sends `offer`. Its install ticket names the desktop's relay, its keys, its name and the Node version of the server bundle it carries.
+1. The desktop mints a secret and sends `offer`. Its install ticket names the desktop's relay, its keys, its name and the Node version of the server bundle it carries. The one-liner carries it in the environment, `curl -fsSL <base>/install | DEVTOOL_TOKEN=<token> sh`, never in a command line: anyone on the machine can read argv from `ps` and, since the desktop accepts a valid token without a click, pair first. `site/install` keeps it in an unexported variable and hands it to the bootstrap the same way, which drops it from its own environment before it starts anything. A token given as an argument still works, with a warning.
 2. The bootstrap connects as role `server` with its new identity, sends `pair { to: desktopId, token: b64u(relayToken) }` after `ready`, then the `0x05` message 1 with `bootstrap: 1`. A relay `error forbidden` for the desktop means the token was used, expired, or the invite is gone; `error offline` means DevTool isn't on the relay.
 3. The desktop routes a `0x05` from a peer it doesn't know yet to the server hub (the frame's first byte, since a phone's first frame is `0x01`). It checks the proof, stores the server in `servers.json`, sends `authorize`, `watch`es its servers again, answers `0x06 ok`, and starts the link handshake (§2) at once. There is no Accept click.
 4. The bootstrap stores the desktop in `desktops.json` when it reads `ok`, so the link handshake that follows is accepted.

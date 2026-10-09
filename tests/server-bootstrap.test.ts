@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -60,6 +61,11 @@ describe.skipIf(!bundle || process.platform === 'win32')('bootstrap', () => {
     expect(d.hub.getState().invite).toMatchObject({ status: 'paired', serverId: server.id })
     expect(new PeerStore(path.join(home, 'data'), 'desktops.json').list().map((r) => r.id)).toEqual([d.identity.get().id])
     expect(d.log.some((line) => line.includes('update=server-empty uploading'))).toBe(true)
+    // The token (and its secret) is in no log and no file the bootstrap wrote.
+    const secretText = invite.token.split('.')[0]
+    const written = spawnSync('grep', ['-rl', secretText.slice(10, 50), home], { encoding: 'utf8' })
+    expect(written.stdout).toBe('')
+    expect(fs.readFileSync(path.join(home, 'logs', 'install.log'), 'utf8')).toContain('bootstrap done')
 
     // Run again with a new invite: pairs again, nothing to upload, still fine.
     const again = d.hub.createInvite()

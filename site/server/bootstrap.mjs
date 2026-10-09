@@ -3,8 +3,8 @@ import { createRequire as __devtoolCreateRequire } from 'node:module'; const req
 
 // src/server/bootstrap.ts
 import { spawn as spawn3 } from "child_process";
-import fs12 from "fs";
-import os6 from "os";
+import fs13 from "fs";
+import os5 from "os";
 import path13 from "path";
 
 // protocol/ts/errors.ts
@@ -1660,9 +1660,9 @@ function text(o, key, max) {
 function parseHostInfo(value) {
   if (typeof value !== "object" || value === null) return void 0;
   const h = value;
-  const os7 = text(h, "os", 32);
-  if (!os7) return void 0;
-  return { os: os7, arch: text(h, "arch", 32), hostname: text(h, "hostname", 255), node: text(h, "node", 32) };
+  const os6 = text(h, "os", 32);
+  if (!os6) return void 0;
+  return { os: os6, arch: text(h, "arch", 32), hostname: text(h, "hostname", 255), node: text(h, "node", 32) };
 }
 function parseHandshakeVersion(bytes) {
   const o = parseObject(bytes);
@@ -2203,24 +2203,84 @@ var RelayMux = class {
 };
 
 // src/server/control.ts
-import { createHash as createHash5 } from "crypto";
+import fs6 from "fs";
 import net2 from "net";
-import os2 from "os";
 import path6 from "path";
-function controlSocketPath(paths) {
-  const inRun = path6.join(paths.runDir, "control.sock");
-  if (Buffer.byteLength(inRun) < 100) return inRun;
-  const hash = createHash5("sha256").update(path6.resolve(paths.home)).digest("hex").slice(0, 16);
-  return path6.join(os2.tmpdir(), `devtool-server-${os2.userInfo().uid}`, `${hash}.sock`);
-}
-var MAX_REQUEST_BYTES = 64 * 1024;
+var UnsafeControlSocketError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "UnsafeControlSocketError";
+  }
+};
 var NotRunningError = class extends Error {
   constructor() {
     super("The DevTool server is not running");
     this.name = "NotRunningError";
   }
 };
-function controlRequest(socketPath, request, timeoutMs = 3e4) {
+function currentUid() {
+  return typeof process.getuid === "function" ? process.getuid() : null;
+}
+function describeMode(mode) {
+  return `0${(mode & 511).toString(8)}`;
+}
+function assertPrivateDir(dir, uid = currentUid()) {
+  let stat;
+  try {
+    stat = fs6.lstatSync(dir);
+  } catch (err) {
+    throw new UnsafeControlSocketError(`${dir} is not there: ${err.message}`);
+  }
+  if (stat.isSymbolicLink()) throw new UnsafeControlSocketError(`${dir} is a symlink; refusing to use it for the control socket`);
+  if (!stat.isDirectory()) throw new UnsafeControlSocketError(`${dir} is not a directory`);
+  if (uid !== null && stat.uid !== uid) throw new UnsafeControlSocketError(`${dir} belongs to uid ${stat.uid}, not to you (uid ${uid}); refusing to use it`);
+  if ((stat.mode & 63) !== 0) throw new UnsafeControlSocketError(`${dir} is open to other users (mode ${describeMode(stat.mode)}); it must be 0700`);
+}
+function assertPrivateSocket(file, uid = currentUid()) {
+  const stat = fs6.lstatSync(file);
+  if (!stat.isSocket()) throw new UnsafeControlSocketError(`${file} is not a socket`);
+  if (uid !== null && stat.uid !== uid) throw new UnsafeControlSocketError(`${file} belongs to uid ${stat.uid}, not to you (uid ${uid}); refusing to talk to it`);
+  if ((stat.mode & 63) !== 0) throw new UnsafeControlSocketError(`${file} is open to other users (mode ${describeMode(stat.mode)})`);
+}
+function controlRecordFile(paths) {
+  return path6.join(paths.runDir, "control-socket");
+}
+function findControlSocket(paths, uid = currentUid()) {
+  const record = controlRecordFile(paths);
+  try {
+    fs6.lstatSync(paths.runDir);
+  } catch {
+    throw new NotRunningError();
+  }
+  assertPrivateDir(paths.runDir, uid);
+  let socket;
+  try {
+    const stat = fs6.lstatSync(record);
+    if (!stat.isFile()) throw new UnsafeControlSocketError(`${record} is not a regular file`);
+    if (uid !== null && stat.uid !== uid) throw new UnsafeControlSocketError(`${record} belongs to uid ${stat.uid}, not to you`);
+    socket = fs6.readFileSync(record, "utf8").trim();
+  } catch (err) {
+    if (err instanceof UnsafeControlSocketError) throw err;
+    throw new NotRunningError();
+  }
+  if (!path6.isAbsolute(socket)) throw new UnsafeControlSocketError(`${record} names no absolute socket path`);
+  assertPrivateDir(path6.dirname(socket), uid);
+  try {
+    fs6.lstatSync(socket);
+  } catch {
+    throw new NotRunningError();
+  }
+  assertPrivateSocket(socket, uid);
+  return socket;
+}
+var MAX_REQUEST_BYTES = 64 * 1024;
+function controlRequest(paths, request, timeoutMs = 3e4) {
+  let socketPath;
+  try {
+    socketPath = findControlSocket(paths);
+  } catch (err) {
+    return Promise.reject(err);
+  }
   return new Promise((resolve, reject) => {
     const socket = net2.createConnection(socketPath);
     let buffer = "";
@@ -2251,14 +2311,14 @@ function controlRequest(socketPath, request, timeoutMs = 3e4) {
 }
 
 // src/server/server-config.ts
-import fs6 from "fs";
-import os3 from "os";
+import fs7 from "fs";
+import os2 from "os";
 import path7 from "path";
 var FILE = "server.json";
 function loadServerConfig(dataDir) {
   let raw = {};
   try {
-    raw = JSON.parse(fs6.readFileSync(path7.join(dataDir, FILE), "utf8"));
+    raw = JSON.parse(fs7.readFileSync(path7.join(dataDir, FILE), "utf8"));
   } catch {
   }
   return {
@@ -2274,16 +2334,16 @@ function saveServerConfig(dataDir, patch) {
   return next;
 }
 function serverDisplayName(config) {
-  return config.name || os3.hostname().replace(/\.local$/, "");
+  return config.name || os2.hostname().replace(/\.local$/, "");
 }
 
 // src/server/server-env.ts
-import fs7 from "fs";
-import os4 from "os";
+import fs8 from "fs";
+import os3 from "os";
 import path8 from "path";
 var DEFAULT_SERVER_HOME_NAME = ".devtool-server";
 function serverPaths(env = process.env) {
-  const home = path8.resolve(env.DEVTOOL_SERVER_HOME?.trim() || path8.join(os4.homedir(), DEFAULT_SERVER_HOME_NAME));
+  const home = path8.resolve(env.DEVTOOL_SERVER_HOME?.trim() || path8.join(os3.homedir(), DEFAULT_SERVER_HOME_NAME));
   return {
     home,
     dataDir: path8.join(home, "data"),
@@ -2297,9 +2357,9 @@ function serverPaths(env = process.env) {
   };
 }
 function ensureServerDirs(paths) {
-  fs7.mkdirSync(paths.home, { recursive: true, mode: 448 });
-  fs7.mkdirSync(paths.dataDir, { recursive: true, mode: 448 });
-  fs7.chmodSync(paths.dataDir, 448);
+  fs8.mkdirSync(paths.home, { recursive: true, mode: 448 });
+  fs8.mkdirSync(paths.dataDir, { recursive: true, mode: 448 });
+  fs8.chmodSync(paths.dataDir, 448);
 }
 var plaintextSecrets = {
   isAvailable: () => false,
@@ -2324,31 +2384,31 @@ function writeLog(line, error) {
 }
 var LOG_FILE_MAX_BYTES = 5 * 1024 * 1024;
 function logToFile(file, maxBytes = LOG_FILE_MAX_BYTES) {
-  fs7.mkdirSync(path8.dirname(file), { recursive: true, mode: 448 });
+  fs8.mkdirSync(path8.dirname(file), { recursive: true, mode: 448 });
   let size = 0;
   try {
-    size = fs7.statSync(file).size;
+    size = fs8.statSync(file).size;
   } catch {
     size = 0;
   }
   logSink = (line) => {
     if (size + line.length > maxBytes && size > 0) {
       try {
-        fs7.renameSync(file, `${file}.1`);
+        fs8.renameSync(file, `${file}.1`);
       } catch {
       }
       size = 0;
     }
-    fs7.appendFileSync(file, line, { mode: 384 });
+    fs8.appendFileSync(file, line, { mode: 384 });
     size += Buffer.byteLength(line);
   };
 }
 function serverHostInfo() {
-  return { os: process.platform, arch: process.arch, hostname: os4.hostname().replace(/\.local$/, ""), node: process.versions.node };
+  return { os: process.platform, arch: process.arch, hostname: os3.hostname().replace(/\.local$/, ""), node: process.versions.node };
 }
 
 // src/main/host/link/diagnostic-streams.ts
-import { createHash as createHash6 } from "crypto";
+import { createHash as createHash5 } from "crypto";
 import { once } from "events";
 var SOURCE_MAX_BYTES = 4 * 1024 * 1024 * 1024;
 var MAX_DELAY_MS = 1e3;
@@ -2387,7 +2447,7 @@ var echo = (stream) => {
 };
 var sink = async (stream) => {
   const delayMs = intParam(stream.params, "delayMs", MAX_DELAY_MS, 0);
-  const hash = createHash6("sha256");
+  const hash = createHash5("sha256");
   let bytes = 0;
   for await (const chunk of stream) {
     hash.update(chunk);
@@ -2440,7 +2500,7 @@ function errorMessage(err) {
 }
 
 // src/main/host/link/peer-store.ts
-import fs8 from "fs";
+import fs9 from "fs";
 import path9 from "path";
 var B64U_32 = /^[A-Za-z0-9_-]{43}$/;
 var DEVICE_ID = /^[0-9a-f]{32}$/;
@@ -2518,7 +2578,7 @@ var PeerStore = class {
   load() {
     let raw;
     try {
-      raw = fs8.readFileSync(this.file, "utf-8");
+      raw = fs9.readFileSync(this.file, "utf-8");
     } catch (err) {
       if (err.code === "ENOENT") return [];
       this.log(`peerStore file=${this.file} unreadable error=${String(err)}`);
@@ -2534,14 +2594,14 @@ var PeerStore = class {
     } catch (err) {
       this.log(`peerStore file=${this.file} corrupt error=${String(err)}`);
       try {
-        fs8.renameSync(this.file, `${this.file}.corrupt-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`);
+        fs9.renameSync(this.file, `${this.file}.corrupt-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`);
       } catch {
       }
       return [];
     }
   }
   persist() {
-    fs8.mkdirSync(this.dir, { recursive: true, mode: 448 });
+    fs9.mkdirSync(this.dir, { recursive: true, mode: 448 });
     atomicWriteFileSync(this.file, JSON.stringify(this.records, null, 2), 384);
   }
 };
@@ -3689,8 +3749,8 @@ var DesktopLink = class {
 
 // src/server/service.ts
 import { execFile, spawn } from "child_process";
-import fs9 from "fs";
-import os5 from "os";
+import fs10 from "fs";
+import os4 from "os";
 import path10 from "path";
 var runCommand = (command, args, options = {}) => new Promise((resolve) => {
   const child = execFile(command, args, { timeout: options.timeoutMs ?? 3e4, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
@@ -3705,14 +3765,14 @@ var runCommand = (command, args, options = {}) => new Promise((resolve) => {
 });
 function serviceContext(paths, log = () => {
 }, env = process.env) {
-  const info = os5.userInfo();
+  const info = os4.userInfo();
   return {
     paths,
     suffix: serviceSuffix(env),
     platform: process.platform,
     uid: info.uid,
     user: info.username,
-    userHome: os5.homedir(),
+    userHome: os4.homedir(),
     run: runCommand,
     log
   };
@@ -3830,7 +3890,7 @@ function serviceRecordFile(paths) {
 }
 function readServiceRecord(paths) {
   try {
-    const raw = JSON.parse(fs9.readFileSync(serviceRecordFile(paths), "utf8"));
+    const raw = JSON.parse(fs10.readFileSync(serviceRecordFile(paths), "utf8"));
     if (raw.kind !== "systemd" && raw.kind !== "launchd" && raw.kind !== "nohup") return null;
     if (typeof raw.name !== "string") return null;
     return { kind: raw.kind, name: raw.name, file: typeof raw.file === "string" ? raw.file : null, ...typeof raw.domain === "string" ? { domain: raw.domain } : {}, suffix: typeof raw.suffix === "string" ? raw.suffix : "", installedAt: typeof raw.installedAt === "string" ? raw.installedAt : "" };
@@ -3842,10 +3902,10 @@ function writeServiceRecord(paths, record) {
   atomicWriteFileSync(serviceRecordFile(paths), JSON.stringify(record, null, 2) + "\n", 384);
 }
 function writeCliWrapper(paths) {
-  fs9.mkdirSync(paths.binDir, { recursive: true, mode: 493 });
+  fs10.mkdirSync(paths.binDir, { recursive: true, mode: 493 });
   const file = path10.join(paths.binDir, "devtool-server");
   atomicWriteFileSync(file, renderCliWrapper(paths), 493);
-  fs9.chmodSync(file, 493);
+  fs10.chmodSync(file, 493);
   return file;
 }
 async function hasUserSystemd(ctx) {
@@ -3859,7 +3919,7 @@ async function hasUserSystemd(ctx) {
 }
 async function installService(ctx) {
   writeCliWrapper(ctx.paths);
-  fs9.mkdirSync(ctx.paths.logsDir, { recursive: true, mode: 448 });
+  fs10.mkdirSync(ctx.paths.logsDir, { recursive: true, mode: 448 });
   const previous = readServiceRecord(ctx.paths);
   let result;
   if (ctx.platform === "darwin") result = await installLaunchd(ctx);
@@ -3879,7 +3939,7 @@ async function installSystemd(ctx) {
   const name = systemdUnitName(ctx.suffix);
   const dir = path10.join(ctx.userHome, ".config", "systemd", "user");
   const file = path10.join(dir, name);
-  fs9.mkdirSync(dir, { recursive: true });
+  fs10.mkdirSync(dir, { recursive: true });
   atomicWriteFileSync(file, renderSystemdUnit(ctx.paths), 420);
   await must(ctx, "systemctl", ["--user", "daemon-reload"]);
   await must(ctx, "systemctl", ["--user", "enable", name]);
@@ -3901,7 +3961,7 @@ async function installLaunchd(ctx) {
   const label = launchdLabel(ctx.suffix);
   const dir = path10.join(ctx.userHome, "Library", "LaunchAgents");
   const file = path10.join(dir, `${label}.plist`);
-  fs9.mkdirSync(dir, { recursive: true });
+  fs10.mkdirSync(dir, { recursive: true });
   atomicWriteFileSync(file, renderLaunchdPlist(ctx.paths, label, ctx.userHome), 420);
   for (const domain2 of [`gui/${ctx.uid}`, `user/${ctx.uid}`]) await ctx.run("launchctl", ["bootout", `${domain2}/${label}`]);
   const notes = [];
@@ -3939,7 +3999,7 @@ function pidFile(paths) {
 }
 function readPid(paths) {
   try {
-    const pid = Number(fs9.readFileSync(pidFile(paths), "utf8").trim());
+    const pid = Number(fs10.readFileSync(pidFile(paths), "utf8").trim());
     if (!Number.isInteger(pid) || pid <= 0) return null;
     process.kill(pid, 0);
     return pid;
@@ -3948,18 +4008,18 @@ function readPid(paths) {
   }
 }
 function startNohup(paths) {
-  fs9.mkdirSync(paths.logsDir, { recursive: true, mode: 448 });
-  const out = fs9.openSync(path10.join(paths.logsDir, "stdio.log"), "a", 384);
+  fs10.mkdirSync(paths.logsDir, { recursive: true, mode: 448 });
+  const out = fs10.openSync(path10.join(paths.logsDir, "stdio.log"), "a", 384);
   const child = spawn(nodeBin(paths), [mainJs(paths)], {
     detached: true,
     stdio: ["ignore", out, out],
-    cwd: os5.homedir(),
+    cwd: os4.homedir(),
     env: { ...process.env, DEVTOOL_SERVER_HOME: paths.home, DEVTOOL_SERVER_SUPERVISOR: "nohup", DEVTOOL_SERVER_LOG: "file" }
   });
   child.on("error", () => {
   });
   child.unref();
-  fs9.closeSync(out);
+  fs10.closeSync(out);
 }
 async function stopNohup(ctx, waitMs = 15e3) {
   const pid = readPid(ctx.paths);
@@ -3999,11 +4059,11 @@ async function removeService(ctx, record, { stop }) {
   switch (record.kind) {
     case "systemd":
       await ctx.run("systemctl", ["--user", "disable", ...stop ? ["--now"] : [], record.name]);
-      if (record.file) fs9.rmSync(record.file, { force: true });
+      if (record.file) fs10.rmSync(record.file, { force: true });
       await ctx.run("systemctl", ["--user", "daemon-reload"]);
       break;
     case "launchd":
-      if (record.file) fs9.rmSync(record.file, { force: true });
+      if (record.file) fs10.rmSync(record.file, { force: true });
       if (stop) {
         for (const domain of [record.domain ?? `gui/${ctx.uid}`]) await ctx.run("launchctl", ["bootout", `${domain}/${record.name}`]);
       }
@@ -4019,7 +4079,7 @@ async function removeService(ctx, record, { stop }) {
       break;
     }
   }
-  fs9.rmSync(serviceRecordFile(ctx.paths), { force: true });
+  fs10.rmSync(serviceRecordFile(ctx.paths), { force: true });
 }
 function linkCliOnPath(paths, userHome, envPath = process.env.PATH ?? "", isDefaultHome) {
   if (!isDefaultHome) return null;
@@ -4028,15 +4088,15 @@ function linkCliOnPath(paths, userHome, envPath = process.env.PATH ?? "", isDefa
   const link = path10.join(dir, "devtool-server");
   const target = path10.join(paths.binDir, "devtool-server");
   try {
-    const existing = fs9.readlinkSync(link);
+    const existing = fs10.readlinkSync(link);
     if (path10.resolve(dir, existing) === target) return link;
     return null;
   } catch (err) {
     if (err.code === "EINVAL") return null;
   }
   try {
-    fs9.mkdirSync(dir, { recursive: true });
-    fs9.symlinkSync(target, link);
+    fs10.mkdirSync(dir, { recursive: true });
+    fs10.symlinkSync(target, link);
     return link;
   } catch {
     return null;
@@ -4045,7 +4105,7 @@ function linkCliOnPath(paths, userHome, envPath = process.env.PATH ?? "", isDefa
 
 // src/server/updater.ts
 import { randomBytes as randomBytes3 } from "crypto";
-import fs11 from "fs";
+import fs12 from "fs";
 import path12 from "path";
 
 // src/main/host/link/update-policy.ts
@@ -4061,16 +4121,16 @@ function acceptsBundle(running, incoming) {
 
 // src/server/node-install.ts
 import { spawn as spawn2 } from "child_process";
-import { createHash as createHash7, randomBytes as randomBytes2 } from "crypto";
-import fs10 from "fs";
+import { createHash as createHash6, randomBytes as randomBytes2 } from "crypto";
+import fs11 from "fs";
 import path11 from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 var DEFAULT_NODE_MIRROR = "https://nodejs.org/dist";
 function nodeDistName(version, platform = process.platform, arch = process.arch) {
-  const os7 = platform === "linux" ? "linux" : platform === "darwin" ? "darwin" : null;
+  const os6 = platform === "linux" ? "linux" : platform === "darwin" ? "darwin" : null;
   const cpu = arch === "x64" ? "x64" : arch === "arm64" ? "arm64" : null;
-  return os7 && cpu ? `node-v${version}-${os7}-${cpu}` : null;
+  return os6 && cpu ? `node-v${version}-${os6}-${cpu}` : null;
 }
 function shasumFor(shasums, file) {
   for (const line of shasums.split("\n")) {
@@ -4081,7 +4141,7 @@ function shasumFor(shasums, file) {
 }
 function installedNode(nodeDir, version) {
   const bin = path11.join(nodeDir, version, "bin", "node");
-  return fs10.existsSync(bin) ? bin : null;
+  return fs11.existsSync(bin) ? bin : null;
 }
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -4110,44 +4170,44 @@ async function ensureNode(options) {
   if (!sums.ok) throw new Error(`Cannot fetch ${base}/SHASUMS256.txt: HTTP ${sums.status}`);
   const expected = shasumFor(await sums.text(), file);
   if (!expected) throw new Error(`SHASUMS256.txt for Node ${options.version} does not list ${file}`);
-  fs10.mkdirSync(options.nodeDir, { recursive: true, mode: 493 });
+  fs11.mkdirSync(options.nodeDir, { recursive: true, mode: 493 });
   const tag = randomBytes2(4).toString("hex");
   const archive = path11.join(options.nodeDir, `.download-${tag}.tar.gz`);
   const unpack = path11.join(options.nodeDir, `.unpack-${tag}`);
   try {
     const response = await doFetch(`${base}/${file}`);
     if (!response.ok || !response.body) throw new Error(`Cannot fetch ${base}/${file}: HTTP ${response.status}`);
-    const hash = createHash7("sha256");
+    const hash = createHash6("sha256");
     const source2 = Readable.fromWeb(response.body);
     source2.on("data", (chunk) => hash.update(chunk));
-    await pipeline(source2, fs10.createWriteStream(archive));
+    await pipeline(source2, fs11.createWriteStream(archive));
     const actual = hash.digest("hex");
     if (actual !== expected) throw new Error(`${file} has sha256 ${actual}, SHASUMS256.txt says ${expected}`);
-    fs10.mkdirSync(unpack);
+    fs11.mkdirSync(unpack);
     await run("tar", ["-xzf", archive, "-C", unpack]);
     const target = path11.join(options.nodeDir, options.version);
-    fs10.rmSync(target, { recursive: true, force: true });
-    fs10.renameSync(path11.join(unpack, dist), target);
+    fs11.rmSync(target, { recursive: true, force: true });
+    fs11.renameSync(path11.join(unpack, dist), target);
     log(`node installed ${target}`);
     return path11.join(target, "bin", "node");
   } finally {
-    fs10.rmSync(archive, { force: true });
-    fs10.rmSync(unpack, { recursive: true, force: true });
+    fs11.rmSync(archive, { force: true });
+    fs11.rmSync(unpack, { recursive: true, force: true });
   }
 }
 function flipSymlink(link, target) {
   const tmp = `${link}.tmp-${process.pid}-${randomBytes2(3).toString("hex")}`;
-  fs10.symlinkSync(target, tmp);
+  fs11.symlinkSync(target, tmp);
   try {
-    fs10.renameSync(tmp, link);
+    fs11.renameSync(tmp, link);
   } catch (err) {
-    fs10.rmSync(tmp, { force: true });
+    fs11.rmSync(tmp, { force: true });
     throw err;
   }
 }
 function symlinkTarget(link) {
   try {
-    return path11.resolve(path11.dirname(link), fs10.readlinkSync(link));
+    return path11.resolve(path11.dirname(link), fs11.readlinkSync(link));
   } catch {
     return null;
   }
@@ -4200,14 +4260,14 @@ var ServerUpdater = class {
   applyLeftoverStaged() {
     let raw;
     try {
-      raw = JSON.parse(fs11.readFileSync(this.stagedFile, "utf8"));
+      raw = JSON.parse(fs12.readFileSync(this.stagedFile, "utf8"));
     } catch {
       return false;
     }
     const dir = typeof raw.dir === "string" ? raw.dir : "";
     const bundle = dir ? readLocalBundle(dir) : null;
     if (!bundle || symlinkTarget(this.options.paths.current) === path12.resolve(dir) || !acceptsBundle(this.options.running, bundle.manifest).ok) {
-      fs11.rmSync(this.stagedFile, { force: true });
+      fs12.rmSync(this.stagedFile, { force: true });
       return false;
     }
     this.staged = { dir: bundle.dir, manifest: bundle.manifest };
@@ -4226,7 +4286,7 @@ var ServerUpdater = class {
     else this.options.log(`update node ${staged.manifest.node} missing; keeping node/current`);
     const previous = symlinkTarget(paths.current);
     flipSymlink(paths.current, path12.relative(paths.home, staged.dir));
-    fs11.rmSync(this.stagedFile, { force: true });
+    fs12.rmSync(this.stagedFile, { force: true });
     this.options.log(`update switched current=${path12.basename(staged.dir)}${previous ? ` previous=${path12.basename(previous)}` : ""}`);
     this.prune([staged.dir, previous, this.runningDir()]);
     this.staged = null;
@@ -4276,7 +4336,7 @@ var ServerUpdater = class {
     const incoming = path12.join(paths.appDir, `.incoming-${randomBytes3(4).toString("hex")}`);
     const started = Date.now();
     try {
-      fs11.mkdirSync(paths.appDir, { recursive: true, mode: 493 });
+      fs12.mkdirSync(paths.appDir, { recursive: true, mode: 493 });
       const { files, bytes } = await unpackBundle(stream, incoming, Math.max(params.bytes, 1));
       const manifest = verifyBundle(incoming, params.sha256);
       this.options.log(`update received version=${manifest.version} commit=${manifest.commit.slice(0, 12)} files=${files} bytes=${bytes} in ${Date.now() - started} ms`);
@@ -4285,14 +4345,14 @@ var ServerUpdater = class {
         await (this.options.ensureNode ?? ((version) => ensureNode({ nodeDir: paths.nodeDir, version, log: this.options.log })))(manifest.node);
       }
       const target = path12.join(paths.appDir, bundleDirName(manifest));
-      if (fs11.existsSync(target) && symlinkTarget(paths.current) !== target) fs11.rmSync(target, { recursive: true, force: true });
-      if (fs11.existsSync(target)) fs11.rmSync(incoming, { recursive: true, force: true });
-      else fs11.renameSync(incoming, target);
+      if (fs12.existsSync(target) && symlinkTarget(paths.current) !== target) fs12.rmSync(target, { recursive: true, force: true });
+      if (fs12.existsSync(target)) fs12.rmSync(incoming, { recursive: true, force: true });
+      else fs12.renameSync(incoming, target);
       this.staged = { dir: target, manifest };
-      fs11.mkdirSync(paths.runDir, { recursive: true, mode: 448 });
+      fs12.mkdirSync(paths.runDir, { recursive: true, mode: 448 });
       atomicWriteFileSync(this.stagedFile, JSON.stringify({ dir: target, version: manifest.version, sha256: manifest.sha256 }) + "\n", 384);
     } catch (err) {
-      fs11.rmSync(incoming, { recursive: true, force: true });
+      fs12.rmSync(incoming, { recursive: true, force: true });
       const message = err.code === "ENOSPC" ? "The server's disk is full" : err instanceof Error ? err.message : String(err);
       refuse(message);
       return;
@@ -4335,7 +4395,7 @@ var ServerUpdater = class {
     const kept = new Set(keep.filter((dir) => !!dir).map((dir) => path12.resolve(dir)));
     let entries;
     try {
-      entries = fs11.readdirSync(this.options.paths.appDir);
+      entries = fs12.readdirSync(this.options.paths.appDir);
     } catch {
       return;
     }
@@ -4343,7 +4403,7 @@ var ServerUpdater = class {
       if (name.startsWith(".incoming-")) continue;
       const dir = path12.join(this.options.paths.appDir, name);
       if (kept.has(path12.resolve(dir))) continue;
-      fs11.rmSync(dir, { recursive: true, force: true });
+      fs12.rmSync(dir, { recursive: true, force: true });
       this.options.log(`update pruned ${name}`);
     }
   }
@@ -4353,7 +4413,7 @@ var ServerUpdater = class {
 };
 
 // src/server/bootstrap.ts
-var BOOTSTRAP_USAGE = "usage: bootstrap.mjs [--token <token>] [--name <name>] [--relay <url>] [--allow-root] [--no-service]";
+var BOOTSTRAP_USAGE = "usage: [DEVTOOL_TOKEN=<token>] bootstrap.mjs [--name <name>] [--relay <url>] [--allow-root] [--no-service]";
 function parseBootstrapArgs(argv) {
   const args = { allowRoot: false, noService: false };
   for (let i = 0; i < argv.length; i++) {
@@ -4418,7 +4478,7 @@ function glibcVersion() {
 }
 function freeBytes(dir) {
   try {
-    const stats = fs12.statfsSync(dir);
+    const stats = fs13.statfsSync(dir);
     return stats.bavail * stats.bsize;
   } catch {
     return null;
@@ -4585,15 +4645,14 @@ ${check.output}`);
   const service = await installService(ctx);
   io.out(`Service: ${service.record.kind === "systemd" ? `systemd user unit ${service.record.name}` : service.record.kind === "launchd" ? `LaunchAgent ${service.record.name} (${service.record.domain})` : "background process with an @reboot crontab line"}`);
   for (const note of service.notes) io.out(note);
-  const linked = linkCliOnPath(paths, os6.homedir(), process.env.PATH ?? "", paths.home === path13.join(os6.homedir(), DEFAULT_SERVER_HOME_NAME));
+  const linked = linkCliOnPath(paths, os5.homedir(), process.env.PATH ?? "", paths.home === path13.join(os5.homedir(), DEFAULT_SERVER_HOME_NAME));
   io.out(`Waiting for ${desktop.name} to see the server online...`);
   const desktopId = desktop.id;
   const until = Date.now() + ONLINE_TIMEOUT_MS;
-  const socket = controlSocketPath(paths);
   for (; ; ) {
     let lastError;
     try {
-      const status = await controlRequest(socket, { cmd: "status" }, 5e3);
+      const status = await controlRequest(paths, { cmd: "status" }, 5e3);
       if (status.desktops.some((d) => d.id === desktopId && d.online)) break;
       lastError = status.relay.state === "online" ? "" : `relay ${status.relay.state}${status.relay.error ? `: ${status.relay.error}` : ""}`;
     } catch (err) {
@@ -4609,10 +4668,20 @@ ${check.output}`);
   io.out(`Connected to ${desktop.name}. DevTool shows "${name}" online.`);
   io.out(`Manage it with: ${cli} status`);
 }
+function takeToken(args, env = process.env, warn = (line) => process.stderr.write(`${line}
+`)) {
+  const fromEnv = env.DEVTOOL_TOKEN?.trim();
+  delete env.DEVTOOL_TOKEN;
+  if (args.token) {
+    warn("warning: --token is visible to other users of this machine (ps); pass the token as DEVTOOL_TOKEN instead.");
+    return args;
+  }
+  return fromEnv ? { ...args, token: fromEnv } : args;
+}
 async function main() {
   let args;
   try {
-    args = parseBootstrapArgs(process.argv.slice(2));
+    args = takeToken(parseBootstrapArgs(process.argv.slice(2)));
   } catch (err) {
     process.stderr.write(`devtool-server install: ${err instanceof Error ? err.message : String(err)}
 `);
@@ -4640,5 +4709,6 @@ export {
   InstallError,
   checkPlatform,
   parseBootstrapArgs,
-  runBootstrap
+  runBootstrap,
+  takeToken
 };

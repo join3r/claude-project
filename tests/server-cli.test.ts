@@ -3,9 +3,19 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { parseCliArgs, removeServerFiles, runCli, type CliIo, type DaemonStatus } from '../src/server/cli'
-import { ControlServer, controlRequest, controlSocketPath, NotRunningError } from '../src/server/control'
+import {
+  ControlServer,
+  NotRunningError,
+  UnsafeControlSocketError,
+  assertPrivateDir,
+  chooseControlSocket,
+  controlRecordFile,
+  controlRequest,
+  ensurePrivateRunDir,
+  findControlSocket
+} from '../src/server/control'
 import { parseMainArgs } from '../src/server/main'
-import { checkPlatform, parseBootstrapArgs } from '../src/server/bootstrap'
+import { checkPlatform, parseBootstrapArgs, takeToken } from '../src/server/bootstrap'
 import { serverPaths } from '../src/server/server-env'
 import type { ServiceContext } from '../src/server/service'
 
@@ -49,6 +59,18 @@ describe('argument parsing', () => {
     expect(parseMainArgs(['--dev-pair', 'x'])).toBeNull()
   })
 
+  it('takes the install token from DEVTOOL_TOKEN and removes it from the environment', () => {
+    const env: NodeJS.ProcessEnv = { DEVTOOL_TOKEN: ' T.24.21.0 ', HOME: '/h' }
+    const warnings: string[] = []
+    expect(takeToken({ allowRoot: false, noService: false }, env, (line) => warnings.push(line))).toMatchObject({ token: 'T.24.21.0' })
+    expect(env).toEqual({ HOME: '/h' })
+    expect(warnings).toEqual([])
+    const flagged = takeToken({ token: 'F.1.2.3', allowRoot: false, noService: false }, { DEVTOOL_TOKEN: 'E.1.2.3' }, (line) => warnings.push(line))
+    expect(flagged.token).toBe('F.1.2.3')
+    expect(warnings[0]).toMatch(/visible to other users/)
+    expect(takeToken({ allowRoot: false, noService: false }, {}).token).toBeUndefined()
+  })
+
   it('parses the bootstrap', () => {
     expect(parseBootstrapArgs(['--token', 'T.24.21.0', '--name', 'box', '--allow-root'])).toEqual({ token: 'T.24.21.0', name: 'box', allowRoot: true, noService: false })
     expect(parseBootstrapArgs([])).toEqual({ allowRoot: false, noService: false })
@@ -75,7 +97,7 @@ describe('bootstrap platform checks', () => {
   })
 })
 
-describe('the CLI against a running server', () => {
+describe.skipIf(process.platform === 'win32')('the CLI against a running server', () => {
   function io(): CliIo & { lines: string[]; errors: string[] } {
     const lines: string[] = []
     const errors: string[] = []
@@ -90,9 +112,9 @@ describe('the CLI against a running server', () => {
     phones: [], update: { state: 'staged', version: '0.6.1', commit: 'cafe', builtAt: '' }
   }
 
-  async function serve(handler: (cmd: string, request: Record<string, unknown>) => unknown) {
-    const paths = serverPaths({ DEVTOOL_SERVER_HOME: tempDir() })
-    const control = new ControlServer(controlSocketPath(paths), async (request) => handler(request.cmd, request), () => {})
+  async function serve(handler: (cmd: string, request: Record<string, unknown>) => unknown, home = tempDir()) {
+    const paths = serverPaths({ DEVTOOL_SERVER_HOME: home })
+    const control = new ControlServer(paths, async (request) => handler(request.cmd, request), () => {}, {})
     await control.start()
     closers.push(() => control.close())
     return paths
@@ -100,7 +122,7 @@ describe('the CLI against a running server', () => {
 
   it('reports not running when nothing listens', async () => {
     const paths = serverPaths({ DEVTOOL_SERVER_HOME: tempDir() })
-    await expect(controlRequest(controlSocketPath(paths), { cmd: 'status' })).rejects.toBeInstanceOf(NotRunningError)
+    await expect(controlRequest(paths, { cmd: 'status' })).rejects.toBeInstanceOf(NotRunningError)
     const out = io()
     expect(await runCli(['status'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(3)
     expect(out.lines[0]).toBe('DevTool server: not running')
@@ -137,9 +159,71 @@ describe('the CLI against a running server', () => {
     expect(await runCli(['unpair', 'zzz'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(1)
   })
 
-  it('a long home gets a control socket under the temp dir', () => {
-    const paths = serverPaths({ DEVTOOL_SERVER_HOME: `/tmp/${'x'.repeat(120)}` })
-    expect(Buffer.byteLength(controlSocketPath(paths))).toBeLessThan(104)
+  it('a long home gets a fresh private dir in the temp dir, recorded under run/ for the CLI', async () => {
+    const home = path.join(tempDir(), 'x'.repeat(110))
+    fs.mkdirSync(home)
+    const paths = await serve(() => status, home)
+    const socket = fs.readFileSync(controlRecordFile(paths), 'utf8').trim()
+    expect(socket.startsWith(fs.realpathSync(os.tmpdir())) || socket.startsWith(os.tmpdir())).toBe(true)
+    expect(Buffer.byteLength(socket)).toBeLessThan(104)
+    expect(fs.statSync(path.dirname(socket)).mode & 0o777).toBe(0o700)
+    expect(fs.statSync(socket).mode & 0o077).toBe(0)
+    expect(findControlSocket(paths)).toBe(socket)
+    await expect(controlRequest(paths, { cmd: 'status' })).resolves.toMatchObject({ name: 'box' })
+  })
+
+  it('prefers a private XDG_RUNTIME_DIR and skips one that is open, someone else\'s, or a symlink', () => {
+    const paths = serverPaths({ DEVTOOL_SERVER_HOME: tempDir() })
+    // Short, so a socket in it fits (macOS temp dirs are long).
+    const runtime = fs.mkdtempSync('/tmp/dts-')
+    dirs.push(runtime)
+    fs.chmodSync(runtime, 0o700)
+    expect(path.dirname(chooseControlSocket(paths, { XDG_RUNTIME_DIR: runtime }).socket)).toBe(runtime)
+    // Anything else falls back to run/ (or, for a long home, a fresh temp dir): never the runtime dir.
+    const notRuntime = (env: NodeJS.ProcessEnv, uid?: number) => path.dirname(chooseControlSocket(paths, env, uid).socket) !== runtime
+    fs.chmodSync(runtime, 0o755)
+    expect(notRuntime({ XDG_RUNTIME_DIR: runtime })).toBe(true)
+    fs.chmodSync(runtime, 0o700)
+    expect(notRuntime({ XDG_RUNTIME_DIR: runtime }, process.getuid!() + 1)).toBe(true)
+    const link = path.join(tempDir(), 'link')
+    fs.symlinkSync(runtime, link)
+    expect(path.dirname(chooseControlSocket(paths, { XDG_RUNTIME_DIR: link }).socket)).not.toBe(link)
+  })
+
+  it('refuses a run dir that is a symlink or belongs to someone else, and closes one of ours that is too open', async () => {
+    const elsewhere = tempDir()
+    const home = tempDir()
+    fs.symlinkSync(elsewhere, path.join(home, 'run'))
+    const paths = serverPaths({ DEVTOOL_SERVER_HOME: home })
+    const control = new ControlServer(paths, async () => null, () => {}, {})
+    await expect(control.start()).rejects.toBeInstanceOf(UnsafeControlSocketError)
+    expect(() => findControlSocket(paths)).toThrow(/symlink/)
+    await expect(runCli(['status'], { bundleDir: '.', io: io(), paths, ctx: ctx(paths) })).resolves.toBe(1)
+
+    const own = serverPaths({ DEVTOOL_SERVER_HOME: tempDir() })
+    fs.mkdirSync(own.runDir, { mode: 0o755 })
+    fs.chmodSync(own.runDir, 0o755)
+    ensurePrivateRunDir(own)
+    expect(fs.statSync(own.runDir).mode & 0o777).toBe(0o700)
+    expect(() => assertPrivateDir(own.runDir, process.getuid!() + 1)).toThrow(/belongs to uid/)
+  })
+
+  it('the CLI refuses a recorded socket in an open dir, or a planted file that is not a socket', async () => {
+    const paths = serverPaths({ DEVTOOL_SERVER_HOME: tempDir() })
+    ensurePrivateRunDir(paths)
+    const open = tempDir()
+    fs.chmodSync(open, 0o777)
+    fs.writeFileSync(controlRecordFile(paths), `${path.join(open, 'control.sock')}\n`)
+    expect(() => findControlSocket(paths)).toThrow(/open to other users/)
+    const out = io()
+    expect(await runCli(['pair', '--no-wait'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(1)
+    expect(out.errors[0]).toMatch(/^Refusing to talk to the server/)
+
+    // A server won't start over something at its socket path that isn't its socket.
+    fs.rmSync(controlRecordFile(paths))
+    fs.writeFileSync(path.join(paths.runDir, 'control.sock'), 'not a socket')
+    const control = new ControlServer(paths, async () => null, () => {}, {})
+    await expect(control.start()).rejects.toThrow(/not a socket of yours/)
   })
 
   it('uninstall keeps the data dir unless asked to delete it', async () => {

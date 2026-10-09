@@ -13,7 +13,7 @@ import type { PeerRecord } from '../main/host/link/peer-store'
 import { RelayMux } from '../main/host/link/relay-mux'
 import type { LinkStream } from '../main/host/link/stream'
 import { DEFAULT_MOBILE_RELAY_URL, isValidRelayUrl, normalizeRelayUrl } from '../shared/mobile'
-import { NotRunningError, controlRequest, controlSocketPath } from './control'
+import { NotRunningError, controlRequest } from './control'
 import { loadServerConfig, saveServerConfig, serverDisplayName } from './server-config'
 import { DEFAULT_SERVER_HOME_NAME, ensureServerDirs, plaintextSecrets, serverHostInfo, serverPaths, logToFile, consoleLog, type ServerPaths } from './server-env'
 import { ServerLink } from './server-link'
@@ -26,9 +26,13 @@ import type { DaemonStatus } from './cli'
  * this machine with a desktop, receives the server bundle from it, installs the
  * service and waits until the desktop sees the server online.
  *
- *   node bootstrap.mjs --token <install token>   the token flow (the one-liner)
- *   node bootstrap.mjs [--relay <url>]           prints a pairing code instead
+ *   DEVTOOL_TOKEN=<install token> node bootstrap.mjs   the token flow (the one-liner)
+ *   node bootstrap.mjs [--relay <url>]                  prints a pairing code instead
  *   ... [--name <name>] [--allow-root] [--no-service]
+ *
+ * The token comes in the environment (`site/install` passes it so), never on the
+ * command line, where other users of the machine could read it from `ps` and pair
+ * first. `--token` still works by hand, with a warning.
  *
  * It speaks a small, frozen part of the protocol (BOOTSTRAP_PROTOCOL 1): pairing,
  * the link handshake, the `bundle` stream and `server-bootstrap-done`, so a desktop
@@ -44,7 +48,7 @@ export interface BootstrapArgs {
   noService: boolean
 }
 
-export const BOOTSTRAP_USAGE = 'usage: bootstrap.mjs [--token <token>] [--name <name>] [--relay <url>] [--allow-root] [--no-service]'
+export const BOOTSTRAP_USAGE = 'usage: [DEVTOOL_TOKEN=<token>] bootstrap.mjs [--name <name>] [--relay <url>] [--allow-root] [--no-service]'
 
 export function parseBootstrapArgs(argv: string[]): BootstrapArgs {
   const args: BootstrapArgs = { allowRoot: false, noService: false }
@@ -285,11 +289,10 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
   io.out(`Waiting for ${desktop.name} to see the server online...`)
   const desktopId = desktop.id
   const until = Date.now() + ONLINE_TIMEOUT_MS
-  const socket = controlSocketPath(paths)
   for (;;) {
     let lastError: string
     try {
-      const status = await controlRequest(socket, { cmd: 'status' }, 5000) as DaemonStatus
+      const status = await controlRequest(paths, { cmd: 'status' }, 5000) as DaemonStatus
       if (status.desktops.some((d) => d.id === desktopId && d.online)) break
       lastError = status.relay.state === 'online' ? '' : `relay ${status.relay.state}${status.relay.error ? `: ${status.relay.error}` : ''}`
     } catch (err) {
@@ -306,10 +309,24 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
   io.out(`Manage it with: ${cli} status`)
 }
 
+/**
+ * The install token: `DEVTOOL_TOKEN`, which this removes from `env` so nothing the
+ * bootstrap starts (tar, systemctl, the server) inherits it, or `--token`.
+ */
+export function takeToken(args: BootstrapArgs, env: NodeJS.ProcessEnv = process.env, warn: (line: string) => void = (line) => process.stderr.write(`${line}\n`)): BootstrapArgs {
+  const fromEnv = env.DEVTOOL_TOKEN?.trim()
+  delete env.DEVTOOL_TOKEN
+  if (args.token) {
+    warn('warning: --token is visible to other users of this machine (ps); pass the token as DEVTOOL_TOKEN instead.')
+    return args
+  }
+  return fromEnv ? { ...args, token: fromEnv } : args
+}
+
 async function main(): Promise<void> {
   let args: BootstrapArgs
   try {
-    args = parseBootstrapArgs(process.argv.slice(2))
+    args = takeToken(parseBootstrapArgs(process.argv.slice(2)))
   } catch (err) {
     process.stderr.write(`devtool-server install: ${err instanceof Error ? err.message : String(err)}\n`)
     process.exit(2)

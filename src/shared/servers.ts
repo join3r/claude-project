@@ -66,7 +66,7 @@ export type ServersRelayKind = 'idle' | 'connecting' | 'online' | 'offline' | 't
 
 /** A server invite the desktop minted: the install one-liner for a new server. */
 export interface ServerInvite {
-  /** `curl -fsSL <base>/install | sh -s -- <token>`. */
+  /** `curl -fsSL <base>/install | DEVTOOL_TOKEN=<token> sh`. */
   oneLiner: string
   token: string
   /** Epoch ms; the invite and its relay offer lapse then. */
@@ -112,11 +112,13 @@ export const RELAY_TOO_OLD_FOR_SERVERS = 'This relay is too old for servers'
 export const DEFAULT_INSTALL_URL = 'https://devtool.awantech.sk'
 
 /**
- * The command a user pastes on a new server. A base URL other than the default is
- * passed on to the script too, so it fetches the bootstrap from the same place.
+ * The command a user pastes on a new server. The token goes in the script's
+ * environment, not its arguments, so other users of that machine can't read it
+ * from `ps`. A base URL other than the default is passed on too, so the script
+ * fetches the bootstrap from the same place.
  */
 export function installOneLiner(token: string, baseUrl: string = DEFAULT_INSTALL_URL): string {
   const base = baseUrl.replace(/\/+$/, '')
   const env = base === DEFAULT_INSTALL_URL ? '' : `DEVTOOL_INSTALL_URL=${base} `
-  return `curl -fsSL ${base}/install | ${env}sh -s -- ${token}`
+  return `curl -fsSL ${base}/install | ${env}DEVTOOL_TOKEN=${token} sh`
 }
