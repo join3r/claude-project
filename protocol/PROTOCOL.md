@@ -2,6 +2,8 @@
 
 This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.md), §1–§9. If this file and SPEC.md disagree, SPEC.md wins. Fix whichever one is wrong in the same change.
 
+The link between a desktop and a DevTool server (a headless host) has its own spec, [SERVER.md](SERVER.md). It reuses the relay, the envelope, Noise IK and fragmentation from SPEC.md, with its own prologue (`devtool-server-v1`) and binary app messages, and it is TypeScript only.
+
 ## Layers
 
 1. **Identities (§1).** Each device has an X25519 key (for Noise) and an Ed25519 key (for relay auth). Keys are raw 32 bytes. The device ID is the hex of the first 16 bytes of SHA-256(ed25519 pub). Binary values in JSON are base64url without padding.
@@ -17,6 +19,7 @@ This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.m
 | path | what |
 |---|---|
 | `SPEC.md` | The normative wire spec (§1–§9) |
+| `SERVER.md` | The desktop↔server link (TypeScript only; code in `src/main/host/link/`, `src/main/servers/`, `src/server/`) |
 | `ts/` | Dependency-free TypeScript (`node:crypto` and `node:buffer` only). Import everything from `ts/index.ts`. |
 | `ts/noise.ts` | Noise IK: `CipherState`, `SymmetricState`, `HandshakeState`, `createInitiator`/`createResponder`, and `NoiseTransport` after `split()` |
 | `ts/keys.ts`, `ts/derive.ts`, `ts/encoding.ts` | Keys from raw bytes, X25519/Ed25519, device IDs, HKDF derivations, b64u/hex |
@@ -24,7 +27,7 @@ This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.m
 | `ts/envelope.ts` | Frame kinds and `encodeEnvelope`/`decodeEnvelope` |
 | `ts/app-messages.ts` | Handshake payloads, app messages, `Inbox`, tolerant parsers, `negotiateVersion` |
 | `ts/pairing-uri.ts` | Pairing URI encode/decode/validate, `isPairingExpired` |
-| `ts/fragments.ts` | §6.1: `fragmentMessage`, `Reassembler`, and `FramedTransport` (a `NoiseTransport` with fragmentation; every app message goes through its `seal`/`open`) |
+| `ts/fragments.ts` | §6.1: `fragmentMessage`, `Reassembler`, and `FramedTransport` (a `NoiseTransport` with fragmentation; every app message goes through its `seal`/`open`). The server link passes `isWhole` so its binary messages get through. |
 | `ts/chat-messages.ts` | §6.2–§6.4: `ChatView`, items, prompts, `ChatOp`, `ChatLimits`, `parseChatParams`/`parseChatResult`/`parseChatViewEvent`, `capText` |
 | `schema/` | JSON Schema (draft 2020-12) for handshake payloads, app messages, `Inbox` and the chat view (`chat.schema.json`). It describes what a sender must produce, and `ts/schema.test.ts` checks it against the samples. |
 | `vectors/` | Test vectors shared with Swift. The layout is in [vectors/README.md](vectors/README.md). |
