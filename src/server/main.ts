@@ -61,6 +61,13 @@ async function main(argv: string[]): Promise<void> {
     return
   }
   if (args.mode === 'cli') {
+    // `devtool-server status | head`: a closed pipe ends the command quietly.
+    for (const stream of [process.stdout, process.stderr]) {
+      stream.on('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EPIPE') process.exit(typeof process.exitCode === 'number' ? process.exitCode : 0)
+        throw err
+      })
+    }
     process.exitCode = await runCli(args.argv, { bundleDir })
     return
   }
