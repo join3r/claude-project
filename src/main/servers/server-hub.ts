@@ -1,10 +1,14 @@
+import { once } from 'events'
 import path from 'path'
+import { finished } from 'stream/promises'
 import { b64uDecode, b64uEncode, derivePairProof, deriveRelayToken } from '../../../protocol/ts/index.ts'
 import type { ErrorMessage, PeerMessage, VersionInfo } from '../../../protocol/ts/index.ts'
 import type { DesktopIdentity } from '../mobile/identity'
 import type { RelayTransportState } from '../mobile/mobile-service'
 import { LinkError, LinkErrorCode, errorMessage } from '../host/link/errors'
-import { buildHello, type LinkBuild } from '../host/link/handshake'
+import { buildHello, type HostLinkReply, type LinkBuild } from '../host/link/handshake'
+import { packBundle, type LocalBundle } from '../host/link/bundle-archive'
+import { decideUpdate, type UpdateDecision } from '../host/link/update-policy'
 import {
   PAIRING_REJECTION_TEXT,
   PAIRING_VERSION,
@@ -19,7 +23,7 @@ import {
   isTicketExpired,
   type PairingReply
 } from '../host/link/pairing'
-import { HUB_CLIENT, LinkChannel } from '../host/link/link-channels'
+import { HUB_CLIENT, LinkChannel, LinkEvent, type ServerInfo } from '../host/link/link-channels'
 import type { HostLinkPort, RelayMux } from '../host/link/relay-mux'
 import type { LinkStream } from '../host/link/stream'
 import { HOST_LINK_MIN_VERSION, HOST_LINK_PROTOCOL_VERSION } from '../host/link/version'
@@ -53,13 +57,14 @@ export interface ServerHubDeps {
   identity: { get(): DesktopIdentity }
   /** The relay to use (today the Mobile setting's; 5b makes it a shared Relay setting). */
   relayUrl: () => string
+  /** The desktop's own build; commit, builtAt and bundleSha come from {@link bundle} when there is one. */
   build: LinkBuild
   desktopName: () => string
   log: (message: string) => void
   /** Where the install script lives, for the one-liner (`DEVTOOL_INSTALL_URL`). */
   installUrl?: () => string
-  /** The Node version an install token asks for (the bundled server's manifest). */
-  serverNode?: () => string
+  /** The server bundle this desktop carries, which it installs on and uploads to its servers. */
+  bundle?: () => LocalBundle | null
   timers?: ConnectionTimers
   /** Tests: speak another protocol version range. */
   version?: VersionInfo
@@ -67,6 +72,10 @@ export interface ServerHubDeps {
 
 /** The Node version an install token names when the desktop carries no server bundle. */
 export const FALLBACK_SERVER_NODE = '24.21.0'
+/** How long a server that said it is restarting into an update shows as `updating`. */
+const RESTART_GRACE_MS = 120_000
+/** How often an upload's progress reaches the windows. */
+const PROGRESS_STEP_BYTES = 256 * 1024
 /** How long `pairWithCode` waits for the relay, then for the server's answer. */
 const RELAY_WAIT_MS = 15_000
 const PAIRING_ANSWER_MS = 20_000
@@ -108,6 +117,14 @@ export class ServerHub {
   /** The live install invite (token flow), at most one. */
   private invite: LiveInvite | null = null
   private inviteTimer: unknown = null
+  /** Bundle uploads in flight: bytes sent and total. */
+  private readonly uploads = new Map<string, { sent: number; total: number }>()
+  /** Servers restarting into an update: shown as `updating` until they're back, or this time passes. */
+  private readonly restarting = new Map<string, { until: number; timer: unknown }>()
+  /** What each server last said about its updates. */
+  private readonly infos = new Map<string, ServerInfo>()
+  /** A bundle sha a server refused: not sent again to it until DevTool restarts. */
+  private readonly failedUploads = new Map<string, string>()
   /** Servers the relay reported on since the socket came up; the others get re-watched after a handshake. */
   private readonly reported = new Set<string>()
   private started = false
@@ -144,6 +161,7 @@ export class ServerHub {
   stop(): void {
     if (!this.started) return
     this.started = false
+    for (const serverId of [...this.restarting.keys()]) this.endRestarting(serverId)
     for (const connection of this.connections.values()) connection.stop()
     this.connections.clear()
     for (const [serverId, pairing] of [...this.codePairings]) {
@@ -154,16 +172,30 @@ export class ServerHub {
     this.port.close()
   }
 
+  /** What the handshakes say about this desktop: its version and the bundle it carries. */
+  private build(): LinkBuild {
+    const manifest = this.deps.bundle?.()?.manifest
+    return manifest
+      ? { version: this.deps.build.version, commit: manifest.commit, builtAt: manifest.builtAt, bundleSha: manifest.sha256 }
+      : this.deps.build
+  }
+
   getState(): ServersState {
     const relay = this.relayState()
     const servers: ServerStatus[] = this.store.list()
       .sort((a, b) => a.pairedAt - b.pairedAt)
       .map((record) => {
         const status = this.connections.get(record.id)?.status() ?? { state: 'offline' as const }
+        const upload = this.uploads.get(record.id)
+        const restarting = this.restarting.has(record.id)
+        const update = this.infos.get(record.id)?.update
         return {
           id: record.id,
           name: record.name,
           ...status,
+          ...(upload || (restarting && status.state !== 'incompatible') ? { state: 'updating' as const } : {}),
+          ...(upload ? { upload: { ...upload } } : {}),
+          ...(update?.state === 'staged' && !restarting ? { updateReady: { version: update.version, commit: update.commit, builtAt: update.builtAt } } : {}),
           pairedAt: record.pairedAt,
           lastSeen: record.lastSeen,
           build: record.build ?? null,
@@ -237,7 +269,7 @@ export class ServerHub {
       secret: offer.secret,
       exp: offer.exp,
       name: this.deps.desktopName(),
-      node: this.deps.serverNode?.() || FALLBACK_SERVER_NODE
+      node: this.deps.bundle?.()?.manifest.node || FALLBACK_SERVER_NODE
     })
     this.clearInvite()
     const expiresAt = offer.exp * 1000
@@ -310,7 +342,7 @@ export class ServerHub {
       proof: b64uEncode(derivePairProof(ticket.secret)),
       ed: b64uEncode(identity.ed25519.pub),
       name: this.deps.desktopName(),
-      build: this.deps.build
+      build: this.build()
     }))
     let reply: PairingReply
     try {
@@ -331,6 +363,145 @@ export class ServerHub {
     })
     this.deps.log(`servers paired server=${serverId} name=${JSON.stringify(reply.name)} (code)`)
     return this.getState().servers.find((s) => s.id === serverId)!
+  }
+
+  // ---- updates (protocol/SERVER.md §10) -------------------------------------------------
+
+  /**
+   * Checks the server's build against this desktop's bundle and uploads it when it
+   * is newer. Runs on every connect; "Update" in Settings calls it too.
+   */
+  async updateServer(serverId: string): Promise<UpdateDecision> {
+    const record = this.store.get(serverId)
+    if (!record?.build) throw new LinkError(LinkErrorCode.ServerOffline, 'The server has not connected yet')
+    this.failedUploads.delete(serverId)
+    return this.maybeUpload(serverId, record.build)
+  }
+
+  /** Restarts the server now, switching to a staged update if it has one. */
+  async restartServer(serverId: string): Promise<void> {
+    await this.call(serverId, HUB_CLIENT, LinkChannel.Restart)
+    this.startRestarting(serverId)
+  }
+
+  private async afterConnect(serverId: string, reply: HostLinkReply): Promise<void> {
+    const bootstrap = reply.features.includes('bootstrap')
+    let uploaded = false
+    try {
+      if (!bootstrap) await this.refreshInfo(serverId)
+      const decision = await this.maybeUpload(serverId, reply.build)
+      uploaded = decision.upload
+    } catch (err) {
+      this.deps.log(`servers server=${serverId} update check failed: ${errorMessage(err)}`)
+    }
+    if (!bootstrap) return
+    // The bootstrap installs the service once the desktop says it is done.
+    try {
+      await this.call(serverId, HUB_CLIENT, LinkChannel.BootstrapDone, [{ uploaded }])
+    } catch (err) {
+      this.deps.log(`servers server=${serverId} bootstrap-done failed: ${errorMessage(err)}`)
+    }
+  }
+
+  private async refreshInfo(serverId: string): Promise<void> {
+    try {
+      this.setInfo(serverId, await this.call(serverId, HUB_CLIENT, LinkChannel.Info))
+    } catch (err) {
+      // A server from before updates answers `unsupported`.
+      if (!(err instanceof LinkError && err.code === LinkErrorCode.Unsupported)) throw err
+    }
+  }
+
+  private setInfo(serverId: string, value: unknown): void {
+    const update = (value as Partial<ServerInfo> | null)?.update
+    const info: ServerInfo = {
+      update: update && typeof update === 'object' && (update.state === 'staged' || update.state === 'restarting')
+        ? { state: update.state, version: String(update.version ?? ''), commit: String(update.commit ?? ''), builtAt: String(update.builtAt ?? '') }
+        : null
+    }
+    this.infos.set(serverId, info)
+    if (info.update?.state === 'restarting') this.startRestarting(serverId)
+    this.emitState()
+  }
+
+  private async maybeUpload(serverId: string, build: LinkBuild): Promise<UpdateDecision> {
+    const bundle = this.deps.bundle?.() ?? null
+    const decision = decideUpdate(bundle?.manifest ?? null, build)
+    if (!decision.upload || !bundle) {
+      this.deps.log(`servers server=${serverId} update=${decision.reason}`)
+      return decision
+    }
+    if (this.failedUploads.get(serverId) === bundle.manifest.sha256) {
+      this.deps.log(`servers server=${serverId} update=${decision.reason} skipped: this bundle failed before`)
+      return { upload: false, reason: decision.reason }
+    }
+    if (this.uploads.has(serverId)) return { upload: false, reason: decision.reason }
+    this.deps.log(`servers server=${serverId} update=${decision.reason} uploading version=${bundle.manifest.version} sha=${bundle.manifest.sha256.slice(0, 12)}`)
+    const ok = await this.upload(serverId, bundle)
+    return { upload: ok, reason: decision.reason }
+  }
+
+  private async upload(serverId: string, bundle: LocalBundle): Promise<boolean> {
+    const archive = packBundle(bundle.dir)
+    const progress = { sent: 0, total: archive.total }
+    this.uploads.set(serverId, progress)
+    this.emitState()
+    const started = this.timers.now()
+    let stream: LinkStream | null = null
+    try {
+      const { version, commit, builtAt, sha256 } = bundle.manifest
+      stream = this.openStream(serverId, 'bundle', { version, commit, builtAt, sha256, bytes: archive.total })
+      const replyChunks: Buffer[] = []
+      stream.on('data', (chunk: Buffer) => replyChunks.push(chunk))
+      const done = finished(stream)
+      done.catch(() => {})
+      let reported = 0
+      for await (const chunk of archive.chunks()) {
+        if (stream.destroyed) break
+        if (!stream.write(chunk)) await Promise.race([once(stream, 'drain'), done])
+        progress.sent += chunk.length
+        if (progress.sent - reported >= PROGRESS_STEP_BYTES) {
+          reported = progress.sent
+          this.emitState()
+        }
+      }
+      stream.end()
+      await done
+      const result = JSON.parse(Buffer.concat(replyChunks).toString('utf8')) as { ok?: boolean; state?: string }
+      this.deps.log(`servers server=${serverId} uploaded ${archive.total} bytes in ${this.timers.now() - started} ms state=${result.state}`)
+      if (result.state === 'restarting') this.startRestarting(serverId)
+      else if (result.state === 'staged') await this.refreshInfo(serverId).catch(() => {})
+      return true
+    } catch (err) {
+      stream?.destroy()
+      const offline = err instanceof LinkError && err.code === LinkErrorCode.ServerOffline
+      if (!offline) this.failedUploads.set(serverId, bundle.manifest.sha256)
+      this.deps.log(`servers server=${serverId} upload failed: ${errorMessage(err)}`)
+      return false
+    } finally {
+      this.uploads.delete(serverId)
+      this.emitState()
+    }
+  }
+
+  private startRestarting(serverId: string): void {
+    this.endRestarting(serverId)
+    const timer = this.timers.setTimeout(() => {
+      if (this.restarting.get(serverId)?.timer !== timer) return
+      this.restarting.delete(serverId)
+      this.emitState()
+    }, RESTART_GRACE_MS)
+    this.restarting.set(serverId, { until: this.timers.now() + RESTART_GRACE_MS, timer })
+    this.emitState()
+  }
+
+  private endRestarting(serverId: string): void {
+    const entry = this.restarting.get(serverId)
+    if (!entry) return
+    this.timers.clearTimeout(entry.timer)
+    this.restarting.delete(serverId)
+    const info = this.infos.get(serverId)
+    if (info?.update?.state === 'restarting') this.infos.set(serverId, { update: null })
   }
 
   /** "Add another device": the server mints a pairing code for another desktop. */
@@ -385,7 +556,7 @@ export class ServerHub {
         body,
         from,
         'devtool-server',
-        () => ({ app: 'devtool-desktop', name: this.deps.desktopName(), build: this.deps.build }),
+        () => ({ app: 'devtool-desktop', name: this.deps.desktopName(), build: this.build() }),
         ({ hello, remoteStatic }) => {
           if (!invite) return { result: 'rejected', reason: 'no-offer' }
           const proof = helloProof(hello)
@@ -475,7 +646,7 @@ export class ServerHub {
       id: record.id,
       serverStatic: () => b64uDecode(this.store.get(record.id)?.x25519Pub ?? record.x25519Pub),
       staticKey: () => this.deps.identity.get().x25519,
-      hello: () => ({ ...buildHello('devtool-desktop', this.deps.build, this.deps.desktopName()), v: this.version.v, min: this.version.min }),
+      hello: () => ({ ...buildHello('devtool-desktop', this.build(), this.deps.desktopName()), v: this.version.v, min: this.version.min }),
       version: this.version,
       port: this.port,
       timers: this.timers,
@@ -485,11 +656,17 @@ export class ServerHub {
         this.store.setBuild(record.id, reply.build)
         if (reply.host) this.store.setHost(record.id, reply.host)
         this.store.touchLastSeen(record.id, this.timers.now())
+        this.endRestarting(record.id)
         // Paired after our last `watch` (the relay may have read it before the pair existed): watch again.
         if (!this.reported.has(record.id)) this.sendWatch()
         this.emitState()
+        void this.afterConnect(record.id, reply)
       },
       onEvent: (event) => {
+        if (event.ch === LinkEvent.Status) {
+          this.setInfo(record.id, event.args[0])
+          return
+        }
         const serverEvent: ServerEvent = { serverId: record.id, client: event.client, ch: event.ch, args: event.args }
         for (const listener of [...this.eventListeners]) {
           try {

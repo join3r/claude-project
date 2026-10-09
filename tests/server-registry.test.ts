@@ -138,12 +138,10 @@ describe('ClientRegistry', () => {
 
 describe('server env', () => {
   it('lives in ~/.devtool-server unless DEVTOOL_SERVER_HOME says otherwise', () => {
-    expect(serverPaths({})).toEqual({
-      home: path.join(os.homedir(), '.devtool-server'),
-      dataDir: path.join(os.homedir(), '.devtool-server', 'data')
-    })
+    const home = path.join(os.homedir(), '.devtool-server')
+    expect(serverPaths({})).toMatchObject({ home, dataDir: path.join(home, 'data'), current: path.join(home, 'current'), nodeCurrent: path.join(home, 'node', 'current') })
     const custom = path.resolve('/srv/devtool')
-    expect(serverPaths({ DEVTOOL_SERVER_HOME: '/srv/devtool' })).toEqual({ home: custom, dataDir: path.join(custom, 'data') })
+    expect(serverPaths({ DEVTOOL_SERVER_HOME: '/srv/devtool' })).toMatchObject({ home: custom, dataDir: path.join(custom, 'data'), appDir: path.join(custom, 'app') })
   })
 
   it('reads the bundle manifest, or falls back to the repo version', () => {

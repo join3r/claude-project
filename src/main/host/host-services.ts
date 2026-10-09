@@ -603,6 +603,16 @@ export class HostServices {
   }
 
   /** Runs after every config change (the desktop's server hub follows the relay URL). */
+  /** No tab is working: a server may restart into an update without cutting a turn short. */
+  isIdle(): boolean {
+    return !Object.values(this.activityRegistry.getSnapshot()).some((status) => status === 'working')
+  }
+
+  /** Any tab's activity changed (status, since or activity). */
+  onActivityChange(listener: () => void): () => void {
+    return this.activityRegistry.subscribe(() => listener())
+  }
+
   onConfigChanged(listener: (config: AppConfig) => void): () => void {
     this.configListeners.add(listener)
     return () => { this.configListeners.delete(listener) }

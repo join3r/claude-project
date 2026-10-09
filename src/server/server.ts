@@ -6,7 +6,12 @@ import { resolveShellEnv } from '../main/shell-env'
 import { listCondaEnvs } from '../main/conda-env'
 import { acquireInstanceLock } from '../main/instance-lock'
 import { installBrokenPipeUncaughtHandler } from '../main/broken-pipe'
-import { createServerLink, startServerHost, type ServerHost } from './server-host'
+import { createServerLink, pairCodeForDesktop, startServerHost, type ServerHost } from './server-host'
+import type { LinkCall, ServerLink } from './server-link'
+import { BUNDLE_STREAM_KIND, ServerUpdater } from './updater'
+import { exitForRestart } from './restart'
+import { diagnosticStreamKinds } from '../main/host/link/diagnostic-streams'
+import { LinkChannel, LinkEvent } from '../main/host/link/link-channels'
 import { consoleError, consoleLog, ensureServerDirs, loadServerManifest, loginShell, passwdShell, serverPaths } from './server-env'
 import { loadServerConfig, saveServerConfig } from './server-config'
 
@@ -56,6 +61,12 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
     process.exitCode = 1
     return
   }
+  // A bundle an earlier run staged but never switched to (it was killed): switch now, before anything runs.
+  const leftover = new ServerUpdater({ paths, running: manifest.sha256 && manifest.sha256 !== 'dev' ? manifest : null, mode: 'daemon', log })
+  if (leftover.applyLeftoverStaged()) {
+    lock.release()
+    exitForRestart(paths, log)
+  }
 
   // Terminals, `!bash` and the login env all follow $SHELL; cron's /bin/sh would
   // make every one of them a bare sh without the user's PATH.
@@ -76,34 +87,72 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
     process.exit(1)
   }
   if (relayUrl) saveServerConfig(paths.dataDir, { relayUrl })
-  const link = createServerLink(server)
+
+  let link: ServerLink | null = null
+  let stopping = false
+  const updater = new ServerUpdater({
+    paths,
+    running: manifest.sha256 && manifest.sha256 !== 'dev' ? manifest : null,
+    mode: 'daemon',
+    log,
+    isIdle: () => server.host.isIdle(),
+    onIdleChange: (listener) => server.host.onActivityChange(listener),
+    restart: (reason) => stop(reason, true),
+    onStatus: (info) => link?.broadcast(LinkEvent.Status, [info])
+  })
+  link = createServerLink(server, {
+    streams: new Map([...diagnosticStreamKinds(), [BUNDLE_STREAM_KIND, updater.streamHandler()]]),
+    linkCall: (call) => daemonLinkCall(call, { link: link!, updater })
+  })
   link.start()
   log(`ready version=${manifest.version} commit=${manifest.commit} data=${paths.dataDir}`)
   log(`link server=${server.host.identity.get().id} relay=${loadServerConfig(paths.dataDir).relayUrl} desktops=${link.desktops.list().length}`)
 
-  let stopping = false
-  const stop = (signal: string): void => {
+  /** Stops like quitting the desktop; a staged update is switched to on the way out. */
+  const stop = (why: string, restart = false): void => {
     if (stopping) return
     stopping = true
-    log(`stopping signal=${signal}`)
+    log(`stopping ${why}`)
     const timer = setTimeout(() => {
       consoleError(`shutdown took over ${SHUTDOWN_TIMEOUT_MS} ms; exiting anyway`)
       lock.release()
       process.exit(1)
     }, SHUTDOWN_TIMEOUT_MS)
     timer.unref()
-    link.stop()
+    link?.stop()
     server.shutdown()
       .catch((err: unknown) => consoleError(`shutdown error ${describe(err)}`))
       .finally(() => {
+        try {
+          updater.applyStaged()
+        } catch (err) {
+          consoleError(`could not switch to the staged update: ${describe(err)}`)
+        }
         lock.release()
         log('stopped')
+        if (restart) exitForRestart(paths, log)
         process.exit(0)
       })
   }
   // Not SIGHUP: under nohup (the fallback service) it is ignored, and a handler would undo that.
-  process.on('SIGTERM', () => stop('SIGTERM'))
-  process.on('SIGINT', () => stop('SIGINT'))
+  process.on('SIGTERM', () => stop('signal=SIGTERM'))
+  process.on('SIGINT', () => stop('signal=SIGINT'))
+}
+
+/** The daemon's link-level calls (protocol/SERVER.md §5.1). */
+function daemonLinkCall(call: LinkCall, { link, updater }: { link: ServerLink; updater: ServerUpdater }): Promise<unknown> | undefined {
+  switch (call.ch) {
+    case LinkChannel.PairCode:
+      return pairCodeForDesktop(link)
+    case LinkChannel.Info:
+      return Promise.resolve(updater.info())
+    case LinkChannel.Restart:
+      // After the answer is out.
+      setTimeout(() => updater.restartNow(`server-restart from ${call.desktopId}`), 200)
+      return Promise.resolve({ restarting: true })
+    default:
+      return undefined
+  }
 }
 
 export interface CheckResult {

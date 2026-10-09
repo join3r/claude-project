@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { HostServices } from './host/host-services'
 import { ServerHub } from './servers/server-hub'
+import { desktopBundle, desktopBundleDir } from './servers/desktop-bundle'
 import { registerServerHandlers } from './ipc/servers'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type { HostEnv } from './host/host-env'
@@ -92,8 +93,8 @@ export class AppRuntime {
       relay: this.host.relay,
       identity: this.host.identity,
       relayUrl: () => mobile().relayUrl,
-      // Commit and bundle hash arrive with the bundled server (step 5).
       build: { version: app.getVersion(), commit: '', builtAt: '', bundleSha: '' },
+      bundle: desktopBundle(desktopBundleDir({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() })),
       desktopName: () => mobile().desktopName?.trim() || os.hostname().replace(/\.local$/, ''),
       log: (message) => this.logDebug(message)
     })

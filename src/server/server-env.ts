@@ -7,16 +7,48 @@ import type { SecretEncryptor } from '../main/mobile/identity'
 import type { PowerSaveApi } from '../main/sleep-blocker'
 import type { ServerHostInfo } from '../shared/servers'
 
-/** Where a server keeps everything: `$DEVTOOL_SERVER_HOME`, by default `~/.devtool-server`. */
+/**
+ * Where a server keeps everything: `$DEVTOOL_SERVER_HOME`, by default `~/.devtool-server`.
+ *
+ *     app/<version>-<sha8>/   unpacked bundles (the running one and one before it)
+ *     current -> app/...      the bundle the service starts
+ *     node/<version>/         Node from nodejs.org;  node/current -> <version>
+ *     data/                   the host's config dir (0700)
+ *     logs/                   server.log when not under systemd
+ *     run/                    staged.json, the control socket (0700)
+ *     bin/devtool-server      the CLI
+ *     service.json            how the service was installed
+ */
 export interface ServerPaths {
   home: string
   /** The host's config dir (projects.json, config, scrollback, the identity). */
   dataDir: string
+  appDir: string
+  /** Symlink to the bundle the service starts. */
+  current: string
+  nodeDir: string
+  /** Symlink to the Node the service starts. */
+  nodeCurrent: string
+  logsDir: string
+  runDir: string
+  binDir: string
 }
 
+export const DEFAULT_SERVER_HOME_NAME = '.devtool-server'
+
 export function serverPaths(env: NodeJS.ProcessEnv = process.env): ServerPaths {
-  const home = path.resolve(env.DEVTOOL_SERVER_HOME?.trim() || path.join(os.homedir(), '.devtool-server'))
-  return { home, dataDir: path.join(home, 'data') }
+  const home = path.resolve(env.DEVTOOL_SERVER_HOME?.trim() || path.join(os.homedir(), DEFAULT_SERVER_HOME_NAME))
+  return {
+    home,
+    dataDir: path.join(home, 'data'),
+    appDir: path.join(home, 'app'),
+    current: path.join(home, 'current'),
+    nodeDir: path.join(home, 'node'),
+    nodeCurrent: path.join(home, 'node', 'current'),
+    logsDir: path.join(home, 'logs'),
+    runDir: path.join(home, 'run'),
+    binDir: path.join(home, 'bin')
+  }
 }
 
 /** Creates the home (0700 when new) and the data dir (always 0700: it holds the identity keys and the projects). */

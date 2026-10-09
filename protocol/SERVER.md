@@ -29,14 +29,14 @@ Message 1 (desktop):
   "build": { "version": "0.6.0", "commit": "", "builtAt": "", "bundleSha": "" },
   "features": [], "name": "join3r-mbp" }
 ```
-Message 2 (server) is the same shape with `app: "devtool-server"`, its own `build` from `manifest.json` and its display name, plus `result`:
+The desktop's `build` is the server bundle it carries (§10): its commit, build time and content hash. Message 2 (server) is the same shape with `app: "devtool-server"`, its own `build` from `manifest.json` (all empty in a server that has no bundle yet), its display name, `host: {os, arch, hostname, node}` and `result`:
 - `ok`: the session is up.
 - `incompatible`: no common version (§2.3). No session.
 - `unknown-device`: the server has no pairing whose Noise key matches. No session.
 
 Rules:
 - The server accepts a desktop only when its pairings (`<data>/desktops.json`) have a record for the relay-authenticated sender ID and that record's `x25519Pub` equals the static key message 1 revealed. The sender ID is the hash of the Ed25519 key the relay checked, so this binds both keys.
-- Unknown fields are ignored. `features` is empty in version 1.
+- Unknown fields are ignored. A desktop sends no `features` in version 1. A server being installed says `features: ["bootstrap"]` (§11).
 
 ### 2.3 Versions
 
@@ -96,6 +96,10 @@ A few channels are the server's own rather than a host channel. A desktop calls 
 | channel | args | result |
 |---|---|---|
 | `server-pair-code` | none | `{code, expiresAt}`: a device ticket (§7.4) for another desktop, `expiresAt` in epoch ms |
+| `server-info` | none | `{update}`: `null`, or `{state: "staged" \| "restarting", version, commit, builtAt}` (§10) |
+| `server-restart` | none | `{restarting: true}`: switch to a staged bundle if there is one, and restart now, working tabs or not |
+
+The server pushes the event `server-status` with the same payload as `server-info` to `*` whenever its update state changes. The desktop keeps it for itself and doesn't hand it to windows.
 
 ## 6. Streams
 
@@ -117,11 +121,12 @@ A few channels are the server's own rather than a host channel. A desktop calls 
 
 ### 6.3 Kinds
 
-A side serves the kinds in its registry (`StreamKinds`). Later steps add `bundle`, `file` and `tcp`. Version 1 has three diagnostic kinds that every server serves. They only move bytes the desktop sends or asks for, so they double as a speed test.
+A side serves the kinds in its registry (`StreamKinds`). Later steps add `file` and `tcp`. Version 1 has three diagnostic kinds that every server serves. They only move bytes the desktop sends or asks for, so they double as a speed test, and `bundle` (§10).
 
 - `echo`: writes back everything it reads, then ends.
 - `sink {delayMs?}`: reads to the end, pausing `delayMs` (at most 1000) after each chunk to play a slow reader. Then it writes `{"bytes":N,"sha256":"<hex>"}` and ends.
 - `source {bytes, seed?}`: writes `bytes` bytes (at most 4 GiB) of `sourceByte(i, seed) = (i*31 + seed + (i >>> 8)) & 0xff`, then ends.
+- `bundle {version, commit, builtAt, sha256, bytes}`: the desktop writes a server bundle archive (§10.1) of exactly `bytes` bytes (at most 256 MiB) and ends. On success the server writes `{"ok":true,"state":...}` and ends; on any failure it aborts the stream with `close {reason: "error", message}`.
 
 ## 7. Pairing
 
@@ -212,5 +217,43 @@ The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phon
 | `src/main/servers/` | the desktop: `ServerHub`, one `ServerConnection` per server |
 | `src/server/server-link.ts` | the server: responder, one session per desktop, client registration, holds |
 | `src/server/server-config.ts` | `<data>/server.json` |
+| `src/main/host/link/bundle-archive.ts`, `update-policy.ts` | §10: the archive, when to upload |
+| `src/server/updater.ts`, `node-install.ts`, `restart.ts` | §10: staging, Node, switching, restarting |
 
-Tests: `tests/host-link-wire.test.ts` and `tests/host-link-session.test.ts` (loopback), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), and `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay).
+Tests: `tests/host-link-wire.test.ts` and `tests/host-link-session.test.ts` (loopback), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay) and `tests/server-updates.test.ts` (archive, policy, uploads through a relay).
+
+## 10. Updates
+
+The server runs the bundle its desktops carry (`out/server/`, built by `npm run build:server`; a packaged desktop has it in `<resources>/server`). The desktop's hello `build` is that bundle's `{commit, builtAt, bundleSha}` next to the app version.
+
+### 10.1 Bundle archive
+
+`src/main/host/link/bundle-archive.ts`. Every file of the bundle, `manifest.json` included:
+
+```
+"DTBUNDL1"  indexLength:u32be  index (UTF-8 JSON)  file bytes, back to back in index order
+index = { "v": 1, "files": [ { "p": "<relative POSIX path>", "n": <bytes>, "x"?: 1 } ] }
+```
+
+`x: 1` is an executable (0755); every other file is 0644. The reader refuses a path that is absolute, has `..`, `.`, an empty segment or a backslash, a path that appears twice (case-insensitively), an archive that ends early or has bytes past its last file, and more bytes than `params.bytes`. After unpacking, the tree's content hash (`bundleSha256`, scripts/server-bundle.mjs) must equal the manifest's `sha256`, which must equal `params.sha256`.
+
+### 10.2 When the desktop uploads
+
+After every link handshake the desktop compares its bundle with the server's hello build (`decideUpdate`, `src/main/host/link/update-policy.ts`):
+- The server has no bundle (`bundleSha` empty, the bootstrap): upload.
+- Same `bundleSha`: nothing.
+- Different, and the desktop's `builtAt` is later: upload. Otherwise nothing: a server is never downgraded. A server from a source checkout (`bundleSha: "dev"`) is left alone.
+
+The server checks the same rule on its side and refuses a bundle built before the one it runs. A bundle the server refused is not sent to it again until the desktop restarts. While the upload runs the desktop shows the server as `updating` with `upload: {sent, total}`.
+
+A desktop whose link version is below the server's `min` gets `incompatible` with `update: "desktop"` and shows "Update DevTool". While `HOST_LINK_MIN_VERSION` is 1 the opposite can't happen; whoever raises `min` must keep a path that lets an old server receive a bundle.
+
+### 10.3 What the server does with it
+
+`src/server/updater.ts`:
+1. Unpack to `app/.incoming-<random>`, verify (§10.1). Fetch the Node the manifest names into `node/<version>` if it isn't there (nodejs.org `.tar.gz`, checked against `SHASUMS256.txt`, `DEVTOOL_NODE_MIRROR` overrides the base URL). Move it to `app/<version>-<sha8>` and write `run/staged.json`.
+2. If no tab is working (the activity registry), answer `restarting` and restart. If one is, answer `staged`, push `server-status` (the desktop shows `updateReady`), and restart when the last working tab stops, on `server-restart`, or whenever the process stops anyway.
+3. Switching flips `node/current` and `current` (a new symlink renamed over the old one), deletes `staged.json`, and deletes every bundle but the new one and the one that was running. A daemon that starts and finds a `staged.json` it never switched to switches first and restarts.
+4. Restart: under systemd and launchd the process exits with code 75 and the service manager starts `current/main.js` again. Under the nohup fallback, or when run by hand, it starts the new `current` itself, detached, after letting go of the instance lock, then exits.
+
+The desktop shows `updating` from `restarting` until the server's next handshake, or for at most 2 minutes.

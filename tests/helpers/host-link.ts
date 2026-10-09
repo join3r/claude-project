@@ -13,6 +13,7 @@ import type { ServerHost } from '../../src/server/server-host'
 import type { ServerLink, ServerLinkOptions } from '../../src/server/server-link'
 import type { PowerSaveApi } from '../../src/main/sleep-blocker'
 import type { ServerStatus } from '../../src/shared/servers'
+import type { LocalBundle } from '../../src/main/host/link/bundle-archive'
 import { waitFor } from './relay-phone'
 
 /**
@@ -52,7 +53,7 @@ export interface TestDesktop {
   close(): void
 }
 
-export function startTestDesktop(relayUrl: string, options: { version?: VersionInfo } = {}): TestDesktop {
+export function startTestDesktop(relayUrl: string, options: { version?: VersionInfo; bundle?: () => LocalBundle | null } = {}): TestDesktop {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-link-desktop-'))
   const log: string[] = []
   const identity = new IdentityStore(path.join(dir, 'mobile'), plaintext)
@@ -74,7 +75,8 @@ export function startTestDesktop(relayUrl: string, options: { version?: VersionI
     build,
     desktopName: () => 'test-mac',
     log: (line) => log.push(line),
-    ...(options.version ? { version: options.version } : {})
+    ...(options.version ? { version: options.version } : {}),
+    ...(options.bundle ? { bundle: options.bundle } : {})
   })
   const events: ServerEvent[] = []
   hub.onEvent((event) => events.push(event))
