@@ -405,10 +405,15 @@ struct InboxRow: View {
     }
 
     private var needLine: some View {
-        Text(need)
-            .font(.subheadline)
-            .foregroundStyle(group == .needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-            .lineLimit(1)
+        HStack(spacing: 4) {
+            if group != .snoozed, entry.task.status != .attention, let landing = entry.task.landing {
+                LandingGlyph(landing: landing)
+            }
+            Text(need)
+        }
+        .font(.subheadline)
+        .foregroundStyle(group == .needsYou || entry.task.landing?.needsYou == true ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+        .lineLimit(1)
     }
 
     /// A working task drops its dot, as on the desktop: the agent has the ball.

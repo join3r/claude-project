@@ -540,6 +540,9 @@ public enum TaskCloseResult: Sendable, Equatable {
     /// The task is archived (its stream's Done row on the desktop).
     case closed
     case blocked(TaskCloseBlocker)
+    /// A task with a worktree of its own didn't land (version 3): it stays
+    /// open with this landing, and `task.land` offers what to do.
+    case landing(TaskLanding)
 }
 
 /// `task.new` result: the new task and its claude-chat tab, already sent the prompt.
@@ -618,6 +621,8 @@ public enum TaskOp {
     public static let newStream = "stream.new"
     /// `branches.list` (§8.13): a project's branches for the New stream sheet.
     public static let listBranches = "branches.list"
+    /// `task.land` (§8.15): a stopped landing's Ask agent to fix, Abort and Retry.
+    public static let land = "task.land"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
 }
@@ -1156,6 +1161,7 @@ extension TaskCloseResult {
     public static func parse(_ value: JSONValue) throws(ProtocolError) -> TaskCloseResult {
         let o = try Fields(value, "result")
         if try o.bool("closed") { return .closed }
+        if !o.isUnset("landing") { return .landing(try TaskLanding.parse(o["landing"])) }
         let raw = try o.str("blocker")
         guard let blocker = TaskCloseBlocker(rawValue: raw) else { throw ProtocolError("unknown blocker \(raw)") }
         return .blocked(blocker)
@@ -1167,6 +1173,8 @@ extension TaskCloseResult {
             return .object(["closed": .bool(true)])
         case .blocked(let blocker):
             return .object(["closed": .bool(false), "blocker": .string(blocker.rawValue)])
+        case .landing(let landing):
+            return .object(["closed": .bool(false), "landing": landing.json])
         }
     }
 }

@@ -43,6 +43,8 @@ extension InboxTask {
     /// Waiting on you rather than the agent (the desktop's `isYourTurn`): it
     /// needs you, or its last event came after your last word.
     public var isYourTurn: Bool {
+        // A stopped landing waits for you whatever its tabs do (§4.4).
+        if landing?.needsYou == true { return true }
         if status == .working { return false }
         if status == .attention { return true }
         guard let eventAt else { return false }
@@ -52,6 +54,8 @@ extension InboxTask {
     /// A live agent wins over snooze and settle, as on the desktop.
     public func inboxGroup(now: Date) -> InboxGroup {
         if status == .attention { return .needsYou }
+        // As the desktop's `partitionInbox`: ahead of working, snooze and settle.
+        if landing?.needsYou == true { return .yourTurn }
         if status == .working { return .working }
         if isSnoozed(now: now) { return .snoozed }
         if settledAt != nil { return .settled }

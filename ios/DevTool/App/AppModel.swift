@@ -163,6 +163,13 @@ final class AppModel {
         return try await connection.closeTask(params)
     }
 
+    /// `task.land` (§8.15): a stopped landing's Ask agent to fix, Abort or
+    /// Retry. The task's new landing (or its leaving) comes with the next inbox.
+    func landTask(desktopId: String, _ params: TaskLandParams) async throws -> TaskLandResult {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.landTask(params)
+    }
+
     /// `tab.close` (§8.8). The tab leaves with the next inbox.
     func closeTab(desktopId: String, tabId: String) async throws {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }

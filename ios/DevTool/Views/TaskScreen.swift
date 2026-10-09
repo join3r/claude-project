@@ -30,6 +30,17 @@ struct TaskScreen: View {
                 if let chat = chatTab(task) {
                     ChatScreen(route: ChatRoute(desktopId: ref.desktopId, tabId: chat.id), app: model, onInfo: { showInfo = true })
                         .id(chat.id)
+                        // Above the transcript, as on the desktop: a landing that stopped waits for you.
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            if task.landing != nil {
+                                TaskLandingBanner(ref: ref, task: task, onClosed: onClosed)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: 780)
+                                    .frame(maxWidth: .infinity)
+                                    .background(.bar)
+                            }
+                        }
                 } else {
                     TaskStatusView(ref: ref, project: found.project, task: task, onInfo: { showInfo = true }, onClosed: onClosed)
                 }
@@ -41,6 +52,9 @@ struct TaskScreen: View {
                 }, onClosed: {
                     showInfo = false
                     onClosed()
+                }, onLanding: {
+                    // Didn't land: back to the task, where the banner says why.
+                    showInfo = false
                 })
             }
             // Reading the task here reads it on the desktop too (§8.3), and so
@@ -114,6 +128,13 @@ struct TaskStatusView: View {
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
             }
+            if task.landing != nil {
+                Section {
+                    TaskLandingBanner(ref: ref, task: task, onClosed: onClosed)
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 12) {
@@ -167,7 +188,8 @@ struct TaskStatusView: View {
         .navigationTitle(task.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { TaskNavigationHeader(project: project, task: task, onInfo: onInfo) }
-        .closeTaskFlow($closing) { _ in onClosed() }
+        // A landing that stops shows its banner above.
+        .closeTaskFlow($closing, onClosed: { _ in onClosed() }, onLanding: { _, _ in })
         .refreshable { await model.refresh([ref.desktopId]) }
     }
 
@@ -196,6 +218,8 @@ struct TaskInfoSheet: View {
     /// Opens another Claude chat of the task (one from before one agent per task).
     var onOpenChat: (String) -> Void = { _ in }
     let onClosed: () -> Void
+    /// Close task didn't land the task's worktree; it stays open with its banner.
+    var onLanding: () -> Void = {}
     @State private var closing: CloseTaskRequest?
 
     var body: some View {
@@ -244,6 +268,17 @@ struct TaskInfoSheet: View {
                         Text(streamName.isEmpty ? "main" : streamName)
                     }
                 }
+                if let branch = task.branch {
+                    LabeledContent("Branch") {
+                        Text(branch)
+                            .font(.callout.monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                if let landing = task.landing {
+                    LabeledContent("Landing", value: landing.label(streamName: streamName.isEmpty ? "its stream" : streamName))
+                }
                 LabeledContent("Desktop", value: model.desktop(ref.desktopId)?.name ?? "")
                 LabeledContent("Status") {
                     StatusChip(status: task.status, since: task.since)
@@ -259,7 +294,7 @@ struct TaskInfoSheet: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { doneButton }
-        .closeTaskFlow($closing) { _ in onClosed() }
+        .closeTaskFlow($closing, onClosed: { _ in onClosed() }, onLanding: { _, _ in onLanding() })
     }
 
     @ViewBuilder
@@ -302,9 +337,13 @@ struct TaskInfoSheet: View {
                 }
             } footer: {
                 if canClose {
-                    Text(streamName.isEmpty
-                         ? "Moves it to the Done list, where it can be reopened."
-                         : "Moves it to \(streamName)’s Done list, where it can be reopened.")
+                    if let branch = task.branch, !streamName.isEmpty {
+                        Text("Lands \(branch) into \(streamName) as one commit, then moves it to \(streamName)’s Done list, where it can be reopened.")
+                    } else {
+                        Text(streamName.isEmpty
+                             ? "Moves it to the Done list, where it can be reopened."
+                             : "Moves it to \(streamName)’s Done list, where it can be reopened.")
+                    }
                 }
             }
         }

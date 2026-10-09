@@ -9,7 +9,9 @@ public enum AppProtocol {
     /// The version this build speaks (N) and the oldest it still accepts.
     /// Version 2 (streams, SPEC.md §9) is a hard cutover: a version 1 desktop
     /// answers `incompatible` and the phone asks to update DevTool there.
-    public static let version = 2
+    /// Version 3 (task worktrees, §11) only adds, so a version 2 desktop still
+    /// talks; it just sends no `branch`, `landing` or `task.land`.
+    public static let version = 3
     public static let minVersion = 2
     public static var local: VersionInfo { VersionInfo(v: version, min: minVersion) }
 }
@@ -195,6 +197,9 @@ public enum DesktopFeature {
     /// The desktop answers `chat.commands`, `chat.btw`, `chat.permissions` and
     /// `chat.permissions.update` (§8.14).
     public static let chatCommands = "chat.commands"
+    /// The desktop answers `task.land` and sends tasks' `branch` and `landing`
+    /// (§8.15, §4.4).
+    public static let taskLand = "task.land"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.
@@ -358,6 +363,8 @@ extension Inbox {
             settledAt: try optInt(o, "settledAt"),
             snoozedUntil: try optInt(o, "snoozedUntil"),
             snoozeUntilAttention: o["snoozeUntilAttention"] == .bool(true),
+            branch: try optStr(o, "branch"),
+            landing: o.isUnset("landing") ? nil : try TaskLanding.parse(o["landing"]),
             tabs: tabs
         )
     }
@@ -430,6 +437,8 @@ extension InboxTask {
         if let settledAt { o["settledAt"] = .int(settledAt) }
         if let snoozedUntil { o["snoozedUntil"] = .int(snoozedUntil) }
         if snoozeUntilAttention { o["snoozeUntilAttention"] = .bool(true) }
+        if let branch { o["branch"] = .string(branch) }
+        if let landing { o["landing"] = landing.json }
         o["tabs"] = .array(tabs.map(\.json))
         return .object(o)
     }

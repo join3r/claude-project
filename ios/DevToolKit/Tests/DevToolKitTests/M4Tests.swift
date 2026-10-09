@@ -267,6 +267,31 @@ import Testing
         await connection.stop()
     }
 
+    @Test func landingCloseAndTaskLandWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        let features = [DesktopFeature.taskClose, DesktopFeature.taskLand]
+        desktop.features = features
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features(Set(features)) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        let stopped = try await connection.closeTask(TaskCloseParams(taskId: "w"))
+        #expect(stopped == .landing(TaskLanding(state: .conflict, intent: .close, files: ["a.ts"], fileCount: 1)))
+
+        let fixing = try await connection.landTask(TaskLandParams(taskId: "w", action: .fixWithAgent))
+        #expect(fixing.status == .fixing && fixing.landing?.state == .fixing)
+        #expect(desktop.requests.last?.op == TaskOp.land)
+        #expect(desktop.requests.last?.params == .object(["taskId": "w", "action": "fix-with-agent"]))
+        #expect(try await connection.landTask(TaskLandParams(taskId: "w", action: .abort)) == TaskLandResult(status: .aborted))
+        #expect(try await connection.landTask(TaskLandParams(taskId: "w", action: .retry)) == TaskLandResult(status: .landed, closed: true))
+        #expect(desktop.taskLandParams.map(\.action) == [.fixWithAgent, .abort, .retry])
+        await connection.stop()
+    }
+
     @Test func pinSetWhenListed() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
@@ -379,6 +404,7 @@ import Testing
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
+            DesktopFeature.taskLand,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let listed = try await mock.listBranches(projectId: "p-api")
@@ -462,6 +488,29 @@ import Testing
         try await events.waitFor { event in
             guard case .inbox(let inbox) = event else { return false }
             return !inbox.projects.flatMap(\.tasks).contains { $0.id == "t-rate" }
+        }
+        await mock.stop()
+    }
+
+    @Test func worktreeTaskStopsOnAConflictUntilTheAgentFixesIt() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor(RelayConnectionTests.isInbox)
+        guard case .landing(let landing) = try await mock.closeTask(TaskCloseParams(taskId: "t-auth")) else {
+            Issue.record("expected the close to stop on a conflict")
+            return
+        }
+        #expect(landing.state == .conflict)
+        #expect(try await mock.landTask(TaskLandParams(taskId: "t-auth", action: .abort)) == TaskLandResult(status: .aborted))
+        #expect(try await mock.landTask(TaskLandParams(taskId: "t-cache", action: .retry)) == TaskLandResult(status: .landed))
+        _ = try await mock.closeTask(TaskCloseParams(taskId: "t-auth"))
+        let fixing = try await mock.landTask(TaskLandParams(taskId: "t-auth", action: .fixWithAgent))
+        #expect(fixing.landing?.state == .fixing)
+        try await events.waitFor(timeout: .seconds(6)) { event in
+            guard case .inbox(let inbox) = event else { return false }
+            let tasks = inbox.projects.flatMap(\.tasks)
+            return !tasks.contains { $0.id == "t-auth" } && tasks.contains { $0.id == "t-cache" && $0.landing == nil }
         }
         await mock.stop()
     }

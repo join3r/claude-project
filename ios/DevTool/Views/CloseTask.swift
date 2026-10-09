@@ -8,6 +8,8 @@ struct CloseTaskRequest: Identifiable, Equatable {
     let name: String
     /// The stream it is archived to (its Done list on the desktop).
     let streamName: String
+    /// The task's own worktree branch: closing lands it into the stream (§8.7).
+    let branch: String?
 
     var id: String { "\(desktopId)/\(taskId)" }
 
@@ -16,6 +18,7 @@ struct CloseTaskRequest: Identifiable, Equatable {
         self.taskId = task.id
         self.name = task.name
         self.streamName = task.streamName
+        self.branch = task.branch
     }
 }
 
@@ -23,15 +26,22 @@ extension View {
     /// "Close task" (§8.3, §8.7): confirm, send `task.close`, which archives
     /// the task, and turn each blocker the desktop reports into a second
     /// confirmation that resends with the matching flag. `onClosed` runs once
-    /// the task is archived.
-    func closeTaskFlow(_ request: Binding<CloseTaskRequest?>, onClosed: @escaping (CloseTaskRequest) -> Void = { _ in }) -> some View {
-        modifier(CloseTaskFlow(request: request, onClosed: onClosed))
+    /// the task is archived. A task with its own worktree lands first; when
+    /// the landing stops it stays open, and `onLanding` gets its state (a
+    /// screen showing the task's banner), or, without it, an alert says why.
+    func closeTaskFlow(
+        _ request: Binding<CloseTaskRequest?>,
+        onClosed: @escaping (CloseTaskRequest) -> Void = { _ in },
+        onLanding: ((CloseTaskRequest, TaskLanding) -> Void)? = nil
+    ) -> some View {
+        modifier(CloseTaskFlow(request: request, onLanding: onLanding, onClosed: onClosed))
     }
 }
 
 private struct CloseTaskFlow: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var request: CloseTaskRequest?
+    let onLanding: ((CloseTaskRequest, TaskLanding) -> Void)?
     let onClosed: (CloseTaskRequest) -> Void
 
     /// Confirmed and in flight, or waiting on a blocker's answer.
@@ -61,7 +71,11 @@ private struct CloseTaskFlow: ViewModifier {
                 Button("Cancel", role: .cancel) {}
             } message: { target in
                 let done = target.streamName.isEmpty ? "Done" : "Done in \(target.streamName)"
-                Text("Its tabs close on the desktop and it moves to \(done), where it can be reopened.")
+                if let branch = target.branch, !target.streamName.isEmpty {
+                    Text("Its work on \(branch) lands in \(target.streamName) as one commit. Then its tabs close and it moves to \(done), where it can be reopened.")
+                } else {
+                    Text("Its tabs close on the desktop and it moves to \(done), where it can be reopened.")
+                }
             }
             .confirmationDialog(
                 blocked.map(Self.title) ?? "",
@@ -102,6 +116,15 @@ private struct CloseTaskFlow: ViewModifier {
                     onClosed(target)
                 case .blocked(let blocker):
                     blocked = blocker
+                case .landing(let landing):
+                    active = nil
+                    if let onLanding {
+                        onLanding(target, landing)
+                    } else {
+                        let stream = target.streamName.isEmpty ? "its stream" : target.streamName
+                        notice = Notice(title: "“\(target.name)” didn’t land",
+                                        message: "\(landing.label(streamName: stream)). Open the task to sort it out; it stays open until then.")
+                    }
                 }
             } catch {
                 active = nil

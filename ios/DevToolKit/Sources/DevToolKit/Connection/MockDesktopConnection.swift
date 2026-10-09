@@ -32,6 +32,10 @@ public actor MockDesktopConnection: DesktopConnection {
     private var scripts: [String: Task<Void, Never>] = [:]
     /// `/permissions` rules (§8.14), shared by every mock chat.
     private var permissionSources = MockChats.permissionSources()
+    /// Worktree tasks whose close stops on a conflict until the agent fixes it (§8.15).
+    private var conflicting: Set<String> = MockInbox.conflictingTasks
+    /// The "agent" fixing a conflict, by task.
+    private var fixes: [String: Task<Void, Never>] = [:]
     /// Pause between streamed chunks.
     private let streamStep: Duration
 
@@ -227,6 +231,14 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             return try removeTask(parsed).json
+        case TaskOp.land:
+            let parsed: TaskLandParams
+            do {
+                parsed = try TaskLandParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return try land(parsed).json
         case TaskOp.closeTab:
             try removeTab(tabId: try string("tabId"))
             return .object([:])
@@ -412,6 +424,12 @@ public actor MockDesktopConnection: DesktopConnection {
             if task.status == .working, !params.stopWorking {
                 return .blocked(.working)
             }
+            // A task with its own worktree lands first (§8.7); the demo's stops.
+            if task.branch != nil, task.landing != nil || conflicting.contains(task.id) {
+                let landing = task.landing?.state == .blocked ? task.landing! : Self.conflict
+                setLanding(landing, taskId: task.id)
+                return .landing(landing)
+            }
             for tab in task.tabs {
                 scripts[tab.id]?.cancel()
                 chats[tab.id] = nil
@@ -423,6 +441,67 @@ public actor MockDesktopConnection: DesktopConnection {
             return .closed
         }
         throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
+    }
+
+    private static let conflict = TaskLanding(state: .conflict, intent: .close, files: ["src/auth/session.ts", "src/auth/login.ts"], fileCount: 2)
+
+    private func setLanding(_ landing: TaskLanding?, taskId: String) {
+        for p in inbox.projects.indices {
+            guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == taskId }) else { continue }
+            inbox.projects[p].tasks[t].landing = landing
+            inbox.generatedAt = Date().unixMilliseconds
+            continuation.yield(.inbox(inbox))
+            return
+        }
+    }
+
+    /// `task.land` (§8.15): Abort clears the landing, Retry finds a conflict
+    /// still there (a blocked stream lets it through), and the "agent" asked
+    /// to fix it lands the task three seconds later.
+    private func land(_ params: TaskLandParams) throws -> TaskLandResult {
+        guard let task = inbox.projects.flatMap(\.tasks).first(where: { $0.id == params.taskId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
+        }
+        guard task.branch != nil else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "This task has no worktree of its own")
+        }
+        guard let landing = task.landing else {
+            if params.action == .abort { return TaskLandResult(status: .aborted) }
+            throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: params.action == .retry ? "Nothing to retry" : "Nothing to fix")
+        }
+        switch params.action {
+        case .abort:
+            fixes.removeValue(forKey: task.id)?.cancel()
+            setLanding(nil, taskId: task.id)
+            return TaskLandResult(status: .aborted)
+        case .retry where landing.state == .blocked:
+            setLanding(nil, taskId: task.id)
+            if landing.intent == .land { return TaskLandResult(status: .landed) }
+            _ = try removeTask(TaskCloseParams(taskId: task.id, stopWorking: true))
+            return TaskLandResult(status: .landed, closed: true)
+        case .retry:
+            fixes.removeValue(forKey: task.id)?.cancel()
+            setLanding(Self.conflict, taskId: task.id)
+            return TaskLandResult(status: .conflict, landing: Self.conflict)
+        case .fixWithAgent:
+            var fixing = Self.conflict
+            fixing.state = .fixing
+            setLanding(fixing, taskId: task.id)
+            fixes[task.id]?.cancel()
+            fixes[task.id] = Task { [weak self] in
+                guard (try? await Task.sleep(for: .seconds(3))) != nil else { return }
+                await self?.agentFixed(task.id)
+            }
+            return TaskLandResult(status: .fixing, landing: fixing)
+        }
+    }
+
+    /// The agent resolved the conflict: the close it was for goes through.
+    private func agentFixed(_ taskId: String) {
+        fixes[taskId] = nil
+        conflicting.remove(taskId)
+        setLanding(nil, taskId: taskId)
+        _ = try? removeTask(TaskCloseParams(taskId: taskId, stopWorking: true))
     }
 
     /// `tab.close`: drops the tab; the task stays.
@@ -652,6 +731,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
+            DesktopFeature.taskLand,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -753,6 +833,9 @@ public struct MockDesktopConnectionFactory: DesktopConnectionFactory {
 
 /// Canned inbox content.
 public enum MockInbox {
+    /// Worktree tasks whose close conflicts until the agent fixes it.
+    public static let conflictingTasks: Set<String> = ["t-auth"]
+
     public static func sample(desktopId: String, desktopName: String, now: Date = Date()) -> Inbox {
         let t = now.unixMilliseconds
         func ago(_ minutes: Double) -> Int64 { t - Int64(minutes * 60_000) }
@@ -766,10 +849,10 @@ public enum MockInbox {
         let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
         func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
                   eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil, snoozedUntil: Int64? = nil,
-                  tabs: [InboxTab]) -> InboxTask {
+                  branch: String? = nil, landing: TaskLanding? = nil, tabs: [InboxTab]) -> InboxTask {
             var task = InboxTask(id: id, name: name, streamId: stream.id, streamName: stream.name,
                                  lastInteractedAt: lastInteractedAt, attentionAt: attentionAt, eventAt: eventAt, unread: unread,
-                                 settledAt: settledAt, snoozedUntil: snoozedUntil, tabs: tabs)
+                                 settledAt: settledAt, snoozedUntil: snoozedUntil, branch: branch, landing: landing, tabs: tabs)
             task.status = MockDesktopConnection.status(of: task)
             let statusTab = MockDesktopConnection.statusTabs(of: task).first { $0.status == task.status }
             task.since = statusTab?.since
@@ -785,12 +868,22 @@ public enum MockInbox {
                     task("t-docs", "openapi-docs", apiMain, lastInteractedAt: ago(180), eventAt: ago(170), settledAt: ago(160), tabs: [
                         InboxTab(id: "tab-5", type: .terminal, title: "npm run docs", status: .exited, since: ago(170)),
                     ]),
-                    task("t-auth", "fix-auth", api050, lastInteractedAt: ago(3), attentionAt: ago(1), eventAt: ago(1), unread: true, tabs: [
+                    // Task worktrees (§4.4): closing fix-auth stops on a conflict; cache-headers'
+                    // Land is blocked by local changes in 0.5.0.
+                    task("t-auth", "fix-auth", api050, lastInteractedAt: ago(3), attentionAt: ago(1), eventAt: ago(1), unread: true,
+                         branch: "0.5.0--fix-auth", tabs: [
                         InboxTab(id: "tab-1", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Wants to run npm test", topic: "Fix the flaky login test"),
                         InboxTab(id: "tab-2", type: .terminal, title: "zsh", status: .idle, since: ago(40)),
                     ]),
                     task("t-rate", "rate-limiter", api050, lastInteractedAt: ago(12), eventAt: ago(6), unread: true, tabs: [
                         InboxTab(id: "tab-3", type: .claude, title: "Claude Code", status: .working, since: ago(4), activity: "Running Bash", topic: "Bump the API client to v3"),
+                    ]),
+                    task("t-cache", "cache-headers", api050, lastInteractedAt: ago(45), eventAt: ago(40),
+                         branch: "0.5.0--cache-headers",
+                         landing: TaskLanding(state: .blocked, intent: .land, files: ["package.json"], fileCount: 1,
+                                              message: "error: Your local changes to the following files would be overwritten by merge:\n\tpackage.json"),
+                         tabs: [
+                        InboxTab(id: "tab-13", type: .codex, title: "Codex", status: .idle, since: ago(40), topic: "Send cache headers on static files"),
                     ]),
                     task("t-flaky", "flaky-login-test", apiBugs, lastInteractedAt: ago(30), eventAt: ago(30), tabs: [
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),

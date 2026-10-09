@@ -291,10 +291,15 @@ struct ProjectTaskRow: View {
                 Text(task.name)
                     .font(.body.weight(needsYou || task.unread ? .semibold : .regular))
                     .lineLimit(1)
-                Text(TaskText.line(task, now: now))
-                    .font(.footnote)
-                    .foregroundStyle(TaskText.color(task, now: now))
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    if task.status != .attention, let landing = task.landing {
+                        LandingGlyph(landing: landing)
+                    }
+                    Text(TaskText.line(task, now: now))
+                }
+                .font(.footnote)
+                .foregroundStyle(TaskText.color(task, now: now))
+                .lineLimit(1)
             }
             Spacer(minLength: 8)
             if task.lastActivityAt > 0 {

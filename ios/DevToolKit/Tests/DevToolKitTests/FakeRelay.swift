@@ -87,6 +87,7 @@ actor FakeRelay: WebSocketConnector {
         var streamNewParams: [StreamNewParams] = []
         var taskNewParams: [TaskNewParams] = []
         var taskCloseParams: [TaskCloseParams] = []
+        var taskLandParams: [TaskLandParams] = []
         var closedTabs: [String] = []
         var pinSetParams: [PinSetParams] = []
         var taskTriageParams: [TaskTriageParams] = []
@@ -216,8 +217,32 @@ actor FakeRelay: WebSocketConnector {
                         return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
                     }
                     taskCloseParams.append(parsed)
+                    // "w" has a worktree of its own whose landing conflicts (version 3).
+                    if parsed.taskId == "w" {
+                        let landing = TaskLanding(state: .conflict, intent: .close, files: ["a.ts"], fileCount: 1)
+                        return app(.resOk(id: id, result: TaskCloseResult.landing(landing).json), to: from)
+                    }
                     // "t" has a working agent until the phone says to stop it.
                     let result: TaskCloseResult = parsed.stopWorking ? .closed : .blocked(.working)
+                    return app(.resOk(id: id, result: result.json), to: from)
+                }
+                if op == TaskOp.land {
+                    guard features.contains(DesktopFeature.taskLand) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    let parsed: TaskLandParams
+                    do {
+                        parsed = try TaskLandParams.parse(params)
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
+                    taskLandParams.append(parsed)
+                    let result: TaskLandResult
+                    switch parsed.action {
+                    case .fixWithAgent: result = TaskLandResult(status: .fixing, landing: TaskLanding(state: .fixing, files: ["a.ts"], fileCount: 1))
+                    case .abort: result = TaskLandResult(status: .aborted)
+                    case .retry: result = TaskLandResult(status: .landed, closed: true)
+                    }
                     return app(.resOk(id: id, result: result.json), to: from)
                 }
                 if op == TaskOp.setPin {

@@ -125,6 +125,11 @@ enum TaskText {
     static func line(_ task: InboxTask, now: Date) -> String {
         var parts: [String] = []
         if let agent = task.agentTab, agent.type != .claudeChat { parts.append(agent.type.displayName) }
+        // A landing says where it is, as the desktop's row does (§4.4).
+        if let landing = task.landing, task.status != .attention {
+            parts.append(landing.label(streamName: task.streamName))
+            return parts.joined(separator: " · ")
+        }
         switch task.inboxGroup(now: now) {
         case .snoozed:
             parts.append("Snoozed")
@@ -146,7 +151,10 @@ enum TaskText {
 
     /// The colour of that line: the attention colour when it needs you.
     static func color(_ task: InboxTask, now: Date) -> Color {
-        switch task.inboxGroup(now: now) {
+        if let landing = task.landing, task.status != .attention {
+            return landing.needsYou ? .orange : .blue
+        }
+        return switch task.inboxGroup(now: now) {
         case .needsYou: .orange
         case .working: .blue
         default: .secondary

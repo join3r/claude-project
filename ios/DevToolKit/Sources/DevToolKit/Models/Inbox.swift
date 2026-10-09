@@ -232,6 +232,11 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var snoozedUntil: Int64?
     /// Snoozed until the task next needs the user.
     public var snoozeUntilAttention: Bool
+    /// The task's own worktree branch (version 3, §4.4); nil for a task that
+    /// works in its stream's folder. Closing such a task lands it.
+    public var branch: String?
+    /// Present while the task lands into its stream or has stopped doing so (§4.4).
+    public var landing: TaskLanding?
     public var tabs: [InboxTab]
 
     public init(
@@ -240,6 +245,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
         eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil,
         snoozedUntil: Int64? = nil, snoozeUntilAttention: Bool = false,
+        branch: String? = nil, landing: TaskLanding? = nil,
         tabs: [InboxTab]
     ) {
         self.id = id
@@ -256,6 +262,8 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         self.settledAt = settledAt
         self.snoozedUntil = snoozedUntil
         self.snoozeUntilAttention = snoozeUntilAttention
+        self.branch = branch
+        self.landing = landing
         self.tabs = tabs
     }
 
@@ -276,6 +284,8 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         settledAt = try c.decodeIfPresent(Int64.self, forKey: .settledAt)
         snoozedUntil = try c.decodeIfPresent(Int64.self, forKey: .snoozedUntil)
         snoozeUntilAttention = (try? c.decodeIfPresent(Bool.self, forKey: .snoozeUntilAttention)) == true
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        landing = (try? c.decodeIfPresent(TaskLanding.self, forKey: .landing)) ?? nil
         tabs = try c.decodeIfPresent([InboxTab].self, forKey: .tabs) ?? []
         status = try c.decodeIfPresent(TabStatus.self, forKey: .status)
             ?? tabs.map(\.status).max(by: { $0.priority < $1.priority }) ?? .idle

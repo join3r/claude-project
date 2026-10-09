@@ -227,11 +227,21 @@ extension DesktopConnection {
 
     /// `task.close` (§8.7): archive the task. A working agent or unsaved edits
     /// come back as `.blocked` until the phone confirms with the matching flag.
+    /// A task with a worktree of its own lands first; one that doesn't land
+    /// comes back as `.landing` and stays open.
     /// Stopping the task's tabs can take a moment, so this waits longer than
     /// other ops.
     public func closeTask(_ params: TaskCloseParams) async throws -> TaskCloseResult {
         let result = try await request(TaskOp.close, params: params.json, timeout: .seconds(60))
         return try decode(result, TaskCloseResult.parse)
+    }
+
+    /// `task.land` (§8.15): Ask agent to fix, Abort or Retry on a task whose
+    /// landing stopped. A retry can land (and so close) the task, which takes
+    /// git a while, so this waits as long as `closeTask`.
+    public func landTask(_ params: TaskLandParams) async throws -> TaskLandResult {
+        let result = try await request(TaskOp.land, params: params.json, timeout: .seconds(60))
+        return try decode(result, TaskLandResult.parse)
     }
 
     /// `tab.close` (§8.8): close one agent or terminal tab; the task stays.

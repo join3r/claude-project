@@ -253,11 +253,16 @@ struct RootView: View {
                 if let inbox = model.inboxes[AppModel.mockOnlineId] ?? fallback {
                     let tasks = inbox.projects.flatMap(\.tasks)
                     // `taskStatus`: the first terminal agent's task.
+                    let wanted = LaunchOptions.current.demoTask
                     let pick = demoRoute == .taskStatus
                         ? tasks.first { $0.agentTab.map { $0.type.isAgent && $0.type != .claudeChat } ?? false }
-                        : tasks.first
+                        : tasks.first { $0.id == wanted } ?? tasks.first
                     if let task = pick {
                         open(TaskRef(desktopId: inbox.desktop.id, taskId: task.id))
+                        if LaunchOptions.current.demoCloseTask {
+                            try? await Task.sleep(for: .seconds(1))
+                            _ = try? await model.closeTask(desktopId: inbox.desktop.id, TaskCloseParams(taskId: task.id, stopWorking: true))
+                        }
                         return
                     }
                 }

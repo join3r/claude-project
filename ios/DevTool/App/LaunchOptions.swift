@@ -11,6 +11,10 @@ import Foundation
 ///   desktop's first project (or `-demoProject`), with the New stream sheet or
 ///   (on its last stream) the New task sheet up.
 /// - `-demoRoute taskInfo [-demoTab <tabId>]`: as `chat`, with the task info sheet up.
+/// - `-demoRoute task [-demoTask <taskId>] [-demoCloseTask]`: that task's screen
+///   (the first task without `-demoTask`); `-demoCloseTask` then sends it
+///   `task.close`, so a worktree task's landing banner shows (mock: `t-auth`
+///   conflicts, `t-cache` is blocked).
 /// - `-demoRoute chat [-demoTab <tabId>]` (Debug builds): open a claude-chat tab
 ///   (the first one that needs attention when `-demoTab` is absent). Works
 ///   against mock and real desktops. With `-demoToolDetail <itemId>` the item's
@@ -68,6 +72,8 @@ struct LaunchOptions: Sendable {
     var pairLink: String?
     var autoConfirmPairing = false
     var demoTab: String?
+    var demoTask: String?
+    var demoCloseTask = false
     var demoProject: String?
     var demoToolDetail: String?
     var demoChatScript = false
@@ -104,6 +110,8 @@ struct LaunchOptions: Sendable {
             return args[index + 1]
         }
         demoTab = value("-demoTab")
+        demoTask = value("-demoTask")
+        demoCloseTask = args.contains("-demoCloseTask")
         demoProject = value("-demoProject")
         demoToolDetail = value("-demoToolDetail")
         demoChatScript = args.contains("-demoChatScript")
