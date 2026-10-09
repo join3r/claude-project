@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     override init() {
         let options = LaunchOptions.current
         if options.mockDesktop {
-            model = AppModel.mock()
+            model = AppModel.mock(offlineIsServer: options.mockServer)
             // Mock mode keeps its switches apart from the real ones.
             let defaults = UserDefaults(suiteName: "sk.awantech.devtool.mock") ?? .standard
             push = PushManager(live: false, identity: DeviceIdentity.generate(), options: options, defaults: defaults,

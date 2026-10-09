@@ -149,6 +149,9 @@ public struct DesktopHello: Sendable, Equatable {
 
     public var version: VersionInfo { VersionInfo(v: v, min: min) }
 
+    /// A desktop or a DevTool server, from `app` (§4.3).
+    public var hostKind: HostKind { HostKind(app: app) }
+
     /// An unknown `result` throws: the phone can only treat it as a failed handshake.
     public static func parse(_ payload: Data) throws(ProtocolError) -> DesktopHello {
         let f = try Fields(JSONValue.parse(payload), "payload")
@@ -166,6 +169,27 @@ public struct DesktopHello: Sendable, Equatable {
         .object(["v": .int(Int64(v)), "min": .int(Int64(min)), "app": .string(app),
                  "features": .array(features.map(JSONValue.string)), "desktopName": .string(desktopName),
                  "result": .string(result.rawValue)])
+    }
+}
+
+/// What answered the handshake (§4.3): the DevTool desktop app or a headless
+/// DevTool server. Phones pair with both the same way; a server says so in
+/// message 2's `app` (`devtool-server/0.3.2`), a desktop sends `devtool/0.3.2`.
+public enum HostKind: String, Codable, Sendable, Equatable {
+    case desktop
+    case server
+
+    /// The `app` a DevTool server sends, alone or before `/<version>`.
+    public static let serverApp = "devtool-server"
+
+    /// `devtool-server` or `devtool-server/…` is a server; anything else is a desktop.
+    public init(app: String) {
+        self = app == Self.serverApp || app.hasPrefix(Self.serverApp + "/") ? .server : .desktop
+    }
+
+    /// A value this build doesn't know (a newer app wrote it) reads as a desktop.
+    public init(from decoder: any Decoder) throws {
+        self = HostKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .desktop
     }
 }
 

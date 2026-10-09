@@ -68,6 +68,8 @@ public actor RelayDesktopConnection: DesktopConnection {
     private var lastSeen: Date?
     /// `features` of the last desktop hello (§8.1).
     private var features: Set<String> = []
+    /// Desktop or DevTool server, from the last hello's `app` (§4.3).
+    private var hostKind: HostKind = .desktop
 
     /// In-flight `request(_:params:timeout:)` calls by `req` id.
     private var pending: [Int64: PendingRequest] = [:]
@@ -372,6 +374,7 @@ public actor RelayDesktopConnection: DesktopConnection {
         }
         desktopName = hello.desktopName.isEmpty ? desktopName : hello.desktopName
         features = Set(hello.features)
+        hostKind = hello.hostKind
         let negotiation = VersionNegotiation.negotiate(local: AppProtocol.local, remote: hello.version)
 
         switch hello.result {
@@ -421,6 +424,7 @@ public actor RelayDesktopConnection: DesktopConnection {
             continuation.yield(.pairing(.accepted(desktopName: desktopName)))
         }
         lastSeen = Date()
+        continuation.yield(.hostKind(hostKind))
         continuation.yield(.features(features))
         set(.online)
         publishChat(.sessionStarted)

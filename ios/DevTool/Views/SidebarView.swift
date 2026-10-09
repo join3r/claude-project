@@ -44,7 +44,8 @@ struct DesktopRow: View {
     var body: some View {
         let state = model.state(of: desktop.id)
         HStack(spacing: 12) {
-            Image(systemName: "desktopcomputer")
+            // A DevTool server shows its rack where a desktop shows the computer.
+            Image(systemName: desktop.isServer ? "server.rack" : "desktopcomputer")
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .overlay(alignment: .bottomTrailing) {
@@ -54,7 +55,8 @@ struct DesktopRow: View {
                         .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
                         .offset(x: 3, y: 2)
                 }
-                .accessibilityHidden(true)
+                .accessibilityLabel(desktop.isServer ? "Server" : "")
+                .accessibilityHidden(!desktop.isServer)
             VStack(alignment: .leading, spacing: 2) {
                 Text(desktop.name)
                 Text(state.summary(lastSeen: desktop.lastSeen))

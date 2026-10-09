@@ -158,6 +158,7 @@ private struct PairedDesktopRow: View {
                     .fill(model.state(of: desktop.id).dotColor)
                     .frame(width: 8, height: 8)
                 Text(desktop.name)
+                if desktop.isServer { ServerGlyph() }
             }
             Text(detail)
                 .font(.caption)

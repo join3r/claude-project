@@ -102,9 +102,11 @@ struct ChatScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .waiting where model.state == nil:
             VStack(spacing: 16) {
-                OfflineBanner(title: "Desktop", lastSeen: lastSeen)
-                ContentUnavailableView("Waiting for the desktop", systemImage: "desktopcomputer",
-                                       description: Text("The chat opens when \(app.desktop(route.desktopId)?.name ?? "the desktop") is back online."))
+                OfflineBanner(title: app.kindTitle(route.desktopId), lastSeen: lastSeen)
+                let server = app.isServer(route.desktopId)
+                ContentUnavailableView(server ? "Waiting for the server" : "Waiting for the desktop",
+                                       systemImage: server ? "server.rack" : "desktopcomputer",
+                                       description: Text("The chat opens when \(app.desktop(route.desktopId)?.name ?? (server ? "the server" : "the desktop")) is back online."))
             }
             .padding()
         case .failed(let message):
@@ -280,7 +282,7 @@ struct ChatScreen: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if offline {
-                OfflineBanner(title: "Desktop", lastSeen: lastSeen)
+                OfflineBanner(title: app.kindTitle(route.desktopId), lastSeen: lastSeen)
             }
             if model.showingCache {
                 cachedNote
@@ -367,7 +369,7 @@ struct ChatScreen: View {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField(offline ? "Desktop offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message Claude"),
+            TextField(offline ? "\(app.kindTitle(route.desktopId)) offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message Claude"),
                       text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($composerFocused)

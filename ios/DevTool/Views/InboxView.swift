@@ -115,6 +115,7 @@ struct InboxView: View {
                 ProjectCardHeader(
                     group: group,
                     desktopName: model.desktops.count > 1 ? model.desktop(group.desktopId)?.name : nil,
+                    isServer: model.isServer(group.desktopId),
                     now: now
                 )
                 ForEach(group.entries) { entry in
@@ -191,6 +192,7 @@ struct InboxView: View {
             group: group,
             inProject: inProject,
             desktopName: !inProject && model.desktops.count > 1 ? model.desktop(entry.desktopId)?.name : nil,
+            isServer: model.isServer(entry.desktopId),
             now: now
         )
         .tag(ref)
@@ -324,6 +326,8 @@ struct InboxRow: View {
     var inProject = false
     /// Set when more than one desktop is paired.
     let desktopName: String?
+    /// The desktop is a DevTool server: its rack goes by `desktopName`.
+    var isServer = false
     let now: Date
 
     var body: some View {
@@ -351,6 +355,7 @@ struct InboxRow: View {
                         Text(place)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if isServer && desktopName != nil { ServerGlyph() }
                     }
                     Spacer(minLength: 4)
                     ageText
@@ -452,6 +457,8 @@ struct InboxRow: View {
 struct ProjectCardHeader: View {
     let group: InboxProjectGroup
     let desktopName: String?
+    /// The desktop is a DevTool server: its rack goes by `desktopName`.
+    var isServer = false
     let now: Date
 
     var body: some View {
@@ -465,6 +472,7 @@ struct ProjectCardHeader: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if isServer { ServerGlyph() }
             }
             Spacer(minLength: 0)
             if let dot {
