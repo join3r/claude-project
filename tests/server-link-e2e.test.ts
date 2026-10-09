@@ -170,7 +170,9 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const cwd = tempDir()
     let maxBuffered = 0
     const sampler = setInterval(() => { maxBuffered = Math.max(maxBuffered, s.link.socketBuffered()) }, 2)
-    const lines = 300_000
+    // About 4.6 MB: more than loopback socket buffers absorb, so the WebSocket's own
+    // queue (what the server watches) really grows past its high-water mark.
+    const lines = 600_000
     const started = Date.now()
     await d.hub.call(s.id, 'win:1', 'pty-spawn', shTab('flood', cwd, `seq 1 ${lines}; echo flood-done`))
     await waitFor(() => d.ptyText('flood').includes('flood-done'), 'the whole flood', 90_000)
