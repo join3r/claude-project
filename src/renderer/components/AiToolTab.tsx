@@ -16,7 +16,7 @@ import { useApp } from '../context/AppContext'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { AI_TAB_META } from '../../shared/types'
 import type { AiTabType, SshConfig } from '../../shared/types'
-import { buildAiToolArgs, parseExtraArgs } from './aiToolTabUtils'
+import { buildAiToolArgs, parseExtraArgs, pastesFirstPrompt } from './aiToolTabUtils'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../shared/ai-status'
 import { ensureHookListeners, hookStatusCallbacks } from './hookStatusListeners'
 import { takeClaudeHandoff } from './claudeTabHandoff'
@@ -33,6 +33,7 @@ import { noteAgentTabTyped } from '../agentLink/agentTabRecency'
 import { agentTerminalReady, onAgentInsert, showAgentLinkNotice } from '../agentLink/linkToAgent'
 import { initialPromptArgs, takePendingPrompt } from './promptBox'
 import ServerOfflineOverlay, { useServerOnline } from './ServerOfflineOverlay'
+import { useHostPlatform } from '../hostPlatform'
 
 const ENABLE_XTERM_WEBGL = false
 
@@ -178,6 +179,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
   const serverOnline = useServerOnline(serverId)
   const prevServerOnlineRef = useRef(serverOnline)
   const [attachEpoch, setAttachEpoch] = useState(0)
+  const platform = useHostPlatform(serverId)
+  const platformRef = useRef(platform)
+  platformRef.current = platform
   const isClaudeTab = toolType === 'claude'
   const isCodexTab = toolType === 'codex'
   const isPiTab = toolType === 'pi'
@@ -682,8 +686,8 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
             // as an argument, except locally on Windows, where a `.cmd` shim runs under
             // cmd.exe and would reinterpret it; there it is pasted once the TUI is up.
             const first = takePendingPrompt(tabId)
-            // A server is never Windows (step 7 asks the server for its platform).
-            const pasteFirst = !!first && window.api.platform === 'win32' && !sshConfig && !serverId
+            // The agent's host decides: a DevTool server's platform, not this desktop's.
+            const pasteFirst = !!first && pastesFirstPrompt(platformRef.current, sshConfig)
             const args = [
               ...buildAiToolArgs(toolType, parsedExtra, resumeSessionId),
               ...(first ? initialPromptArgs(toolType, first, parsedExtra, !pasteFirst) : [])

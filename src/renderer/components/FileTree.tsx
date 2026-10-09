@@ -4,7 +4,8 @@ import { ChevronRight, Folder, FileText, BookText } from 'lucide-react'
 import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
 import { posixRelativeJoin } from '../../shared/workspace-path'
 import { isNotebookFile } from '../../shared/notebook'
-import { revealInFolderLabel } from '../utils/revealLabel'
+import { revealInFolderLabel, revealInTerminalLabel } from '../utils/revealLabel'
+import { desktopPlatform } from '../hostPlatform'
 
 interface Props {
   projectDir: string
@@ -18,6 +19,10 @@ interface Props {
   onOpenInIde?: (editorId: string) => Promise<string | null>
   /** "Link to agent": insert an `@path` link into the task's agent tab. */
   onLinkToAgent?: (relativePath: string, isDirectory: boolean) => void
+  /** Reveal in Finder: only for folders on this computer (not a DevTool server's). */
+  canReveal?: boolean
+  /** The OS the project's terminals run on (a DevTool server's, or this desktop's). */
+  hostPlatform?: string
 }
 
 type StatusColor = 'var(--color-danger)' | 'var(--color-warn)' | 'var(--color-success)' | undefined
@@ -377,7 +382,9 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
   onRevealInTerminal,
   ideEditors = [],
   onOpenInIde,
-  onLinkToAgent
+  onLinkToAgent,
+  canReveal = true,
+  hostPlatform = desktopPlatform()
 }, ref) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [childrenCache, setChildrenCache] = useState<Record<string, DirectoryEntry[]>>({})
@@ -842,17 +849,19 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
                 </button>
               </>
             )}
-            <button
-              className={menuItemCls}
-              onClick={() => {
-                setMenu(null)
-                window.api.revealInFolder(projectDir, menu.relativePath || undefined, projectId)
-                  .then(() => setActionError(null))
-                  .catch((error: unknown) => setActionError(fileActionErrorMessage(error)))
-              }}
-            >
-              {revealInFolderLabel()}
-            </button>
+            {canReveal && (
+              <button
+                className={menuItemCls}
+                onClick={() => {
+                  setMenu(null)
+                  window.api.revealInFolder(projectDir, menu.relativePath || undefined, projectId)
+                    .then(() => setActionError(null))
+                    .catch((error: unknown) => setActionError(fileActionErrorMessage(error)))
+                }}
+              >
+                {revealInFolderLabel()}
+              </button>
+            )}
             {onRevealInTerminal && (
               <button
                 className={menuItemCls}
@@ -861,7 +870,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
                   onRevealInTerminal(revealDir)
                 }}
               >
-                Reveal in Git Bash
+                {revealInTerminalLabel(hostPlatform)}
               </button>
             )}
             {onOpenInIde && ideEditors.map((editor) => (

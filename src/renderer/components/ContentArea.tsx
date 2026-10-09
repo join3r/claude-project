@@ -441,7 +441,7 @@ export default function ContentArea(): React.ReactElement {
                   />
                 </>
               )}
-              {canShowLocalTabs && (
+              {canShowLocalTabs && featureAvailable(selectedProject, 'local-folder') && (
                 <OpenInIdeButton
                   editors={config?.externalEditors?.editors ?? []}
                   defaultId={config?.externalEditors?.defaultId ?? null}

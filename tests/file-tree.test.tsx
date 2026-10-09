@@ -322,11 +322,35 @@ describe('FileTree', () => {
         gitStatus={null}
         onFileClick={vi.fn()}
         onRevealInTerminal={onReveal}
+        hostPlatform="win32"
       />
     )
     fireEvent.contextMenu(await screen.findByText('src'))
     fireEvent.click(screen.getByText('Reveal in Git Bash'))
     expect(onReveal).toHaveBeenCalledWith('src')
+  })
+
+  it('names the terminal after the host\'s platform, and has no Reveal in Finder for a server\'s folder', async () => {
+    window.api.fbReadDirectory = vi.fn(() =>
+      Promise.resolve([{ name: 'src', type: 'directory' as const, relativePath: 'src' }])
+    )
+    const onReveal = vi.fn()
+    render(
+      <FileTree
+        projectDir="/home/me/app"
+        projectId="srv-p"
+        gitStatus={null}
+        onFileClick={vi.fn()}
+        onRevealInTerminal={onReveal}
+        hostPlatform="linux"
+        canReveal={false}
+      />
+    )
+    fireEvent.contextMenu(await screen.findByText('src'))
+    expect(screen.queryByText(/Reveal in Finder|Show in Explorer|Show in file manager/)).toBeNull()
+    fireEvent.click(screen.getByText('Reveal in Terminal'))
+    expect(onReveal).toHaveBeenCalledWith('src')
+    expect(window.api.fbReadDirectory).toHaveBeenCalledWith('/home/me/app', '', 'srv-p')
   })
 
   it('offers Open in Cursor from the context menu when editors are configured', async () => {
