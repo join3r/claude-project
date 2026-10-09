@@ -1,7 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { atomicWriteFileSync } from '../main/storage'
+import { atomicWriteFileSync } from '../main/atomic-write'
 import { DEFAULT_MOBILE_RELAY_URL, isValidRelayUrl, normalizeRelayUrl } from '../shared/mobile'
 
 /** `<data>/server.json`: what the server needs before any desktop talks to it. */

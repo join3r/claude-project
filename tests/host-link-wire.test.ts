@@ -4,8 +4,6 @@ import { LinkError } from '../src/main/host/link/errors'
 import { buildHello, parseHello, parseReply, encodeHandshakePayload, HOST_LINK_PROLOGUE } from '../src/main/host/link/handshake'
 import { LinkInitiator, answerHandshake } from '../src/main/host/link/secure'
 import { LINK_MAX_MESSAGE, LinkMessageType, decodeLinkMessage, decodeValue, encodeLinkMessage, encodeValue, isLinkMessageByte, type LinkMessage } from '../src/main/host/link/wire'
-import { decodeDevKeys, decodeDevPairCode, encodeDevKeys, encodeDevPairCode } from '../src/main/host/link/dev-pair'
-import { b64uEncode, deviceId, generateEd25519 } from '../protocol/ts/index.ts'
 
 const build = { version: '0.6.0', commit: 'abc', builtAt: '2026-10-09T00:00:00Z', bundleSha: 'f00' }
 
@@ -168,18 +166,5 @@ describe('host link handshake', () => {
     expect(parseHello(utf8Encode(JSON.stringify({ v: 1, min: 1, app: 'devtool-desktop', name: 7 })))).toMatchObject({ name: '', features: [], build: { version: '' } })
     expect(() => parseHello(utf8Encode(JSON.stringify({ v: 1, min: 1, app: 'toaster' })))).toThrow(ProtocolError)
     expect(() => parseReply(utf8Encode(JSON.stringify({ v: 1, min: 1, app: 'devtool-server', result: 'maybe' })))).toThrow(/result/)
-  })
-})
-
-describe('dev pairing codes', () => {
-  it('round-trips keys and codes and checks the id against the key', () => {
-    const x = b64uEncode(generateX25519().pub)
-    const edKey = generateEd25519()
-    const ed = b64uEncode(edKey.pub)
-    expect(decodeDevKeys(encodeDevKeys({ x25519Pub: x, ed25519Pub: ed }))).toEqual({ x25519Pub: x, ed25519Pub: ed })
-    expect(() => decodeDevKeys('nope')).toThrow()
-    const offer = { id: deviceId(edKey.pub), x25519Pub: x, ed25519Pub: ed, name: 'srv', token: b64uEncode(new Uint8Array(32).fill(1)), exp: 123 }
-    expect(decodeDevPairCode(encodeDevPairCode(offer))).toEqual(offer)
-    expect(() => decodeDevPairCode(encodeDevPairCode({ ...offer, id: 'f'.repeat(32) }))).toThrow(/id/)
   })
 })

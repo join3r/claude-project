@@ -164,4 +164,51 @@ describe('ServerHub on a relay from before servers', () => {
       fs.rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('gives the one relay offer to whoever sent it last and tells the one before', () => {
+    const env = setup()
+    env.port.connect('ws://r')
+    env.mobile.connect('ws://r')
+    env.client.setState({ kind: 'online' })
+    let portLost = 0
+    let mobileLost = 0
+    env.port.onOfferTaken(() => portLost++)
+    env.mobile.onOfferTaken!(() => mobileLost++)
+    env.mobile.send({ t: 'offer', tokenHash: 'h1', exp: 1 })
+    env.mobile.send({ t: 'offer', tokenHash: 'h1', exp: 1 })
+    expect([portLost, mobileLost]).toEqual([0, 0])
+    env.port.send({ t: 'offer', tokenHash: 'h2', exp: 1 })
+    expect([portLost, mobileLost]).toEqual([0, 1])
+    env.port.send({ t: 'watch', desktops: [] })
+    env.mobile.send({ t: 'offer', tokenHash: 'h3', exp: 1 })
+    expect([portLost, mobileLost]).toEqual([1, 1])
+  })
+
+  it('hands a pairing hello from an unknown peer to the port that takes them, and nothing else', () => {
+    const client = new FakeClient()
+    const mux = new RelayMux(client)
+    const hellos: string[] = []
+    const frames: string[] = []
+    const port = mux.hostPort((id) => id === SERVER, {
+      frame: (from) => frames.push(from),
+      peer: () => {},
+      error: () => {},
+      pairing: (from, envelope) => hellos.push(`${from}:${envelope[0]}`)
+    })
+    const mobileMessages: RelayServerMessage[] = []
+    const mobile = mux.mobileTransport()
+    mobile.onMessage((m) => mobileMessages.push(m))
+    port.connect('ws://r')
+    mobile.connect('ws://r')
+    client.setState({ kind: 'online' })
+    const stranger = 'c'.repeat(32)
+    client.pushBinary(stranger, new Uint8Array([0x05, 1, 2]))
+    client.push({ t: 'frame', from: stranger, data: b64uEncode(new Uint8Array([0x05, 9])) })
+    // A phone's handshake (0x01) still goes to mobile, and a known server's frames to the link.
+    client.pushBinary(PHONE, new Uint8Array([0x01, 1]))
+    client.pushBinary(SERVER, new Uint8Array([0x05, 1]))
+    expect(hellos).toEqual([`${stranger}:5`, `${stranger}:5`])
+    expect(frames).toEqual([SERVER])
+    expect(mobileMessages).toHaveLength(1)
+  })
 })

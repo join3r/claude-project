@@ -100,24 +100,7 @@ export class AppRuntime {
     servers.onStateChange((state) => this.clients.broadcast('servers-state-changed', state))
     this.host.onConfigChanged(() => servers.relayUrlChanged())
     servers.start()
-    this.devPairServer(servers)
     return servers
-  }
-
-  /**
-   * Dev runs only (protocol/SERVER.md §7): `DEVTOOL_DEV_SERVER_PAIR=1` logs this
-   * desktop's keys for a server's `--dev-pair`; set to the code that server prints,
-   * it pairs with that server.
-   */
-  private devPairServer(servers: ServerHub): void {
-    const value = process.env.DEVTOOL_DEV_SERVER_PAIR?.trim()
-    if (!value || app.isPackaged) return
-    try {
-      this.logDebug(`servers devKeys=${servers.devKeys()}`)
-      if (value.startsWith('devtool-dev-pair:')) servers.devPair(value)
-    } catch (err) {
-      this.logDebug(`servers devPair error=${err instanceof Error ? err.message : String(err)}`)
-    }
   }
 
   /** The updater, for the app menu's "Check for Updates…". */

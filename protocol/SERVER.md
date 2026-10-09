@@ -14,7 +14,7 @@ It builds on the mobile protocol in [SPEC.md](SPEC.md). The relay rules are §3 
 
 ### 2.1 Envelope and Noise
 
-- `frame` bytes are the §4.1 envelope: `0x01` message 1 (desktop to server), `0x02` message 2 (server to desktop), `0x03` transport, `0x04` reset.
+- `frame` bytes are the §4.1 envelope: `0x01` message 1 (desktop to server), `0x02` message 2 (server to desktop), `0x03` transport, `0x04` reset. Pairing adds `0x05` and `0x06` (§7.2).
 - `Noise_IK_25519_AESGCM_SHA256` as in SPEC §4.2, with the prologue `utf8("devtool-server-v1")`. A phone's prologue is `devtool-mobile-v1`, so a handshake meant for one can't be read by the other.
 - The desktop knows the server's static X25519 key from its pairing record and starts every handshake. The server learns the desktop's static key from message 1.
 - A new handshake happens on every (re)connect of either side. Message 1 always replaces the server's existing session for that desktop.
@@ -47,9 +47,9 @@ Rules:
 ## 3. Relay
 
 - A host has one relay socket and one identity (`<configDir>/mobile/identity.json`, plaintext 0600 on a server). The phones and the link share it. `RelayMux` (`src/main/host/link/relay-mux.ts`) routes by peer ID: `frame`, `peer` and `error { to }` about a peer the link owns go to the link, everything else to the mobile service. Errors without `to` go to both.
-- The desktop owns the IDs in `servers.json`. A server owns every peer that is not a phone. There are no phones on a server before step 10, so it answers any unknown desktop with `unknown-device`.
+- The desktop owns the IDs in `servers.json` and the servers it is proving a code to. A `0x05` pairing hello from a peer nobody owns goes to the desktop's hub (§7.3). A server owns every peer that is not a phone. There are no phones on a server before step 10, so it answers any unknown desktop with `unknown-device`.
 - Both ends say `binary: true` in hello and send binary frames (SPEC §3.9). A desktop whose `ready` lacks `binary: true` is on a relay from before servers. It reports "This relay is too old for servers", keeps its phones on JSON and sends no `pair`, `watch` or binary frames.
-- The desktop's socket runs while Mobile is on or any server is paired. It uses the Mobile relay URL setting until step 5 makes it a shared Relay setting. The server's relay URL is in `<data>/server.json`.
+- The desktop's socket runs while Mobile is on, any server is paired, an invite is live or a code is being proven. It uses the Mobile relay URL setting until step 5 makes it a shared Relay setting. The server's relay URL is in `<data>/server.json`.
 - Presence: the desktop sends one `watch` with all its server IDs after every `ready` (SPEC §3.3). It handshakes with each server the relay reports online. A server gets its desktops' presence without asking, and drops a desktop's session on `peer offline`, `peer revoked` or `error offline`.
 - Retries: a handshake has 10 s to get message 2. A failed attempt retries with backoff from 1 s to 30 s while the relay still reports the server online. A session that comes up resets the backoff.
 - Liveness (SPEC §3.10): the client gives up on the relay after 60 s of total silence, or after 180 s while its own sends are still queued (`bufferedAmount > 0`), since a relay that stopped reading a socket also delays its pongs.
@@ -89,6 +89,14 @@ type:u8  headerLength:u32be  header (UTF-8 JSON, headerLength bytes)  payload (t
 - Calls go from the desktop to the server only. A call toward the desktop answers `unsupported`.
 - Error codes (`LinkErrorCode`): `server-offline` (no session, or it ended while the call was pending), `too-large`, `remote-error`, `unsupported`, `refused`, `aborted`, `protocol-error`. A desktop fails a call at once with `server-offline` when the server isn't connected. It never queues calls.
 
+### 5.1 Link-level calls
+
+A few channels are the server's own rather than a host channel. A desktop calls them as the client `hub`, and the server answers them before the registry (`src/main/host/link/link-channels.ts`):
+
+| channel | args | result |
+|---|---|---|
+| `server-pair-code` | none | `{code, expiresAt}`: a device ticket (§7.4) for another desktop, `expiresAt` in epoch ms |
+
 ## 6. Streams
 
 ### 6.1 Messages
@@ -115,15 +123,71 @@ A side serves the kinds in its registry (`StreamKinds`). Later steps add `bundle
 - `sink {delayMs?}`: reads to the end, pausing `delayMs` (at most 1000) after each chunk to play a slow reader. Then it writes `{"bytes":N,"sha256":"<hex>"}` and ends.
 - `source {bytes, seed?}`: writes `bytes` bytes (at most 4 GiB) of `sourceByte(i, seed) = (i*31 + seed + (i >>> 8)) & 0xff`, then ends.
 
-## 7. Dev pairing
+## 7. Pairing
 
-Real pairing (server invites and offers) comes with step 5. Until then a desktop and a server pair by exchanging public keys by hand, while the relay pair goes through the normal code flow (SPEC §3.8):
+A desktop and a server pair with the one-time secret, HKDF and proof of SPEC §2. The side that minted the secret makes the relay `offer` and checks the proof. The side that was handed a ticket joins the offer (`pair`) and proves the secret inside a Noise handshake of its own. The relay only ever sees `SHA-256(relayToken)` and can't compute `pairProof`.
 
-1. The desktop prints its keys as `<x25519Pub>.<ed25519Pub>` (`ServerHub.devKeys()`; a dev run logs them as `servers devKeys=` when `DEVTOOL_DEV_SERVER_PAIR=1`).
-2. The server runs `node main.js --dev-pair <keys> [--name <desktop name>] [--relay <url>]`. It stores the desktop, starts as usual, sends a relay `offer` and prints a code: `devtool-dev-pair:` and base64url JSON `{id, x25519Pub, ed25519Pub, name, token, exp}`.
-3. The desktop takes the code (`ServerHub.devPair(code)`, or `DEVTOOL_DEV_SERVER_PAIR=<code>` in a dev run). It stores the server, sends `pair { to, token }` and handshakes straight away, since frames already route for a pending pair. The server sends `authorize` when the desktop comes online, and the desktop sends `watch` again after its first handshake.
+- **Token flow** (the install one-liner): the desktop mints an `install` ticket and the new server, run by the bootstrap, holds it.
+- **Code flow** (`devtool-server pair`, "Add another device"): the server mints a `device` ticket and a desktop holds it.
 
-The relay offer lasts 15 minutes and is sent again after every reconnect of the server until then.
+Code: `src/main/host/link/pairing.ts`.
+
+### 7.1 Tickets
+
+A ticket is base64url (no padding) of a small binary record:
+
+```
+format:u8 = 1   kind:u8 (1 install, 2 device)
+x25519:32  ed25519:32  secret:32  exp:u32be (unix s)
+relayLength:u8  relay (UTF-8; empty means wss://relay.devtool.awantech.sk)
+nameLength:u8   name (UTF-8, at most 64 bytes, cut on a character boundary)
+```
+
+- The keys and the name are the issuer's. Its device ID is `deviceId(ed25519)` and is not sent.
+- An install ticket's text is `<base64url>.<node version>`, for example `...Q.24.21.0`. `site/install` reads the Node version after the first dot with plain sh, so it can fetch Node before the bootstrap runs. A device ticket has no dot.
+- A decoder rejects another format byte, a length that doesn't add up, a relay that isn't `ws://` or `wss://`, an install ticket without a `d.d.d` Node version, and a ticket of the other kind than the one it takes ("This is an install token for a new server, not a pairing code"). Expiry is a separate check.
+- A ticket lives 15 minutes (the relay's limit on an offer) and works once.
+
+### 7.2 Pairing handshake
+
+- Envelopes: `0x05` carries Noise message 1 (ticket holder to minter) and `0x06` message 2 (minter to holder). They sit next to the link's `0x01` to `0x04` (§2.1) and a phone never sees them.
+- `Noise_IK_25519_AESGCM_SHA256` with the prologue `utf8("devtool-server-pair-v1")`. The holder is the initiator, since the ticket gives it the minter's static key. The handshake opens no session: after message 2 both sides drop its state.
+- Message 1 payload:
+  ```json
+  { "v": 1, "min": 1, "app": "devtool-server" | "devtool-desktop",
+    "proof": "<b64u pairProof>", "ed": "<b64u Ed25519 pub>", "name": "...",
+    "build": { "version", "commit", "builtAt", "bundleSha" },
+    "host": { "os", "arch", "hostname", "node" },  // a server's only
+    "bootstrap": 1 }                                 // a server being installed only
+  ```
+- Message 2 payload: `{ v, min, app, name, build, host?, result: "ok" | "rejected" | "incompatible", reason? }`, with `reason` one of `expired`, `used`, `wrong-secret`, `no-offer`, `bad-key`, `role`.
+- The minter's rules, in order:
+  - `{v, min}` are negotiated first as in SPEC §4.3; no common version answers `incompatible`. These are the pairing handshake's own versions (1 and 1), apart from the link's.
+  - `app` must be the other role (`role`), and `deviceId(ed)` must equal the relay-authenticated sender (`bad-key`).
+  - There must be a live offer (`no-offer`), unexpired (`expired`), and `proof` must equal its `pairProof` in a constant-time compare (`wrong-secret`).
+  - The first correct proof consumes the offer. The same device (same ID and Noise key) proving it again before `exp` is answered `ok` again, in case message 2 was lost. Any other device gets `used`.
+- On `ok` the minter stores the holder: its Noise key is the static key message 1 revealed, its Ed25519 key is `ed`. It sends the relay `authorize { peer, pub: ed }`.
+- A message 1 that doesn't decrypt or parse is dropped without a reply.
+
+### 7.3 Token flow
+
+1. The desktop mints a secret and sends `offer`. Its install ticket names the desktop's relay, its keys, its name and the Node version of the server bundle it carries.
+2. The bootstrap connects as role `server` with its new identity, sends `pair { to: desktopId, token: b64u(relayToken) }` after `ready`, then the `0x05` message 1 with `bootstrap: 1`. A relay `error forbidden` for the desktop means the token was used, expired, or the invite is gone; `error offline` means DevTool isn't on the relay.
+3. The desktop routes a `0x05` from a peer it doesn't know yet to the server hub (the frame's first byte, since a phone's first frame is `0x01`). It checks the proof, stores the server in `servers.json`, sends `authorize`, `watch`es its servers again, answers `0x06 ok`, and starts the link handshake (§2) at once. There is no Accept click.
+4. The bootstrap stores the desktop in `desktops.json` when it reads `ok`, so the link handshake that follows is accepted.
+
+### 7.4 Code flow
+
+1. The server mints a secret, sends `offer` (again after each reconnect until `exp`) and shows a device ticket.
+2. The desktop checks the ticket's expiry and that its relay is the desktop's own. Its socket runs while the pairing lasts. It sends `pair { to: serverId, token }` and the `0x05` message 1, and treats the server's frames as its own while it waits (20 s).
+3. The server checks the proof (§7.2), stores the desktop, sends `authorize` and answers `0x06 ok`.
+4. The desktop stores the server and starts the link handshake.
+
+A desktop already paired with a server asks it for a code with the link call `server-pair-code` (§5.1) for "Add another device".
+
+### 7.5 One offer per host
+
+The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phone QR and its server invite, and by a server's desktop code and (later) phone QR. A host has one invite at a time: whoever sends `offer` last holds it, and the shared socket (`RelayMux`) tells the one before, which drops its invite. Cancelling an invite doesn't withdraw the relay offer. A desktop with no server paired leaves the relay when its invite ends, which drops the offer; otherwise the desktop answers a late pairing hello `no-offer`.
 
 ## 8. Terminal output
 
@@ -144,9 +208,9 @@ The relay offer lasts 15 minutes and is sent again after every reconnect of the 
 | `src/main/host/link/diagnostic-streams.ts` | `echo`, `sink`, `source` |
 | `src/main/host/link/relay-mux.ts`, `relay-transport.ts` | the shared relay socket, and a session's transport over it |
 | `src/main/host/link/peer-store.ts` | `servers.json` and `desktops.json` |
-| `src/main/host/link/dev-pair.ts` | §7 codes |
+| `src/main/host/link/pairing.ts` | §7: tickets, the pairing handshake, offers |
 | `src/main/servers/` | the desktop: `ServerHub`, one `ServerConnection` per server |
 | `src/server/server-link.ts` | the server: responder, one session per desktop, client registration, holds |
 | `src/server/server-config.ts` | `<data>/server.json` |
 
-Tests: `tests/host-link-wire.test.ts` and `tests/host-link-session.test.ts` (loopback), `tests/relay-mux.test.ts`, and `tests/server-link-e2e.test.ts` (desktop, relay and server in one process).
+Tests: `tests/host-link-wire.test.ts` and `tests/host-link-session.test.ts` (loopback), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), and `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay).

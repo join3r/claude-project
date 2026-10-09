@@ -8,7 +8,7 @@ import type { RelayServer } from '../relay/src/server.ts'
 import { sourceBytes } from '../src/main/host/link/diagnostic-streams'
 import type { ServerConnectionKind } from '../src/shared/servers'
 import type { ProjectsData } from '../src/shared/types'
-import { devPair, startTestDesktop, startTestRelay, startTestServer, waitFor, type TestDesktop, type TestServer } from './helpers/host-link'
+import { pairByCode, startTestDesktop, startTestRelay, startTestServer, waitFor, type TestDesktop, type TestServer } from './helpers/host-link'
 import { MobileService } from '../src/main/mobile/mobile-service'
 import { PairingsStore } from '../src/main/mobile/pairings-store'
 import { createNoiseChannelFactory } from '../src/main/mobile/channel'
@@ -74,7 +74,7 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const d = desktop(r.url)
-    await devPair(d, s)
+    await pairByCode(d, s)
     const cwd = tempDir()
     const desktopId = d.identity.get().id
 
@@ -104,7 +104,7 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const d = desktop(r.url)
-    await devPair(d, s)
+    await pairByCode(d, s)
     const { revision, data } = await d.hub.call(s.id, 'win:1', 'load-projects') as { revision: number; data: ProjectsData }
     await d.hub.call(s.id, 'win:2', 'load-config')
     const saved = await d.hub.call(s.id, 'win:2', 'save-projects', [{ baseRevision: revision, data: { ...data, tags: [{ id: 'tag-1', name: 'linked', color: '#123456' }] } }]) as { ok: boolean }
@@ -129,7 +129,7 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const d = desktop(r.url)
-    await devPair(d, s)
+    await pairByCode(d, s)
     const states = trackStates(d, s.id)
 
     const total = 50 * 1024 * 1024
@@ -165,7 +165,7 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay({ hostBytesPerSecond: 1024 * 1024, hostBytesBurst: 256 * 1024 })
     const s = await server(r.url)
     const d = desktop(r.url)
-    await devPair(d, s)
+    await pairByCode(d, s)
     const states = trackStates(d, s.id)
     const cwd = tempDir()
     let maxBuffered = 0
@@ -195,7 +195,7 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const d = desktop(r.url)
-    await devPair(d, s)
+    await pairByCode(d, s)
     const cwd = tempDir()
     const desktopId = d.identity.get().id
     await d.hub.call(s.id, 'win:1', 'pty-spawn', shTab('tab-r', cwd, 'echo before-the-drop; exec cat'))
@@ -224,7 +224,7 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const d = desktop(r.url)
-    await devPair(d, s)
+    await pairByCode(d, s)
     s.link.stop()
     await waitFor(() => d.status(s.id)?.state === 'offline', 'server offline')
     await expect(d.hub.call(s.id, 'win:1', 'load-config')).rejects.toMatchObject({ code: 'server-offline' })
@@ -239,13 +239,13 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const future = desktop(r.url, { version: { v: 3, min: 2 } })
-    await devPair(future, s, 'incompatible')
+    await pairByCode(future, s, 'incompatible')
     expect(future.status(s.id)).toMatchObject({ state: 'incompatible', update: 'server' })
     await expect(future.hub.call(s.id, 'win:1', 'load-config')).rejects.toMatchObject({ code: 'server-offline' })
 
     const newer = await server(r.url, { version: { v: 3, min: 2 } })
     const d = desktop(r.url)
-    await devPair(d, newer, 'incompatible')
+    await pairByCode(d, newer, 'incompatible')
     expect(d.status(newer.id)).toMatchObject({ state: 'incompatible', update: 'desktop' })
     expect(newer.link.connectedDesktops()).toEqual([])
   })
@@ -254,13 +254,13 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const stranger = desktop(r.url)
-    const identity = stranger.identity.get()
-    const { b64uEncode } = await import('../protocol/ts/index.ts')
-    const code = await s.link.offerDevPair({ x25519Pub: b64uEncode(identity.x25519.pub), ed25519Pub: b64uEncode(identity.ed25519.pub) })
-    // The relay will route its frames (it joins the offer), but the server forgets it.
-    s.link.desktops.remove(identity.id)
-    stranger.hub.devPair(code)
-    await waitFor(() => stranger.status(s.id)?.problem === 'unknown-device', 'unknown-device')
+    await pairByCode(stranger, s)
+    // The server forgets it (its record only; the relay pair stays), then the link starts over.
+    s.link.desktops.remove(stranger.identity.get().id)
+    s.link.stop()
+    await waitFor(() => stranger.status(s.id)?.state === 'offline', 'server offline')
+    s.link.start()
+    await waitFor(() => stranger.status(s.id)?.problem === 'unknown-device', 'unknown-device', 15_000)
     expect(stranger.status(s.id)).toMatchObject({ state: 'offline', error: expect.stringMatching(/does not know this desktop/) })
     expect(s.link.connectedDesktops()).toEqual([])
     expect(s.log.some((line) => line.includes('handshake result=unknown-device'))).toBe(true)
@@ -270,7 +270,7 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const r = await relay()
     const s = await server(r.url)
     const d = desktop(r.url)
-    await devPair(d, s)
+    await pairByCode(d, s)
 
     // The desktop's mobile service, on the same relay socket and identity as its servers.
     let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, relayUrl: r.url }

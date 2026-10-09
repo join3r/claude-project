@@ -9,10 +9,6 @@ import { installBrokenPipeUncaughtHandler } from '../main/broken-pipe'
 import { createServerLink, startServerHost, type ServerHost } from './server-host'
 import { consoleError, consoleLog, ensureServerDirs, loadServerManifest, loginShell, passwdShell, serverPaths } from './server-env'
 import { loadServerConfig, saveServerConfig } from './server-config'
-import { decodeDevKeys, type DevKeys } from '../main/host/link/dev-pair'
-
-/** `--dev-pair`'s argument; throws when it isn't `<x25519Pub>.<ed25519Pub>`. */
-export const parseDevKeys = decodeDevKeys
 
 /**
  * The server bundle's second entry (`server.js`), loaded by the launcher
@@ -27,8 +23,6 @@ export interface RunOptions {
 }
 
 export interface DaemonOptions extends RunOptions {
-  /** Dev only: also offer this desktop a pairing and print the code for it (protocol/SERVER.md §7). */
-  devPair?: DevKeys & { name?: string }
   /** Saved to server.json before the link starts. */
   relayUrl?: string
 }
@@ -44,7 +38,7 @@ function describe(err: unknown): string {
  * stops it the way quitting the desktop does. Resolves once it is up; the hook
  * server and the instance lock keep the process alive from then on.
  */
-export async function runDaemon({ bundleDir, devPair, relayUrl }: DaemonOptions): Promise<void> {
+export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise<void> {
   const log = consoleLog
   // As in Electron's main: an exception escaping a callback is logged, and the
   // terminals and chats running in this process live on.
@@ -86,15 +80,6 @@ export async function runDaemon({ bundleDir, devPair, relayUrl }: DaemonOptions)
   link.start()
   log(`ready version=${manifest.version} commit=${manifest.commit} data=${paths.dataDir}`)
   log(`link server=${server.host.identity.get().id} relay=${loadServerConfig(paths.dataDir).relayUrl} desktops=${link.desktops.list().length}`)
-  if (devPair) {
-    link.offerDevPair(devPair).then(
-      (code) => {
-        log('dev pairing: give this code to the desktop (ServerHub.devPair, or DEVTOOL_DEV_SERVER_PAIR in a dev run):')
-        process.stdout.write(`${code}\n`)
-      },
-      (err: unknown) => consoleError(`dev pairing failed: ${describe(err)}`)
-    )
-  }
 
   let stopping = false
   const stop = (signal: string): void => {

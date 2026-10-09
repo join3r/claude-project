@@ -10,7 +10,7 @@ import {
   x25519FromPrivate
 } from '../../../protocol/ts/index.ts'
 import type { KeyPair } from '../../../protocol/ts/index.ts'
-import { atomicWriteFileSync } from '../storage'
+import { atomicWriteFileSync } from '../atomic-write'
 
 /** This desktop's long-term keys (SPEC.md §1). One per config dir. */
 export interface DesktopIdentity {

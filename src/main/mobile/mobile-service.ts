@@ -103,6 +103,11 @@ export interface RelayTransport {
   getState(): RelayTransportState
   onMessage(listener: (message: RelayServerMessage) => void): () => void
   onStateChange(listener: (state: RelayTransportState) => void): () => void
+  /**
+   * The relay keeps one offer per host. When a shared socket's other user (a server
+   * invite) sends its own `offer`, this QR stops working, so the service drops it.
+   */
+  onOfferTaken?(listener: () => void): () => void
 }
 
 /** What a phone's channel asks of the service. */
@@ -607,9 +612,19 @@ export class MobileService {
     this.transport = transport
     this.transportUnsubs = [
       transport.onStateChange((state) => this.handleTransportState(state)),
-      transport.onMessage((message) => this.handleRelayMessage(message))
+      transport.onMessage((message) => this.handleRelayMessage(message)),
+      ...(transport.onOfferTaken ? [transport.onOfferTaken(() => this.offerTaken())] : [])
     ]
     transport.connect(this.deps.getConfig().relayUrl)
+    this.emitState()
+  }
+
+  /** A server invite took the relay's one offer slot: the QR on screen is dead. */
+  private offerTaken(): void {
+    if (!this.invite) return
+    this.log('pairing QR replaced by a server invite')
+    this.inviteGeneration++
+    this.clearInvite()
     this.emitState()
   }
 

@@ -1,6 +1,7 @@
 import { b64uDecode, b64uEncode } from '../../../../protocol/ts/index.ts'
 import type { ClientMessage, ErrorMessage, PeerMessage } from '../../../../protocol/ts/index.ts'
 import type { RelayServerMessage, RelayTransport, RelayTransportState } from '../../mobile/mobile-service'
+import { PairFrame } from './pairing'
 
 /** The relay connection a {@link RelayMux} shares: `RelayClient` in the app, a fake in tests. */
 export interface MuxedRelayClient {
@@ -32,6 +33,8 @@ export interface HostLinkPort {
   bufferedAmount(): number
   onBufferBelow(below: number, fn: () => void): void
   onStateChange(listener: (state: RelayTransportState) => void): () => void
+  /** Another user of the socket sent an `offer`, which replaced this one's at the relay. */
+  onOfferTaken(listener: () => void): () => void
 }
 
 export interface HostLinkHandlers {
@@ -40,11 +43,17 @@ export interface HostLinkHandlers {
   peer(message: PeerMessage): void
   /** Errors about a peer it owns, and every error without a `to`. */
   error(message: ErrorMessage): void
+  /**
+   * A pairing hello (`0x05`, protocol/SERVER.md §7) from a peer no port owns yet:
+   * a new server answering this desktop's invite. Only one port should take these.
+   */
+  pairing?(from: string, envelope: Uint8Array): void
 }
 
 interface Lease {
   wanted: boolean
   url: string | null
+  offerTakenListeners: Set<() => void>
 }
 
 interface HostLease extends Lease {
@@ -76,6 +85,12 @@ export class RelayMux {
   private readonly mobileLeases = new Set<MobileLease>()
   /** The URL of the user that connected last. */
   private url: string | null = null
+  /**
+   * The relay keeps one live offer per host (SPEC.md §3.2), so a phone QR and a
+   * server invite (or, on a server, a desktop code and a phone QR) share it: the
+   * last user to send `offer` holds it, and the one before is told it lost it.
+   */
+  private offerHolder: Lease | null = null
 
   constructor(private readonly client: MuxedRelayClient, private readonly log: (message: string) => void = () => {}) {
     client.onMessage((message) => this.route(message))
@@ -88,7 +103,7 @@ export class RelayMux {
 
   /** What `MobileService` gets from `createTransport()`: one per connect, like the RelayClient it replaces. */
   mobileTransport(): RelayTransport {
-    const lease: MobileLease = { wanted: false, url: null, messageListeners: new Set(), stateListeners: new Set() }
+    const lease: MobileLease = { wanted: false, url: null, offerTakenListeners: new Set(), messageListeners: new Set(), stateListeners: new Set() }
     this.mobileLeases.add(lease)
     return {
       connect: (relayUrl) => this.want(lease, relayUrl),
@@ -96,7 +111,7 @@ export class RelayMux {
         this.release(lease)
         this.mobileLeases.delete(lease)
       },
-      send: (message) => lease.wanted && this.client.send(message),
+      send: (message) => this.send(lease, message),
       getState: () => (lease.wanted ? this.client.getState() : IDLE),
       onMessage: (listener) => {
         lease.messageListeners.add(listener)
@@ -105,26 +120,34 @@ export class RelayMux {
       onStateChange: (listener) => {
         lease.stateListeners.add(listener)
         return () => { lease.stateListeners.delete(listener) }
+      },
+      onOfferTaken: (listener) => {
+        lease.offerTakenListeners.add(listener)
+        return () => { lease.offerTakenListeners.delete(listener) }
       }
     }
   }
 
   /** A host link's port: frames, presence and errors about the peers `owns` claims come here. */
   hostPort(owns: (peerId: string) => boolean, handlers: HostLinkHandlers): HostLinkPort {
-    const lease: HostLease = { wanted: false, url: null, owns, handlers, stateListeners: new Set() }
+    const lease: HostLease = { wanted: false, url: null, owns, handlers, stateListeners: new Set(), offerTakenListeners: new Set() }
     this.hostLeases.add(lease)
     return {
       connect: (relayUrl) => this.want(lease, relayUrl),
       close: () => this.release(lease),
       getState: () => (lease.wanted ? this.client.getState() : IDLE),
       isBinary: () => lease.wanted && this.client.isBinary(),
-      send: (message) => lease.wanted && this.client.send(message),
+      send: (message) => this.send(lease, message),
       sendBinary: (peer, envelope) => lease.wanted && this.client.sendBinary(peer, envelope),
       bufferedAmount: () => this.client.bufferedAmount(),
       onBufferBelow: (below, fn) => this.client.onBufferBelow(below, fn),
       onStateChange: (listener) => {
         lease.stateListeners.add(listener)
         return () => { lease.stateListeners.delete(listener) }
+      },
+      onOfferTaken: (listener) => {
+        lease.offerTakenListeners.add(listener)
+        return () => { lease.offerTakenListeners.delete(listener) }
       }
     }
   }
@@ -146,6 +169,25 @@ export class RelayMux {
     if (!was && before.kind === 'online' && this.client.getState().kind === 'online') {
       for (const listener of lease.stateListeners) listener(this.client.getState())
     }
+  }
+
+  private send(lease: Lease, message: ClientMessage): boolean {
+    if (!lease.wanted) return false
+    const sent = this.client.send(message)
+    if (sent && message.t === 'offer') {
+      const previous = this.offerHolder
+      this.offerHolder = lease
+      if (previous && previous !== lease) {
+        for (const listener of [...previous.offerTakenListeners]) {
+          try {
+            listener()
+          } catch (err) {
+            this.log(`relayMux offerTaken listener error=${err instanceof Error ? err.message : String(err)}`)
+          }
+        }
+      }
+    }
+    return sent
   }
 
   private release(lease: Lease): void {
@@ -171,6 +213,13 @@ export class RelayMux {
     return null
   }
 
+  /** A pairing hello from a peer nobody owns yet goes to the port that takes them. */
+  private pairingOwner(envelope: Uint8Array): HostLease | null {
+    if (envelope[0] !== PairFrame.Hello) return null
+    for (const lease of this.hostLeases) if (lease.wanted && lease.handlers.pairing) return lease
+    return null
+  }
+
   private route(message: RelayServerMessage): void {
     switch (message.t) {
       case 'frame': {
@@ -183,6 +232,11 @@ export class RelayMux {
             return
           }
           if (bytes.length > 0) owner.handlers.frame(message.from, bytes)
+          return
+        }
+        const pairing = this.pairingOwnerOfJson(message.data)
+        if (pairing) {
+          pairing.lease.handlers.pairing!(message.from, pairing.bytes)
           return
         }
         break
@@ -213,10 +267,26 @@ export class RelayMux {
     this.toMobile(message)
   }
 
+  private pairingOwnerOfJson(data: string): { lease: HostLease; bytes: Uint8Array } | null {
+    let bytes: Uint8Array
+    try {
+      bytes = b64uDecode(data)
+    } catch {
+      return null
+    }
+    const lease = bytes.length > 0 ? this.pairingOwner(bytes) : null
+    return lease ? { lease, bytes } : null
+  }
+
   private routeBinary(from: string, envelope: Uint8Array): void {
     const owner = this.ownerOf(from)
     if (owner) {
       owner.handlers.frame(from, envelope)
+      return
+    }
+    const pairing = this.pairingOwner(envelope)
+    if (pairing) {
+      pairing.handlers.pairing!(from, envelope)
       return
     }
     // A phone's frame on a binary socket: the mobile service reads JSON frames.

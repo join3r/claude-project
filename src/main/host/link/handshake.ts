@@ -1,6 +1,7 @@
 import { ProtocolError, utf8Decode, utf8Encode } from '../../../../protocol/ts/index.ts'
 import type { VersionInfo } from '../../../../protocol/ts/index.ts'
 import { HOST_LINK_MIN_VERSION, HOST_LINK_PROTOCOL_VERSION } from './version'
+import type { ServerHostInfo } from '../../../shared/servers'
 
 /** Noise prologue of the desktop↔server link (protocol/SERVER.md §2); never the phones' `devtool-mobile-v1`. */
 export const HOST_LINK_PROLOGUE = 'devtool-server-v1'
@@ -25,6 +26,8 @@ export interface HostLinkHello extends VersionInfo {
   features: string[]
   /** A display name: the desktop's host name, or the server's configured name. */
   name: string
+  /** The server's machine (its reply only). */
+  host?: ServerHostInfo
 }
 
 /**
@@ -41,8 +44,8 @@ export interface HostLinkReply extends HostLinkHello {
 const RESULTS: readonly string[] = ['ok', 'incompatible', 'unknown-device']
 const APPS: readonly string[] = ['devtool-desktop', 'devtool-server']
 
-export function buildHello(app: HostLinkApp, build: LinkBuild, name: string, features: string[] = []): HostLinkHello {
-  return { v: HOST_LINK_PROTOCOL_VERSION, min: HOST_LINK_MIN_VERSION, app, build, features, name }
+export function buildHello(app: HostLinkApp, build: LinkBuild, name: string, features: string[] = [], host?: ServerHostInfo): HostLinkHello {
+  return { v: HOST_LINK_PROTOCOL_VERSION, min: HOST_LINK_MIN_VERSION, app, build, features, name, ...(host ? { host } : {}) }
 }
 
 export function encodeHandshakePayload(payload: HostLinkHello | HostLinkReply): Uint8Array {
@@ -67,6 +70,15 @@ function text(o: Obj, key: string, max: number): string {
   return typeof value === 'string' ? value.slice(0, max) : ''
 }
 
+/** A `host` object from a hello or pairing payload; undefined when it names no OS. */
+export function parseHostInfo(value: unknown): ServerHostInfo | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const h = value as Obj
+  const os = text(h, 'os', 32)
+  if (!os) return undefined
+  return { os, arch: text(h, 'arch', 32), hostname: text(h, 'hostname', 255), node: text(h, 'node', 32) }
+}
+
 /**
  * Only `{v, min}`: read first, so a peer whose payload has a future shape still
  * gets a clean `incompatible` (as phones do, SPEC.md §4.3).
@@ -85,6 +97,7 @@ export function parseHello(bytes: Uint8Array): HostLinkHello {
   const app = o.app
   if (typeof app !== 'string' || !APPS.includes(app)) throw new ProtocolError('app must be devtool-desktop or devtool-server')
   const build = typeof o.build === 'object' && o.build !== null ? (o.build as Obj) : {}
+  const host = parseHostInfo(o.host)
   return {
     ...version,
     app: app as HostLinkApp,
@@ -95,7 +108,8 @@ export function parseHello(bytes: Uint8Array): HostLinkHello {
       bundleSha: text(build, 'bundleSha', 128)
     },
     features: Array.isArray(o.features) ? o.features.filter((f): f is string => typeof f === 'string').slice(0, 64) : [],
-    name: text(o, 'name', 100)
+    name: text(o, 'name', 100),
+    ...(host ? { host } : {})
   }
 }
 

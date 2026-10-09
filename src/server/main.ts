@@ -16,13 +16,11 @@ import { loadServerManifest } from './server-env'
 const MIN_NODE_MAJOR = 24
 const USAGE = [
   'usage: node main.js [--check | --version]',
-  '       node main.js --dev-pair <desktop x25519Pub>.<ed25519Pub> [--name <desktop name>] [--relay <url>]'
+  '       node main.js --relay <url>'
 ].join('\n')
 
 interface ParsedArgs {
   mode: 'run' | 'check' | 'version' | 'help'
-  devPair?: string
-  name?: string
   relay?: string
 }
 
@@ -37,13 +35,11 @@ function parseArgs(argv: string[]): ParsedArgs | null {
     const value = argv[i + 1]
     if (value === undefined || value.startsWith('--')) return null
     switch (argv[i]) {
-      case '--dev-pair': parsed.devPair = value; break
-      case '--name': parsed.name = value; break
       case '--relay': parsed.relay = value; break
       default: return null
     }
   }
-  return parsed.devPair || parsed.relay ? parsed : null
+  return parsed.relay ? parsed : null
 }
 
 function fail(message: string, code = 1): void {
@@ -82,15 +78,7 @@ async function main(argv: string[]): Promise<void> {
     // Nothing of the check may keep the process up.
     process.exit(result.ok ? 0 : 1)
   }
-  let devPair: { x25519Pub: string; ed25519Pub: string; name?: string } | undefined
-  if (args.devPair) {
-    try {
-      devPair = { ...server.parseDevKeys(args.devPair), ...(args.name ? { name: args.name } : {}) }
-    } catch (err) {
-      return fail(`--dev-pair: ${err instanceof Error ? err.message : String(err)}`, 2)
-    }
-  }
-  await server.runDaemon({ bundleDir, devPair, relayUrl: args.relay })
+  await server.runDaemon({ bundleDir, relayUrl: args.relay })
 }
 
 main(process.argv.slice(2)).catch((err: unknown) => {

@@ -1,7 +1,6 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { b64uEncode } from '../../protocol/ts/index.ts'
 import type { VersionInfo } from '../../protocol/ts/index.ts'
 import { startRelayServer, type RelayServer } from '../../relay/src/server.ts'
 import type { RelayLimits } from '../../relay/src/relay.ts'
@@ -132,11 +131,14 @@ export async function startTestServer(relayUrl: string, overrides: Partial<Serve
   }
 }
 
-/** The dev pairing (protocol/SERVER.md §7) end to end: offer, pair, authorize. Resolves once the desktop's link is up. */
-export async function devPair(desktop: TestDesktop, server: TestServer, expect: ServerStatus['state'] = 'online'): Promise<void> {
-  const identity = desktop.identity.get()
-  const code = await server.link.offerDevPair({ x25519Pub: b64uEncode(identity.x25519.pub), ed25519Pub: b64uEncode(identity.ed25519.pub), name: 'test-mac' })
-  desktop.hub.devPair(code)
+/**
+ * The code flow (protocol/SERVER.md §7.3) end to end: the server mints a code, the
+ * desktop proves it, both store each other. Resolves once the desktop's link is in
+ * `expect`.
+ */
+export async function pairByCode(desktop: TestDesktop, server: TestServer, expect: ServerStatus['state'] = 'online'): Promise<void> {
+  const { code } = await server.link.createPairingCode()
+  await desktop.hub.pairWithCode(code)
   await waitFor(() => desktop.status(server.id)?.state === expect, `server ${expect}`, 10_000)
 }
 

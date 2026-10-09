@@ -5,6 +5,7 @@ import type { HostEnv } from '../main/host/host-env'
 import type { ImageCodec } from '../main/mobile/chat-image'
 import type { SecretEncryptor } from '../main/mobile/identity'
 import type { PowerSaveApi } from '../main/sleep-blocker'
+import type { ServerHostInfo } from '../shared/servers'
 
 /** Where a server keeps everything: `$DEVTOOL_SERVER_HOME`, by default `~/.devtool-server`. */
 export interface ServerPaths {
@@ -161,4 +162,9 @@ export function passwdShell(): string | null {
   } catch {
     return null
   }
+}
+
+/** What a server says about its machine in its handshake and pairing hello. */
+export function serverHostInfo(): ServerHostInfo {
+  return { os: process.platform, arch: process.arch, hostname: os.hostname().replace(/\.local$/, ''), node: process.versions.node }
 }

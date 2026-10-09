@@ -2,8 +2,9 @@ import { HostServices } from '../main/host/host-services'
 import { ClientRegistry } from './client-registry'
 import { loadServerConfig, serverDisplayName } from './server-config'
 import { ServerLink, type ServerLinkOptions } from './server-link'
+import { LinkChannel } from '../main/host/link/link-channels'
 import { ProcessPowerSave } from './power-save'
-import { createServerHostEnv, ensureServerDirs, type ServerHostEnv, type ServerManifest, type ServerPaths } from './server-env'
+import { createServerHostEnv, ensureServerDirs, serverHostInfo, type ServerHostEnv, type ServerManifest, type ServerPaths } from './server-env'
 import type { PowerSaveApi } from '../main/sleep-blocker'
 
 export interface ServerHostOptions {
@@ -73,7 +74,7 @@ export async function startServerHost(options: ServerHostOptions): Promise<Serve
 export function createServerLink(server: ServerHost, overrides: Partial<ServerLinkOptions> = {}): ServerLink {
   const dataDir = server.env.paths.dataDir
   const { manifest } = server.env
-  return new ServerLink({
+  const link: ServerLink = new ServerLink({
     relay: server.host.relay,
     identity: server.host.identity,
     registry: server.clients,
@@ -81,8 +82,17 @@ export function createServerLink(server: ServerHost, overrides: Partial<ServerLi
     dataDir,
     relayUrl: () => loadServerConfig(dataDir).relayUrl,
     name: () => serverDisplayName(loadServerConfig(dataDir)),
-    build: { version: manifest.version, commit: manifest.commit, builtAt: manifest.builtAt, bundleSha: manifest.sha256 },
+    build: () => ({ version: manifest.version, commit: manifest.commit, builtAt: manifest.builtAt, bundleSha: manifest.sha256 }),
+    host: serverHostInfo,
     log: server.env.log,
+    linkCall: (call) => (call.ch === LinkChannel.PairCode ? pairCodeForDesktop(link) : undefined),
     ...overrides
   })
+  return link
+}
+
+/** `server-pair-code`: a code for another desktop ("Add another device"). */
+export async function pairCodeForDesktop(link: ServerLink): Promise<{ code: string; expiresAt: number }> {
+  const state = await link.createPairingCode()
+  return { code: state.code, expiresAt: state.exp * 1000 }
 }

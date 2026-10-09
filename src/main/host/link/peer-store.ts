@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { atomicWriteFileSync } from '../../storage'
-import type { ServerBuildInfo } from '../../../shared/servers'
+import { atomicWriteFileSync } from '../../atomic-write'
+import type { ServerBuildInfo, ServerHostInfo } from '../../../shared/servers'
 
 /**
  * One paired peer of the host link: a server (on a desktop) or a desktop (on a
@@ -19,6 +19,8 @@ export interface PeerRecord {
   lastSeen: number | null
   /** What its last handshake said about its build. */
   build?: ServerBuildInfo
+  /** A server's machine, from its pairing or last handshake. */
+  host?: ServerHostInfo
 }
 
 const B64U_32 = /^[A-Za-z0-9_-]{43}$/
@@ -33,6 +35,12 @@ function isRecord(value: unknown): value is PeerRecord {
     && typeof r.ed25519Pub === 'string' && B64U_32.test(r.ed25519Pub)
     && typeof r.pairedAt === 'number' && Number.isFinite(r.pairedAt)
     && (r.lastSeen === null || r.lastSeen === undefined || (typeof r.lastSeen === 'number' && Number.isFinite(r.lastSeen)))
+}
+
+function isHost(value: unknown): value is ServerHostInfo {
+  if (typeof value !== 'object' || value === null) return false
+  const h = value as Record<string, unknown>
+  return ['os', 'arch', 'hostname', 'node'].every((key) => typeof h[key] === 'string')
 }
 
 function isBuild(value: unknown): value is ServerBuildInfo {
@@ -95,6 +103,18 @@ export class PeerStore {
     this.update(id, { build: { ...build } })
   }
 
+  setHost(id: string, host: ServerHostInfo): void {
+    const current = this.records.find((r) => r.id === id)
+    if (!current || JSON.stringify(current.host) === JSON.stringify(host)) return
+    this.update(id, { host: { ...host } })
+  }
+
+  rename(id: string, name: string): boolean {
+    if (!this.has(id)) return false
+    this.update(id, { name })
+    return true
+  }
+
   private update(id: string, patch: Partial<PeerRecord>): void {
     this.records = this.records.map((r) => (r.id === id ? { ...r, ...patch } : r))
     this.persist()
@@ -113,8 +133,8 @@ export class PeerStore {
       const parsed = JSON.parse(raw) as unknown
       if (!Array.isArray(parsed)) throw new Error('top-level JSON value is not an array')
       return parsed.filter(isRecord).map((r) => {
-        const { build, ...rest } = r
-        return { ...rest, lastSeen: r.lastSeen ?? null, ...(isBuild(build) ? { build } : {}) }
+        const { build, host, ...rest } = r
+        return { ...rest, lastSeen: r.lastSeen ?? null, ...(isBuild(build) ? { build } : {}), ...(isHost(host) ? { host } : {}) }
       })
     } catch (err) {
       this.log(`peerStore file=${this.file} corrupt error=${String(err)}`)
