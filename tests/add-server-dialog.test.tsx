@@ -211,9 +211,16 @@ describe('Add server dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Install over SSH…' }))
     expect(screen.getByTestId('ssh-panel')).toBeTruthy()
     expect(screen.getByText('Answer any ssh questions in the terminal above.')).toBeTruthy()
+    // Going back to the command keeps the panel (and a running ssh) mounted, out of sight.
+    fireEvent.click(screen.getByRole('button', { name: 'Back to the command' }))
+    expect(screen.getByTestId('ssh-panel').parentElement?.className).toBe('hidden')
+    expect(screen.getByTestId('install-command')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Install over SSH…' }))
+    expect(screen.getByTestId('ssh-panel').parentElement?.className).toBe('contents')
     push(waiting({ invite: { ...waiting().invite!, status: 'paired', serverId: ID }, servers: [server({ state: 'online' })] }))
     // Connected, but the installer may still be printing: stay until "Set up".
     expect(screen.getByTestId('ssh-panel')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Back to the command' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Set up box' }))
     expect(screen.getByRole('heading', { name: 'Set up box' })).toBeTruthy()
   })

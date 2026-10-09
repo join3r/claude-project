@@ -44,6 +44,7 @@ export default function AddServerDialog({ sshTargets, existingDirectories, onAdd
   const [added, setAdded] = useState(0)
   /** Install over SSH stays on screen once connected, until "Set up" (the installer may still be printing). */
   const [setupNow, setSetupNow] = useState(false)
+  const [sshOpened, setSshOpened] = useState(false)
   const now = useNow(true)
 
   const newInvite = (): void => {
@@ -127,9 +128,9 @@ export default function AddServerDialog({ sshTargets, existingDirectories, onAdd
   const footer = (
     <>
       <span className="mr-auto flex items-center gap-3">
-        {view !== 'command' && <LinkBtn onClick={() => setView('command')}>Back to the command</LinkBtn>}
+        {view !== 'command' && !paired && <LinkBtn onClick={() => setView('command')}>Back to the command</LinkBtn>}
         {view !== 'code' && !paired && <LinkBtn onClick={() => setView('code')}>I have a code</LinkBtn>}
-        {view !== 'ssh' && !paired && <LinkBtn onClick={() => setView('ssh')}>Install over SSH…</LinkBtn>}
+        {view !== 'ssh' && !paired && <LinkBtn onClick={() => { setSshOpened(true); setView('ssh') }}>Install over SSH…</LinkBtn>}
       </span>
       {connected && progress.server
         ? <PrimaryButton onClick={() => setSetupNow(true)}>Set up {progress.server.name}</PrimaryButton>
@@ -139,9 +140,13 @@ export default function AddServerDialog({ sshTargets, existingDirectories, onAdd
 
   return (
     <Modal title="Add server" onClose={onClose} width="w-[560px]" footer={footer}>
-      {view === 'ssh' ? (
-        <SshInstallPanel known={sshTargets} connected={connected} status={status} />
-      ) : view === 'code' && !paired ? (
+      {/* Kept mounted once opened: leaving the view must not stop a running ssh. */}
+      {sshOpened && (
+        <div className={view === 'ssh' ? 'contents' : 'hidden'}>
+          <SshInstallPanel known={sshTargets} connected={connected} status={view === 'ssh' ? status : null} />
+        </div>
+      )}
+      {view === 'ssh' ? null : view === 'code' && !paired ? (
         <CodeForm onPaired={(id) => { setServerId(id); setView('command') }} />
       ) : (
         <>
