@@ -43,6 +43,7 @@ import { readPermissionSettings, updatePermissionRule } from '../claude-chat/per
 import { registerFileBrowserHandlers } from '../ipc/file-browser'
 import { registerGitHandlers } from '../ipc/git'
 import { registerNotebookHandlers } from '../ipc/notebooks'
+import { registerHostFsHandlers } from '../ipc/host-fs'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../../shared/archive'
 import {
@@ -881,6 +882,10 @@ export class HostServices {
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
     registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
+    registerHostFsHandlers(ipc, {
+      send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
+      env: () => getShellEnv()
+    })
   }
 
   /**

@@ -1,6 +1,9 @@
 /** Small presentational pieces and status helpers shared by the sidebar tree. */
 import React, { useState } from 'react'
+import { Server } from 'lucide-react'
 import type { Project, Task } from '../../../shared/types'
+import type { ServerConnectionKind } from '../../../shared/servers'
+import { serverName, useServersState } from '../../serversState'
 import { landingStatusLabel } from '../../../shared/inbox-state'
 import { useLandingOp, useStreamAhead } from '../../taskLanding'
 import { projectSwatch, projectTile } from '../../../shared/project-label'
@@ -103,6 +106,41 @@ function ProjectIcon({
           {tile.text}
         </span>
       )}
+    </span>
+  )
+}
+
+const SERVER_DOT: Record<ServerConnectionKind, string> = {
+  online: 'bg-success',
+  connecting: 'bg-warn',
+  offline: 'bg-status-exited',
+  incompatible: 'bg-danger'
+}
+
+const SERVER_STATE_LABEL: Record<ServerConnectionKind, string> = {
+  online: 'online',
+  connecting: 'connecting',
+  offline: 'offline',
+  incompatible: 'needs an update'
+}
+
+/**
+ * Where a DevTool server's project lives: a server glyph, the server's name and
+ * its connection dot. Quiet, like the row's other trailing marks.
+ */
+export function ServerBadge({ serverId }: { serverId: string }): React.ReactElement {
+  const state = useServersState()
+  const kind = state.servers.find(s => s.id === serverId)?.state ?? 'offline'
+  const name = serverName(serverId, state)
+  return (
+    <span
+      className="flex items-center gap-1 min-w-0 shrink-[4] text-2xs text-text-subtle font-normal"
+      title={`On ${name} (${SERVER_STATE_LABEL[kind]})`}
+      data-testid="server-badge"
+    >
+      <Server size={10} className="shrink-0" aria-hidden />
+      <span className="truncate max-w-[72px]">{name}</span>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${SERVER_DOT[kind]}`} aria-label={SERVER_STATE_LABEL[kind]} />
     </span>
   )
 }

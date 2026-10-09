@@ -38,6 +38,11 @@ export interface ProjectsActions {
     tagIds?: string[]
   ) => Project
   addShellCommandProject: (name: string, command: string, tagIds?: string[]) => Project
+  /**
+   * Projects on a DevTool server (`host`): one write, saved to that server and
+   * listed in this desktop's order. The first one is selected.
+   */
+  addServerProjects: (serverId: string, items: Array<{ name: string; directory: string }>) => Project[]
   connectSsh: ConnectSsh
   getProjectDir: (project: Project) => string
   removeProject: (id: string) => Promise<void>
@@ -115,6 +120,17 @@ export function useProjects(
     connectSsh(project.id, sshConfig).catch(() => {})
     return project
   }, [connectSsh, includePendingTags, mutateProjects, selectProject])
+
+  const addServerProjects = useCallback((serverId: string, items: Array<{ name: string; directory: string }>) => {
+    const created: Project[] = items.map(({ name, directory }) => {
+      const id = uuid()
+      return { id, name, directory, host: serverId, streams: [createMainStream(id)] }
+    })
+    if (created.length === 0) return created
+    mutateProjects(prev => created.reduce((data, project) => appendProject(data, project), prev))
+    selectProject(created[0].id)
+    return created
+  }, [mutateProjects, selectProject])
 
   const addShellCommandProject = useCallback((name: string, command: string, tagIds?: string[]) => {
     const id = uuid()
@@ -217,6 +233,7 @@ export function useProjects(
     addProject,
     addRemoteProject,
     addShellCommandProject,
+    addServerProjects,
     connectSsh,
     getProjectDir,
     removeProject,

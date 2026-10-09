@@ -41,6 +41,7 @@ import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
 import type { ServersState } from '../shared/servers'
 import type { ProjectsSources, ProjectsUpdate, SourceSaveResult } from '../shared/projects-sources'
+import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shared/host-fs'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
@@ -548,6 +549,18 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, state: MobileState) => callback(state)
     ipcRenderer.on('mobile-state-changed', handler)
     return () => ipcRenderer.removeListener('mobile-state-changed', handler)
+  },
+  // Adding a project to a host (`host`: 'local' or a server id): its folders, its git repos, a clone.
+  serverListDirs: (host: string, dir: string, options?: { showHidden?: boolean }): Promise<HostDirListing> =>
+    ipcRenderer.invoke('server-list-dirs', host, dir, options),
+  serverDiscoverRepos: (host: string, options?: { root?: string; maxDepth?: number }): Promise<HostRepoDiscovery> =>
+    ipcRenderer.invoke('server-discover-repos', host, options),
+  serverCloneRepo: (host: string, request: { url: string; parentDir?: string; name?: string; opId: string }): Promise<HostCloneResult> =>
+    ipcRenderer.invoke('server-clone-repo', host, request),
+  onServerCloneProgress: (callback: (opId: string, line: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, opId: string, line: string) => callback(opId, line)
+    ipcRenderer.on('server-clone-progress', handler)
+    return () => ipcRenderer.removeListener('server-clone-progress', handler)
   },
   // DevTool servers. Main owns the state; every change is also broadcast.
   serversGetState: (): Promise<ServersState> => ipcRenderer.invoke('servers-get-state'),

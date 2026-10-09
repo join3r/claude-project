@@ -178,8 +178,12 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-update-from-stream': project0,
   'task-stream-ahead': project0,
   'task-landing-preview': project0,
-  'task-worktree-close': project0
+  'task-worktree-close': project0,
 
+  // adding a server project (ipc/host-fs.ts): the first argument names the host
+  'server-list-dirs': { by: [{ host: 0 }] },
+  'server-discover-repos': { by: [{ host: 0 }] },
+  'server-clone-repo': { by: [{ host: 0 }] }
 }
 
 /**
@@ -208,6 +212,7 @@ export const SERVER_EVENTS: Readonly<Record<string, 'forward' | 'projects' | 'dr
   'task-worktree-state': 'forward',
   'task-landing-state': 'forward',
   'notebook-kernel-event': 'forward',
+  'server-clone-progress': 'forward',
   'config-updated': 'drop',
   'notes-updated': 'drop',
   'mobile-state-changed': 'drop',

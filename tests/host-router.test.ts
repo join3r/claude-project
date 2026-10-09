@@ -216,10 +216,14 @@ describe('HostRouter', () => {
     expect(t.calls.length).toBe(before)
   })
 
-  it('lets the desktop answer load-projects and save a server\'s slice by the host argument', async () => {
+  it('routes by the host argument, and lets the desktop answer load-projects and save a server\'s slice', async () => {
     const t = setup()
+    t.register('server-list-dirs')
     t.register('load-projects', 'handle', { local: { revision: 1 } })
     t.register('save-projects')
+    await t.invoke('server-list-dirs', ['srvA', '~', undefined])
+    expect(t.calls.at(-1)).toMatchObject({ serverId: 'srvA', ch: 'server-list-dirs' })
+    expect(await t.invoke('server-list-dirs', ['local', '~', undefined])).toBe('local-answer')
     expect(await t.invoke('load-projects', [])).toEqual({ local: { revision: 1 }, srvA: { revision: 9 } })
     expect(await t.invoke('save-projects', ['srvA', { baseRevision: 1 }])).toEqual({ custom: 'srvA', clientId: 'win:1', payload: { baseRevision: 1 } })
     expect(await t.invoke('save-projects', ['local', { baseRevision: 1 }])).toBe('local-answer')

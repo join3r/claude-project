@@ -6,6 +6,8 @@ import type { Task, Project, PinnedItem, PendingWorktreeSetup, Stream } from '..
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
+import AddServerProject from './servers/AddServerProject'
+import { useServersState } from '../serversState'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
@@ -32,6 +34,7 @@ import {
   TASK_ROW_PL,
   LandingBadges,
   ProjectIconSlot,
+  ServerBadge,
   SidebarTabButton,
   StateDot,
   TreeChevron,
@@ -73,7 +76,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId,
     switchToTask, selectProjectHome, showArchived,
-    addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
+    addProject, addRemoteProject, addShellCommandProject, addServerProjects, addTag, renameProject, updateProject,
     addTask, addTaskInDirectory, addStream, renameTask,
     moveTask, renameStream, reopenTask, reopenStream, deleteArchived,
     reorderProjects, getProjectDir,
@@ -157,6 +160,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
+  const [serverProjectOpen, setServerProjectOpen] = useState(false)
+  const serversState = useServersState()
+  const pairedServers = serversState.servers
+  /** A DevTool server's project whose server isn't online: listed greyed out, from the cache. */
+  const isUnreachable = (project: Project): boolean =>
+    !!project.host && pairedServers.find(s => s.id === project.host)?.state !== 'online'
+  const serverDirectories = useCallback((serverId: string): ReadonlySet<string> =>
+    new Set(projects.filter(p => p.host === serverId).map(p => p.directory)), [projects])
   const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
   const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null)
   const [iconMetadata, setIconMetadata] = useState<DashboardIconsMetadata | null>(null)
@@ -723,8 +734,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       && !projectTasks(project).some(t => t.id === selectedTaskId)
     const isProjectSelected = selectedProjectId === project.id && (!isExpanded || isHomeSelected)
     const isProjectDragging = dragState?.type === 'project' && dragState.id === project.id
+    const unreachable = isUnreachable(project)
     return (
-    <div className="sidebar-project" key={project.id} data-project-id={project.id}>
+    <div
+      className={`sidebar-project${unreachable ? ' opacity-55' : ''}`}
+      key={project.id}
+      data-project-id={project.id}
+      data-server-offline={unreachable ? 'true' : undefined}
+    >
       <div
         className={[
           'group flex items-center gap-2 mx-1.5 px-2.5 h-[26px] rounded-md text-base text-text cursor-pointer',
@@ -764,6 +781,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             </button>
             <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} show={showIcons} />
             <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
+            {project.host && <ServerBadge serverId={project.host} />}
             <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {!isExpanded && <StateDot state={rollUpState(projectTasks(project).map(stateOf))} hideOnHover />}
               <RowActions>
@@ -880,7 +898,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           )}
           <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} show={showIcons} />
           {isProjectPin ? (
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
+            <>
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
+              {project.host && <ServerBadge serverId={project.host} />}
+            </>
           ) : (
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">
               <span className="font-semibold">{project.name}</span>
@@ -991,6 +1012,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 <div className="border-t border-hair mt-1 pt-1">
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
+                  {pairedServers.length > 0 && (
+                    <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setServerProjectOpen(true) }}>Server project…</button>
+                  )}
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
                 </div>
               </div>
@@ -1083,6 +1107,20 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             setRemoteModalOpen(false)
           }}
           onCancel={() => setRemoteModalOpen(false)}
+        />
+      )}
+
+      {serverProjectOpen && pairedServers.length > 0 && (
+        <AddServerProject
+          servers={pairedServers}
+          existingDirectories={serverDirectories}
+          onAdd={(serverId, items) => {
+            const created = addServerProjects(serverId, items)
+            setServerProjectOpen(false)
+            setSidebarTab('projects')
+            if (created[0]) setProjectExpanded(created[0].id, true)
+          }}
+          onClose={() => setServerProjectOpen(false)}
         />
       )}
 

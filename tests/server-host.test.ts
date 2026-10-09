@@ -189,6 +189,14 @@ describe.skipIf(process.platform === 'win32')('server host (in process)', () => 
     await server.clients.call(a.id, 'pty-kill', [tabId])
   })
 
+  it('lists its folders and finds its repos for a desktop adding a project', async () => {
+    const listing = await server.clients.call(a.id, 'server-list-dirs', ['ignored-host-id', projectDir, {}]) as { path: string; entries: unknown[] }
+    expect(listing.path).toBe(projectDir)
+    fs.mkdirSync(path.join(projectDir, 'repo', '.git'), { recursive: true })
+    const found = await server.clients.call(a.id, 'server-discover-repos', ['ignored-host-id', { root: projectDir }]) as { repos: Array<{ name: string }> }
+    expect(found.repos.map(r => r.name)).toEqual(['repo'])
+  })
+
   it('runs a chat tab against the configured claude', async () => {
     const fakeClaude = path.resolve('tests/helpers/fake-claude.mjs')
     await server.clients.call(a.id, 'save-config', [{ claudeCommand: fakeClaude }])
