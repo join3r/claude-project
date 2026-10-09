@@ -76,11 +76,13 @@ describe('TaskLandingBanner', () => {
     expect(app.addTab).toHaveBeenCalledWith('p1', 't1', 'focused', 'terminal', { cwd: '/repo/.worktrees/0.5.0--fix' })
   })
 
-  it('a retried close that lands archives the task', async () => {
+  it('a retried close that lands leaves the archiving to main', async () => {
     mount({ state: 'conflict', intent: 'close', files: ['a.txt'] })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })) })
     expect(api.taskLandingRetry).toHaveBeenCalledWith('p1', 't1')
-    expect(app.archiveTask).toHaveBeenCalledWith('p1', 't1', { dirtyChecked: true })
+    // Main archived it as the landing closed it; no result line for a task that is gone.
+    expect(app.archiveTask).not.toHaveBeenCalled()
+    expect(screen.queryByText('Landed into 0.5.0.')).toBeNull()
   })
 
   it('a retried Land shows the result instead', async () => {

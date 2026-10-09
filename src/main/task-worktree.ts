@@ -1,3 +1,4 @@
+import fs from 'fs'
 import type {
   EnsureTaskWorktreeOptions,
   PendingWorktreeSetup,
@@ -9,6 +10,7 @@ import type {
   TaskWorktreeResult,
   TaskWorktreeState,
   WorkspaceConfig,
+  WorkspaceRestoreResult,
   WorktreeSetupDecision
 } from '../shared/types'
 import { findStreamOfTask, findTaskInProject, mapTaskInProject, needsTaskWorktree } from '../shared/streams'
@@ -24,12 +26,16 @@ import type { WorktreeSetupResult } from './worktree-setup'
  * the stream's worktree. One creation per task at a time; everyone who asks
  * meanwhile gets the same answer.
  *
+ * A reopened task can bring the worktree it had recorded (closed with Keep
+ * branch, or with its stream): its folder is gone, so it comes back from the
+ * branch, setup included, or as a fresh worktree when the branch went too.
+ *
  * Progress is a per-task {@link TaskWorktreeState}, pushed to the windows so a
  * task shows "Preparing worktree…", the setup approval or an error wherever it
  * is on screen.
  */
 
-export type TaskWorktreeGit = Pick<WorkspaceManager, 'listBranches' | 'create' | 'runSetup' | 'approveSetup' | 'delete' | 'repoRoot'>
+export type TaskWorktreeGit = Pick<WorkspaceManager, 'listBranches' | 'create' | 'restore' | 'runSetup' | 'approveSetup' | 'delete' | 'repoRoot'>
 
 export interface TaskWorktreeDeps {
   /** Main's canonical projects: `commit` is app-runtime's one write path. */
@@ -49,6 +55,8 @@ export interface TaskWorktreeDeps {
   recordSetupArtifacts?(worktreeRoot: string): Promise<void>
   /** How long to wait for a window's save to bring a task main does not know yet. */
   waitMs?: number
+  /** Whether a worktree folder is there (`fs.existsSync`). */
+  exists?(path: string): boolean
 }
 
 interface Located {
@@ -87,7 +95,8 @@ export class TaskWorktreeManager {
   /**
    * Makes the task's worktree if it is still to get one, and records it as
    * `Task.workspace`. Safe to call for any task: one that has a worktree, or
-   * works in its stream's directory, answers at once.
+   * works in its stream's directory, answers at once. A recorded worktree
+   * whose folder is gone is restored from its branch (see {@link restore}).
    *
    * A git failure leaves nothing behind and nothing to spawn in (`failed`).
    * A failed setup step keeps the worktree (`ready` with `setupError`); setup
@@ -166,9 +175,18 @@ export class TaskWorktreeManager {
     }, () => this.find(projectId, taskId))
     if (!found) return { status: 'failed', error: 'No such task' }
     const { project, stream, task } = found
-    if (task.workspace) return this.current(taskId)
+    if (task.workspace) {
+      return this.isGone(found, task.workspace) ? this.restore(found, task.workspace, options) : this.current(taskId)
+    }
     if (!needsTaskWorktree(project, stream, task) || !stream.workspace) return { status: 'not-needed' }
-    const base = stream.workspace
+    return this.create(found, stream.workspace, options)
+  }
+
+  /** A new worktree and branch off the stream's tip, then setup. */
+  private async create(found: Located, base: WorkspaceConfig, options: EnsureTaskWorktreeOptions): Promise<TaskWorktreeResult> {
+    const { project, stream, task } = found
+    const projectId = project.id
+    const taskId = task.id
 
     this.setState(taskId, { phase: 'creating' })
     let created: Awaited<ReturnType<TaskWorktreeGit['create']>>
@@ -208,14 +226,68 @@ export class TaskWorktreeManager {
       this.setState(taskId, { phase: 'failed', error })
       return { status: 'failed', error }
     }
-    this.deps.projects.commit({
-      ...this.deps.projects.peek(),
-      projects: this.deps.projects.peek().projects.map(p =>
-        p.id === projectId ? mapTaskInProject(p, taskId, t => ({ ...t, workspace })) : p
-      )
-    })
+    this.commitTask(projectId, taskId, t => ({ ...t, workspace }))
     this.deps.log?.(`task worktree task=${taskId} branch=${workspace.branchName} setup=${created.setup.status}`)
     return this.afterSetup(taskId, workspace, created.setup, { sourceRoot: base.worktreePath, worktreeRoot: created.worktreePath })
+  }
+
+  /** A recorded worktree of a local task in a task-worktree stream, whose folder is not there. */
+  private isGone(found: Located, recorded: WorkspaceConfig): boolean {
+    const { project, stream } = found
+    if (project.ssh || !stream.workspace || !stream.taskWorktrees) return false
+    return !(this.deps.exists ?? fs.existsSync)(recorded.worktreePath)
+  }
+
+  /**
+   * The recorded worktree back from its branch (`git worktree add <path>
+   * <branch>`), then setup again: links, copies, and the commands once
+   * approved. When the branch is gone the record goes and the task gets a
+   * fresh worktree off the stream's tip, as a new task would.
+   */
+  private async restore(found: Located, recorded: WorkspaceConfig, options: EnsureTaskWorktreeOptions): Promise<TaskWorktreeResult> {
+    const { project, stream, task } = found
+    const base = stream.workspace!
+    this.setState(task.id, { phase: 'creating', branch: recorded.branchName })
+    let restored: WorkspaceRestoreResult
+    try {
+      restored = await this.deps.git.restore(project.directory, recorded.worktreePath, recorded.branchName)
+    } catch (err) {
+      const error = errorMessage(err)
+      this.deps.log?.(`task worktree restore task=${task.id} error=${error}`)
+      this.setState(task.id, { phase: 'failed', error })
+      return { status: 'failed', error }
+    }
+    if (restored.status === 'branch-missing') {
+      this.deps.log?.(`task worktree task=${task.id} branch ${recorded.branchName} is gone, making a fresh worktree`)
+      this.commitTask(project.id, task.id, current => {
+        const { workspace: _gone, ...rest } = current
+        return rest
+      })
+      const now = this.find(project.id, task.id)
+      if (!now?.stream.workspace || !needsTaskWorktree(now.project, now.stream, now.task)) {
+        this.setState(task.id, null)
+        return now ? { status: 'not-needed' } : { status: 'failed', error: 'The task was closed' }
+      }
+      return this.create(now, now.stream.workspace, options)
+    }
+    const workspace: WorkspaceConfig = {
+      worktreePath: restored.worktreePath,
+      branchName: restored.branchName,
+      baseBranch: base.branchName,
+      relativeProjectPath: restored.relativeProjectPath
+    }
+    const now = this.find(project.id, task.id)
+    if (!now || now.stream.id !== stream.id) {
+      // Closed or moved meanwhile: the folder goes again; the branch is the user's work.
+      await this.discard(project, workspace, { keepBranch: true })
+      this.setState(task.id, null)
+      return { status: 'failed', error: 'The task was closed' }
+    }
+    this.commitTask(project.id, task.id, current => ({ ...current, workspace }))
+    this.deps.log?.(`task worktree task=${task.id} restored branch=${workspace.branchName}`)
+    const roots = { sourceRoot: base.worktreePath, worktreeRoot: workspace.worktreePath }
+    const setup = await this.deps.git.runSetup({ ...roots, branch: workspace.branchName, onOutput: (text) => this.appendLog(task.id, text) })
+    return this.afterSetup(task.id, workspace, setup, roots)
   }
 
   private async runHeld(taskId: string, held: HeldSetup, decision: WorktreeSetupDecision): Promise<TaskWorktreeResult> {
@@ -275,15 +347,25 @@ export class TaskWorktreeManager {
     return { status: 'failed', error: 'No such task' }
   }
 
+  /** `fn` on the task in main's projects, committed. */
+  private commitTask(projectId: string, taskId: string, fn: (task: Task) => Task): void {
+    const data = this.deps.projects.peek()
+    this.deps.projects.commit({
+      ...data,
+      projects: data.projects.map(p => (p.id === projectId ? mapTaskInProject(p, taskId, fn) : p))
+    })
+  }
+
   /** A worktree made for a task that no longer wants it: nothing was done in it yet. */
-  private async discard(project: Project, workspace: WorkspaceConfig): Promise<void> {
+  private async discard(project: Project, workspace: WorkspaceConfig, options: { keepBranch?: boolean } = {}): Promise<void> {
     try {
       await this.deps.git.delete({
         projectDir: project.directory,
         worktreePath: workspace.worktreePath,
         branchName: workspace.branchName,
         baseBranch: workspace.baseBranch,
-        force: true
+        force: true,
+        keepBranch: options.keepBranch
       })
     } catch (err) {
       this.deps.log?.(`task worktree discard ${workspace.worktreePath} error=${errorMessage(err)}`)

@@ -19,8 +19,9 @@ import { useTaskCloseChoice } from './TaskCloseDialog'
  * each renders the returned `dialog` (the worktree questions below).
  *
  * A task with a worktree of its own lands into its stream first (see
- * `taskLandingCloseQuestion`). A landing that stops on a conflict or a blocked
- * stream keeps the task open and selects it, where its banner says what next.
+ * `taskLandingCloseQuestion`); main then stops its tabs, removes the worktree
+ * and archives it. A landing that stops on a conflict or a blocked stream
+ * keeps the task open and selects it, where its banner says what next.
  */
 export function useCloseTask(): {
   closeTask: (projectId: string, taskId: string) => Promise<void>
@@ -34,8 +35,8 @@ export function useCloseTask(): {
   const askClose = closeChoice.ask
 
   /**
-   * Lands the task (or keeps / discards its branch, as asked) and archives it.
-   * False when it stays open: cancelled, stopped, or failed.
+   * Lands the task (or keeps / discards its branch, as asked); main archives
+   * it. False when it stays open: cancelled, stopped, or failed.
    */
   const landAndArchive = useCallback(async (project: Project, task: Task): Promise<boolean> => {
     const stream = findStreamOfTask(project, task.id)
@@ -64,16 +65,14 @@ export function useCloseTask(): {
         const mode = choice === 'keep-branch' ? 'keep' : 'discard'
         result = await runLandingOp(task.id, mode, () => window.api.taskWorktreeClose(project.id, task.id, mode))
       }
-      if (result.status === 'landed' || result.status === 'nothing' || result.status === 'removed') {
-        return await archiveTask(project.id, task.id, { dirtyChecked: true })
-      }
+      if (result.status === 'landed' || result.status === 'nothing' || result.status === 'removed') return true
       setLandingNotice(task.id, landingResultNotice(result, 'close', stream.name))
       switchToTask(project.id, task.id)
       return false
     } finally {
       release()
     }
-  }, [askClose, archiveTask, confirmDiscardDirty, switchToTask, tabStatusStore])
+  }, [askClose, confirmDiscardDirty, switchToTask, tabStatusStore])
 
   const closeTask = useCallback(async (projectId: string, taskId: string) => {
     const project = projects.find(p => p.id === projectId)

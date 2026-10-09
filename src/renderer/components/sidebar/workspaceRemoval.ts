@@ -25,17 +25,20 @@ export type AskWorktreeChoice = (question: { title: string; message: string; bra
 /**
  * Run the pre-flight and ask about whatever it found. Null means cancel; `done`
  * means the pre-flight already removed the worktree; otherwise the forced pass
- * still has to run, keeping the branch or not.
+ * still has to run, keeping the branch or not. `keepBranch`: a clean, merged
+ * worktree goes but its branch stays (its tasks kept branches off it, which a
+ * reopen restores on top of it).
  */
 export async function confirmWorktreeRemoval(
   project: Project,
   streamName: string,
   workspace: WorkspaceConfig,
-  ask: AskWorktreeChoice
+  ask: AskWorktreeChoice,
+  options: { keepBranch?: boolean } = {}
 ): Promise<{ done: true } | { done: false; keepBranch: boolean } | null> {
   let result: WorkspaceDeleteResult
   try {
-    result = await window.api.workspaceDelete(deleteRequest(project, workspace))
+    result = await window.api.workspaceDelete({ ...deleteRequest(project, workspace), ...(options.keepBranch ? { keepBranch: true } : {}) })
   } catch (err) {
     // A pre-flight that never ran is not permission to delete: ask, like 'check-failed'.
     result = { status: 'check-failed', reason: err instanceof Error ? err.message : String(err) }

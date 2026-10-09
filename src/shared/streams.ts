@@ -78,6 +78,28 @@ export function needsTaskWorktree(project: Project, stream: Stream, task: Task):
     && !task.sharesStreamWorktree
 }
 
+/**
+ * Whether a task reopening into `stream` works in a worktree of its own: the
+ * one it recorded (`Task.workspace`, restored from its branch) or a fresh one
+ * off the stream's tip. That is every reopened task of a local task-worktree
+ * stream except one sharing the stream's worktree, so a task archived before
+ * task worktrees (no stamp, no record) comes back as a new one. Anywhere else
+ * it works in the stream's directory, as before.
+ */
+export function reopensInOwnWorktree(project: Project, stream: Stream, task: Task): boolean {
+  return !!stream.workspace && !!stream.taskWorktrees && !project.ssh && !task.sharesStreamWorktree
+}
+
+/**
+ * An archived task as it reopens: no landing (none survives its close), and
+ * its recorded worktree only when it reopens into one of its own.
+ */
+export function reopenedTask(task: Task, ownWorktree: boolean): Task {
+  if (!task.landing && (ownWorktree || !task.workspace)) return task
+  const { landing: _landing, workspace, ...rest } = task
+  return ownWorktree && workspace ? { ...rest, workspace } : rest
+}
+
 /** `fn` applied to every task; untouched streams and projects keep their identity. */
 export function mapProjectTasks(project: Project, fn: (task: Task, stream: Stream) => Task): Project {
   let changed = false

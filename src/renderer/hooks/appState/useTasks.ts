@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { v4 as uuid } from 'uuid'
 import { isEphemeralProject } from '../../../shared/types'
-import type { Project, ProjectsData, Stream, Tab, Task, WorkspaceConfig } from '../../../shared/types'
+import type { PendingWorktreeSetup, Project, ProjectsData, Stream, Tab, Task, WorkspaceConfig } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
 import {
   findStreamOfTask,
@@ -9,11 +9,14 @@ import {
   needsTaskWorktree,
   planTaskMove,
   projectTasks,
+  reopenedTask,
+  reopensInOwnWorktree,
   streamDirectory,
   taskDirectory,
   taskMoveBlocker,
   taskTabIds,
-  taskTabs
+  taskTabs,
+  waitsForTaskWorktree
 } from '../../../shared/streams'
 import { joinWorkspaceDir } from '../../../shared/workspace-path'
 import { ensureTaskWorktree, holdTaskSpawn } from '../../taskWorktrees'
@@ -47,6 +50,13 @@ import { removeTaskView, selectNewTaskView } from './viewState'
 import { reportRefusedWorkspaceDelete } from './useProjects'
 import { resolveLandingTaskId } from '../taskNavigation'
 
+/** A reopened stream's worktree came back, but its setup failed or waits for approval. */
+export interface ReopenedStreamSetup {
+  branch: string
+  error?: string
+  pending?: PendingWorktreeSetup
+}
+
 export interface TasksActions {
   /** A task in stream `streamId` (`main` when absent), selected in this window. */
   addTask: (projectId: string, name: string, initialTabs?: Tab[], streamId?: string | null) => Task
@@ -78,22 +88,28 @@ export interface TasksActions {
    * project's `Done` group. The worktree is removed too unless
    * `skipWorkspaceCleanup` (the caller already ran the pre-flight). Resolves
    * false when nothing was closed (unsaved editors kept it, or the archive could
-   * not be written).
+   * not be written). `dirtyChecked`: the caller already asked about unsaved editors.
    */
-  archiveStream: (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => Promise<boolean>
+  archiveStream: (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean, options?: { dirtyChecked?: boolean }) => Promise<boolean>
   /**
    * Reopen an archived task: back at the end of its stream (`main` when that
    * stream is closed), selected in this window. Its agent resumes its session
    * when its tabs mount; a session from another directory is copied over first.
+   * In a task-worktree stream (`reopensInOwnWorktree`) its tabs wait for its own
+   * worktree: back from the branch it kept, else a fresh one off the stream's
+   * tip, with its sessions carried there. Elsewhere a kept branch stays in the
+   * repository unused.
    */
   reopenTask: (projectId: string, taskId: string) => Promise<boolean>
   /**
    * Reopen an archived stream with the tasks it had open. A worktree stream gets
-   * its worktree back from its branch; when the branch was discarded it comes
-   * back as a project-folder stream and `notice` says so. Rejects when git
-   * fails otherwise (nothing reopened).
+   * its worktree back from its branch (with the repo's setup; `setup` says when
+   * that failed or its commands wait for approval); when the branch was
+   * discarded it comes back as a project-folder stream and `notice` says so.
+   * Rejects when git fails otherwise (nothing reopened). Its tasks with
+   * worktrees of their own get them back as {@link reopenTask} says.
    */
-  reopenStream: (projectId: string, streamId: string) => Promise<{ reopened: boolean; notice?: string }>
+  reopenStream: (projectId: string, streamId: string) => Promise<{ reopened: boolean; notice?: string; setup?: ReopenedStreamSetup }>
   /** Delete archived tasks and streams for good (and their tabs' scrollback). */
   deleteArchived: (projectId: string, ids: { tasks?: string[]; streams?: string[] }) => Promise<void>
   /** Rename a stream. Its branch keeps its name. */
@@ -268,12 +284,17 @@ export function useTasks(
     return true
   }, [confirmDiscardDirty, mutateProjects])
 
-  const archiveStream = useCallback(async (projectId: string, streamId: string, skipWorkspaceCleanup?: boolean) => {
+  const archiveStream = useCallback(async (
+    projectId: string,
+    streamId: string,
+    skipWorkspaceCleanup?: boolean,
+    options: { dirtyChecked?: boolean } = {}
+  ) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const stream = project?.streams.find(candidate => candidate.id === streamId)
     if (!project || !stream || stream.isMain) return false
     const tabIds = stream.tasks.flatMap(tabIdsOfTask)
-    if (await confirmDiscardDirty(tabIds) === 'cancel') return false
+    if (!options.dirtyChecked && await confirmDiscardDirty(tabIds) === 'cancel') return false
     const ownerRetired = isEphemeralProject(project)
       && !project.streams.some(candidate => candidate.id !== streamId && candidate.tasks.length > 0)
     const entry = archivedStreamEntry(project, streamId, Date.now())
@@ -311,6 +332,25 @@ export function useTasks(
     return () => setArchiveLoadedHandler(null)
   }, [mutateProjects])
 
+  /**
+   * A reopened task that works in a worktree of its own gets it before its tabs
+   * spawn: restored from the branch it recorded, or fresh off the stream's tip
+   * (step 3's `ensureTaskWorktree`). Then its sessions are carried there from
+   * where they ran (`fromDir`). A task with nothing to spawn and nothing to
+   * restore is left to get its worktree when it first needs one.
+   */
+  const settleOwnWorktree = useCallback(async (project: Project, streamId: string, task: Task, fromDir: string, release: () => void) => {
+    try {
+      if (!task.workspace && !taskTabs(task).some(waitsForTaskWorktree)) return
+      const made = await ensureTaskWorktree(project.id, task.id, { name: task.name, streamId })
+      if (made.status !== 'ready' && made.status !== 'needs-approval') return
+      const cwds = await carrySessions(project, [task], fromDir, joinWorkspaceDir(made.workspace.worktreePath, made.workspace.relativeProjectPath))
+      if (cwds.size > 0) mutateProjects(prev => mapTask(prev, project.id, task.id, current => withCwds(current, cwds)))
+    } finally {
+      release()
+    }
+  }, [mutateProjects])
+
   const reopenTask = useCallback(async (projectId: string, taskId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     if (!project) return false
@@ -318,13 +358,18 @@ export function useTasks(
     const entry = archive.tasks.find(candidate => candidate.task.id === taskId)
     const target = entry && reopenTargetStream(project, entry)
     if (!entry || !target) return false
-    const [task] = await carryOver(project, [entry.task], entry.dir, streamDirectory(project, target))
+    const own = reopensInOwnWorktree(project, target, entry.task)
+    let task = reopenedTask(entry.task, own)
+    // Its tabs wait until its own worktree is there and its sessions are in it.
+    const release = own ? holdTaskSpawn(taskId) : null
+    if (!own) task = withCwds(task, await carrySessions(project, [task], entry.dir, streamDirectory(project, target)))
     // The data first, then the file (see `archiveTask`).
     mutateProjects(prev => reopenTaskInData(prev, projectId, { ...entry, task }))
     await writeArchive(projectId, () => window.api.archiveRemove(projectId, { tasks: [taskId] }))
     switchToTask(projectId, taskId)
+    if (release) await settleOwnWorktree(project, target.id, task, entry.dir, release)
     return true
-  }, [mutateProjects, projectsRef, switchToTask])
+  }, [mutateProjects, projectsRef, switchToTask, settleOwnWorktree])
 
   const reopenStream = useCallback(async (projectId: string, streamId: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
@@ -334,6 +379,7 @@ export function useTasks(
     if (!entry) return { reopened: false }
     let workspace: WorkspaceConfig | null = null
     let notice: string | undefined
+    let setup: ReopenedStreamSetup | undefined
     const old = entry.stream.workspace
     if (old) {
       const restored = await window.api.workspaceRestore({
@@ -350,18 +396,41 @@ export function useTasks(
           baseBranch: old.baseBranch,
           relativeProjectPath: restored.relativeProjectPath
         }
+        if (restored.setupError || restored.setupPending) {
+          setup = { branch: restored.branchName, error: restored.setupError, pending: restored.setupPending }
+        }
       } else {
         notice = `Branch "${old.branchName}" no longer exists, so "${entry.stream.name}" reopened in the project folder.`
       }
     }
-    const dir = streamDirectory(project, { ...entry.stream, ...(workspace ? { workspace } : { workspace: undefined }) })
-    const tasks = await carryOver(project, entry.stream.tasks, entry.dir, dir)
-    mutateProjects(prev => reopenStreamInData(prev, projectId, { ...entry, stream: { ...entry.stream, tasks } }, workspace))
-    await writeArchive(projectId, () => window.api.archiveRemove(projectId, { streams: [streamId] }))
-    const first = entry.stream.lastTaskId ?? entry.stream.tasks[0]?.id
-    if (first) switchToTask(projectId, first)
-    return { reopened: true, notice }
-  }, [mutateProjects, projectsRef, switchToTask])
+    const reopened: Stream = { ...entry.stream, ...(workspace ? { workspace } : { workspace: undefined }) }
+    const dir = streamDirectory(project, reopened)
+    // Each task's sessions ran in its own worktree when it had one, else in the stream's directory.
+    const plans = entry.stream.tasks.map(task => {
+      const own = reopensInOwnWorktree(project, reopened, task)
+      const fromDir = task.workspace ? joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath) : entry.dir
+      return { task: reopenedTask(task, own), own, fromDir }
+    })
+    const tasks: Task[] = []
+    for (const plan of plans) {
+      tasks.push(plan.own ? plan.task : withCwds(plan.task, await carrySessions(project, [plan.task], plan.fromDir, dir)))
+    }
+    const releases = new Map(plans.filter(plan => plan.own).map(plan => [plan.task.id, holdTaskSpawn(plan.task.id)]))
+    try {
+      mutateProjects(prev => reopenStreamInData(prev, projectId, { ...entry, stream: { ...entry.stream, tasks } }, workspace))
+      await writeArchive(projectId, () => window.api.archiveRemove(projectId, { streams: [streamId] }))
+      const first = entry.stream.lastTaskId ?? entry.stream.tasks[0]?.id
+      if (first) switchToTask(projectId, first)
+      // One at a time: each is a `git worktree add` in the same repository.
+      for (const plan of plans) {
+        const release = releases.get(plan.task.id)
+        if (release) await settleOwnWorktree(project, streamId, plan.task, plan.fromDir, release)
+      }
+    } finally {
+      releases.forEach(release => release())
+    }
+    return { reopened: true, notice, setup }
+  }, [mutateProjects, projectsRef, switchToTask, settleOwnWorktree])
 
   const deleteArchived = useCallback(async (projectId: string, ids: { tasks?: string[]; streams?: string[] }) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
@@ -421,18 +490,18 @@ async function writeArchive(projectId: string, write: () => Promise<ProjectArchi
 
 /**
  * A task reopening somewhere else than it was archived from (its stream is gone,
- * or its worktree came back elsewhere or not at all) takes its sessions along:
- * Claude and Pi keep them per directory, so they are copied over first and its
- * agent resumes there. A terminal opened on a folder inside the old directory
- * opens on the same folder in the new one, or at the new top when it isn't
- * there. Returns the tasks as they reopen.
+ * or its worktree came back elsewhere, fresh or not at all) takes its sessions
+ * along: Claude and Pi keep them per directory, so they are copied over first
+ * and its agent resumes there. A terminal opened on a folder inside the old
+ * directory opens on the same folder in the new one, or at the new top when it
+ * isn't there. Returns the new `cwd` per tab that has one to change.
  */
-async function carryOver(project: Project, tasks: Task[], fromDir: string, toDir: string): Promise<Task[]> {
-  if (!fromDir || fromDir === toDir) return tasks
+async function carrySessions(project: Project, tasks: Task[], fromDir: string, toDir: string): Promise<Map<string, string | undefined>> {
+  if (!fromDir || fromDir === toDir) return new Map()
   const plans = tasks.map(task => planTaskMove(task, fromDir, toDir))
   const sessions = plans.flatMap(plan => plan.sessions)
   const cwdMoves = plans.flatMap(plan => plan.cwdMoves)
-  if (sessions.length === 0 && cwdMoves.length === 0) return tasks
+  if (sessions.length === 0 && cwdMoves.length === 0) return new Map()
   let dirsExist: boolean[] = []
   try {
     const prepared = await window.api.taskMovePrepare(
@@ -442,10 +511,11 @@ async function carryOver(project: Project, tasks: Task[], fromDir: string, toDir
   } catch {
     // The agents start new sessions instead; terminals start at the new top.
   }
-  const cwds = new Map(cwdMoves.map((move, i) => [move.tabId, dirsExist[i] ? move.cwd : undefined]))
-  return tasks.map(task => (
-    taskTabs(task).some(tab => cwds.has(tab.id))
-      ? [...cwds].reduce((next, [tabId, cwd]) => patchTabInTask(next, tabId, { cwd }), task)
-      : task
-  ))
+  return new Map(cwdMoves.map((move, i) => [move.tabId, dirsExist[i] ? move.cwd : undefined]))
+}
+
+/** The task with these tabs' `cwd`s set (from {@link carrySessions}). */
+function withCwds(task: Task, cwds: Map<string, string | undefined>): Task {
+  if (!taskTabs(task).some(tab => cwds.has(tab.id))) return task
+  return [...cwds].reduce((next, [tabId, cwd]) => patchTabInTask(next, tabId, { cwd }), task)
 }

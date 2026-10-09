@@ -226,15 +226,15 @@ export class AppRuntime {
       activity: this.activityRegistry,
       sendToAgent: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
       forgetWorktree: (taskId) => this.taskWorktrees.forget(taskId),
-      onState: (taskId, landing) => this.broadcastToAllWindows('task-landing-state', taskId, landing),
-      onResumed: (projectId, taskId, intent, result) => {
-        // A close that stopped on a conflict and was finished by the agent: nobody
-        // is waiting to archive it, so main does, as for a phone's close.
-        if (intent !== 'close' || result.status !== 'landed') return
+      stopTabs: (project, task) => this.stopTaskTabs(project, task),
+      // Every close a landing finishes is archived here, whoever asked for it (a
+      // window, a phone, the agent that fixed a conflict).
+      archiveTask: async (projectId, taskId, closed, dir) => {
         const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
         const task = findTaskInProject(project, taskId)
-        if (project && task) void this.archiveTaskFromMain(project, task)
+        if (project && task) await this.archiveTaskFromMain(project, task, { task: closed, dir })
       },
+      onState: (taskId, landing) => this.broadcastToAllWindows('task-landing-state', taskId, landing),
       log: (message) => this.logDebug(message)
     })
     this.forgetArchivesOfVanishedProjects()
@@ -536,9 +536,12 @@ export class AppRuntime {
    * stays, for Reopen. A renderer only tears down tabs it has mounted, so nothing
    * here may be left to the broadcast; the broadcast covers only what is
    * renderer-local (xterm instances, per-window status entries, view state).
+   * A landing's close passes `closed`: the task as it left its worktree, and
+   * the directory its sessions ran in.
    */
-  private async archiveTaskFromMain(project: Project, task: Task): Promise<void> {
-    const entry = archivedTaskEntry(project, task.id, Date.now())
+  private async archiveTaskFromMain(project: Project, task: Task, closed?: { task: Task; dir: string }): Promise<void> {
+    const found = archivedTaskEntry(project, task.id, Date.now())
+    const entry = found && closed ? { ...found, task: closed.task, dir: closed.dir } : found
     const tabIds = await tearDownTaskTabs(project, task, { ...this.teardownTargets(), deleteScrollback: () => {} })
 
     // Sent before the state commit, and on the same ordered channel: a window that
@@ -596,6 +599,16 @@ export class AppRuntime {
         }
       }
     })
+  }
+
+  /**
+   * End a task's processes before its worktree is removed (a landing's close):
+   * the teardown archiving does, keeping the scrollback. Windows can't delete a
+   * folder a process still runs in, so there they get a moment to exit.
+   */
+  private async stopTaskTabs(project: Project, task: Task): Promise<void> {
+    const tabIds = await tearDownTaskTabs(project, task, { ...this.teardownTargets(), deleteScrollback: () => {} })
+    if (process.platform === 'win32' && tabIds.length > 0) await new Promise(resolve => setTimeout(resolve, 500))
   }
 
   /** What a window does for the tabs it closes, done by main for tabs no window may be showing. */

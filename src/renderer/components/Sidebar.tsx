@@ -41,10 +41,8 @@ import {
 import { useStreamAheadPolling } from '../taskLanding'
 import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
-import { confirmWorktreeRemoval, forceRemoveWorktree } from './sidebar/workspaceRemoval'
-import { streamCloseQuestion } from './sidebar/closeRules'
-import { useWorktreeChoice } from './sidebar/WorktreeChoiceDialog'
 import { useCloseTask } from './sidebar/useCloseTask'
+import { useCloseStream } from './sidebar/useCloseStream'
 import { ProjectDoneGroup, StreamDoneRow, type DoneRowActions } from './sidebar/DoneRows'
 import { closeArchivedView, getArchivedView } from './archivedViewTarget'
 import {
@@ -77,7 +75,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     switchToTask, selectProjectHome, showArchived,
     addProject, addRemoteProject, addShellCommandProject, addTag, renameProject, updateProject,
     addTask, addTaskInDirectory, addStream, renameTask,
-    moveTask, archiveStream, renameStream, reopenTask, reopenStream, deleteArchived,
+    moveTask, renameStream, reopenTask, reopenStream, deleteArchived,
     reorderProjects, getProjectDir,
     config, updateConfig,
     expandedProjectIds, toggleProjectExpansion, setProjectExpanded,
@@ -172,8 +170,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
   /** A new stream whose worktree setup commands wait for approval. */
   const [streamSetup, setStreamSetup] = useState<{ projectId: string; streamId: string; branch: string; pending: PendingWorktreeSetup } | null>(null)
-  const worktreeChoice = useWorktreeChoice()
   const closeTaskFlow = useCloseTask()
+  const closeStreamFlow = useCloseStream()
   useStreamAheadPolling(projects, selectedProjectId, selectedTaskId)
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const [switcherActive, setSwitcherActive] = useState(false)
@@ -408,44 +406,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     setNewTaskWhere(null)
   }
 
-  const statusOf = useCallback((tabId: string) => tabStatusStore.getStatus(tabId), [tabStatusStore])
-
-  /**
-   * Run the stream-level worktree pre-flight, then `close` (which ends the tabs),
-   * then the forced removal. Resolves false when cancelled.
-   */
-  const closeWithWorktree = async (
-    project: Project,
-    stream: Stream,
-    close: () => Promise<boolean>
-  ): Promise<boolean> => {
-    const workspace = stream.workspace
-    if (!workspace) return close()
-    const answer = await confirmWorktreeRemoval(project, stream.name, workspace, worktreeChoice.ask)
-    if (!answer) return false
-    if (!await close()) return false
-    if (!answer.done) await forceRemoveWorktree(project, workspace, answer.keepBranch)
-    return true
-  }
-
   /** Hover ✕ on a task row, and the menu's Close task (see `useCloseTask`). */
   const handleCloseTask = closeTaskFlow.closeTask
 
-  /**
-   * Hover ✕ on a stream row (never `main`): the stream is archived with its
-   * tasks to the project's `Done` group. Asks when a task is working (unsaved
-   * editors ask in `archiveStream`); a worktree runs the pre-flight: clean and
-   * merged goes quietly, anything else asks keep branch / discard / cancel.
-   */
-  const handleCloseStream = async (projectId: string, streamId: string) => {
-    const project = projects.find(p => p.id === projectId)
-    const stream = project?.streams.find(candidate => candidate.id === streamId)
-    if (!project || !stream || stream.isMain) return
-    const question = streamCloseQuestion(stream, statusOf)
-    if (question && !window.confirm(question)) return
-    // Tabs close before the forced removal, so no process holds the worktree.
-    await closeWithWorktree(project, stream, () => archiveStream(projectId, streamId, true))
-  }
+  /** Hover ✕ on a stream row, and the menu's Close stream (see `useCloseStream`). */
+  const handleCloseStream = closeStreamFlow.closeStream
 
   /** What the Done rows do: open read-only, reopen, delete for good (after a confirm). */
   const doneActions: DoneRowActions = {
@@ -455,8 +420,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       void reopenTask(projectId, taskId)
     },
     reopenStream: (projectId, streamId) => {
-      void reopenStream(projectId, streamId).then(({ notice }) => {
+      void reopenStream(projectId, streamId).then(({ notice, setup }) => {
         if (notice) window.alert(notice)
+        // Its worktree came back from the branch; setup runs as for a new stream.
+        if (setup?.pending) setStreamSetup({ projectId, streamId, branch: setup.branch, pending: setup.pending })
+        else if (setup?.error) window.alert(`The worktree of the reopened stream is back, but its setup failed:\n\n${setup.error}`)
       }).catch((err: unknown) => {
         window.alert(`Couldn't reopen the stream: ${err instanceof Error ? err.message : String(err)}`)
       })
@@ -1220,7 +1188,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         />
       )}
 
-      {worktreeChoice.dialog}
+      {closeStreamFlow.dialog}
       {closeTaskFlow.dialog}
 
       {newTaskOpen && config && (

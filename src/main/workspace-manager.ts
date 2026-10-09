@@ -156,7 +156,7 @@ export class WorkspaceManager {
     const registered = await this.listWorktreePaths(repoRoot)
     const target = realpathOrSelf(worktreePath)
     if (fs.existsSync(worktreePath) && registered.some(entry => realpathOrSelf(entry) === target)) {
-      return { status: 'ok', worktreePath: canonicalFilePath(worktreePath), branchName, relativeProjectPath: rel }
+      return { status: 'ok', worktreePath: canonicalFilePath(worktreePath), branchName, relativeProjectPath: rel, reused: true }
     }
     const branch = await this.runner.run(['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { cwd: repoRoot, timeoutMs: 5000 })
     if (branch.code !== 0) return { status: 'branch-missing' }

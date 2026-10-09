@@ -315,11 +315,21 @@ export interface WorkspaceRestoreRequest extends WorkspaceTarget {
 }
 
 /**
- * `ok`: the worktree is there again (or never went: a kept worktree is reused).
+ * `ok`: the worktree is there again (or never went: a kept worktree is reused,
+ * `reused`). A local one added again also gets the repo's setup, which can
+ * come back as `setupError`/`setupPending` (as for {@link WorkspaceCreateResult}).
  * `branch-missing`: the branch was discarded, so there is nothing to check out.
  */
 export type WorkspaceRestoreResult =
-  | { status: 'ok'; worktreePath: string; branchName: string; relativeProjectPath: string }
+  | {
+      status: 'ok'
+      worktreePath: string
+      branchName: string
+      relativeProjectPath: string
+      reused?: true
+      setupError?: string
+      setupPending?: PendingWorktreeSetup
+    }
   | { status: 'branch-missing' }
 
 export interface WorkspaceDeleteRequest extends WorkspaceTarget {

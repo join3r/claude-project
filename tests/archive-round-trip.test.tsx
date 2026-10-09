@@ -2,12 +2,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { DEFAULT_CONFIG, mainStreamId, type Project, type ProjectsData, type WorkspaceConfig } from '../src/shared/types'
-import { emptyArchive, withArchivedStream, withArchivedTasks, withoutArchived, type ProjectArchive } from '../src/shared/archive'
+import { DEFAULT_CONFIG, mainStreamId, type Project, type ProjectsData, type Stream, type Task, type WorkspaceConfig } from '../src/shared/types'
+import { emptyArchive, withArchivedStream, withArchivedTasks, withoutArchived, type ArchivedTask, type ProjectArchive } from '../src/shared/archive'
 import { useAppState } from '../src/renderer/hooks/useAppState'
 import { resetArchiveStore } from '../src/renderer/hooks/archiveStore'
-import { projectTasks } from '../src/shared/streams'
-import { fixtureProject } from './helpers/streams-fixtures'
+import { findTaskInProject, projectTasks } from '../src/shared/streams'
+import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 
 void React
 
@@ -159,5 +159,125 @@ describe('archive and reopen', () => {
     expect(closed).toBe(false)
     expect(projectTasks(result.current.projects[0]).map(t => t.id)).toContain('t1')
     expect(window.alert).toHaveBeenCalledWith(expect.stringMatching(/disk full/))
+  })
+})
+
+describe('reopening into task worktrees', () => {
+  const STREAM_WS: WorkspaceConfig = { worktreePath: '/tmp/p1/.worktrees/rel', branchName: 'rel', baseBranch: 'master', relativeProjectPath: '' }
+  const KEPT: WorkspaceConfig = { worktreePath: '/tmp/p1/.worktrees/rel--kept', branchName: 'rel--kept', baseBranch: 'rel', relativeProjectPath: '' }
+  const FRESH: WorkspaceConfig = { worktreePath: '/tmp/p1/.worktrees/rel--old', branchName: 'rel--old', baseBranch: 'rel', relativeProjectPath: '' }
+  const claudeTab = (id: string) => ({ id: `tab-${id}`, type: 'claude' as const, title: 'Claude Code', sessionId: `session-${id}` })
+
+  function archivedTask(id: string, extra: Partial<Task>, dir: string, streamId = 'stream-rel'): ArchivedTask {
+    return { task: { ...fixtureTask({ id, name: id, tabs: { left: [claudeTab(id)] } }), ...extra }, streamId, streamName: 'rel', dir, archivedAt: 1 }
+  }
+
+  function withStreams(streams: Stream[]): void {
+    api.loadProjects.mockResolvedValue({
+      revision: 0,
+      data: { projects: [fixtureProject({ id: 'p1', directory: '/tmp/p1', streams })], tags: [], projectOrder: ['p1'], pinnedItems: [] }
+    })
+  }
+
+  const relStream = (tasks: Task[] = []): Stream => ({ id: 'stream-rel', name: 'rel', workspace: STREAM_WS, taskWorktrees: true, tasks, archivedTaskCount: 1 })
+  const taskIn = (project: Project, id: string) => findTaskInProject(project, id)
+
+  beforeEach(() => {
+    api.taskWorktreeEnsure = vi.fn()
+    api.taskWorktreeStates = vi.fn().mockResolvedValue({})
+    api.onTaskWorktreeState = vi.fn().mockReturnValue(() => {})
+  })
+
+  it('a task closed with Keep branch gets its worktree back before its tabs start', async () => {
+    withStreams([relStream()])
+    archive = withArchivedTasks(emptyArchive(), [archivedTask('kept', { workspace: KEPT }, KEPT.worktreePath)])
+    api.taskWorktreeEnsure.mockResolvedValue({ status: 'ready', workspace: KEPT })
+    const { result } = await mountState()
+
+    await act(async () => { await result.current.reopenTask('p1', 'kept') })
+
+    expect(api.taskWorktreeEnsure).toHaveBeenCalledWith('p1', 'kept', { name: 'kept', streamId: 'stream-rel' })
+    expect(taskIn(result.current.projects[0], 'kept')?.workspace).toEqual(KEPT)
+    // Back where it ran: nothing to carry.
+    expect(api.taskMovePrepare).not.toHaveBeenCalled()
+  })
+
+  it('a task from before task worktrees comes back with a fresh worktree, its sessions carried into it', async () => {
+    withStreams([relStream()])
+    archive = withArchivedTasks(emptyArchive(), [archivedTask('old', {}, STREAM_WS.worktreePath)])
+    api.taskWorktreeEnsure.mockResolvedValue({ status: 'ready', workspace: FRESH })
+    const { result } = await mountState()
+
+    await act(async () => { await result.current.reopenTask('p1', 'old') })
+
+    expect(taskIn(result.current.projects[0], 'old')?.sharesStreamWorktree).toBeUndefined()
+    expect(api.taskWorktreeEnsure).toHaveBeenCalledWith('p1', 'old', { name: 'old', streamId: 'stream-rel' })
+    expect(api.taskMovePrepare).toHaveBeenCalledWith(
+      STREAM_WS.worktreePath, FRESH.worktreePath, [{ kind: 'claude', sessionId: 'session-old' }], [], undefined, undefined
+    )
+  })
+
+  it('a task sharing its stream\'s worktree, or reopening into main, works in the stream\'s directory as before', async () => {
+    withStreams([relStream()])
+    archive = withArchivedTasks(emptyArchive(), [
+      archivedTask('shared', { sharesStreamWorktree: true }, STREAM_WS.worktreePath),
+      // Its stream is gone: it reopens in main, and its kept branch stays unused.
+      archivedTask('orphan', { workspace: KEPT, landing: { state: 'conflict' } }, KEPT.worktreePath, 'stream-gone')
+    ])
+    const { result } = await mountState()
+
+    await act(async () => { await result.current.reopenTask('p1', 'shared') })
+    await act(async () => { await result.current.reopenTask('p1', 'orphan') })
+
+    expect(api.taskWorktreeEnsure).not.toHaveBeenCalled()
+    const orphan = taskIn(result.current.projects[0], 'orphan')
+    expect(orphan?.workspace).toBeUndefined()
+    expect(orphan?.landing).toBeUndefined()
+    expect(api.taskMovePrepare).toHaveBeenCalledWith(KEPT.worktreePath, '/tmp/p1', [{ kind: 'claude', sessionId: 'session-orphan' }], [], undefined, undefined)
+  })
+
+  it('a stream closed with Keep branches gets its worktree and each task\'s back, one task at a time', async () => {
+    withStreams([])
+    const stream: Stream = {
+      id: 'stream-rel',
+      name: 'rel',
+      workspace: STREAM_WS,
+      taskWorktrees: true,
+      tasks: [
+        { ...fixtureTask({ id: 'kept', name: 'kept', tabs: { left: [claudeTab('kept')] } }), workspace: KEPT },
+        { ...fixtureTask({ id: 'gone', name: 'gone', tabs: { left: [claudeTab('gone')] } }), workspace: FRESH },
+        fixtureTask({ id: 'idle', name: 'idle' })
+      ]
+    }
+    archive = withArchivedStream(emptyArchive(), { stream, doneTasks: [], dir: STREAM_WS.worktreePath, archivedAt: 1 })
+    api.workspaceRestore.mockResolvedValue({
+      status: 'ok', worktreePath: STREAM_WS.worktreePath, branchName: 'rel', relativeProjectPath: '',
+      setupPending: { repoKey: '/tmp/p1/.git', hash: 'h', commands: ['npm ci'] }
+    })
+    const fresh: WorkspaceConfig = { ...FRESH, worktreePath: '/tmp/p1/.worktrees/rel--gone', branchName: 'rel--gone' }
+    let resolveKept: (value: unknown) => void = () => {}
+    api.taskWorktreeEnsure.mockImplementation((_p: string, taskId: string) => (taskId === 'kept'
+      ? new Promise(resolve => { resolveKept = resolve })
+      : Promise.resolve({ status: 'ready', workspace: fresh })))
+    const { result } = await mountState()
+
+    let outcome: Awaited<ReturnType<typeof result.current.reopenStream>> | undefined
+    let done: Promise<void> = Promise.resolve()
+    act(() => { done = result.current.reopenStream('p1', 'stream-rel').then(value => { outcome = value }) })
+    await waitFor(() => expect(api.taskWorktreeEnsure).toHaveBeenCalledTimes(1))
+    // The second waits for the first's `git worktree add`.
+    expect(api.taskWorktreeEnsure).toHaveBeenLastCalledWith('p1', 'kept', { name: 'kept', streamId: 'stream-rel' })
+    await act(async () => {
+      resolveKept({ status: 'ready', workspace: KEPT })
+      await done
+    })
+
+    expect(api.taskWorktreeEnsure.mock.calls.map(call => call[1])).toEqual(['kept', 'gone'])
+    // `idle` has nothing to spawn: it gets its worktree when it first needs one.
+    expect(outcome?.setup).toEqual({ branch: 'rel', pending: { repoKey: '/tmp/p1/.git', hash: 'h', commands: ['npm ci'] } })
+    const reopened = result.current.projects[0].streams.find(candidate => candidate.id === 'stream-rel')
+    expect(reopened?.tasks.map(task => task.id)).toEqual(['kept', 'gone', 'idle'])
+    // The branch that was gone: its sessions follow it into the fresh worktree.
+    expect(api.taskMovePrepare).toHaveBeenCalledWith(FRESH.worktreePath, fresh.worktreePath, [{ kind: 'claude', sessionId: 'session-gone' }], [], undefined, undefined)
   })
 })

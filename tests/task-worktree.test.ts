@@ -4,6 +4,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { TaskWorktreeManager } from '../src/main/task-worktree'
+import { TaskLandingManager } from '../src/main/task-landing'
+import { LocalGitRunner } from '../src/main/git-runner'
 import { canonicalFilePath, WorkspaceManager } from '../src/main/workspace-manager'
 import { MemorySetupApprovals } from '../src/main/worktree-setup-approvals'
 import { WORKTREE_CONFIG_FILE } from '../src/main/worktree-setup'
@@ -273,6 +275,81 @@ describe('TaskWorktreeManager', () => {
     expect(workspace.worktreePath).toBe(canonicalFilePath(path.join(repo, '.worktrees', 'release--web')))
     expect(workspace.relativeProjectPath).toBe('apps/web')
     expect(fs.existsSync(path.join(workspace.worktreePath, 'apps', 'web', 'index.txt'))).toBe(true)
+  })
+
+  describe('a reopened task with its worktree recorded', () => {
+    /** Closes the task the way a closing stream's Keep branches / Discard all does. */
+    async function closeForStream(mode: 'keep' | 'discard'): Promise<void> {
+      const landing = new TaskLandingManager({
+        projects: store,
+        runner: new LocalGitRunner(),
+        git: git_,
+        activity: { getStatus: () => null, subscribe: () => () => {} }
+      })
+      expect(await landing.closeWorktree('p1', 't1', mode, { archive: false })).toEqual({ status: 'removed' })
+    }
+
+    it('gets it back on the kept branch, with its commits, and setup runs again once approved', async () => {
+      writeConfig(streamWorkspace.worktreePath, { setup: ['touch ran.txt'], symlink: ['node_modules'] })
+      fs.mkdirSync(path.join(streamWorkspace.worktreePath, 'node_modules'))
+      setProjects([project([fixtureTask({ id: 't1', name: 'Keep me', tabs: { left: [tab('a')] } })])])
+      const made = await manager.ensureTaskWorktree('p1', 't1')
+      if (made.status !== 'needs-approval') throw new Error(`expected needs-approval, got ${made.status}`)
+      await manager.decideSetup('t1', 'skip')
+      const recorded = made.workspace
+      fs.writeFileSync(path.join(recorded.worktreePath, 'work.txt'), 'committed\n')
+      git(recorded.worktreePath, 'add', 'work.txt')
+      git(recorded.worktreePath, 'commit', '-q', '-m', 'Work')
+      fs.writeFileSync(path.join(recorded.worktreePath, 'draft.txt'), 'uncommitted\n')
+
+      await closeForStream('keep')
+      expect(fs.existsSync(recorded.worktreePath)).toBe(false)
+      expect(taskOf('t1')?.workspace).toEqual(recorded)
+
+      // Reopened: the gate (or the reopen itself) asks for it.
+      const restored = await manager.ensureTaskWorktree('p1', 't1')
+
+      expect(restored).toMatchObject({ status: 'needs-approval', workspace: recorded })
+      if (restored.status !== 'needs-approval') return
+      expect(git(recorded.worktreePath, 'branch', '--show-current').trim()).toBe('release--keep-me')
+      expect(fs.readFileSync(path.join(recorded.worktreePath, 'work.txt'), 'utf8')).toBe('committed\n')
+      // Keep branch committed the draft too.
+      expect(fs.readFileSync(path.join(recorded.worktreePath, 'draft.txt'), 'utf8')).toBe('uncommitted\n')
+      expect(fs.lstatSync(path.join(recorded.worktreePath, 'node_modules')).isSymbolicLink()).toBe(true)
+      expect(states.get('t1')).toMatchObject({ phase: 'needs-approval', branch: 'release--keep-me' })
+
+      expect(await manager.decideSetup('t1', 'run')).toEqual({ status: 'ready', workspace: recorded })
+      expect(fs.existsSync(path.join(recorded.worktreePath, 'ran.txt'))).toBe(true)
+      expect(branches(repo).filter(branch => branch.startsWith('release--'))).toEqual(['release--keep-me'])
+    })
+
+    it('gets a fresh worktree off the stream when its branch is gone', async () => {
+      setProjects([project([fixtureTask({ id: 't1', name: 'Gone', tabs: { left: [tab('a')] } })])])
+      const made = await manager.ensureTaskWorktree('p1', 't1')
+      if (made.status !== 'ready') throw new Error(`expected ready, got ${made.status}`)
+      fs.writeFileSync(path.join(made.workspace.worktreePath, 'lost.txt'), 'x\n')
+      await closeForStream('discard')
+      expect(branches(repo)).not.toContain('release--gone')
+      expect(taskOf('t1')?.workspace).toEqual(made.workspace)
+
+      const fresh = await manager.ensureTaskWorktree('p1', 't1')
+
+      expect(fresh.status).toBe('ready')
+      const workspace = taskOf('t1')!.workspace!
+      expect(workspace.branchName).toBe('release--gone')
+      expect(fs.existsSync(path.join(workspace.worktreePath, 'lost.txt'))).toBe(false)
+      expect(git(workspace.worktreePath, 'rev-parse', 'HEAD')).toBe(git(repo, 'rev-parse', 'release'))
+      expect(states.has('t1')).toBe(false)
+    })
+
+    it('leaves a worktree that is still there alone', async () => {
+      setProjects([project([fixtureTask({ id: 't1', name: 'Here', tabs: { left: [tab('a')] } })])])
+      const made = await manager.ensureTaskWorktree('p1', 't1')
+      const commits = store.commits
+
+      expect(await manager.ensureTaskWorktree('p1', 't1')).toEqual(made)
+      expect(store.commits).toBe(commits)
+    })
   })
 
   it('runs a new stream\'s held setup once approved', async () => {

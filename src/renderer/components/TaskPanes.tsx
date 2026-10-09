@@ -276,7 +276,9 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
  * or a move holds it back) the tabs that work in its folder wait. Asked for
  * while the task is on screen, so restoring a session doesn't make a
  * worktree for every task at once. A task being closed never asks: its
- * worktree went because it is closing.
+ * worktree went because it is closing. A reopened task whose recorded
+ * worktree couldn't be restored waits on its error and Retry, so nothing
+ * spawns in a folder that isn't there.
  */
 function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
   waiting: boolean
@@ -292,7 +294,7 @@ function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
   const closing = useTaskClosing(task.id)
   const needed = !!stream && needsTaskWorktree(project, stream, task)
   const hasWaitingTabs = taskTabs(task).some(waitsForTaskWorktree)
-  const busy = state?.phase === 'creating' || state?.phase === 'needs-approval' || state?.phase === 'setup'
+  const busy = state?.phase === 'creating' || state?.phase === 'needs-approval' || state?.phase === 'setup' || state?.phase === 'failed'
   const waiting = possible && hasWaitingTabs && (needed || held || busy)
 
   const projectId = project.id

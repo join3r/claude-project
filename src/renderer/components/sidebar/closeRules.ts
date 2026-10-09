@@ -13,6 +13,10 @@
  *   saying what landing would take, and asks nothing when there is nothing to
  *   land. A task sharing its stream's worktree (from before task worktrees) and
  *   a `main` task close as above.
+ * - A stream whose tasks have worktrees of their own asks once about all of
+ *   them (`streamTasksCloseQuestion`): Land all / Keep branches / Discard all,
+ *   listing the tasks with work not landed. Its own worktree's pre-flight
+ *   comes after.
  */
 import { isAgentTabType } from '../../../shared/types'
 import type { Stream, TabStatusValue, Task, TaskLandingPreview, WorkspaceConfig, WorkspaceDeleteResult } from '../../../shared/types'
@@ -147,4 +151,72 @@ export function landingActionBlocker(task: Task, statusOf: StatusOf, busy: boole
   if (task.landing?.state === 'fixing') return 'agent fixing'
   if (task.landing) return 'landing stopped'
   return null
+}
+
+/** One task the stream-close question lists, and what it holds. */
+export interface StreamTaskWork {
+  taskId: string
+  name: string
+  /** "2 commits, uncommitted changes in 1 file". */
+  holds: string
+}
+
+export interface StreamTasksCloseQuestion {
+  title: string
+  streamName: string
+  /** In the stream's order, which is the order Land all lands them in. */
+  tasks: StreamTaskWork[]
+  /** Null when Land all is on offer; otherwise why not. */
+  landBlocked: string | null
+}
+
+/** A task with a worktree of its own, as the stream's close found it. */
+export interface StreamTaskCheck {
+  task: Task
+  /** Null when main couldn't tell. */
+  preview: TaskLandingPreview | null
+  working: boolean
+}
+
+/** Whether closing would lose (or land) something of the task's. */
+export function taskHasWork(check: StreamTaskCheck): boolean {
+  const { preview, task, working } = check
+  return working || !!task.landing || !preview || preview.commits > 0 || preview.uncommitted > 0
+}
+
+function taskHolds(check: StreamTaskCheck): string {
+  const { preview, task, working } = check
+  const parts: string[] = []
+  if (preview?.commits) parts.push(plural(preview.commits, 'commit'))
+  if (preview?.uncommitted) parts.push(`uncommitted changes in ${plural(preview.uncommitted, 'file')}`)
+  if (!preview && !task.landing) parts.push('work DevTool could not check')
+  if (task.landing?.state === 'conflict' || task.landing?.state === 'fixing') parts.push('a landing stopped on conflicts')
+  else if (task.landing?.state === 'blocked') parts.push('a landing blocked by local changes in the stream')
+  else if (task.landing?.state === 'landing') parts.push('a landing under way')
+  if (working) parts.push('its agent is working')
+  return parts.join(', ')
+}
+
+/**
+ * The question before closing a stream whose tasks have worktrees of their
+ * own, or null when none of them has anything to land (their worktrees just
+ * go). Land all is held back while an agent works or a landing stands.
+ */
+export function streamTasksCloseQuestion(stream: Stream, checks: readonly StreamTaskCheck[]): StreamTasksCloseQuestion | null {
+  const withWork = checks.filter(taskHasWork)
+  if (withWork.length === 0) return null
+  const working = withWork.find(check => check.working)
+  // A blocked landing is just tried again; a conflict has to be settled in the task.
+  const stopped = withWork.find(check => check.task.landing && check.task.landing.state !== 'blocked')
+  const landBlocked = working
+    ? `"${working.task.name}" is still working`
+    : stopped
+      ? `Finish or abort the landing of "${stopped.task.name}" first`
+      : null
+  return {
+    title: `Close stream "${stream.name}"?`,
+    streamName: stream.name,
+    tasks: withWork.map(check => ({ taskId: check.task.id, name: check.task.name, holds: taskHolds(check) })),
+    landBlocked
+  }
 }

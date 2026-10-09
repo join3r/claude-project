@@ -48,7 +48,7 @@ export function useTaskLandingActions(): {
   fix: (project: Project, task: Task) => Promise<void>
   fixByHand: (project: Project, task: Task) => void
 } {
-  const { switchToTask, archiveTask, addTab, confirmDiscardDirty, projects } = useApp()
+  const { switchToTask, addTab, confirmDiscardDirty, projects } = useApp()
 
   const settle = useCallback((project: Project, task: Task, op: LandingOp, result: TaskLandingResult) => {
     const streamName = findStreamOfTask(project, task.id)?.name ?? 'the stream'
@@ -73,22 +73,19 @@ export function useTaskLandingActions(): {
   const fix = useCallback((project: Project, task: Task) =>
     run(project, task, 'fix', () => window.api.taskLandingFix(project.id, task.id)), [run])
 
-  /** Picks the stopped landing up again; a close that lands now archives the task, as closing would have. */
+  /** Picks the stopped landing up again; a close that lands now is archived by main, as closing would have been. */
   const retry = useCallback(async (project: Project, task: Task) => {
     const closing = (task.landing?.intent ?? 'close') === 'close'
     if (closing && await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return
     const release = closing ? markTaskClosing(task.id) : null
     try {
       const result = await runLandingOp(task.id, 'retry', () => window.api.taskLandingRetry(project.id, task.id))
-      if (closing && (result.status === 'landed' || result.status === 'nothing')) {
-        await archiveTask(project.id, task.id, { dirtyChecked: true })
-        return
-      }
+      if (closing && (result.status === 'landed' || result.status === 'nothing')) return
       settle(project, task, 'retry', result)
     } finally {
       release?.()
     }
-  }, [archiveTask, confirmDiscardDirty, settle])
+  }, [confirmDiscardDirty, settle])
 
   /** A terminal at the task's worktree root, where the rebase stopped. */
   const fixByHand = useCallback((project: Project, task: Task) => {

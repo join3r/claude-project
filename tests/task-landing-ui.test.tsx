@@ -137,7 +137,8 @@ describe('the close question in the sidebar', () => {
       taskLandingPreview: vi.fn().mockResolvedValue({ commits: 2, uncommitted: 1 }),
       taskLand: vi.fn().mockResolvedValue({ status: 'landed' } satisfies TaskLandingResult),
       taskWorktreeClose: vi.fn().mockResolvedValue({ status: 'removed' } satisfies TaskLandingResult),
-      taskStreamAhead: vi.fn().mockResolvedValue(3)
+      taskStreamAhead: vi.fn().mockResolvedValue(3),
+      archiveAddTasks: vi.fn().mockResolvedValue({ version: 1, tasks: [], streams: [] })
     }
     ;(window as unknown as { api: unknown }).api = new Proxy(api, {
       get(target, prop: string) {
@@ -173,14 +174,16 @@ describe('the close question in the sidebar', () => {
     fireEvent.click(await screen.findByText('Close task', { selector: 'button' }))
   }
 
-  it('lands by default, then archives', async () => {
+  it('lands by default, and main archives', async () => {
     renderSidebar()
     await openClose()
     expect((await screen.findByTestId('task-close-summary')).textContent).toBe('Squash 2 commits and uncommitted changes in 1 file into 0.5.0.')
     fireEvent.click(screen.getByRole('button', { name: 'Land & close' }))
-    await waitFor(() => expect(lastTasks().some(t => t.id === 't1')).toBe(false))
-    expect(api.taskLand).toHaveBeenCalledWith('p1', 't1')
+    await waitFor(() => expect(api.taskLand).toHaveBeenCalledWith('p1', 't1'))
     expect(api.taskWorktreeClose).not.toHaveBeenCalled()
+    // The landing's close archives in main, in the step that drops the worktree.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(api.archiveAddTasks).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -190,9 +193,10 @@ describe('the close question in the sidebar', () => {
     renderSidebar()
     await openClose()
     fireEvent.click(await screen.findByRole('button', { name: button }))
-    await waitFor(() => expect(lastTasks().some(t => t.id === 't1')).toBe(false))
-    expect(api.taskWorktreeClose).toHaveBeenCalledWith('p1', 't1', mode)
+    await waitFor(() => expect(api.taskWorktreeClose).toHaveBeenCalledWith('p1', 't1', mode))
     expect(api.taskLand).not.toHaveBeenCalled()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(api.archiveAddTasks).not.toHaveBeenCalled()
   })
 
   it('cancel leaves the task alone', async () => {

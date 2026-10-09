@@ -15,6 +15,7 @@ import type {
   WorkspaceConfig
 } from '../shared/types'
 import { findStreamOfTask, findTaskInProject, mapTaskInProject, projectTasks, taskTabs } from '../shared/streams'
+import { joinWorkspaceDir } from '../shared/workspace-path'
 import { gitErrorText, gitOutput, type GitResult, type GitRunner } from './git-runner'
 import type { WorkspaceManager } from './workspace-manager'
 
@@ -59,12 +60,23 @@ export interface TaskLandingDeps {
   sendToAgent?(project: Project, task: Task, tab: Tab, text: string): Promise<void>
   /** The task's worktree is gone: forget anything kept about it (held setup, state). */
   forgetWorktree?(taskId: string): void
+  /**
+   * Ends the task's processes (terminals, agents) before its worktree is
+   * removed: Windows won't delete a folder a process still runs in.
+   */
+  stopTabs?(project: Project, task: Task): Promise<void>
+  /**
+   * Archives a task whose close removed its worktree, as `closed` (no landing;
+   * a `workspace` only when its branch was kept), its sessions being in `dir`.
+   * Without it the task just loses its worktree and the caller archives.
+   */
+  archiveTask?(projectId: string, taskId: string, closed: Task, dir: string): Promise<void>
   /** `Task.landing` changed (it is also committed); null when cleared. */
   onState?(taskId: string, landing: TaskLanding | null): void
   /**
    * A landing resumed on its own (the agent asked to fix a conflict went idle
-   * with the rebase done) came to `result`. Nobody else is waiting for it, so a
-   * `close` that `landed` is the listener's to archive.
+   * with the rebase done) came to `result`. A `close` that `landed` is archived
+   * already (through `archiveTask`).
    */
   onResumed?(projectId: string, taskId: string, intent: TaskLandingIntent, result: TaskLandingResult): void
   log?(message: string): void
@@ -222,9 +234,9 @@ export class TaskLandingManager {
 
   /**
    * Lands the task into its stream. `keepWorktree` is the Land action: the
-   * worktree stays, on the stream's new tip. Otherwise (closing) the worktree
-   * and branch go and `Task.workspace` is cleared, also when there was nothing
-   * to land; archiving the task is the caller's.
+   * worktree stays, on the stream's new tip. Otherwise (closing) the task's
+   * tabs stop, the worktree and branch go and the task is archived, also when
+   * there was nothing to land.
    */
   landTask(projectId: string, taskId: string, options: { keepWorktree?: boolean } = {}): Promise<TaskLandingResult> {
     const intent: TaskLandingIntent = options.keepWorktree ? 'land' : 'close'
@@ -331,12 +343,18 @@ export class TaskLandingManager {
   }
 
   /**
-   * Closing without landing. `keep`: a stopped rebase is aborted, uncommitted
-   * work is committed, and the worktree goes but the branch stays; so does
-   * `Task.workspace`, which tells a reopen what to restore. `discard`: worktree
-   * and branch go, uncommitted work with them, and `Task.workspace` is cleared.
+   * Closing without landing; the task's tabs stop and it is archived. `keep`:
+   * a stopped rebase is aborted, uncommitted work is committed, and the
+   * worktree goes but the branch stays; so does `Task.workspace`, which tells a
+   * reopen what to restore. `discard`: worktree and branch go, uncommitted work
+   * with them, and `Task.workspace` is cleared.
+   *
+   * `archive: false` is for a stream about to close with its tasks: the task
+   * stays where it is and keeps `Task.workspace` either way, as the record of
+   * where it worked. Reopened, it gets the worktree back from the branch, or a
+   * fresh one when the branch went.
    */
-  closeWorktree(projectId: string, taskId: string, mode: 'keep' | 'discard'): Promise<TaskLandingResult> {
+  closeWorktree(projectId: string, taskId: string, mode: 'keep' | 'discard', options: { archive?: boolean } = {}): Promise<TaskLandingResult> {
     return this.enqueue(projectId, taskId, async at => {
       this.stopWatching(taskId)
       if (mode === 'keep') {
@@ -347,7 +365,7 @@ export class TaskLandingManager {
         }
         await this.autoCommit(at)
       }
-      await this.remove(at, mode === 'keep')
+      await this.remove(at, { keepBranch: mode === 'keep', archive: options.archive !== false })
       return { status: 'removed' }
     })
   }
@@ -389,7 +407,7 @@ export class TaskLandingManager {
     const base = (await this.git(root, ['merge-base', `refs/heads/${at.target.branchName}`, 'HEAD'])).trim()
     if (!(await this.squash(at, base))) {
       this.deps.log?.(`task landing task=${at.task.id} nothing to land`)
-      if (intent === 'close') await this.remove(at, false)
+      if (intent === 'close') await this.remove(at, { keepBranch: false, archive: true })
       else this.setLanding(at.task.id, null)
       return { status: 'nothing' }
     }
@@ -461,7 +479,7 @@ export class TaskLandingManager {
         return { status: 'blocked', files: ff.files, message: ff.message }
       }
       this.deps.log?.(`task landing task=${at.task.id} landed into ${at.target.branchName}`)
-      if (intent === 'close') await this.remove(at, false)
+      if (intent === 'close') await this.remove(at, { keepBranch: false, archive: true })
       else this.setLanding(at.task.id, null)
       return { status: 'landed' }
     }
@@ -549,24 +567,39 @@ export class TaskLandingManager {
     return { status: 'blocked', files: landing.filter(file => dirty.has(file)), message: gitErrorText(['merge'], merged) }
   }
 
-  /** The worktree goes (and the branch, unless kept); the task forgets it unless the branch is kept. */
-  private async remove(at: Located, keepBranch: boolean): Promise<void> {
+  /**
+   * Closing: the task's tabs stop, the worktree goes (and the branch, unless
+   * kept), and the task is archived in the same step that drops its worktree
+   * from the data. A window never sees it open without a worktree, which
+   * would make it a new one. `archive: false` leaves the task in place with
+   * `Task.workspace` kept as the record of its worktree (its stream closes next).
+   */
+  private async remove(at: Located, options: { keepBranch: boolean; archive: boolean }): Promise<void> {
+    const dir = joinWorkspaceDir(at.own.worktreePath, at.own.relativeProjectPath)
+    await this.deps.stopTabs?.(at.project, at.task)
     const removed = await this.deps.git.delete({
       projectDir: at.project.directory,
       worktreePath: at.own.worktreePath,
       branchName: at.own.branchName,
       baseBranch: at.own.baseBranch,
       force: true,
-      keepBranch
+      keepBranch: options.keepBranch
     })
     if (removed.status !== 'ok') throw new Error(removed.reason ?? `Couldn't remove the task's worktree (${removed.status})`)
     await this.deps.runner.run(['worktree', 'prune'], { cwd: at.project.directory })
     this.deps.forgetWorktree?.(at.task.id)
-    const changed = this.mapTask(at.task.id, task => {
+    const keepRecord = options.keepBranch || !options.archive
+    const closed = (task: Task): Task => {
       const { landing: _landing, workspace, ...rest } = task
-      return keepBranch && workspace ? { ...rest, workspace } : rest
-    })
-    if (changed) this.deps.onState?.(at.task.id, null)
+      return keepRecord && workspace ? { ...rest, workspace } : rest
+    }
+    if (options.archive && this.deps.archiveTask) {
+      const latest = findTaskInProject(this.deps.projects.peek().projects.find(p => p.id === at.project.id), at.task.id) ?? at.task
+      await this.deps.archiveTask(at.project.id, at.task.id, closed(latest), dir)
+      this.deps.onState?.(at.task.id, null)
+      return
+    }
+    if (this.mapTask(at.task.id, closed)) this.deps.onState?.(at.task.id, null)
   }
 
   private async conflict(at: Located, intent: TaskLandingIntent): Promise<TaskLandingResult> {

@@ -567,6 +567,84 @@ describe('TaskLandingManager', () => {
     expect(taskOf('t1')?.workspace).toBeUndefined()
   })
 
+  describe('closing ends the task\'s tabs, then archives it in main', () => {
+    /** What app-runtime's `stopTabs` / `archiveTask` see, in order. */
+    let log: string[]
+    let archived: { taskId: string; closed: Task; dir: string }[]
+
+    function closingDeps(ws: WorkspaceConfig): Partial<TaskLandingDeps> {
+      return {
+        stopTabs: async (_project, stopped) => {
+          // The folder is still there: the processes end before git removes it.
+          log.push(`stop ${stopped.id} worktree=${fs.existsSync(ws.worktreePath)}`)
+        },
+        archiveTask: async (_projectId, taskId, closed, dir) => {
+          log.push(`archive ${taskId} worktree=${fs.existsSync(ws.worktreePath)}`)
+          archived.push({ taskId, closed, dir })
+        }
+      }
+    }
+
+    beforeEach(() => {
+      log = []
+      archived = []
+    })
+
+    it('a landed close stops the tabs before the removal and archives the task without its worktree', async () => {
+      const ws = taskWorktree('t1')
+      write(ws.worktreePath, 'c.txt', 'done\n')
+      setTasks([task('t1', 'Finish', ws)], { deps: closingDeps(ws) })
+
+      expect(await manager.landTask('p1', 't1')).toEqual({ status: 'landed' })
+
+      expect(log).toEqual(['stop t1 worktree=true', 'archive t1 worktree=false'])
+      expect(archived).toHaveLength(1)
+      expect(archived[0].closed.workspace).toBeUndefined()
+      expect(archived[0].closed.landing).toBeUndefined()
+      // Its sessions ran in the task's own worktree: a reopen carries them from there.
+      expect(archived[0].dir).toBe(ws.worktreePath)
+      // Never committed open without a worktree, which would make a window ask for a new one.
+      expect(taskOf('t1')?.workspace).toEqual(ws)
+      expect(states.get('t1')).toBeNull()
+    })
+
+    it('keep branch archives the task with its worktree recorded', async () => {
+      const ws = taskWorktree('t1')
+      write(ws.worktreePath, 'c.txt', 'later\n')
+      setTasks([task('t1', 'Later', ws)], { deps: closingDeps(ws) })
+
+      expect(await manager.closeWorktree('p1', 't1', 'keep')).toEqual({ status: 'removed' })
+      expect(log).toEqual(['stop t1 worktree=true', 'archive t1 worktree=false'])
+      expect(archived[0].closed.workspace).toEqual(ws)
+      expect(branches(repo)).toContain('release--t1')
+    })
+
+    it('a stopped landing never stops the tabs', async () => {
+      const ws = taskWorktree('t1')
+      makeConflict(ws.worktreePath)
+      setTasks([task('t1', 'Edit a', ws)], { deps: closingDeps(ws) })
+
+      expect((await manager.landTask('p1', 't1')).status).toBe('conflict')
+      expect(log).toEqual([])
+    })
+
+    it.each(['keep', 'discard'] as const)('%s for a closing stream leaves the task in place with its worktree recorded', async (mode) => {
+      const ws = taskWorktree('t1')
+      write(ws.worktreePath, 'c.txt', 'work\n')
+      setTasks([task('t1', 'Work', ws, { landing: { state: 'blocked', files: [] } })], { deps: closingDeps(ws) })
+
+      expect(await manager.closeWorktree('p1', 't1', mode, { archive: false })).toEqual({ status: 'removed' })
+
+      expect(log).toEqual(['stop t1 worktree=true'])
+      expect(archived).toEqual([])
+      expect(fs.existsSync(ws.worktreePath)).toBe(false)
+      expect(branches(repo).includes('release--t1')).toBe(mode === 'keep')
+      // The record a reopen restores from (or replaces, the branch being gone).
+      expect(taskOf('t1')?.workspace).toEqual(ws)
+      expect(taskOf('t1')?.landing).toBeUndefined()
+    })
+  })
+
   it('reconciles persisted landings with git at startup', async () => {
     const conflicted = taskWorktree('t1')
     makeConflict(conflicted.worktreePath)

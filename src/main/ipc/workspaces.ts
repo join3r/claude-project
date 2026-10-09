@@ -74,12 +74,28 @@ export async function createWorkspace(deps: WorkspaceGit, request: WorkspaceCrea
   }
 }
 
-/** An archived stream's worktree back from its branch, over SSH for a remote project. */
+/**
+ * An archived stream's worktree back from its branch, over SSH for a remote
+ * project. A local one added again gets the repo's setup, from the project's
+ * checkout, as a new stream's does: its tasks' own worktrees link and copy
+ * from it.
+ */
 export async function restoreWorkspace(deps: WorkspaceGit, request: WorkspaceRestoreRequest): Promise<WorkspaceRestoreResult> {
   const { projectId, sshConfig } = request
   if (sshConfig && projectId) {
     await deps.ensureSshConnected(projectId, sshConfig)
     return deps.remoteWorkspaceManager.restore(deps.socketPath(projectId), { ...request, projectId, sshConfig })
   }
-  return deps.workspaceManager.restore(request.projectDir, request.worktreePath, request.branchName)
+  const restored = await deps.workspaceManager.restore(request.projectDir, request.worktreePath, request.branchName)
+  if (restored.status !== 'ok' || restored.reused) return restored
+  const setup = await deps.workspaceManager.runSetup({
+    sourceRoot: await deps.workspaceManager.repoRoot(request.projectDir),
+    worktreeRoot: restored.worktreePath,
+    branch: restored.branchName
+  })
+  return {
+    ...restored,
+    ...(setup.status === 'failed' ? { setupError: setup.error } : {}),
+    ...(setup.status === 'needs-approval' ? { setupPending: setup.pending } : {})
+  }
 }

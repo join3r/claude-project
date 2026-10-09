@@ -11,6 +11,10 @@ const landOptions = v.object({
   keepWorktree: v.optional(v.boolean())
 })
 
+const closeOptions = v.object({
+  archive: v.optional(v.boolean())
+})
+
 /**
  * Landing a task's worktree into its stream (`task-landing.ts`). Ids only: main
  * looks up the worktrees and branches itself. Every change to `Task.landing`
@@ -38,6 +42,6 @@ export function registerTaskLandingHandlers(ipc: IpcRegistrar, deps: TaskLanding
   ipc.handle('task-landing-preview', [safeId, safeId], (_event, projectId, taskId) =>
     deps.taskLanding.preview(projectId, taskId))
 
-  ipc.handle('task-worktree-close', [safeId, safeId, v.literal('keep', 'discard')], (_event, projectId, taskId, mode) =>
-    deps.taskLanding.closeWorktree(projectId, taskId, mode))
+  ipc.handle('task-worktree-close', [safeId, safeId, v.literal('keep', 'discard'), v.optional(closeOptions)], (_event, projectId, taskId, mode, options) =>
+    deps.taskLanding.closeWorktree(projectId, taskId, mode, options ?? {}))
 }

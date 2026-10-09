@@ -447,7 +447,7 @@ const api = {
     ipcRenderer.invoke('stream-worktree-setup-run', projectId, streamId, pending),
 
   // Landing a task's worktree into its stream (main's TaskLandingManager). A stop is also on `Task.landing`.
-  /** Close (default): land, then remove the worktree and branch; the caller archives. `keepWorktree`: the Land action. */
+  /** Close (default): land, stop the task's tabs, remove the worktree and branch, and archive the task (main does). `keepWorktree`: the Land action. */
   taskLand: (projectId: string, taskId: string, options?: { keepWorktree?: boolean }): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-land', projectId, taskId, options),
   taskLandingRetry: (projectId: string, taskId: string): Promise<TaskLandingResult> =>
@@ -465,9 +465,13 @@ const api = {
   /** What closing would land (commits the stream lacks, uncommitted paths); null when unknown. */
   taskLandingPreview: (projectId: string, taskId: string): Promise<TaskLandingPreview | null> =>
     ipcRenderer.invoke('task-landing-preview', projectId, taskId),
-  /** Close without landing: `keep` the branch (and `Task.workspace`, for reopen) or `discard` both. */
-  taskWorktreeClose: (projectId: string, taskId: string, mode: 'keep' | 'discard'): Promise<TaskLandingResult> =>
-    ipcRenderer.invoke('task-worktree-close', projectId, taskId, mode),
+  /**
+   * Close without landing (main archives the task): `keep` the branch (and
+   * `Task.workspace`, for reopen) or `discard` both. `archive: false` (its
+   * stream closes next) leaves the task open, `Task.workspace` kept as a record.
+   */
+  taskWorktreeClose: (projectId: string, taskId: string, mode: 'keep' | 'discard', options?: { archive?: boolean }): Promise<TaskLandingResult> =>
+    ipcRenderer.invoke('task-worktree-close', projectId, taskId, mode, options),
   onTaskLandingState: (callback: (taskId: string, landing: TaskLanding | null) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, taskId: string, landing: TaskLanding | null) => callback(taskId, landing)
     ipcRenderer.on('task-landing-state', handler)
