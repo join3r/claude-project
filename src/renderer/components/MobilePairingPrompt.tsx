@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { LinkBtn } from './ui'
 import { useMobileSettingsVisible, useMobileState } from '../hooks/useMobileState'
+import { stripBidi } from '../../shared/printable'
 
 /**
  * App-wide, non-modal: a phone asked to pair while Settings → Mobile is not on
@@ -25,7 +26,7 @@ export default function MobilePairingPrompt(): React.ReactElement | null {
       role="alert"
       className="fixed bottom-4 right-4 z-(--z-alert) w-72 rounded-lg border border-border bg-surface shadow-pop px-3 py-2.5 flex flex-col gap-1.5"
     >
-      <div className="text-base text-text">{pending.name} wants to pair</div>
+      <div className="text-base text-text">{stripBidi(pending.name)} wants to pair</div>
       <div className="text-sm text-text-muted">
         {pending.online ? 'It will see your projects, tasks and agent status.' : 'The phone is offline right now.'}
       </div>

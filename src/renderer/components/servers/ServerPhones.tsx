@@ -3,6 +3,7 @@ import type { MobilePairingInvite, MobileState } from '../../../shared/mobile'
 import { formatCountdown, formatLastSeen } from '../../hooks/useMobileState'
 import { renderPairingQr } from '../settings/pairingQr'
 import { InlineConfirm, LinkBtn } from '../ui'
+import { stripBidi } from '../../../shared/printable'
 
 function errorText(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err)
@@ -58,7 +59,7 @@ export function useServerPhones(serverId: string, online: boolean): ServerPhones
 
   // A request that went away (accepted here, in the server's terminal, rejected,
   // or run out) closes the panel in the same render, with a line saying how it ended.
-  const request = state?.pending ? { phoneId: state.pending.phoneId, name: state.pending.name } : null
+  const request = state?.pending ? { phoneId: state.pending.phoneId, name: stripBidi(state.pending.name) } : null
   if (state && (request?.phoneId ?? null) !== (shownRequest?.phoneId ?? null)) {
     setShownRequest(request)
     if (!request && shownRequest) {
@@ -148,7 +149,8 @@ export function PhonePairingPanel({ serverName, online, phones, now }: {
     <div className="ml-3.5 mt-1 rounded-md border border-border bg-surface-2 px-2.5 py-2 flex flex-col gap-1.5" data-testid="phone-pairing">
       {pending ? (
         <div role="alert" className="flex flex-col gap-1.5">
-          <div className="text-base text-text font-medium">{pending.name} wants to pair with {serverName}</div>
+          {/* A phone picks its own name: no bidi controls that could reorder the line. */}
+          <div className="text-base text-text font-medium">{stripBidi(pending.name)} wants to pair with {stripBidi(serverName)}</div>
           <div className="text-sm text-text-muted">
             {pending.online
               ? 'Accept only if this is your phone and you just scanned the code.'
@@ -205,7 +207,7 @@ export function PairedPhones({ online, phones, now }: { online: boolean; phones:
       {devices.map(device => (
         <div key={device.id} className="flex items-center gap-2 text-sm text-text-muted min-w-0" data-testid="server-phone">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${device.online ? 'bg-ssh-connected' : 'bg-status-exited'}`} />
-          <span className="text-text truncate">{device.name}</span>
+          <span className="text-text truncate">{stripBidi(device.name)}</span>
           <span className="truncate">
             {device.outdated
               ? (device.outdated === 'phone' ? 'Update DevTool on this phone' : 'Needs a newer server')

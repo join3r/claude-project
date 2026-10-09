@@ -53,7 +53,7 @@ export interface TestDesktop {
   close(): void
 }
 
-export function startTestDesktop(relayUrl: string, options: { version?: VersionInfo; bundle?: () => LocalBundle | null } = {}): TestDesktop {
+export function startTestDesktop(relayUrl: string, options: { version?: VersionInfo; bundle?: () => LocalBundle | null; desktopName?: string } = {}): TestDesktop {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-link-desktop-'))
   const log: string[] = []
   const identity = new IdentityStore(path.join(dir, 'mobile'), plaintext)
@@ -73,7 +73,7 @@ export function startTestDesktop(relayUrl: string, options: { version?: VersionI
     identity,
     relayUrl: () => relayUrl,
     build,
-    desktopName: () => 'test-mac',
+    desktopName: () => options.desktopName ?? 'test-mac',
     log: (line) => log.push(line),
     ...(options.version ? { version: options.version } : {}),
     ...(options.bundle ? { bundle: options.bundle } : {})

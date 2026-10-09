@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import readline from 'readline'
 import { renderTerminalQr } from './qr-terminal'
+import { printable } from '../shared/printable'
 import { NotRunningError, UnsafeControlSocketError, controlRequest } from './control'
 import type { ServerUpdateState } from '../main/host/link/link-channels'
 import { loadServerManifest, serverPaths, type ServerPaths } from './server-env'
@@ -254,18 +255,18 @@ async function status(io: CliIo, paths: ServerPaths, ctx: ServiceContext, record
     return 3
   }
   const update = daemon.update ? `${daemon.update.version} (${daemon.update.commit.slice(0, 12)}) ${daemon.update.state === 'staged' ? 'staged: switches once no tab is working (or devtool-server restart)' : 'restarting'}` : 'none'
-  io.out(`DevTool server "${daemon.name}" (${daemon.serverId})`)
+  io.out(`DevTool server "${printable(daemon.name)}" (${daemon.serverId})`)
   io.out(`  running   yes, pid ${daemon.pid}; ${service.detail}`)
   io.out(`  version   ${daemon.version} (commit ${daemon.commit.slice(0, 12)}${daemon.builtAt ? `, built ${daemon.builtAt}` : ''}) on Node ${daemon.node}`)
   io.out(`  relay     ${daemon.relay.url}: ${daemon.relay.state}${daemon.relay.error ? ` (${daemon.relay.error})` : ''}`)
   io.out(`  update    ${update}`)
   io.out(`  desktops  ${daemon.desktops.length === 0 ? 'none (pair one with: devtool-server pair)' : daemon.desktops.length}`)
   for (const desktop of daemon.desktops) {
-    io.out(`    ${desktop.name.padEnd(20)} ${desktop.id.slice(0, 8)}  ${desktop.online ? 'connected' : `last seen ${ago(desktop.lastSeen)}`}${desktop.version ? `  DevTool ${desktop.version}` : ''}`)
+    io.out(`    ${printable(desktop.name).padEnd(20)} ${desktop.id.slice(0, 8)}  ${desktop.online ? 'connected' : `last seen ${ago(desktop.lastSeen)}`}${desktop.version ? `  DevTool ${printable(desktop.version, 40)}` : ''}`)
   }
   io.out(`  phones    ${daemon.phones.length === 0 ? 'none (pair one with: devtool-server pair --phone)' : daemon.phones.length}`)
   for (const phone of daemon.phones) {
-    io.out(`    ${phone.name.padEnd(20)} ${phone.id.slice(0, 8)}  ${phone.online ? 'connected' : `last seen ${ago(phone.lastSeen ?? null)}`}`)
+    io.out(`    ${printable(phone.name).padEnd(20)} ${phone.id.slice(0, 8)}  ${phone.online ? 'connected' : `last seen ${ago(phone.lastSeen ?? null)}`}`)
   }
   io.out(`  home      ${daemon.home}`)
   return 0
@@ -306,7 +307,7 @@ async function pair(io: CliIo, paths: ServerPaths, wait: boolean): Promise<numbe
       return 1
     }
     if (state.state === 'paired') {
-      io.out(`Paired with ${state.desktop?.name ?? 'a desktop'} (${state.desktop?.id.slice(0, 8) ?? '?'}).`)
+      io.out(`Paired with ${state.desktop ? printable(state.desktop.name) : 'a desktop'} (${state.desktop?.id.slice(0, 8) ?? '?'}).`)
       return 0
     }
     if (state.state === 'expired' || state.state === 'cancelled') {
@@ -333,7 +334,7 @@ async function unpair(io: CliIo, paths: ServerPaths, target: string): Promise<nu
   }
   const [match] = matches
   await controlRequest(paths, match.kind === 'phone' ? { cmd: 'phone-revoke', id: match.id } : { cmd: 'unpair', id: match.id })
-  io.out(`Removed ${match.kind === 'phone' ? 'the phone ' : ''}${match.name} (${match.id.slice(0, 8)}).`)
+  io.out(`Removed ${match.kind === 'phone' ? 'the phone ' : ''}${printable(match.name)} (${match.id.slice(0, 8)}).`)
   return 0
 }
 
@@ -368,6 +369,8 @@ async function pairPhone(io: CliIo, paths: ServerPaths, wait: boolean): Promise<
     return 0
   }
   io.out('Waiting for the phone... (Ctrl-C to stop waiting; the link stays valid)')
+  /** A phone as the terminal shows it: its name made printable, and its id's first 8 characters. */
+  const label = (phone: { phoneId: string; name: string }) => `${printable(phone.name)} (${phone.phoneId.slice(0, 8)})`
   let asked = null as { phoneId: string; name: string } | null
   let told = false
   const paired = (state: PhoneState, phoneId: string) => state.devices.some((d) => d.id === phoneId)
@@ -375,15 +378,15 @@ async function pairPhone(io: CliIo, paths: ServerPaths, wait: boolean): Promise<
     await new Promise((resolve) => setTimeout(resolve, io.pollMs ?? 1000))
     let state = await controlRequest(paths, { cmd: 'phone-state' }) as PhoneState
     if (asked && paired(state, asked.phoneId)) {
-      io.out(`Paired with ${asked.name}.`)
+      io.out(`Paired with ${label(asked)}.`)
       return 0
     }
     const pending = state.pending
     if (pending && pending.phoneId !== asked?.phoneId) {
       asked = { phoneId: pending.phoneId, name: pending.name }
-      const answer = await io.confirm(`${pending.name} wants to pair with this server. Accept only if it is your phone and you just scanned the code. Accept?`)
+      const answer = await io.confirm(`${label(pending)} wants to pair with this server. Accept only if it is your phone and you just scanned the code. Accept?`)
       if (answer === null) {
-        if (!told) io.out(`${pending.name} wants to pair. Accept it in DevTool: Settings, Servers, this server.`)
+        if (!told) io.out(`${label(pending)} wants to pair. Accept it in DevTool: Settings, Servers, this server.`)
         told = true
         continue
       }
@@ -395,18 +398,18 @@ async function pairPhone(io: CliIo, paths: ServerPaths, wait: boolean): Promise<
         if (!paired(state, pending.phoneId)) throw err
       }
       if (!answer) {
-        io.out(`Rejected ${pending.name}.`)
+        io.out(`Rejected ${label(pending)}.`)
         return 1
       }
       if (paired(state, pending.phoneId)) {
-        io.out(`Paired with ${pending.name}.`)
+        io.out(`Paired with ${label(pending)}.`)
         return 0
       }
       continue
     }
     if (pending) continue
     if (asked) {
-      io.err(`${asked.name} did not pair: the request was rejected or ran out.`)
+      io.err(`${label(asked)} did not pair: the request was rejected or ran out.`)
       return 1
     }
     if (!state.invite || state.invite.uri !== invite.uri) {

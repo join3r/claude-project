@@ -10,6 +10,7 @@ import {
   useNow
 } from '../../hooks/useMobileState'
 import { renderPairingQr } from './pairingQr'
+import { stripBidi } from '../../../shared/printable'
 
 function describeConnection(connection: MobileConnectionState): string {
   switch (connection.kind) {
@@ -121,7 +122,7 @@ export default function MobileSettings({ onOpenRelay }: { onOpenRelay: () => voi
         <div ref={pairSectionRef}>
           {pending ? (
             <div role="alert" className="rounded-md border border-accent bg-accent/10 px-3 py-2.5 flex flex-col gap-1.5">
-              <div className="text-base text-text font-medium">{pending.name} wants to pair</div>
+              <div className="text-base text-text font-medium">{stripBidi(pending.name)} wants to pair</div>
               <div className="text-sm text-text-muted">
                 {pending.online
                   ? 'Accept only if this is your phone and you just scanned the code.'
@@ -181,7 +182,7 @@ export default function MobileSettings({ onOpenRelay }: { onOpenRelay: () => voi
             <GroupRow
               key={device.id}
               icon={<span className={`w-1.5 h-1.5 rounded-full ${device.online ? 'bg-ssh-connected' : 'bg-status-exited'}`} />}
-              label={device.name}
+              label={stripBidi(device.name)}
               sub={device.outdated
                 ? <span className="text-warn">{updateAdvice(device.outdated)}</span>
                 : `${device.online ? 'Online' : formatLastSeen(device.lastSeen, now)}${device.push ? ' · Notifications on' : ''}`}

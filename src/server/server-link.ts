@@ -34,6 +34,7 @@ import type { StreamKinds } from '../main/host/link/stream'
 import { HOST_LINK_MIN_VERSION, HOST_LINK_PROTOCOL_VERSION } from '../main/host/link/version'
 import type { ServerHostInfo } from '../shared/servers'
 import type { ClientRegistry } from './client-registry'
+import { printable } from '../shared/printable'
 
 /** Terminal output batching on the server (plan: at most one message per tab and client per 16 ms). */
 export const PTY_COALESCE_MS = 16
@@ -342,7 +343,7 @@ export class ServerLink {
       build: reply.build
     }
     this.desktops.add(record)
-    this.options.log(`link paired desktop=${record.id} name=${JSON.stringify(record.name)} (install token)`)
+    this.options.log(`link paired desktop=${record.id} name=${JSON.stringify(printable(record.name))} (install token)`)
     this.options.onPaired?.(record)
     pending.resolve(record)
   }
@@ -476,7 +477,7 @@ export class ServerLink {
     }
     this.port.sendBinary(from, outcome.envelope)
     const hello = outcome.hello
-    this.options.log(`link desktop=${from} pairing result=${outcome.result}${outcome.reason ? ` reason=${outcome.reason}` : ''}${hello ? ` name=${JSON.stringify(hello.name)}` : ''}`)
+    this.options.log(`link desktop=${from} pairing result=${outcome.result}${outcome.reason ? ` reason=${outcome.reason}` : ''}${hello ? ` name=${JSON.stringify(printable(hello.name))}` : ''}`)
     if (outcome.result !== 'ok' || !hello || !code) return
     const now = this.now()
     const record: PeerRecord = {
@@ -522,7 +523,7 @@ export class ServerLink {
     }
     this.port.sendBinary(from, outcome.envelope)
     const hello = outcome.hello
-    this.options.log(`link desktop=${from} handshake result=${outcome.result}${hello ? ` name=${JSON.stringify(hello.name)} version=${hello.build.version}` : ''}${outcome.update ? ` update=${outcome.update}` : ''}`)
+    this.options.log(`link desktop=${from} handshake result=${outcome.result}${hello ? ` name=${JSON.stringify(printable(hello.name))} version=${JSON.stringify(printable(hello.build.version, 40))}` : ''}${outcome.update ? ` update=${outcome.update}` : ''}`)
     if (outcome.result !== 'ok' || !outcome.channel || !hello) return
     this.desktops.touchLastSeen(from, this.now())
     this.desktops.setBuild(from, hello.build)

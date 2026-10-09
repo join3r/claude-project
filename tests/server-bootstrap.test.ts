@@ -29,10 +29,10 @@ afterEach(async () => {
   else process.env.DEVTOOL_SERVER_HOME = savedHome
 })
 
-async function setup(): Promise<{ d: TestDesktop; home: string; lines: string[]; relayUrl: string }> {
+async function setup(desktopName?: string): Promise<{ d: TestDesktop; home: string; lines: string[]; relayUrl: string }> {
   const { relay } = await startTestRelay()
   cleanups.push(() => relay.close())
-  const d = startTestDesktop(relay.url, { bundle: () => bundle })
+  const d = startTestDesktop(relay.url, { bundle: () => bundle, ...(desktopName ? { desktopName } : {}) })
   cleanups.push(() => d.close())
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-bootstrap-'))
   cleanups.push(() => fs.rmSync(home, { recursive: true, force: true }))
@@ -76,6 +76,20 @@ describe.skipIf(!bundle || process.platform === 'win32')('bootstrap', () => {
     expect(second.some((line) => line.startsWith('Receiving'))).toBe(false)
     expect(d.log.some((line) => line.includes('update=same'))).toBe(true)
     expect(d.hub.getState().servers).toHaveLength(1)
+  })
+
+  it('prints and logs a desktop\'s chosen name without its escape sequences or bidi controls', { timeout: 60_000 }, async () => {
+    const { d, home, lines } = await setup('Mac\u001b[2J\u001b]0;x\u0007\rbox\u202e')
+    const invite = d.hub.createInvite()
+    await waitFor(() => d.hub.getState().relay.kind === 'online', 'desktop online')
+    await runBootstrap({ token: invite.token, name: 'box', allowRoot: false, noService: true }, { out: (line) => lines.push(line) })
+    expect(lines.find((l) => l.startsWith('Pairing with'))).toMatch(/^Pairing with Mac\ufffd\[2J\ufffd\]0;x\ufffd\ufffdbox through ws:/)
+    expect(lines).toContain('Paired with Mac\ufffd[2J\ufffd]0;x\ufffd\ufffdbox.')
+    const log = fs.readFileSync(path.join(home, 'logs', 'install.log'), 'utf8')
+    const unsafe = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u
+    expect(lines.join('\n')).not.toMatch(unsafe)
+    expect(log).not.toMatch(unsafe)
+    expect(log).toContain('name="Mac\ufffd[2J\ufffd]0;x\ufffd\ufffdbox"')
   })
 
   it('code flow: prints a code, the desktop pairs with it, and the bundle arrives', { timeout: 60_000 }, async () => {

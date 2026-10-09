@@ -258,7 +258,10 @@ describe('Settings › Servers', () => {
     pushServerPhones(id('a'), live())
     expect(screen.getByTestId('phone-pairing').textContent).toContain('another pairing code on the server took its place')
 
-    pushServerPhones(id('a'), live({ pending: { phoneId: id('e'), name: 'iPad', receivedAt: T0, online: false } }))
+    // A phone picks its own name: bidi controls in it don't reach the page.
+    pushServerPhones(id('a'), live({ pending: { phoneId: id('e'), name: 'iP\u202ead', receivedAt: T0, online: false } }))
+    expect(screen.getByRole('alert').textContent).toContain('iPad wants to pair with box')
+    expect(screen.getByRole('alert').textContent).not.toContain('\u202e')
     expect(screen.getByRole('alert').textContent).toContain('The phone is offline right now.')
     api.serverMobileReject.mockResolvedValue(live())
     fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Reject' }))

@@ -20,6 +20,7 @@ import { ServerLink } from './server-link'
 import { installService, linkCliOnPath, readServiceRecord, serviceContext, stopService } from './service'
 import { BUNDLE_STREAM_KIND, ServerUpdater } from './updater'
 import type { DaemonStatus } from './cli'
+import { printable } from '../shared/printable'
 
 /**
  * `site/server/bootstrap.mjs`: what `site/install` runs once it has Node. It pairs
@@ -206,7 +207,7 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
     features: ['bootstrap'],
     log,
     streams: new Map([[BUNDLE_STREAM_KIND, async (stream: LinkStream, context: { peer: string }) => {
-      io.out(`Receiving the DevTool server from ${desktop?.name ?? 'DevTool'}...`)
+      io.out(`Receiving the DevTool server from ${desktop ? printable(desktop.name) : 'DevTool'}...`)
       await updater.streamHandler()(stream, context)
     }]]),
     linkCall: (call) => {
@@ -238,7 +239,7 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
   try {
     link.start()
     if (ticket) {
-      io.out(`Pairing with ${ticket.name || 'DevTool'} through ${relayUrl}...`)
+      io.out(`Pairing with ${ticket.name ? printable(ticket.name) : 'DevTool'} through ${relayUrl}...`)
       desktop = await link.pairWithInstallToken(ticket, { bootstrap: BOOTSTRAP_PROTOCOL })
     } else {
       const code = await link.createPairingCode()
@@ -253,15 +254,15 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
         new Promise<never>((_, reject) => setTimeout(() => reject(new InstallError('The pairing code expired. Run the installer again.')), Math.max(0, code.exp * 1000 - Date.now())).unref())
       ])
     }
-    io.out(`Paired with ${desktop.name}.`)
+    io.out(`Paired with ${printable(desktop.name)}.`)
 
     const result = await Promise.race([
       done,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new InstallError(`${desktop?.name ?? 'DevTool'} paired but did not finish sending the server. Keep DevTool open and run the command again.`)), DONE_TIMEOUT_MS).unref())
+      new Promise<never>((_, reject) => setTimeout(() => reject(new InstallError(`${desktop ? printable(desktop.name) : 'DevTool'} paired but did not finish sending the server. Keep DevTool open and run the command again.`)), DONE_TIMEOUT_MS).unref())
     ])
     log(`bootstrap done desktop=${result.desktopId} uploaded=${result.uploaded}`)
     const bundle = installed()
-    if (!bundle) throw new InstallError(`${desktop.name} has no server bundle to send. Update DevTool (a dev build needs npm run build:server) and run the command again.`)
+    if (!bundle) throw new InstallError(`${printable(desktop.name)} has no server bundle to send. Update DevTool (a dev build needs npm run build:server) and run the command again.`)
     io.out(`DevTool server ${bundle.manifest.version} (${bundle.manifest.commit.slice(0, 12)}) is in ${paths.home}.`)
   } catch (err) {
     cleanup()
@@ -287,7 +288,7 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
   for (const note of service.notes) io.out(note)
   const linked = linkCliOnPath(paths, os.homedir(), process.env.PATH ?? '', paths.home === path.join(os.homedir(), DEFAULT_SERVER_HOME_NAME))
 
-  io.out(`Waiting for ${desktop.name} to see the server online...`)
+  io.out(`Waiting for ${printable(desktop.name)} to see the server online...`)
   const desktopId = desktop.id
   const until = Date.now() + ONLINE_TIMEOUT_MS
   for (;;) {
@@ -300,13 +301,13 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
       lastError = err instanceof NotRunningError ? 'the server is not running' : String(err)
     }
     if (Date.now() > until) {
-      throw new InstallError(`The service is installed, but ${desktop.name} did not connect within ${ONLINE_TIMEOUT_MS / 1000} s${lastError ? ` (${lastError})` : ''}. See: ${path.join(paths.binDir, 'devtool-server')} logs`)
+      throw new InstallError(`The service is installed, but ${printable(desktop.name)} did not connect within ${ONLINE_TIMEOUT_MS / 1000} s${lastError ? ` (${lastError})` : ''}. See: ${path.join(paths.binDir, 'devtool-server')} logs`)
     }
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
   const cli = linked ? 'devtool-server' : path.join(paths.binDir, 'devtool-server')
   io.out('')
-  io.out(`Connected to ${desktop.name}. DevTool shows "${name}" online.`)
+  io.out(`Connected to ${printable(desktop.name)}. DevTool shows "${printable(name)}" online.`)
   io.out(`Manage it with: ${cli} status`)
 }
 
