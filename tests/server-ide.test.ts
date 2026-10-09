@@ -199,6 +199,39 @@ describe.skipIf(process.platform === 'win32')('Open in IDE for server projects',
     expect(fs.existsSync(path.join(lying.configDir, 'ssh', 'config'))).toBe(false)
   })
 
+  it('keys everything by server id: two servers with one name get their own alias, block and socket, and removing one leaves the other', async () => {
+    const OTHER = 'cd'.repeat(16)
+    const r = await rig({ sshdPort: await fakeSshd() })
+    r.state.servers = [status({ name: 'Box' }), status({ id: OTHER, name: 'Box' })]
+    await r.ide.setup(SERVER, { include: true, key: true })
+    await r.ide.setup(OTHER, { include: false, key: true })
+    expect(r.ide.aliasOf(SERVER)).toBe('devtool-abababababab')
+    expect(r.ide.aliasOf(OTHER)).toBe('devtool-cdcdcdcdcdcd')
+    expect(r.ide.socketPath(SERVER)).not.toBe(r.ide.socketPath(OTHER))
+    const configFile = path.join(r.configDir, 'ssh', 'config')
+    const config = fs.readFileSync(configFile, 'utf8')
+    expect(config.match(/^Host /gm)).toHaveLength(2)
+    expect(config).toContain(`# DevTool server ${SERVER}\nHost devtool-abababababab\n`)
+    expect(config).toContain(`# DevTool server ${OTHER}\nHost devtool-cdcdcdcdcdcd\n`)
+    expect(config).toContain(`-U ${r.ide.socketPath(OTHER)}\n`)
+
+    // A server renamed like a user's own Host, or like the other server, changes nothing.
+    r.state.servers = [status({ name: 'devtool-cdcdcdcdcdcd' }), status({ id: OTHER, name: '*' })]
+    await r.ide.open(editor, SERVER, '/srv')
+    expect(r.launched.at(-1)?.alias).toBe('devtool-abababababab')
+    expect(fs.readFileSync(configFile, 'utf8')).toBe(config)
+
+    // Removing one leaves the other's block, pinned keys and socket alone.
+    r.state.servers = [status({ id: OTHER, name: 'Box' })]
+    r.ide.serversChanged({ relay: { kind: 'online' }, servers: r.state.servers, invite: null })
+    await expect.poll(() => fs.readFileSync(configFile, 'utf8').match(/^Host /gm)?.length).toBe(1)
+    const after = fs.readFileSync(configFile, 'utf8')
+    expect(after).toContain('Host devtool-cdcdcdcdcdcd\n')
+    expect(after).not.toContain('devtool-abababababab')
+    expect(fs.readFileSync(path.join(r.configDir, 'ssh', 'known_hosts'), 'utf8')).toBe('devtool-cdcdcdcdcdcd ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHostKey\n')
+    expect(await firstLine(r.ide.socketPath(OTHER))).toBe('SSH-2.0-OpenSSH_fake\r\n')
+  })
+
   it('keeps an alias when the server is renamed, and survives a restart of DevTool', async () => {
     const r = await rig({ sshdPort: await fakeSshd() })
     await r.ide.setup(SERVER, { include: true, key: true })

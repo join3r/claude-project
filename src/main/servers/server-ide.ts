@@ -293,7 +293,8 @@ export class ServerIde {
     // The server says who it runs as; only a plain login name goes into the ssh config.
     if (!isPlainUserName(answer.user)) throw new Error(notPlainUser(serverName))
     const entry: SshHostEntry = { serverId, user: answer.user, hostKeys: answer.hostKeys.slice(0, 8) }
-    this.entries = [...this.entries.filter((e) => e.serverId !== serverId), entry]
+    // In server id order, so a re-authorization rewrites the file the same way.
+    this.entries = [...this.entries.filter((e) => e.serverId !== serverId), entry].sort((a, b) => a.serverId.localeCompare(b.serverId))
     this.saveRegistry()
     await this.writeConfig()
     return entry

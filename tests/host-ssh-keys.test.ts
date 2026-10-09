@@ -88,6 +88,16 @@ describe('authorized_keys on a server', () => {
     expect(mode(file)).toBe(0o600)
   })
 
+  it('matches keys by their bytes, never their comment: two desktops with one name stay apart', () => {
+    const where = tempHome()
+    authorizeDesktopKey({ publicKey: ed25519Pub(6), comment: 'devtool-mac' }, where)
+    authorizeDesktopKey({ publicKey: ed25519Pub(7), comment: 'devtool-mac' }, where)
+    expect(revokeDesktopKey(ed25519Pub(6, 'devtool-mac'), where)).toEqual({ removed: true })
+    const left = fs.readFileSync(path.join(where.home, '.ssh', 'authorized_keys'), 'utf8')
+    expect(left).toContain(parseEd25519PublicKey(ed25519Pub(7)))
+    expect(left).not.toContain(parseEd25519PublicKey(ed25519Pub(6)))
+  })
+
   it('works with a key ssh-keygen made', () => {
     const where = tempHome()
     const keyFile = path.join(path.dirname(where.home), 'id_ed25519')
