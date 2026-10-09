@@ -113,9 +113,7 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
   })
   const uninstall = (deleteData: boolean, why: string): void => {
     log(`uninstall ${why} deleteData=${deleteData}`)
-    // Its identity goes with the data, so the pairs are useless: unpair first, while the relay still hears it.
-    if (deleteData) for (const desktop of link?.desktops.list() ?? []) link?.unpair(desktop.id)
-    setTimeout(() => stop(`uninstall (${why})`, false, async () => {
+    const removeEverything = async () => {
       const ctx = serviceContext(paths, log)
       const record = readServiceRecord(paths)
       if (record) await removeService(ctx, record, { stop: false })
@@ -123,7 +121,13 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
       removeServerFiles(paths, deleteData)
       exitOnSignal = true
       stopSelf(ctx, record)
-    }), 300)
+    }
+    // After the caller's answer is out: unpairing drops its session.
+    setTimeout(() => {
+      // Its identity goes with the data, so the pairs are useless: unpair while the relay still hears it.
+      if (deleteData) for (const desktop of link?.desktops.list() ?? []) link?.unpair(desktop.id)
+      setTimeout(() => stop(`uninstall (${why})`, false, removeEverything), 300)
+    }, 300)
   }
   link = createServerLink(server, {
     streams: new Map([...diagnosticStreamKinds(), [BUNDLE_STREAM_KIND, updater.streamHandler()]]),

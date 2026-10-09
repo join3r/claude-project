@@ -3828,6 +3828,8 @@ function renderSystemdUnit(paths) {
     "Environment=DEVTOOL_SERVER_SUPERVISOR=systemd",
     "Restart=always",
     "RestartSec=3",
+    // 75 is "restart me into an update", not a failure.
+    "SuccessExitStatus=75",
     // SIGTERM to the server first, so it saves scrollback and stops its PTYs; the rest after.
     "KillMode=mixed",
     "TimeoutStopSec=20",

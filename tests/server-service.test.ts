@@ -75,6 +75,7 @@ describe('service files', () => {
     expect(unit).toContain('Environment="DEVTOOL_SERVER_HOME=/home/u/my %%server"')
     expect(unit).toContain('Environment=DEVTOOL_SERVER_SUPERVISOR=systemd')
     expect(unit).toMatch(/^Restart=always$/m)
+    expect(unit).toMatch(/^SuccessExitStatus=75$/m)
     expect(unit).toMatch(/^StartLimitIntervalSec=0$/m)
     expect(unit).toMatch(/^KillMode=mixed$/m)
     expect(unit).toMatch(/^WantedBy=default.target$/m)
