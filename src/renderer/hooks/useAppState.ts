@@ -16,6 +16,7 @@ import {
   useTasksRemovedListener,
   useTabsRemovedListener,
   useTabsRestartListener,
+  useTabsMovedListener,
   useWindowFocused,
   useWindowTitle
 } from './appState/useWindowEffects'
@@ -72,6 +73,7 @@ export function useAppState(): AppActions {
   useTasksRemovedListener(core.updateWindowViewState)
   useTabsRemovedListener()
   useTabsRestartListener()
+  useTabsMovedListener()
   const windowFocused = useWindowFocused()
   usePersistence(core)
   const connectSsh = useConnectSsh()

@@ -53,6 +53,7 @@ beforeEach(() => {
     onTasksRemoved: vi.fn().mockReturnValue(() => {}),
     onTabsRemoved: vi.fn().mockReturnValue(() => {}),
     onTabsRestart: vi.fn().mockReturnValue(() => {}),
+    onTabsMoved: vi.fn().mockReturnValue(() => {}),
     onConfigUpdated: vi.fn().mockReturnValue(() => {}),
     reportDirtyTabs: vi.fn().mockResolvedValue(undefined),
     sshStatus: vi.fn().mockResolvedValue('disconnected'),
