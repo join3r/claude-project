@@ -13,7 +13,7 @@ import type {
   WorkspaceRestoreResult,
   WorktreeSetupDecision
 } from '../shared/types'
-import { findStreamOfTask, findTaskInProject, mapTaskInProject, needsTaskWorktree } from '../shared/streams'
+import { findStreamOfTask, findTaskInProject, mapTaskInProject, needsTaskWorktree, taskWorktreesSupported } from '../shared/streams'
 import { taskBranchName } from '../shared/branch-name'
 import type { WorkspaceManager } from './workspace-manager'
 import type { WorktreeSetupResult } from './worktree-setup'
@@ -153,7 +153,7 @@ export class TaskWorktreeManager {
       return project && stream ? { project, stream } : null
     })
     const workspace = located?.stream.workspace
-    if (!located || !workspace || located.project.ssh) return { status: 'failed', error: 'No such stream worktree' }
+    if (!located || !workspace || !taskWorktreesSupported(located.project)) return { status: 'failed', error: 'No such stream worktree' }
     this.deps.git.approveSetup(pending.repoKey, pending.hash)
     try {
       const sourceRoot = await this.deps.git.repoRoot(located.project.directory)
@@ -240,10 +240,10 @@ export class TaskWorktreeManager {
     return this.afterSetup(taskId, workspace, created.setup, { sourceRoot: base.worktreePath, worktreeRoot: created.worktreePath })
   }
 
-  /** A recorded worktree of a local task in a task-worktree stream, whose folder is not there. */
+  /** A recorded worktree of a task in a task-worktree stream (not over SSH), whose folder is not there. */
   private isGone(found: Located, recorded: WorkspaceConfig): boolean {
     const { project, stream } = found
-    if (project.ssh || !stream.workspace || !stream.taskWorktrees) return false
+    if (!taskWorktreesSupported(project) || !stream.workspace || !stream.taskWorktrees) return false
     return !(this.deps.exists ?? fs.existsSync)(recorded.worktreePath)
   }
 

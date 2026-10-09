@@ -131,6 +131,28 @@ describe('step 7 routes (files, editor, Git panel, chat, conda, notebooks, agent
   })
 })
 
+describe('step 8 routes (streams, task worktrees, landing)', () => {
+  it('sends every stream, task worktree and landing call to the host of the project or task it names', () => {
+    for (const channel of ['task-worktree-ensure', 'stream-worktree-setup-run', 'task-land', 'task-landing-retry', 'task-landing-abort',
+      'task-landing-fix', 'task-update-from-stream', 'task-stream-ahead', 'task-landing-preview', 'task-worktree-close']) {
+      expect(HOST_ROUTES[channel], channel).toEqual({ by: [{ project: 0 }] })
+    }
+    // The setup approval and a dismissed error name only the task.
+    for (const channel of ['task-worktree-decide', 'task-worktree-dismiss']) expect(HOST_ROUTES[channel], channel).toEqual({ by: [{ task: 0 }] })
+    expect(HOST_ROUTES['task-worktree-states']).toEqual({ merge: 'tasks' })
+    for (const channel of ['workspace-list-branches', 'workspace-create', 'workspace-delete', 'workspace-restore']) {
+      expect(HOST_ROUTES[channel], channel).toEqual({ by: [{ projectField: [0, 'projectId'] }] })
+    }
+    // Moving or reopening a task carries its agent sessions on the project's host.
+    expect(HOST_ROUTES['task-move-prepare']).toEqual({ by: [{ project: 4 }] })
+  })
+
+  it('forwards a server\'s worktree and landing pushes only for its own tasks', () => {
+    expect(SERVER_EVENTS['task-worktree-state']).toBe('server-task')
+    expect(SERVER_EVENTS['task-landing-state']).toBe('server-task')
+  })
+})
+
 describe('HostRouter', () => {
   function setup() {
     const index = new RouteIndex()
@@ -362,5 +384,58 @@ describe('HostRouter', () => {
     expect(t.calls).toEqual([])
     t.invoke('scrollback-save-sync', ['local-tab', 'xterm text'])
     expect(t.local.get('scrollback-save-sync')).toHaveBeenCalledTimes(1)
+  })
+
+  it('lands a server project\'s task on its server, and answers its setup approval there, as the calling window', async () => {
+    const t = setup()
+    for (const channel of ['task-land', 'task-landing-abort', 'task-stream-ahead', 'task-worktree-ensure', 'stream-worktree-setup-run', 'task-worktree-decide']) {
+      t.register(channel)
+    }
+    await t.invoke('task-land', ['srv-p', 'srv-t', { keepWorktree: false }], ctx('win:2'))
+    await t.invoke('task-landing-abort', ['srv-p', 'srv-t'])
+    await t.invoke('task-stream-ahead', ['srv-p', 'srv-t'])
+    await t.invoke('task-worktree-ensure', ['srv-p', 'srv-t', { name: 'Fix it' }])
+    const pending = { repoKey: '/srv/p/.git', hash: 'h', commands: ['npm ci'] }
+    await t.invoke('stream-worktree-setup-run', ['srv-p', 'stream-x', pending])
+    await t.invoke('task-worktree-decide', ['srv-t', 'run'])
+    expect(t.calls.map(c => [c.serverId, c.clientId, c.ch])).toEqual([
+      ['srvA', 'win:2', 'task-land'],
+      ['srvA', 'win:1', 'task-landing-abort'],
+      ['srvA', 'win:1', 'task-stream-ahead'],
+      ['srvA', 'win:1', 'task-worktree-ensure'],
+      ['srvA', 'win:1', 'stream-worktree-setup-run'],
+      ['srvA', 'win:1', 'task-worktree-decide']
+    ])
+    for (const channel of ['task-land', 'stream-worktree-setup-run', 'task-worktree-decide']) expect(t.local.get(channel)).not.toHaveBeenCalled()
+
+    // This desktop's own projects and tasks are landed and approved here.
+    expect(await t.invoke('task-land', ['local-p', 'local-t', {}])).toBe('local-answer')
+    expect(await t.invoke('stream-worktree-setup-run', ['local-p', 'stream-x', pending])).toBe('local-answer')
+    expect(await t.invoke('task-worktree-decide', ['local-t', 'run'])).toBe('local-answer')
+    expect(t.calls).toHaveLength(6)
+  })
+
+  it('takes only a server\'s own tasks from its worktree states', async () => {
+    const t = setup()
+    t.register('task-worktree-states', 'handle', { 'local-t': { phase: 'creating' } })
+    const hub = t.hub as { call: RouterHub['call'] }
+    const call = hub.call
+    hub.call = async (serverId, clientId, ch, args, options) => ch === 'task-worktree-states'
+      ? { 'srv-t': { phase: 'needs-approval' }, 'local-t': { phase: 'failed', error: 'spoofed' } }
+      : call(serverId, clientId, ch, args, options)
+    expect(await t.invoke('task-worktree-states', [])).toEqual({ 'local-t': { phase: 'creating' }, 'srv-t': { phase: 'needs-approval' } })
+  })
+
+  it('still forwards a server\'s last landing push about a task it archived, but never one about a local task that left', () => {
+    const t = setup()
+    // The server's landing closed its task: the data loses it, then the landing state clears.
+    t.index.update([fixtureProject({ id: 'local-p', directory: '/home/me/l' }), { ...fixtureProject({ id: 'srv-p', directory: '/srv/p' }), host: 'srvA' }])
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'task-landing-state', args: ['srv-t', null] })
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'task-landing-state', args: ['local-t', null] })
+    t.router.deliver({ serverId: 'srvB', client: '*', ch: 'task-landing-state', args: ['srv-t', null] })
+    expect(t.broadcast).toEqual([['task-landing-state', 'srv-t', null]])
+    // A call about it still reaches the server it was on.
+    expect(t.router.hostFor('task-worktree-dismiss', ['srv-t'])).toBe('srvA')
+    expect(t.router.hostFor('task-worktree-dismiss', ['local-t'])).toBe(LOCAL_HOST)
   })
 })

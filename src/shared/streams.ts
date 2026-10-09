@@ -66,16 +66,25 @@ export function taskDirectory(project: Project, task: Task): string {
 }
 
 /**
+ * Whether the project's tasks can have worktrees of their own and land them:
+ * a project on this machine or on a DevTool server (its own git runs them
+ * there), never an SSH project, whose tasks keep sharing their stream's
+ * worktree. The one guard for task worktrees and landing, on every side.
+ */
+export function taskWorktreesSupported(project: Pick<Project, 'ssh' | 'host'>): boolean {
+  return !project.ssh && featureAvailable(project, 'task-worktrees')
+}
+
+/**
  * Whether `task` is still to get a worktree of its own before its first tab
- * spawns: its stream is a migrated worktree stream (`taskWorktrees`), the project
- * is local (SSH projects keep sharing the stream's worktree), and the task has no
+ * spawns: its stream is a migrated worktree stream (`taskWorktrees`), the
+ * project supports them ({@link taskWorktreesSupported}), and the task has no
  * worktree yet and does not share the stream's.
  */
 export function needsTaskWorktree(project: Project, stream: Stream, task: Task): boolean {
   return !!stream.workspace
     && !!stream.taskWorktrees
-    && !project.ssh
-    && featureAvailable(project, 'task-worktrees')
+    && taskWorktreesSupported(project)
     && !task.workspace
     && !task.sharesStreamWorktree
 }
@@ -83,13 +92,13 @@ export function needsTaskWorktree(project: Project, stream: Stream, task: Task):
 /**
  * Whether a task reopening into `stream` works in a worktree of its own: the
  * one it recorded (`Task.workspace`, restored from its branch) or a fresh one
- * off the stream's tip. That is every reopened task of a local task-worktree
- * stream except one sharing the stream's worktree, so a task archived before
- * task worktrees (no stamp, no record) comes back as a new one. Anywhere else
- * it works in the stream's directory, as before.
+ * off the stream's tip. That is every reopened task of a task-worktree stream
+ * ({@link taskWorktreesSupported}) except one sharing the stream's worktree, so
+ * a task archived before task worktrees (no stamp, no record) comes back as a
+ * new one. Anywhere else it works in the stream's directory, as before.
  */
 export function reopensInOwnWorktree(project: Project, stream: Stream, task: Task): boolean {
-  return !!stream.workspace && !!stream.taskWorktrees && !project.ssh && featureAvailable(project, 'task-worktrees')
+  return !!stream.workspace && !!stream.taskWorktrees && taskWorktreesSupported(project)
     && !task.sharesStreamWorktree
 }
 
