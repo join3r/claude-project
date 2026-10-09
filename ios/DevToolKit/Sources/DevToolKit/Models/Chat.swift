@@ -403,6 +403,22 @@ public struct ChatEarlierResult: Sendable, Equatable {
     }
 }
 
+/// One picture `task.new` sends with its prompt (§8.4): base64 `data` with no
+/// `data:` prefix, of one of `ChatImageResult.mediaTypes`.
+public struct TaskNewImage: Sendable, Equatable {
+    /// §8.4 limits: images per task, and their base64 characters in total.
+    public static let maxCount = 4
+    public static let maxData = 3_000_000
+
+    public var mediaType: String
+    public var data: String
+
+    public init(mediaType: String, data: String) {
+        self.mediaType = mediaType
+        self.data = data
+    }
+}
+
 /// `task.new` (§8.4) params: a new task in one of `projectId`'s streams whose
 /// Claude chat starts on `prompt`.
 public struct TaskNewParams: Sendable, Equatable {
@@ -412,12 +428,16 @@ public struct TaskNewParams: Sendable, Equatable {
     public var prompt: String
     /// One of `TaskOp.modes`; nil leaves Claude's own default.
     public var mode: String?
+    /// Pictures sent with the prompt (`task.images`): at most
+    /// `TaskNewImage.maxCount`, `TaskNewImage.maxData` base64 characters in all.
+    public var images: [TaskNewImage]
 
-    public init(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil) {
+    public init(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [TaskNewImage] = []) {
         self.projectId = projectId
         self.streamId = streamId
         self.prompt = prompt
         self.mode = mode
+        self.images = images
     }
 }
 
@@ -1022,7 +1042,22 @@ extension TaskNewParams {
         if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ProtocolError("prompt is empty") }
         let mode = try o.optStr("mode")
         if let mode, !TaskOp.modes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
-        return TaskNewParams(projectId: projectId, streamId: try o.optStr("streamId"), prompt: prompt, mode: mode)
+        var images: [TaskNewImage] = []
+        if !o.isUnset("images") {
+            for value in try o.array("images") {
+                let image = try Fields(value, "image")
+                let mediaType = try image.str("mediaType")
+                guard ChatImageResult.mediaTypes.contains(mediaType) else { throw ProtocolError("unknown mediaType \(mediaType)") }
+                let data = try image.str("data")
+                if data.isEmpty { throw ProtocolError("image data is empty") }
+                images.append(TaskNewImage(mediaType: mediaType, data: data))
+            }
+            if images.count > TaskNewImage.maxCount { throw ProtocolError("more than \(TaskNewImage.maxCount) images") }
+            if images.reduce(0, { $0 + $1.data.utf8.count }) > TaskNewImage.maxData {
+                throw ProtocolError("images over \(TaskNewImage.maxData) characters")
+            }
+        }
+        return TaskNewParams(projectId: projectId, streamId: try o.optStr("streamId"), prompt: prompt, mode: mode, images: images)
     }
 
     public var json: JSONValue {
@@ -1030,6 +1065,9 @@ extension TaskNewParams {
         if let streamId { fields["streamId"] = .string(streamId) }
         fields["prompt"] = .string(prompt)
         if let mode { fields["mode"] = .string(mode) }
+        if !images.isEmpty {
+            fields["images"] = .array(images.map { .object(["mediaType": .string($0.mediaType), "data": .string($0.data)]) })
+        }
         return .object(fields)
     }
 }

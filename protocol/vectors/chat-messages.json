@@ -807,6 +807,30 @@
           "projectId": "p1",
           "prompt": "Go"
         }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"What is wrong here?\",\"images\":[{\"mediaType\":\"image/jpeg\",\"data\":\"/9j/4AAQ\"},{\"mediaType\":\"image/png\",\"data\":\"iVBORw0K\"}]}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "What is wrong here?",
+          "images": [
+            {
+              "mediaType": "image/jpeg",
+              "data": "/9j/4AAQ"
+            },
+            {
+              "mediaType": "image/png",
+              "data": "iVBORw0K"
+            }
+          ]
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":[]}",
+        "expected": {
+          "projectId": "p1",
+          "prompt": "Go"
+        }
       }
     ],
     "results": [
@@ -832,6 +856,9 @@
         "{\"projectId\":\"p1\",\"prompt\":\"   \"}",
         "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"mode\":\"yolo\"}",
         "{\"projectId\":\"p1\",\"streamId\":7,\"prompt\":\"Go\"}",
+        "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":[{\"mediaType\":\"image/tiff\",\"data\":\"AAAA\"}]}",
+        "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":[{\"mediaType\":\"image/png\",\"data\":\"\"}]}",
+        "{\"projectId\":\"p1\",\"prompt\":\"Go\",\"images\":\"photo\"}",
         "null"
       ],
       "results": [

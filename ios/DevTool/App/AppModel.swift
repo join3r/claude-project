@@ -147,9 +147,9 @@ final class AppModel {
     /// `task.new` (§8.4): a new task in the project's stream `streamId` (nil:
     /// the one last used) whose Claude chat starts on `prompt`, and the route
     /// to that chat. The task shows up with the next inbox.
-    func newTask(desktopId: String, projectId: String, streamId: String?, prompt: String, mode: String?) async throws -> ChatRoute {
+    func newTask(desktopId: String, projectId: String, streamId: String?, prompt: String, mode: String?, images: [TaskNewImage] = []) async throws -> ChatRoute {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
-        let result = try await connection.newTask(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode)
+        let result = try await connection.newTask(projectId: projectId, streamId: streamId, prompt: prompt, mode: mode, images: images)
         return ChatRoute(desktopId: desktopId, tabId: result.tabId)
     }
 

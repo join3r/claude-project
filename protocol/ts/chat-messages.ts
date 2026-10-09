@@ -33,7 +33,14 @@ export const TASK_NEW_FEATURE = 'task.new'
 export const TASK_NEW_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const
 export type TaskNewMode = (typeof TASK_NEW_MODES)[number]
 
-export interface TaskNewParams { projectId: string; streamId?: string; prompt: string; mode?: TaskNewMode }
+/**
+ * The handshake feature (§8.1) a desktop lists when `task.new` takes `images`:
+ * pictures sent with the first prompt, as the desktop composer attaches them.
+ */
+export const TASK_IMAGES_FEATURE = 'task.images'
+
+export interface TaskNewImage { mediaType: string; data: string }
+export interface TaskNewParams { projectId: string; streamId?: string; prompt: string; mode?: TaskNewMode; images?: TaskNewImage[] }
 export interface TaskNewResult { taskId: string; tabId: string }
 
 /**
@@ -267,6 +274,9 @@ export const ChatLimits = {
   imageDefaultSide: 2048,
   /** `chat.image` base64 `data`, so the result fits one message (§6.1). */
   imageData: 3_000_000,
+  /** `task.new` images: how many, and their base64 `data` in total, so the req fits one message (§6.1). */
+  taskImages: 4,
+  taskImageData: 3_000_000,
   /** `chat.btw` question (§8.14). */
   btwQuestion: 20_000,
   /** `chat.permissions.update` rule (§8.14). */
@@ -760,7 +770,9 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
 /**
  * `task.new` params (the desktop's side). Throws ProtocolError — `bad-request` — on
  * a missing `projectId`, a blank prompt or one over {@link ChatLimits.send}
- * characters, or a `mode` outside {@link TASK_NEW_MODES}.
+ * characters, a `mode` outside {@link TASK_NEW_MODES}, or `images` that aren't
+ * {@link CHAT_IMAGE_TYPES} or go over {@link ChatLimits.taskImages} /
+ * {@link ChatLimits.taskImageData}.
  */
 export function parseTaskNewParams(params: unknown): TaskNewParams {
   const o = obj(params, 'params')
@@ -775,6 +787,21 @@ export function parseTaskNewParams(params: unknown): TaskNewParams {
   if (mode !== undefined) {
     if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
     out.mode = mode as TaskNewMode
+  }
+  if (!absent(o, 'images')) {
+    const images = arr(o, 'images').map((value) => {
+      const image = obj(value, 'image')
+      const mediaType = str(image, 'mediaType')
+      if (!(CHAT_IMAGE_TYPES as readonly string[]).includes(mediaType)) fail(`unknown mediaType ${mediaType}`)
+      const data = str(image, 'data')
+      if (!data) fail('image data is empty')
+      return { mediaType, data }
+    })
+    if (images.length > ChatLimits.taskImages) fail(`more than ${ChatLimits.taskImages} images`)
+    if (images.reduce((sum, image) => sum + image.data.length, 0) > ChatLimits.taskImageData) {
+      fail(`images over ${ChatLimits.taskImageData} characters`)
+    }
+    if (images.length > 0) out.images = images
   }
   return out
 }

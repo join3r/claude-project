@@ -84,8 +84,8 @@ struct NewTaskToolbarButton: View {
 }
 
 /// "New task" (§8.3, §8.4), project first: the project, its stream, the
-/// agent (a Claude chat: what `task.new` starts), a permission mode and the
-/// first prompt. The stream defaults to the one the project was last used
+/// agent (a Claude chat: what `task.new` starts), a permission mode, the
+/// first prompt and pictures to go with it. The stream defaults to the one the project was last used
 /// in. The desktop names the task after the prompt and starts Claude on it in
 /// the stream's folder; the chat opens as soon as the task shows up in the inbox.
 struct NewTaskSheet: View {
@@ -100,6 +100,7 @@ struct NewTaskSheet: View {
     /// nil until a project is picked; then its default stream.
     @State private var streamId: String?
     @State private var prompt = ""
+    @State private var images: [PickedImage] = []
     /// "" leaves Claude's own default mode.
     @State private var mode = ""
     @State private var sending = false
@@ -166,12 +167,17 @@ struct NewTaskSheet: View {
                     } footer: {
                         Text("The task is named from this prompt.")
                     }
+                    if imagesSupported || !images.isEmpty {
+                        TaskImagesSection(images: $images, disabled: sending, unsupported: imagesUnsupported)
+                    }
                     if let error {
                         Section {
                             Text(error).foregroundStyle(.red)
                         }
                     }
                 }
+                // Dragging down puts the keyboard away, uncovering the pictures under the prompt.
+                .scrollDismissesKeyboard(.interactively)
                 // The field sits low and grows as it fills: keep its bottom edge,
                 // where the caret usually is, above the keyboard.
                 .onChange(of: prompt) { revealPrompt(scroller) }
@@ -192,7 +198,7 @@ struct NewTaskSheet: View {
                         ProgressView()
                     } else {
                         Button("Start") { Task { await start() } }
-                            .disabled(trimmed.isEmpty || selection == nil || offline)
+                            .disabled(trimmed.isEmpty || selection == nil || offline || (imagesUnsupported != nil && !images.isEmpty))
                     }
                 }
             }
@@ -265,16 +271,28 @@ struct NewTaskSheet: View {
     }
     private var trimmed: String { prompt.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var offline: Bool { selection.map { model.isOffline($0.desktopId) } ?? true }
+    /// The picked desktop takes pictures with `task.new`.
+    private var imagesSupported: Bool {
+        selection.map { model.supports(DesktopFeature.taskImages, on: $0.desktopId) } ?? false
+    }
+    /// Pictures picked for a desktop that can't take them, after switching project.
+    private var imagesUnsupported: String? {
+        guard let selection, !imagesSupported else { return nil }
+        let name = model.desktop(selection.desktopId)?.name ?? "This desktop"
+        return "\(name) can't take pictures yet. Update DevTool there, or remove them."
+    }
 
     private func start() async {
         guard !sending, !trimmed.isEmpty, let selection else { return }
         sending = true
         error = nil
         do {
+            let picked = imagesSupported ? images.map(\.image) : []
+            let encoded = await Task.detached(priority: .userInitiated) { PickedImage.encode(picked) }.value
             // A stream that has gone since the picker was filled: let the desktop pick.
             let route = try await model.newTask(
                 desktopId: selection.desktopId, projectId: selection.projectId, streamId: selectedStream?.id,
-                prompt: trimmed, mode: mode.isEmpty ? nil : mode
+                prompt: trimmed, mode: mode.isEmpty ? nil : mode, images: encoded
             )
             lastProject = selection.id
             dismiss()

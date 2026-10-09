@@ -634,7 +634,10 @@ function chatMessages(): unknown {
         text({ projectId: 'p1', streamId: 's-050', prompt: 'Plan the refactor', mode: 'plan' }),
         text({ projectId: 'p1', streamId: null, prompt: 'Go', mode: null, extra: true }),
         // Version 1's `workspace` is gone: it is ignored like any unknown field.
-        text({ projectId: 'p1', prompt: 'Go', workspace: true })
+        text({ projectId: 'p1', prompt: 'Go', workspace: true }),
+        // `images` (feature `task.images`) go with the prompt; an empty list is no images.
+        text({ projectId: 'p1', prompt: 'What is wrong here?', images: [{ mediaType: 'image/jpeg', data: '/9j/4AAQ' }, { mediaType: 'image/png', data: 'iVBORw0K' }] }),
+        text({ projectId: 'p1', prompt: 'Go', images: [] })
       ].map((json) => ({ json, expected: parseTaskNewParams(JSON.parse(json)) })),
       results: [text({ taskId: 'task-new', tabId: 'tab-new' }), text({ taskId: 'task-new', tabId: 'tab-new', seq: 0 })].map((json) => ({ json, expected: parseTaskNewResult(JSON.parse(json)) })),
       invalid: {
@@ -644,6 +647,9 @@ function chatMessages(): unknown {
           text({ projectId: 'p1', prompt: '   ' }),
           text({ projectId: 'p1', prompt: 'Go', mode: 'yolo' }),
           text({ projectId: 'p1', streamId: 7, prompt: 'Go' }),
+          text({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/tiff', data: 'AAAA' }] }),
+          text({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/png', data: '' }] }),
+          text({ projectId: 'p1', prompt: 'Go', images: 'photo' }),
           'null'
         ],
         results: [text({ tabId: 'tab-new' }), text({ taskId: 'task-new' }), '[]']

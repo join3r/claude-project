@@ -83,6 +83,7 @@ import {
   BRANCHES_LIST_FEATURE,
   CHAT_COMMANDS_FEATURE,
   CHAT_IMAGE_FEATURE,
+  TASK_IMAGES_FEATURE,
   CHAT_SETTINGS_FEATURE,
   PIN_FEATURE,
   STREAM_NEW_FEATURE,
@@ -448,7 +449,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, TASK_IMAGES_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -456,7 +457,7 @@ export class HostServices {
       broadcastState: (state) => this.clients.broadcast(this.isServer ? SERVER_MOBILE_STATE_CHANNEL : 'mobile-state-changed', state),
       log,
       chat: bridge,
-      newTask: async (phoneId, { projectId, streamId, prompt, mode }) => {
+      newTask: async (phoneId, { projectId, streamId, prompt, mode, images }) => {
         // A server has no Claude switch: its desktops' settings are theirs.
         if (!this.isServer && !this.config.enableClaude) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
@@ -480,7 +481,7 @@ export class HostServices {
         // reported: the phone opens the chat either way and sees its state there,
         // where a retry of task.new would only make a second task.
         try {
-          await bridge.startTask(phoneId, added.tabId, prompt, mode)
+          await bridge.startTask(phoneId, added.tabId, prompt, mode, images)
         } catch (err) {
           log(`task.new start tab=${added.tabId} error=${err instanceof Error ? err.message : String(err)}`)
         }

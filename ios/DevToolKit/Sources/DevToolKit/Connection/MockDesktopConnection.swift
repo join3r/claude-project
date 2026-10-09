@@ -225,7 +225,7 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             let result = try addTask(projectId: parsed.projectId, streamId: parsed.streamId, prompt: parsed.prompt)
-            startReply(tabId: result.tabId, text: parsed.prompt)
+            startReply(tabId: result.tabId, text: parsed.prompt, images: parsed.images.count)
             return result.json
         case TaskOp.close:
             let parsed: TaskCloseParams
@@ -602,12 +602,12 @@ public actor MockDesktopConnection: DesktopConnection {
         }
     }
 
-    private func startReply(tabId: String, text: String) {
+    private func startReply(tabId: String, text: String, images: Int = 0) {
         guard var chat = chats[tabId] else { return }
         let userId = chat.makeId("u"), thinkingId = chat.makeId("th"), textId = chat.makeId("a"), toolId = chat.makeId("t")
         chats[tabId] = chat
         let busy = chat.status.busy
-        change(tabId, upserts: [ChatItem(id: userId, .user(text: text, images: nil, queued: busy, failed: false))]) {
+        change(tabId, upserts: [ChatItem(id: userId, .user(text: text, images: images > 0 ? images : nil, queued: busy, failed: false))]) {
             $0.status.busy = true
             $0.status.process = .running
             if $0.status.turnStartedAt == nil || !busy { $0.status.turnStartedAt = Date().unixMilliseconds }
@@ -736,7 +736,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
-            DesktopFeature.taskLand,
+            DesktopFeature.taskLand, DesktopFeature.taskImages,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

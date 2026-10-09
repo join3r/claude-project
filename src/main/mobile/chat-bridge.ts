@@ -20,6 +20,7 @@ import {
   questionAnswerResponse,
   canAlwaysAllow
 } from '../../shared/chat-prompts'
+import type { ChatImage } from '../../shared/claude-chat'
 import { chatTabConfig, type ChatTabConfigShape } from '../../shared/chat-tab-config'
 import type { Project, ProjectsData, Tab, Task, TaskWorktreeResult } from '../../shared/types'
 import { findStreamOfTask, needsTaskWorktree, projectTasks, taskTabs } from '../../shared/streams'
@@ -86,7 +87,7 @@ export interface ChatBridgeChats {
     listener: (seq: number, event: ChatEvent, state: ChatState) => void
   ): Promise<{ snapshot: ChatSnapshot; stop: () => void }>
   snapshot(tabId: string): ChatSnapshot | null
-  send(tabId: string, text: string): Promise<void>
+  send(tabId: string, text: string, images?: ChatImage[]): Promise<void>
   /** Optional so a bridge without it still serves every `chat.*` op; `task.new` uses it for `mode`. */
   setPermissionMode?(tabId: string, mode: string): Promise<void>
   /** `chat.settings`; undefined goes back to Claude's settings default. */
@@ -202,15 +203,16 @@ export class ChatBridge {
 
   /**
    * `task.new` (SPEC.md §8.4): start a chat tab that was just committed on its first
-   * prompt, in `mode` when given, as a send from this phone (so its `done` push follows).
+   * prompt (with its images), in `mode` when given, as a send from this phone (so its
+   * `done` push follows).
    */
-  async startTask(phoneId: string, tabId: string, prompt: string, mode?: string): Promise<void> {
+  async startTask(phoneId: string, tabId: string, prompt: string, mode?: string, images?: ChatImage[]): Promise<void> {
     const resolved = await this.resolveReady(tabId)
     if (!resolved) throw new OpError(AppErrorCode.NotFound, 'No such tab')
     await this.ensureRuntime(resolved)
     if (mode) await this.deps.chats.setPermissionMode?.(tabId, mode)
     this.deps.onPhoneSend?.(phoneId, tabId)
-    await this.deps.chats.send(tabId, prompt)
+    await this.deps.chats.send(tabId, prompt, images)
   }
 
   /** The phone's session ended: forget its subscription. */

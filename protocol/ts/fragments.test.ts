@@ -158,6 +158,18 @@ describe('chat parsers', () => {
     expect(parseChatParams('task.new', { projectId: 'p1', prompt: 'Go' })).toBeNull()
   })
 
+  it('parses task.new images (§8.4) within their caps', () => {
+    const png = { mediaType: 'image/png', data: 'iVBO' }
+    expect(parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [png] })).toEqual({ projectId: 'p1', prompt: 'Go', images: [png] })
+    expect(parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [] })).toEqual({ projectId: 'p1', prompt: 'Go' })
+    expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/tiff', data: 'x' }] })).toThrow(ProtocolError)
+    expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/png', data: '' }] })).toThrow(ProtocolError)
+    expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: Array(ChatLimits.taskImages + 1).fill(png) })).toThrow(ProtocolError)
+    const half = { mediaType: 'image/jpeg', data: 'x'.repeat(ChatLimits.taskImageData / 2) }
+    expect(parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [half, half] }).images).toHaveLength(2)
+    expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [half, half, png] })).toThrow(ProtocolError)
+  })
+
   it('parses stream.new (§8.12): trims, drops branch fields without a worktree, names no tab', () => {
     expect(parseStreamNewParams({ projectId: 'p1', name: ' 0.6.0 ', worktree: true, branch: ' 0.6.0 ', baseBranch: 'main' }))
       .toEqual({ projectId: 'p1', name: '0.6.0', worktree: true, branch: '0.6.0', baseBranch: 'main' })

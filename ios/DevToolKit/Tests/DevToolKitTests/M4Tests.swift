@@ -108,6 +108,19 @@ import Testing
         }
         #expect(try ChatParams.parse(op: TaskOp.new, .object(["projectId": "p", "prompt": "Go"])) == nil)
     }
+
+    @Test func imagesAreCapped() throws {
+        let png: JSONValue = .object(["mediaType": "image/png", "data": "iVBO"])
+        let parsed = try TaskNewParams.parse(.object(["projectId": "p", "prompt": "Go", "images": .array([png])]))
+        #expect(parsed.images == [TaskNewImage(mediaType: "image/png", data: "iVBO")])
+        #expect(throws: ProtocolError.self) {
+            _ = try TaskNewParams.parse(.object(["projectId": "p", "prompt": "Go", "images": .array(Array(repeating: png, count: TaskNewImage.maxCount + 1))]))
+        }
+        let big: JSONValue = .object(["mediaType": "image/jpeg", "data": .string(String(repeating: "x", count: TaskNewImage.maxData))])
+        #expect(throws: ProtocolError.self) {
+            _ = try TaskNewParams.parse(.object(["projectId": "p", "prompt": "Go", "images": .array([big, png])]))
+        }
+    }
 }
 
 /// `task.close` and `tab.close` samples in `protocol/vectors/chat-messages.json` (§8.7, §8.8).
@@ -404,7 +417,7 @@ import Testing
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
-            DesktopFeature.taskLand,
+            DesktopFeature.taskLand, DesktopFeature.taskImages,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let listed = try await mock.listBranches(projectId: "p-api")
