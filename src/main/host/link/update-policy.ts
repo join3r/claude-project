@@ -1,5 +1,6 @@
 import type { LinkBuild } from './handshake'
 import type { BundleManifest } from './bundle-archive'
+import type { ServerUpdateResult } from '../../../shared/servers'
 
 /**
  * Whether a desktop uploads its server bundle to a server it just connected to
@@ -14,12 +15,9 @@ import type { BundleManifest } from './bundle-archive'
  * - `source`: the server runs from a source checkout (`sha256: dev`): leave it.
  * - `unknown-age`: a build time is missing or unreadable: leave it.
  */
-export type UpdateReason = 'server-empty' | 'same' | 'desktop-newer' | 'server-newer' | 'no-bundle' | 'source' | 'unknown-age'
+export type UpdateReason = ServerUpdateResult['reason']
 
-export interface UpdateDecision {
-  upload: boolean
-  reason: UpdateReason
-}
+export type UpdateDecision = ServerUpdateResult
 
 export function decideUpdate(desktop: BundleManifest | null, server: LinkBuild): UpdateDecision {
   if (!desktop) return { upload: false, reason: 'no-bundle' }

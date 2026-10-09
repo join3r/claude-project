@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import fs from 'fs'
 import path from 'path'
 import {
   ProtocolError,
@@ -331,4 +332,44 @@ describe.skipIf(process.platform === 'win32')('pairing through the relay', () =>
     await waitFor(() => d.status(s.id)?.problem === 'revoked', 'revoked')
     expect(s.link.desktops.list()).toEqual([])
   })
+
+  it('remove: asks an online server to uninstall, revokes the pair, and the server forgets the desktop', { timeout: 30_000 }, async () => {
+    const r = await relay()
+    const uninstalls: unknown[] = []
+    const s = await startTestServer(r.url, {
+      linkCall: (call) => {
+        if (call.ch !== 'server-uninstall') return undefined
+        uninstalls.push(call.args[0])
+        return Promise.resolve({ ok: true })
+      }
+    })
+    cleanups.push(() => s.close())
+    const d = desktop(r.url)
+    await pairByCode(d, s)
+    expect(d.hub.rename(s.id, '  build box ')).toMatchObject({ name: 'build box' })
+    await expect(d.hub.remove(s.id, { uninstall: true })).resolves.toEqual({ uninstalled: true })
+    expect(uninstalls).toEqual([{ deleteData: true }])
+    expect(d.hub.getState().servers).toEqual([])
+    await waitFor(() => s.link.desktops.list().length === 0, 'server forgot the desktop')
+    expect(fs.existsSync(path.join(d.dir, 'servers', 'pending-revokes.json')) ? JSON.parse(fs.readFileSync(path.join(d.dir, 'servers', 'pending-revokes.json'), 'utf8')) : []).toEqual([])
+  })
+
+  it('remove while the relay is away: the revoke waits for the next connection', { timeout: 30_000 }, async () => {
+    const { relay: r, store } = await startTestRelay()
+    cleanups.push(() => r.close())
+    const s = await server(r.url)
+    const d = desktop(r.url)
+    await pairByCode(d, s)
+    const port = Number(new URL(r.url).port)
+    await r.close()
+    await waitFor(() => d.hub.getState().relay.kind !== 'online', 'relay gone')
+    await d.hub.remove(s.id)
+    expect(JSON.parse(fs.readFileSync(path.join(d.dir, 'servers', 'pending-revokes.json'), 'utf8'))).toEqual([s.id])
+    const { startRelayServer } = await import('../relay/src/server.ts')
+    const again = await startRelayServer({ store, port, host: '127.0.0.1', limits: { connectionsPerIpPerMinute: 1000 } })
+    cleanups.push(() => again.close())
+    await waitFor(() => JSON.parse(fs.readFileSync(path.join(d.dir, 'servers', 'pending-revokes.json'), 'utf8')).length === 0, 'revoke sent', 15_000)
+    await waitFor(() => !store.findPair(d.identity.get().id, s.id) && !store.findPair(s.id, d.identity.get().id), 'pair gone at the relay', 5000)
+  })
 })
+

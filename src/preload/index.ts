@@ -41,7 +41,7 @@ import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared
 import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
-import type { ServersState } from '../shared/servers'
+import type { ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult } from '../shared/servers'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
@@ -545,6 +545,19 @@ const api = {
   },
   // DevTool servers. Main owns the state; every change is also broadcast.
   serversGetState: (): Promise<ServersState> => ipcRenderer.invoke('servers-get-state'),
+  /** A fresh install one-liner (15 minutes, single use); replaces the phone QR and any earlier invite. */
+  serversCreateInvite: (): Promise<ServerInvite> => ipcRenderer.invoke('servers-create-invite'),
+  serversCancelInvite: (): Promise<ServersState> => ipcRenderer.invoke('servers-cancel-invite'),
+  /** "I have a code": a code from `devtool-server pair` on the server. Rejects with a readable message. */
+  serversPairCode: (code: string): Promise<ServerStatus> => ipcRenderer.invoke('servers-pair-code', code),
+  serversRename: (serverId: string, name: string): Promise<ServerStatus> => ipcRenderer.invoke('servers-rename', serverId, name),
+  serversRemove: (serverId: string, options?: ServerRemoveOptions): Promise<{ uninstalled: boolean }> => ipcRenderer.invoke('servers-remove', serverId, options),
+  /** Restart now, switching to a staged update ("Server update ready · Restart now"). */
+  serversRestart: (serverId: string): Promise<void> => ipcRenderer.invoke('servers-restart', serverId),
+  /** "Add another device": a pairing code the server mints for another desktop. */
+  serversDeviceCode: (serverId: string): Promise<ServerDeviceCode> => ipcRenderer.invoke('servers-device-code', serverId),
+  /** "Update": send this desktop's server bundle if it is newer than the server's. */
+  serversUpdate: (serverId: string): Promise<ServerUpdateResult> => ipcRenderer.invoke('servers-update', serverId),
   onServersStateChanged: (callback: (state: ServersState) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: ServersState) => callback(state)
     ipcRenderer.on('servers-state-changed', handler)

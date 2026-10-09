@@ -94,8 +94,16 @@ export interface ServerDeviceCode {
 }
 
 export interface ServerRemoveOptions {
-  /** Also uninstall the server (and delete its data) when it is online. */
+  /** Also uninstall the server when it is online (its service and files). */
   uninstall?: boolean
+  /** With `uninstall`: keep the server's data dir (its identity, projects and settings). */
+  keepData?: boolean
+}
+
+/** `servers-update`'s answer: whether this desktop sent its bundle, and why (see update-policy.ts). */
+export interface ServerUpdateResult {
+  upload: boolean
+  reason: 'server-empty' | 'same' | 'desktop-newer' | 'server-newer' | 'no-bundle' | 'source' | 'unknown-age'
 }
 
 export const RELAY_TOO_OLD_FOR_SERVERS = 'This relay is too old for servers'

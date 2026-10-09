@@ -5,6 +5,7 @@ import path from 'path'
 import { HostServices } from './host/host-services'
 import { ServerHub } from './servers/server-hub'
 import { desktopBundle, desktopBundleDir } from './servers/desktop-bundle'
+import { DEFAULT_INSTALL_URL } from '../shared/servers'
 import { registerServerHandlers } from './ipc/servers'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type { HostEnv } from './host/host-env'
@@ -95,6 +96,7 @@ export class AppRuntime {
       relayUrl: () => mobile().relayUrl,
       build: { version: app.getVersion(), commit: '', builtAt: '', bundleSha: '' },
       bundle: desktopBundle(desktopBundleDir({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() })),
+      installUrl: () => process.env.DEVTOOL_INSTALL_URL?.trim() || DEFAULT_INSTALL_URL,
       desktopName: () => mobile().desktopName?.trim() || os.hostname().replace(/\.local$/, ''),
       log: (message) => this.logDebug(message)
     })

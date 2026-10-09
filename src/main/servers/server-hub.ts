@@ -1,4 +1,5 @@
 import { once } from 'events'
+import fs from 'fs'
 import path from 'path'
 import { finished } from 'stream/promises'
 import { b64uDecode, b64uEncode, derivePairProof, deriveRelayToken } from '../../../protocol/ts/index.ts'
@@ -33,6 +34,7 @@ import {
   RELAY_TOO_OLD_FOR_SERVERS,
   installOneLiner,
   type ServerDeviceCode,
+  type ServerRemoveOptions,
   type ServerInvite,
   type ServerInviteState,
   type ServerStatus,
@@ -41,6 +43,7 @@ import {
 } from '../../shared/servers'
 import { ServerConnection, type ConnectionTimers } from './server-connection'
 import { PeerStore, type PeerRecord } from '../host/link/peer-store'
+import { atomicWriteFileSync } from '../atomic-write'
 
 /** A push from a server: `client` is the local window it is for (`win:N`), or `*` for every window. */
 export interface ServerEvent {
@@ -125,6 +128,9 @@ export class ServerHub {
   private readonly infos = new Map<string, ServerInfo>()
   /** A bundle sha a server refused: not sent again to it until DevTool restarts. */
   private readonly failedUploads = new Map<string, string>()
+  /** Servers removed while the relay was away: revoked at the next `ready` (`servers/pending-revokes.json`). */
+  private readonly pendingRevokesFile: string
+  private pendingRevokes: Set<string>
   /** Servers the relay reported on since the socket came up; the others get re-watched after a handshake. */
   private readonly reported = new Set<string>()
   private started = false
@@ -134,6 +140,8 @@ export class ServerHub {
     this.timers = deps.timers ?? realTimers
     this.version = deps.version ?? { v: HOST_LINK_PROTOCOL_VERSION, min: HOST_LINK_MIN_VERSION }
     this.store = new PeerStore(path.join(deps.configDir, 'servers'), 'servers.json', deps.log)
+    this.pendingRevokesFile = path.join(deps.configDir, 'servers', 'pending-revokes.json')
+    this.pendingRevokes = new Set(readIdList(this.pendingRevokesFile))
     this.port = deps.relay.hostPort((peerId) => this.store.has(peerId) || this.codePairings.has(peerId), {
       frame: (from, envelope) => this.onFrame(from, envelope),
       peer: (message) => this.onPeer(message),
@@ -504,6 +512,75 @@ export class ServerHub {
     if (info?.update?.state === 'restarting') this.infos.set(serverId, { update: null })
   }
 
+  // ---- managing ---------------------------------------------------------------------------
+
+  /** The name this desktop shows for the server (the server keeps its own). */
+  rename(serverId: string, name: string): ServerStatus {
+    const clean = name.trim().slice(0, 100)
+    if (!clean) throw new Error('A server needs a name')
+    if (!this.store.rename(serverId, clean)) throw new Error('No such server')
+    this.emitState()
+    return this.getState().servers.find((s) => s.id === serverId)!
+  }
+
+  /**
+   * Forgets the server: revokes the relay pair (now, or at the next `ready`) and
+   * drops its record. With `uninstall` and the server online, it first asks the
+   * server to remove itself (`server-uninstall`), data included unless `keepData`.
+   */
+  async remove(serverId: string, options: ServerRemoveOptions = {}): Promise<{ uninstalled: boolean }> {
+    if (!this.store.has(serverId)) throw new Error('No such server')
+    let uninstalled = false
+    if (options.uninstall) {
+      try {
+        await this.call(serverId, HUB_CLIENT, LinkChannel.Uninstall, [{ deleteData: !options.keepData }])
+        uninstalled = true
+      } catch (err) {
+        this.deps.log(`servers server=${serverId} uninstall failed: ${errorMessage(err)}`)
+      }
+    }
+    this.connections.get(serverId)?.stop()
+    this.connections.delete(serverId)
+    this.store.remove(serverId)
+    this.infos.delete(serverId)
+    this.failedUploads.delete(serverId)
+    this.endRestarting(serverId)
+    if (this.invite?.serverId === serverId) this.clearInvite()
+    this.pendingRevokes.add(serverId)
+    this.saveRevokes()
+    this.deps.log(`servers removed server=${serverId} uninstalled=${uninstalled}`)
+    // The socket stays up long enough to send the revoke.
+    this.syncSocket()
+    if (this.port.getState().kind === 'online') {
+      this.sendRevokes()
+      // Replaces the watch set, so the removed server leaves it too.
+      if (this.port.isBinary()) this.port.send({ t: 'watch', desktops: [...this.connections.keys()] })
+    }
+    this.syncSocket()
+    this.emitState()
+    return { uninstalled }
+  }
+
+  private sendRevokes(): void {
+    if (!this.port.isBinary()) return
+    let changed = false
+    for (const serverId of [...this.pendingRevokes]) {
+      if (!this.port.send({ t: 'revoke', peer: serverId })) continue
+      this.pendingRevokes.delete(serverId)
+      changed = true
+    }
+    if (changed) this.saveRevokes()
+  }
+
+  private saveRevokes(): void {
+    try {
+      fs.mkdirSync(path.dirname(this.pendingRevokesFile), { recursive: true, mode: 0o700 })
+      atomicWriteFileSync(this.pendingRevokesFile, JSON.stringify([...this.pendingRevokes]), 0o600)
+    } catch (err) {
+      this.deps.log(`servers pending revokes not saved: ${errorMessage(err)}`)
+    }
+  }
+
   /** "Add another device": the server mints a pairing code for another desktop. */
   async deviceCode(serverId: string): Promise<ServerDeviceCode> {
     const result = await this.call(serverId, HUB_CLIENT, LinkChannel.PairCode) as Partial<ServerDeviceCode> | null
@@ -680,10 +757,10 @@ export class ServerHub {
     this.connections.set(record.id, connection)
   }
 
-  /** The socket is wanted while any server is paired, an invite is live or a code is being proven. */
+  /** The socket is wanted while any server is paired, an invite is live, a code is being proven or a revoke waits. */
   private syncSocket(): void {
     if (!this.started) return
-    if (this.connections.size > 0 || this.invite || this.codePairings.size > 0) this.port.connect(this.deps.relayUrl())
+    if (this.connections.size > 0 || this.invite || this.codePairings.size > 0 || this.pendingRevokes.size > 0) this.port.connect(this.deps.relayUrl())
     else this.port.close()
   }
 
@@ -702,6 +779,7 @@ export class ServerHub {
       return
     }
     this.sendInviteOffer()
+    this.sendRevokes()
     this.sendWatch()
     this.emitState()
   }
@@ -785,5 +863,14 @@ export class ServerHub {
         this.deps.log(`servers state listener error=${err instanceof Error ? err.message : String(err)}`)
       }
     }
+  }
+}
+
+function readIdList(file: string): string[] {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string' && /^[0-9a-f]{32}$/.test(id)) : []
+  } catch {
+    return []
   }
 }
