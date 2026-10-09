@@ -289,7 +289,7 @@ export default function SidebarContextMenu({
                 return (
                   <button className={menuItemCls} onClick={() => {
                     setContextMenu(null)
-                    window.api.revealInFolder(folder).catch((err: unknown) => {
+                    window.api.revealInFolder(folder, undefined, contextMenu.projectId).catch((err: unknown) => {
                       window.alert(`Couldn't open ${folder}: ${err instanceof Error ? err.message : String(err)}`)
                     })
                   }}>{revealInFolderLabel()}</button>

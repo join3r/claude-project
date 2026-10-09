@@ -4,7 +4,6 @@
  * keep branch / discard / cancel, and the forced pass runs once no process holds
  * the folder any more.
  */
-import { isRemoteProject } from '../../../shared/types'
 import type { Project, WorkspaceConfig, WorkspaceDeleteResult } from '../../../shared/types'
 import { getProjectDir } from '../../hooks/appState/projectsData'
 import { worktreePreflight, worktreeRemovalFor, type WorktreeChoice } from './closeRules'
@@ -12,7 +11,7 @@ import { worktreePreflight, worktreeRemovalFor, type WorktreeChoice } from './cl
 function deleteRequest(project: Project, workspace: WorkspaceConfig) {
   return {
     projectDir: getProjectDir(project),
-    projectId: isRemoteProject(project) ? project.id : undefined,
+    projectId: project.id,
     sshConfig: project.ssh,
     worktreePath: workspace.worktreePath,
     branchName: workspace.branchName,

@@ -285,7 +285,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
       const { sessionId: latestSessionId } = await window.api.codexReadSession(
         cwd,
         codexSpawnTsRef.current,
-        sshConfig ? projectId : undefined,
+        projectId,
         sshConfig
       )
 
@@ -639,7 +639,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
                 const exists = await window.api.claudeSessionExists(
                   projectDir,
                   resumeSessionId,
-                  sshConfig ? projectId : undefined,
+                  projectId,
                   sshConfig
                 )
                 if (!exists) {
@@ -854,7 +854,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
           if (sshConfig) {
             window.api.hooksCleanupRemote(projectId, sshConfig, projectDir, tabId)
           } else {
-            window.api.hooksCleanup(projectDir, tabId)
+            window.api.hooksCleanup(projectDir, tabId, projectId)
           }
         }
       }

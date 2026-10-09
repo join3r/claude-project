@@ -70,7 +70,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
     if (!canPickConda) return
     let cancelled = false
     setCondaLoading(true)
-    window.api.condaListEnvs()
+    window.api.condaListEnvs(project.id)
       .then((result) => {
         if (cancelled) return
         setCondaEnvs(result.envs)
@@ -97,7 +97,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
         if (!cancelled) setCondaLoading(false)
       })
     return () => { cancelled = true }
-  }, [canPickConda])
+  }, [canPickConda, project.id])
 
   const suggestions = useMemo(() => {
     if (!iconMetadata || !iconQuery.trim()) return []

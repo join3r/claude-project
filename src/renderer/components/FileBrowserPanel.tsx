@@ -46,7 +46,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
     && !!selectedProject.directory
-  const gitStatus = useGitStatus(effectiveDir, fileBrowserOpen && isLocalProject)
+  const gitStatus = useGitStatus(effectiveDir, fileBrowserOpen && isLocalProject, selectedProjectId ?? undefined)
   const linkToAgent = useLinkToAgent(selectedProjectId ?? '', selectedTaskId ?? '')
 
   useEffect(() => {
@@ -172,12 +172,13 @@ export default function FileBrowserPanel(): React.ReactElement | null {
                 <FileTree
                   ref={fileTreeRef}
                   projectDir={effectiveDir}
+                  projectId={selectedProjectId ?? undefined}
                   gitStatus={gitStatus}
                   onFileClick={handleFileClick}
                   filterQuery={filterQuery}
                   onRevealInTerminal={handleRevealInTerminal}
                   ideEditors={config?.externalEditors?.editors ?? []}
-                  onOpenInIde={(editorId) => openWorkspaceInIde(editorId, effectiveDir)}
+                  onOpenInIde={(editorId) => openWorkspaceInIde(editorId, effectiveDir, selectedProjectId ?? undefined)}
                   onLinkToAgent={selectedTaskId
                     ? (relativePath, isDirectory) => {
                         linkToAgent(formatAgentLink({ path: agentLinkPath(effectiveDir, relativePath), isDirectory }))
@@ -190,6 +191,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
             <GitStatus
               gitStatus={gitStatus}
               projectDir={effectiveDir}
+              projectId={selectedProjectId ?? undefined}
               onFileClick={handleGitFileClick}
             />
           ) : (

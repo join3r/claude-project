@@ -3,7 +3,7 @@ import type { AppConfig, WindowViewState } from '../../shared/types'
 import { detectExternalEditors, openFolderInEditor } from '../external-ide'
 import { resolveSafeProjectPath } from '../project-fs-path'
 import type { IpcContext, IpcRegistrar } from './registrar'
-import { str, windowViewState } from './schemas'
+import { optSafeId, str, windowViewState } from './schemas'
 import { v } from './validate'
 
 /** A desktop call's context: the local window it came from. */
@@ -19,7 +19,11 @@ export interface WindowDeps {
   getConfig: () => AppConfig
   /** Throws unless `folder` is a known local project/workspace directory. */
   assertAllowedDirectory: (folder: string) => Promise<string>
+  /** A DevTool server's project: its folders are on that server, not here. */
+  isServerProject?: (projectId: string) => boolean
 }
+
+const NOT_ON_THIS_COMPUTER = 'This project is on a DevTool server; its folders aren\'t on this computer.'
 
 /** Only web URLs leave the app through the OS browser. */
 export function parseExternalUrl(url: string): URL {
@@ -79,7 +83,8 @@ export function registerWindowHandlers(ipc: IpcRegistrar<WindowIpcContext>, deps
   ipc.handle('app:quit', [], () => app.quit())
 
   // "Reveal in Finder": a project/workspace directory opens; a file or folder under one is selected in its parent.
-  ipc.handle('reveal-in-folder', [v.string({ nonEmpty: true }), v.optional(v.string())], async (_event, folder, relativePath) => {
+  ipc.handle('reveal-in-folder', [v.string({ nonEmpty: true }), v.optional(v.string()), optSafeId], async (_event, folder, relativePath, projectId) => {
+    if (projectId && deps.isServerProject?.(projectId)) throw new Error(NOT_ON_THIS_COMPUTER)
     const root = await deps.assertAllowedDirectory(folder)
     if (relativePath) {
       shell.showItemInFolder(resolveSafeProjectPath(root, relativePath))
@@ -91,7 +96,8 @@ export function registerWindowHandlers(ipc: IpcRegistrar<WindowIpcContext>, deps
   })
 
   ipc.handle('external-ide-detect', [], () => detectExternalEditors())
-  ipc.handle('open-in-ide', [v.string({ nonEmpty: true }), v.string({ nonEmpty: true })], async (_event, editorId, folder) => {
+  ipc.handle('open-in-ide', [v.string({ nonEmpty: true }), v.string({ nonEmpty: true }), optSafeId], async (_event, editorId, folder, projectId) => {
+    if (projectId && deps.isServerProject?.(projectId)) throw new Error(NOT_ON_THIS_COMPUTER)
     const editors = deps.getConfig().externalEditors?.editors ?? []
     const editor = editors.find((item) => item.id === editorId)
     if (!editor) throw new Error('That editor is not in Settings.')

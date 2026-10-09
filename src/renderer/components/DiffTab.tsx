@@ -12,10 +12,12 @@ interface Props {
   visible: boolean
   filePath: string
   projectDir: string
+  /** Routes the reads to a DevTool server's project. */
+  projectId?: string
   effectiveTheme: 'dark' | 'light'
 }
 
-export default function DiffTab({ tabId, visible, filePath, projectDir, effectiveTheme }: Props): React.ReactElement {
+export default function DiffTab({ tabId, visible, filePath, projectDir, projectId, effectiveTheme }: Props): React.ReactElement {
   const { config } = useApp()
   const [original, setOriginal] = useState<string | null>(null)
   const [modified, setModified] = useState<string | null>(null)
@@ -62,8 +64,8 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
       requestIdRef.current = requestId
 
       Promise.all([
-        window.api.fbGitDiff(projectDir, filePath),
-        window.api.fbReadFile(projectDir, filePath).catch(() => '')
+        window.api.fbGitDiff(projectDir, filePath, projectId),
+        window.api.fbReadFile(projectDir, filePath, projectId).catch(() => '')
       ]).then(([orig, mod]) => {
         if (requestId !== requestIdRef.current) return
         setOriginal(orig)
@@ -104,7 +106,7 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, effectiv
       window.removeEventListener('file-saved', handleFileSaved)
       window.removeEventListener('reload-file-tab', handleReload)
     }
-  }, [filePath, projectDir, tabId, visible])
+  }, [filePath, projectDir, projectId, tabId, visible])
 
   useEffect(() => {
     let cancelled = false

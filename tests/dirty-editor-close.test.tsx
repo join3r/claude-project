@@ -315,7 +315,7 @@ describe('closing an editor with unsaved changes', () => {
     })
     await click('Save')
 
-    expect((window as any).api.fbWriteFile).toHaveBeenCalledWith('/project', 'src/a.txt', 'unsaved a')
+    expect((window as any).api.fbWriteFile).toHaveBeenCalledWith('/project', 'src/a.txt', 'unsaved a', 'p1')
     expect(dialog()).toBeNull()
     expect(tabsOf('t1').map(t => t.id)).toEqual(['tab-b'])
   })

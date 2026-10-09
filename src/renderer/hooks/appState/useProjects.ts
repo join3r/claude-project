@@ -152,7 +152,7 @@ export function useProjects(
           await window.api.workspaceDelete(
             {
               projectDir: getProjectDir(project),
-              projectId: project.ssh ? id : undefined,
+              projectId: id,
               sshConfig: project.ssh,
               worktreePath: workspace.worktreePath,
               branchName: workspace.branchName,

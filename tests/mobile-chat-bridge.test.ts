@@ -106,7 +106,7 @@ describe('ChatBridge', () => {
     chats.runtimes.clear()
     data = projects({ tabs: [chatTab] })
     await req('chat.open', { tabId: 'tab-chat' })
-    expect(chats.runtimes.get('tab-chat')?.config).toEqual({ cwd: '/wt/fix/pkg', sessionId: 'sess-1', projectId: undefined, sshConfig: undefined, extraArgs: ['--verbose', '--x'] })
+    expect(chats.runtimes.get('tab-chat')?.config).toEqual({ cwd: '/wt/fix/pkg', sessionId: 'sess-1', projectId: 'p1', sshConfig: undefined, extraArgs: ['--verbose', '--x'] })
   })
 
   it('streams diffs: throttled to 4/s, prompts and status at once, seq from the open', async () => {

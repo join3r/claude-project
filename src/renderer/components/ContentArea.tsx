@@ -444,6 +444,7 @@ export default function ContentArea(): React.ReactElement {
                   editors={config?.externalEditors?.editors ?? []}
                   defaultId={config?.externalEditors?.defaultId ?? null}
                   folder={localProjectFolder(selectedProject, selectedTask)}
+                  projectId={selectedProject?.id}
                   onError={setOpenInIdeError}
                 />
               )}

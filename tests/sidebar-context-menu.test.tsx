@@ -152,7 +152,7 @@ describe('Sidebar context menu', () => {
 
     fireEvent.contextMenu(row)
     fireEvent.click(await screen.findByRole('button', { name: /Reveal in Finder|Show in/ }))
-    expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha')
+    expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha', undefined, 'p1')
   })
 })
 

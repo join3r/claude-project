@@ -120,7 +120,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
     attachChat(tabId, {
       cwd: projectDir,
       sessionId,
-      projectId: sshConfig ? projectId : undefined,
+      projectId,
       sshConfig,
       extraArgs: parseExtraArgs(extraArgs)
     }).then(() => {
@@ -277,7 +277,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   }, [convertClaudeTab, projectId, taskId, tabId])
 
   const loadFiles = useCallback(
-    () => window.api.chatListFiles(projectDir, sshConfig ? projectId : undefined, sshConfig),
+    () => window.api.chatListFiles(projectDir, projectId, sshConfig),
     [projectDir, projectId, sshConfig]
   )
 
@@ -416,6 +416,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       {permissionsOpen && (
         <PermissionsDialog
           cwd={sshConfig ? null : projectDir}
+          projectId={projectId}
           permissionMode={state.info.permissionMode}
           onClose={() => setPermissionsOpen(false)}
           onOpenInTerminal={openInTerminal}

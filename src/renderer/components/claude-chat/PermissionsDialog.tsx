@@ -13,6 +13,8 @@ import { Field, HelperText, LinkBtn, Modal, PrimaryButton, SegCtl, Select } from
 interface Props {
   /** The project directory; null for a remote project, whose settings live on the host. */
   cwd: string | null
+  /** Its project, so a DevTool server's project reads the settings on that server. */
+  projectId?: string
   permissionMode?: string
   onClose: () => void
   onOpenInTerminal: () => void
@@ -39,7 +41,7 @@ function errorText(err: unknown): string {
  * files Claude reads, editable in place. The running session picks up changes
  * on its own (the CLI watches those files).
  */
-export default function PermissionsDialog({ cwd, permissionMode, onClose, onOpenInTerminal }: Props): React.ReactElement {
+export default function PermissionsDialog({ cwd, projectId, permissionMode, onClose, onOpenInTerminal }: Props): React.ReactElement {
   const [sources, setSources] = useState<PermissionSettingsSource[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [behavior, setBehavior] = useState<PermissionBehavior>('allow')
@@ -50,11 +52,11 @@ export default function PermissionsDialog({ cwd, permissionMode, onClose, onOpen
   const load = useCallback(async () => {
     if (!cwd) return
     try {
-      setSources(await window.api.chatPermissionsRead(cwd))
+      setSources(await window.api.chatPermissionsRead(cwd, projectId))
     } catch (err) {
       setError(errorText(err))
     }
-  }, [cwd])
+  }, [cwd, projectId])
 
   useEffect(() => { void load() }, [load])
 
@@ -71,7 +73,7 @@ export default function PermissionsDialog({ cwd, permissionMode, onClose, onOpen
     setBusy(true)
     setError(null)
     try {
-      await window.api.chatPermissionsUpdate(cwd, kind, target, value, action)
+      await window.api.chatPermissionsUpdate(cwd, kind, target, value, action, projectId)
       if (action === 'add') setRule('')
       await load()
     } catch (err) {

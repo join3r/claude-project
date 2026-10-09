@@ -138,7 +138,7 @@ describe('archive and reopen', () => {
     expect(stream.workspace).toBeUndefined()
     expect(stream.tasks.map(t => t.id)).toEqual(['w1'])
     expect(api.taskMovePrepare).toHaveBeenCalledWith(
-      WORKTREE.worktreePath, '/tmp/p1', [{ kind: 'claude', sessionId: 'bbbbbbbb-2222' }], [], undefined, undefined
+      WORKTREE.worktreePath, '/tmp/p1', [{ kind: 'claude', sessionId: 'bbbbbbbb-2222' }], [], 'p1', undefined
     )
   })
 
@@ -213,7 +213,7 @@ describe('reopening into task worktrees', () => {
     expect(taskIn(result.current.projects[0], 'old')?.sharesStreamWorktree).toBeUndefined()
     expect(api.taskWorktreeEnsure).toHaveBeenCalledWith('p1', 'old', { name: 'old', streamId: 'stream-rel' })
     expect(api.taskMovePrepare).toHaveBeenCalledWith(
-      STREAM_WS.worktreePath, FRESH.worktreePath, [{ kind: 'claude', sessionId: 'session-old' }], [], undefined, undefined
+      STREAM_WS.worktreePath, FRESH.worktreePath, [{ kind: 'claude', sessionId: 'session-old' }], [], 'p1', undefined
     )
   })
 
@@ -233,7 +233,7 @@ describe('reopening into task worktrees', () => {
     const orphan = taskIn(result.current.projects[0], 'orphan')
     expect(orphan?.workspace).toBeUndefined()
     expect(orphan?.landing).toBeUndefined()
-    expect(api.taskMovePrepare).toHaveBeenCalledWith(KEPT.worktreePath, '/tmp/p1', [{ kind: 'claude', sessionId: 'session-orphan' }], [], undefined, undefined)
+    expect(api.taskMovePrepare).toHaveBeenCalledWith(KEPT.worktreePath, '/tmp/p1', [{ kind: 'claude', sessionId: 'session-orphan' }], [], 'p1', undefined)
   })
 
   it('a stream closed with Keep branches gets its worktree and each task\'s back, one task at a time', async () => {
@@ -278,6 +278,6 @@ describe('reopening into task worktrees', () => {
     const reopened = result.current.projects[0].streams.find(candidate => candidate.id === 'stream-rel')
     expect(reopened?.tasks.map(task => task.id)).toEqual(['kept', 'gone', 'idle'])
     // The branch that was gone: its sessions follow it into the fresh worktree.
-    expect(api.taskMovePrepare).toHaveBeenCalledWith(FRESH.worktreePath, fresh.worktreePath, [{ kind: 'claude', sessionId: 'session-gone' }], [], undefined, undefined)
+    expect(api.taskMovePrepare).toHaveBeenCalledWith(FRESH.worktreePath, fresh.worktreePath, [{ kind: 'claude', sessionId: 'session-gone' }], [], 'p1', undefined)
   })
 })

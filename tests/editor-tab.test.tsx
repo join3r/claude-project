@@ -277,7 +277,8 @@ describe('EditorTab', () => {
     expect((window as any).api.fbWriteFile).toHaveBeenCalledWith(
       '/project',
       'src/notes.txt',
-      'unsaved edit'
+      'unsaved edit',
+      'p1'
     )
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByTitle('Unsaved changes')).toBeNull()
@@ -300,7 +301,8 @@ describe('EditorTab', () => {
     expect((window as any).api.fbWriteFile).toHaveBeenCalledWith(
       '/project',
       'src/notes.txt',
-      'unsaved edit'
+      'unsaved edit',
+      'p1'
     )
     expect(screen.queryByTitle('Unsaved changes')).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
@@ -387,7 +389,7 @@ describe('EditorTab', () => {
       await press(LINK_FILE_KEYBINDING)
       await flush()
 
-      expect((window as any).api.fbWriteFile).toHaveBeenCalledWith('/project', 'src/notes.txt', 'edited\ntext\n')
+      expect((window as any).api.fbWriteFile).toHaveBeenCalledWith('/project', 'src/notes.txt', 'edited\ntext\n', 'p1')
       expect(inserts.map(i => i.text)).toEqual(['@src/notes.txt '])
     })
 

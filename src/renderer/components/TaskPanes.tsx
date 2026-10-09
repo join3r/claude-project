@@ -126,7 +126,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
       return <ClaudeChatTab tabId={tab.id} visible={tabVisible} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} extraArgs={project.aiToolArgs?.claude} />
     }
     if (tab.type === 'diff' && tab.filePath) {
-      return <DiffTab tabId={tab.id} visible={tabVisible} filePath={tab.filePath} projectDir={projectDir} effectiveTheme={effectiveTheme} />
+      return <DiffTab tabId={tab.id} visible={tabVisible} filePath={tab.filePath} projectDir={projectDir} projectId={projectId} effectiveTheme={effectiveTheme} />
     }
     if (tab.filePath && (tab.type === 'notebook' || (tab.type === 'editor' && isNotebookFile(tab.filePath)))) {
       return <NotebookTab tabId={tab.id} visible={tabVisible} filePath={tab.filePath} projectDir={projectDir} projectId={projectId} taskId={task.id} effectiveTheme={effectiveTheme} />

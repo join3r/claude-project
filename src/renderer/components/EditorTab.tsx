@@ -75,7 +75,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
 
-    window.api.fbReadFile(projectDir, filePath).then(text => {
+    window.api.fbReadFile(projectDir, filePath, projectId).then(text => {
       if (requestId !== requestIdRef.current) return
       setError(null)
 
@@ -102,7 +102,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       dirtyRef.current = false
       setDirty(false)
     })
-  }, [filePath, projectDir])
+  }, [filePath, projectDir, projectId])
 
   useEffect(() => {
     setContent(null)
@@ -166,7 +166,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     if (!ed) return Promise.resolve()
     const value = ed.getValue()
     setSaveError(null)
-    return window.api.fbWriteFile(projectDir, filePath, value).then(() => {
+    return window.api.fbWriteFile(projectDir, filePath, value, projectId).then(() => {
       savedContentRef.current = value
       // The buffer may have moved on while the write was in flight; recompute
       // dirtiness against what the editor actually holds now.
@@ -183,7 +183,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
       setSaveError(message ? `Save failed: ${message}` : 'Save failed.')
       throw err
     })
-  }, [filePath, projectDir])
+  }, [filePath, projectDir, projectId])
 
   const saveContent = useCallback(() => {
     // A failed write must stay inside this tab: an unhandled rejection is

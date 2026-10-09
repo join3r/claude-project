@@ -8,6 +8,8 @@ import { revealInFolderLabel } from '../utils/revealLabel'
 
 interface Props {
   projectDir: string
+  /** Routes the file calls to a DevTool server's project. */
+  projectId?: string
   gitStatus: GitStatusResult | null
   onFileClick: (filePath: string) => void
   filterQuery?: string
@@ -368,6 +370,7 @@ export type FileTreeHandle = {
 
 const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
   projectDir,
+  projectId,
   gitStatus,
   onFileClick,
   filterQuery = '',
@@ -405,7 +408,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         return next
       })
       try {
-        const entries = await window.api.fbReadDirectory(projectDir, relativePath)
+        const entries = await window.api.fbReadDirectory(projectDir, relativePath, projectId)
         if (directoryVersion !== directoryVersionRef.current) return undefined
         setChildrenCache((prev) => ({ ...prev, [relativePath]: entries }))
         childrenCacheRef.current = { ...childrenCacheRef.current, [relativePath]: entries }
@@ -427,7 +430,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         })
       }
     },
-    [projectDir]
+    [projectDir, projectId]
   )
   const fetchDirectoryRef = React.useRef(fetchDirectory)
   fetchDirectoryRef.current = fetchDirectory
@@ -440,7 +443,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     const results = await Promise.all(
       paths.map(async (relativePath) => {
         try {
-          return { relativePath, entries: await window.api.fbReadDirectory(projectDir, relativePath) }
+          return { relativePath, entries: await window.api.fbReadDirectory(projectDir, relativePath, projectId) }
         } catch {
           return { relativePath, entries: null }
         }
@@ -504,7 +507,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
       for (const relativePath of resolved) delete next[relativePath]
       return next
     })
-  }, [projectDir])
+  }, [projectDir, projectId])
 
   useEffect(() => {
     directoryVersionRef.current += 1
@@ -519,7 +522,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     return () => {
       directoryVersionRef.current += 1
     }
-  }, [projectDir])
+  }, [projectDir, projectId])
 
   useEffect(() => {
     if (!projectDir) return
@@ -534,7 +537,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
       window.removeEventListener('focus', run)
       window.removeEventListener('file-saved', run)
     }
-  }, [projectDir, refreshVisibleDirectories])
+  }, [projectDir, projectId, refreshVisibleDirectories])
 
   const handleToggleDir = useCallback(
     (relativePath: string) => {
@@ -642,13 +645,13 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     )
     if (!ok) return
     try {
-      await window.api.fbDelete(projectDir, relativePath)
+      await window.api.fbDelete(projectDir, relativePath, projectId)
       setActionError(null)
       notifyTreeChanged()
     } catch (error) {
       setActionError(fileActionErrorMessage(error))
     }
-  }, [projectDir, notifyTreeChanged])
+  }, [projectDir, projectId, notifyTreeChanged])
 
   const handleSubmitDraft = useCallback(async (name: string) => {
     const current = draft
@@ -662,14 +665,14 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     try {
       if (current.mode === 'create') {
         if (current.kind === 'directory') {
-          await window.api.fbCreateDirectory(projectDir, current.parent, trimmed)
+          await window.api.fbCreateDirectory(projectDir, current.parent, trimmed, projectId)
         } else {
-          await window.api.fbCreateFile(projectDir, current.parent, trimmed)
+          await window.api.fbCreateFile(projectDir, current.parent, trimmed, projectId)
         }
         const createdPath = posixRelativeJoin(current.parent, trimmed)
         setSelectedPath(createdPath)
       } else {
-        await window.api.fbRename(projectDir, current.relativePath, trimmed)
+        await window.api.fbRename(projectDir, current.relativePath, trimmed, projectId)
         const parent = parentDirOf(current.relativePath)
         setSelectedPath(posixRelativeJoin(parent, trimmed))
       }
@@ -685,7 +688,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
         setDraft({ ...current, name: trimmed })
       }
     }
-  }, [draft, projectDir, notifyTreeChanged])
+  }, [draft, projectDir, projectId, notifyTreeChanged])
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (draft) return
@@ -843,7 +846,7 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
               className={menuItemCls}
               onClick={() => {
                 setMenu(null)
-                window.api.revealInFolder(projectDir, menu.relativePath || undefined)
+                window.api.revealInFolder(projectDir, menu.relativePath || undefined, projectId)
                   .then(() => setActionError(null))
                   .catch((error: unknown) => setActionError(fileActionErrorMessage(error)))
               }}
