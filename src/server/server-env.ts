@@ -32,7 +32,7 @@ export interface ServerManifest {
   commit: string
   /** ISO time of the build. */
   builtAt: string
-  /** The host link's protocol version (a placeholder 0 until the link exists). */
+  /** The host link's protocol version (`HOST_LINK_PROTOCOL_VERSION`); 0 in a source checkout. */
   protocol: number
   /** The Node version the installer pins for this build. */
   node: string

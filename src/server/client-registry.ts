@@ -11,6 +11,12 @@ export type ClientSink = (channel: string, args: unknown[]) => void
 export interface ClientOptions {
   /** Whether the client's window has focus: `pty-resize` from an unfocused one only applies while it controls the PTY. */
   isFocused?: () => boolean
+  /**
+   * A broadcast group (one per linked desktop): while the group has a sink
+   * ({@link ClientRegistry.registerGroup}), broadcasts reach its clients once,
+   * through that sink, instead of once per client.
+   */
+  group?: string
 }
 
 export interface ClientRegistryOptions {
@@ -26,6 +32,7 @@ interface Client {
   handle: number
   sink: ClientSink
   isFocused: () => boolean
+  group?: string
 }
 
 /** The frame URL of every call made through {@link ClientRegistry.call}; the sender policy accepts only it. */
@@ -49,6 +56,7 @@ export class ClientRegistry implements ClientHub, IpcMainLike {
   private readonly handlers = new Map<string, Listener>()
   private readonly listeners = new Map<string, Listener>()
   private readonly clients = new Map<string, Client>()
+  private readonly groups = new Map<string, ClientSink>()
   private readonly byHandle = new Map<number, string>()
   private nextHandle = 1
   private readonly onClientGone: (clientId: string) => void
@@ -65,7 +73,7 @@ export class ClientRegistry implements ClientHub, IpcMainLike {
   registerClient(clientId: string, sink: ClientSink, options: ClientOptions = {}): void {
     if (this.clients.has(clientId)) throw new Error(`Client ${clientId} is already registered`)
     const handle = this.nextHandle++
-    this.clients.set(clientId, { handle, sink, isFocused: options.isFocused ?? (() => false) })
+    this.clients.set(clientId, { handle, sink, isFocused: options.isFocused ?? (() => false), ...(options.group ? { group: options.group } : {}) })
     this.byHandle.set(handle, clientId)
     this.log(`clientRegistered clientId=${clientId}`)
   }
@@ -82,6 +90,23 @@ export class ClientRegistry implements ClientHub, IpcMainLike {
 
   hasClient(clientId: string): boolean {
     return this.clients.has(clientId)
+  }
+
+  /**
+   * Broadcasts for `group` go to `sink`, once, from now on, whether or not the
+   * group has clients yet (a linked desktop hears them before its first call).
+   */
+  registerGroup(group: string, sink: ClientSink): void {
+    if (this.groups.has(group)) throw new Error(`Group ${group} is already registered`)
+    this.groups.set(group, sink)
+  }
+
+  /** Unregisters the group's sink and every client in it. */
+  unregisterGroup(group: string): void {
+    for (const [clientId, client] of [...this.clients]) {
+      if (client.group === group) this.unregisterClient(clientId)
+    }
+    this.groups.delete(group)
   }
 
   /**
@@ -110,7 +135,11 @@ export class ClientRegistry implements ClientHub, IpcMainLike {
   }
 
   broadcast(channel: string, ...args: unknown[]): void {
-    for (const [clientId, client] of [...this.clients]) this.deliver(clientId, client, channel, structuredClone(args))
+    for (const [group, sink] of [...this.groups]) this.deliverTo(`group ${group}`, sink, channel, structuredClone(args))
+    for (const [clientId, client] of [...this.clients]) {
+      if (client.group && this.groups.has(client.group)) continue
+      this.deliver(clientId, client, channel, structuredClone(args))
+    }
   }
 
   clientIds(): string[] {
@@ -172,10 +201,14 @@ export class ClientRegistry implements ClientHub, IpcMainLike {
   }
 
   private deliver(clientId: string, client: Client, channel: string, args: unknown[]): void {
+    this.deliverTo(`clientId=${clientId}`, client.sink, channel, args)
+  }
+
+  private deliverTo(who: string, sink: ClientSink, channel: string, args: unknown[]): void {
     try {
-      client.sink(channel, args)
+      sink(channel, args)
     } catch (err) {
-      this.log(`clientSendFailed clientId=${clientId} channel=${channel} error=${err instanceof Error ? err.message : String(err)}`)
+      this.log(`clientSendFailed ${who} channel=${channel} error=${err instanceof Error ? err.message : String(err)}`)
     }
   }
 }

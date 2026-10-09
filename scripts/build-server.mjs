@@ -23,12 +23,18 @@ import { MANIFEST_FILE, bundleSha256, electronGuardPlugin } from './server-bundl
 
 /** The Node the installer fetches for the server (nodejs.org, checked against SHASUMS256.txt). */
 const SERVER_NODE_VERSION = '24.21.0'
-/** The host link's protocol version. A placeholder until the link exists (plan step 4). */
-const HOST_LINK_PROTOCOL = 0
 /** node-pty's prebuilt platforms the server supports; Windows is the desktop's alone. */
 const PTY_PREBUILDS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64']
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+/** The host link's protocol version, read from src/main/host/link/version.ts (the one source of it). */
+function hostLinkProtocolVersion() {
+  const source = fs.readFileSync(path.join(root, 'src/main/host/link/version.ts'), 'utf8')
+  const match = /export const HOST_LINK_PROTOCOL_VERSION = (\d+)/.exec(source)
+  if (!match) throw new Error('HOST_LINK_PROTOCOL_VERSION not found in src/main/host/link/version.ts')
+  return Number(match[1])
+}
 const outDir = path.join(root, 'out/server')
 const ptySource = path.join(root, 'node_modules/node-pty-server')
 
@@ -105,7 +111,7 @@ async function main() {
     version,
     commit: git(['rev-parse', 'HEAD']) || 'unknown',
     builtAt: new Date().toISOString(),
-    protocol: HOST_LINK_PROTOCOL,
+    protocol: hostLinkProtocolVersion(),
     node: SERVER_NODE_VERSION,
     sha256: bundleSha256(outDir)
   }

@@ -52,7 +52,8 @@ export default tseslint.config(
   {
     // The host runs without Electron too (the DevTool server): it reaches the process
     // through HostEnv and the windows through ClientHub, never through Electron itself.
-    files: ['src/main/host/**'],
+    // The desktop's server hub and the server itself are Electron-free as well.
+    files: ['src/main/host/**', 'src/main/servers/**', 'src/server/**'],
     rules: {
       'no-restricted-imports': ['error', {
         paths: [

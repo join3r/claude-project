@@ -201,3 +201,108 @@ describe('RelayClient', () => {
     expect(client.getState()).toEqual({ kind: 'offline', error: 'bad url' })
   })
 })
+
+describe('RelayClient as a host on binary frames (SPEC.md §3.9)', () => {
+  class BinarySocket extends FakeSocket {
+    bufferedAmount = 0
+    binaryType: string | undefined
+    readonly binary: Uint8Array[] = []
+    override send(data: string | Uint8Array): void {
+      if (typeof data === 'string') super.send(data)
+      else this.binary.push(data)
+    }
+    pushBinary(bytes: Uint8Array): void {
+      this.onmessage?.({ data: bytes.slice().buffer })
+    }
+  }
+
+  function hostSetup(role: 'desktop' | 'server') {
+    const keys = generateEd25519()
+    const id = deviceId(keys.pub)
+    const timers = new Timers()
+    const sockets: BinarySocket[] = []
+    const frames: { from: string; envelope: Uint8Array }[] = []
+    const client = new RelayClient({
+      role,
+      binary: true,
+      ed25519: () => keys,
+      deviceId: () => id,
+      createSocket: (url) => { const s = new BinarySocket(url); sockets.push(s); return s },
+      timers
+    })
+    client.onBinaryFrame((from, envelope) => frames.push({ from, envelope }))
+    const socket = () => sockets[sockets.length - 1]
+    const authenticate = (binary = true) => {
+      socket().open()
+      socket().push({ t: 'challenge', nonce: NONCE })
+      const hello = socket().sent.at(-1) as HelloMessage
+      expect(verifyHello(hello, NONCE)).toBe(id)
+      socket().push(binary ? { t: 'ready', id, binary: true } : { t: 'ready', id })
+      return hello
+    }
+    return { client, id, timers, socket, frames, authenticate }
+  }
+
+  it('signs in as a server asking for binary frames, and says whether the relay agreed', () => {
+    const env = hostSetup('server')
+    env.client.connect('ws://r')
+    expect(env.socket().binaryType).toBe('arraybuffer')
+    const hello = env.authenticate()
+    expect(hello).toMatchObject({ role: 'server', binary: true })
+    expect(env.client.isBinary()).toBe(true)
+    expect(env.client.relayUrl).toBe('ws://r')
+
+    const old = hostSetup('desktop')
+    old.client.connect('ws://r')
+    old.authenticate(false)
+    expect(old.client.getState()).toEqual({ kind: 'online' })
+    expect(old.client.isBinary()).toBe(false)
+  })
+
+  it('hands binary frames to their listeners and sends them, only once online', () => {
+    const env = hostSetup('desktop')
+    env.client.connect('ws://r')
+    const peer = 'c'.repeat(32)
+    expect(env.client.sendBinary(peer, new Uint8Array([3, 1]))).toBe(false)
+    env.authenticate()
+    expect(env.client.sendBinary(peer, new Uint8Array([3, 1]))).toBe(true)
+    expect([...env.socket().binary[0]]).toEqual([...new Uint8Array(16).fill(0xcc), 3, 1])
+    env.socket().pushBinary(new Uint8Array([...new Uint8Array(16).fill(0xab), 2, 9, 9]))
+    expect(env.frames).toEqual([{ from: 'ab'.repeat(16), envelope: new Uint8Array([2, 9, 9]) }])
+    // Junk is logged and dropped.
+    env.socket().pushBinary(new Uint8Array([1, 2]))
+    expect(env.frames).toHaveLength(1)
+  })
+
+  it('waits three idle timeouts before giving up on a relay while its own sends are queued', () => {
+    const env = hostSetup('server')
+    env.client.connect('ws://r')
+    env.authenticate()
+    env.socket().bufferedAmount = 5 * 1024 * 1024
+    env.timers.advance(75_000)
+    expect(env.client.getState().kind).toBe('online')
+    env.timers.advance(100_000) // 175 s: still under 3 × 60 s
+    expect(env.client.getState().kind).toBe('online')
+    env.timers.advance(25_000) // the first ping tick after 180 s of silence
+    expect(env.client.getState()).toEqual({ kind: 'offline', error: 'Relay stopped responding' })
+  })
+
+  it('runs drain waiters once the buffer is under their mark, or the socket is gone', () => {
+    const env = hostSetup('desktop')
+    env.client.connect('ws://r')
+    env.authenticate()
+    const order: string[] = []
+    env.client.onBufferBelow(100, () => order.push('immediate'))
+    env.socket().bufferedAmount = 1000
+    env.client.onBufferBelow(100, () => order.push('low'))
+    env.client.onBufferBelow(500, () => order.push('high'))
+    env.timers.advance(50)
+    expect(order).toEqual(['immediate'])
+    env.socket().bufferedAmount = 400
+    env.timers.advance(10)
+    expect(order).toEqual(['immediate', 'high'])
+    env.client.onBufferBelow(10, () => order.push('gone'))
+    env.socket().drop(1006)
+    expect(order).toEqual(['immediate', 'high', 'low', 'gone'])
+  })
+})

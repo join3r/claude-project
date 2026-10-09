@@ -59,6 +59,12 @@ export interface ReassemblerOptions {
   now?: () => number
   /** Why a partial message (or a stray plaintext) was dropped. */
   log?: (message: string) => void
+  /**
+   * Which first bytes start a complete message. Phones and desktops (§6.1) use JSON,
+   * so only `{`; the desktop↔server link (protocol/SERVER.md) has binary messages of
+   * its own. Never pass a test that accepts {@link PLAINTEXT_FRAGMENT}.
+   */
+  isWhole?: (firstByte: number) => boolean
 }
 
 interface PartialMessage {
@@ -82,10 +88,12 @@ export class Reassembler {
   readonly #partials = new Map<number, PartialMessage>()
   readonly #now: () => number
   readonly #log: (message: string) => void
+  readonly #isWhole: (firstByte: number) => boolean
 
   constructor(options: ReassemblerOptions = {}) {
     this.#now = options.now ?? Date.now
     this.#log = options.log ?? (() => {})
+    this.#isWhole = options.isWhole ?? ((byte) => byte === PLAINTEXT_JSON)
   }
 
   /** Messages currently partially received. */
@@ -100,7 +108,7 @@ export class Reassembler {
       return null
     }
     const first = plaintext[0]
-    if (first === PLAINTEXT_JSON) return plaintext
+    if (first !== PLAINTEXT_FRAGMENT && this.#isWhole(first)) return plaintext
     if (first !== PLAINTEXT_FRAGMENT) {
       this.#log(`fragments: plaintext starting 0x${first.toString(16).padStart(2, '0')} ignored`)
       return null
@@ -178,7 +186,7 @@ export class FramedTransport {
     this.#reassembler = new Reassembler(options)
   }
 
-  /** The Noise ciphertexts for one encoded JSON message, in send order. */
+  /** The Noise ciphertexts for one encoded message (JSON, or what `isWhole` accepts), in send order. */
   seal(json: Uint8Array): Uint8Array[] {
     const parts = json.length > FRAGMENT_CHUNK ? fragmentMessage(json, this.#takeId()) : [json]
     return parts.map((plaintext) => this.transport.encrypt(plaintext))

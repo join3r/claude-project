@@ -105,6 +105,29 @@ describe('ClientRegistry', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('clientSendFailed clientId=broken channel=projects-updated'))
   })
 
+  it('broadcasts once per group, through the group sink, and drops a group with its clients', () => {
+    const { registry, gone } = registryWithHandlers()
+    const pushes: string[] = []
+    registry.registerGroup('link:d1', (channel) => pushes.push(`group:${channel}`))
+    registry.registerClient('link:d1:win:1', (channel) => pushes.push(`w1:${channel}`), { group: 'link:d1' })
+    registry.registerClient('link:d1:win:2', (channel) => pushes.push(`w2:${channel}`), { group: 'link:d1' })
+    registry.registerClient('local', (channel) => pushes.push(`local:${channel}`))
+    registry.broadcast('projects-updated', 1)
+    expect(pushes).toEqual(['group:projects-updated', 'local:projects-updated'])
+    pushes.length = 0
+    registry.send('link:d1:win:2', 'pty-data', 't', 'x')
+    expect(pushes).toEqual(['w2:pty-data'])
+    expect(() => registry.registerGroup('link:d1', () => {})).toThrow(/already registered/)
+    registry.unregisterGroup('link:d1')
+    expect(gone).toEqual(['link:d1:win:1', 'link:d1:win:2'])
+    expect(registry.clientIds()).toEqual(['local'])
+    // A grouped client whose group has no sink gets broadcasts itself.
+    pushes.length = 0
+    registry.registerClient('orphan', (channel) => pushes.push(`orphan:${channel}`), { group: 'nobody' })
+    registry.broadcast('x')
+    expect(pushes).toEqual(['local:x', 'orphan:x'])
+  })
+
   it('refuses a second registration of a client id or a channel', () => {
     const { registry } = registryWithHandlers()
     registry.registerClient('c1', () => {})

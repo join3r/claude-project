@@ -57,6 +57,23 @@ export class PtyManager {
     }
   }
 
+  /** Stops reading the PTY: once the kernel buffer fills, the program blocks on its writes. */
+  pause(id: string): void {
+    try {
+      this.instances.get(id)?.process.pause()
+    } catch {
+      // Already exited.
+    }
+  }
+
+  resume(id: string): void {
+    try {
+      this.instances.get(id)?.process.resume()
+    } catch {
+      // Already exited.
+    }
+  }
+
   onData(id: string, callback: (data: string) => void): void {
     this.instances.get(id)?.process.onData(callback)
   }

@@ -64,6 +64,7 @@ import { PairingsStore } from '../mobile/pairings-store'
 import { IdentityStore } from '../mobile/identity'
 import { createInvite } from '../mobile/invite'
 import { RelayClient } from '../mobile/relay-client'
+import { RelayMux } from './link/relay-mux'
 import { createNoiseChannelFactory } from '../mobile/channel'
 import { ChatBridge } from '../mobile/chat-bridge'
 import { PushEmitter } from '../mobile/push-emitter'
@@ -112,6 +113,11 @@ export interface HostServicesOptions {
   env: HostEnv
   clients: ClientHub
   /**
+   * Who this host is on the relay: a desktop, or a DevTool server (SPEC.md §3.8).
+   * Phones and the host link share that one socket and identity.
+   */
+  relayRole?: 'desktop' | 'server'
+  /**
    * Main archived a task on its own (a phone's close, a landing): the desktop
    * drops it from the window view states it persists.
    */
@@ -154,6 +160,15 @@ export class HostServices {
   private chatManager!: ClaudeChatManager
   /** Phones: relay connection, pairing and the inbox they see. Dormant while Mobile is off. */
   private mobileService!: MobileService
+  /**
+   * This host's keys (`<configDir>/mobile/identity.json`), for phones and the host
+   * link alike. Loaded on first use: on macOS safeStorage can raise a Keychain prompt.
+   */
+  readonly identity: IdentityStore
+  /** The one relay socket, shared by the phones and the host link (servers or desktops). */
+  readonly relay: RelayMux
+  private readonly relayClient: RelayClient
+  private readonly configListeners = new Set<(config: AppConfig) => void>()
   private started = false
   private readonly projectsStore: RevisionStore<ProjectsData>
   /** Tasks' own worktrees, made just before their first spawn. */
@@ -166,11 +181,22 @@ export class HostServices {
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
 
-  constructor({ env, clients, onTaskArchived }: HostServicesOptions) {
+  constructor({ env, clients, onTaskArchived, relayRole }: HostServicesOptions) {
     this.env = env
     this.clients = clients
     this.onTaskArchived = onTaskArchived ?? (() => {})
     const configDir = env.configDir
+    const identity = new IdentityStore(path.join(configDir, 'mobile'), env.secrets, (message) => this.logDebug(message))
+    this.identity = identity
+    this.relayClient = new RelayClient({
+      role: relayRole ?? 'desktop',
+      // Servers need binary frames; phones keep getting JSON from the relay.
+      binary: true,
+      ed25519: () => identity.get().ed25519,
+      deviceId: () => identity.get().id,
+      log: (message) => this.logDebug(`relay ${message}`)
+    })
+    this.relay = new RelayMux(this.relayClient, (message) => this.logDebug(message))
     this.storage = new Storage(configDir)
     this.scrollbackStorage = new ScrollbackStorage(path.join(configDir, 'scrollback'))
     this.archiveStorage = new ArchiveStorage(path.join(configDir, 'archive'))
@@ -297,7 +323,7 @@ export class HostServices {
     const log = (message: string) => this.logDebug(message)
     // Loaded on first use (Mobile on, or a pairing started), never at startup:
     // safeStorage can raise a Keychain prompt on macOS.
-    const identity = new IdentityStore(mobileDir, this.env.secrets, log)
+    const identity = this.identity
     const desktopName = () => normalizeMobileConfig(this.config.mobile).desktopName?.trim() || os.hostname().replace(/\.local$/, '')
     // The emitter and the service need each other: it sends through the service, and
     // the bridge (inside the service's deps) tells it which turns a phone started.
@@ -344,11 +370,7 @@ export class HostServices {
       pairings: new PairingsStore(mobileDir, log),
       getDesktopId: () => identity.peekId(),
       defaultDesktopName: () => os.hostname().replace(/\.local$/, ''),
-      createTransport: () => new RelayClient({
-        ed25519: () => identity.get().ed25519,
-        deviceId: () => identity.get().id,
-        log: (message) => this.logDebug(`mobile ${message}`)
-      }),
+      createTransport: () => this.relay.mobileTransport(),
       channels: createNoiseChannelFactory({
         staticKey: () => identity.get().x25519,
         app: `devtool/${this.env.appVersion}`,
@@ -580,6 +602,28 @@ export class HostServices {
     return stdout
   }
 
+  /** Runs after every config change (the desktop's server hub follows the relay URL). */
+  onConfigChanged(listener: (config: AppConfig) => void): () => void {
+    this.configListeners.add(listener)
+    return () => { this.configListeners.delete(listener) }
+  }
+
+  /**
+   * Flow control for a congested host link: hold a terminal tab's output back
+   * (the PTY stops being read) until `holder` releases it. False for no live tab.
+   */
+  holdTerminalOutput(tabId: string, holder: string): boolean {
+    return this.ptySessions.holdOutput(tabId, holder)
+  }
+
+  releaseTerminalOutput(tabId: string, holder: string): void {
+    this.ptySessions.releaseOutput(tabId, holder)
+  }
+
+  terminalOutputHeldBy(holder: string): string[] {
+    return this.ptySessions.heldBy(holder)
+  }
+
   async shutdown(): Promise<void> {
     this.mobileService?.stop()
     this.ptySessions.saveAllScrollback()
@@ -590,6 +634,7 @@ export class HostServices {
     this.hookInjector.cleanupAll()
     await this.hookServer.stop()
     await this.sshManager.disconnectAll().catch(() => {})
+    this.relayClient.close()
   }
 
   private registerEventForwarders(): void {
@@ -820,6 +865,13 @@ export class HostServices {
     setPortableNodeDir(this.config.portableNodeDir)
     this.sleepBlocker.update()
     this.clients.broadcast('config-updated', clone(this.config))
+    for (const listener of [...this.configListeners]) {
+      try {
+        listener(this.config)
+      } catch (err) {
+        this.logDebug(`configListener error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
   }
 
   /** Behind the `workspace-delete` IPC; without `force` it is the pre-flight. */

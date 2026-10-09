@@ -4,16 +4,22 @@ import {
   RELAY_PING_INTERVAL_MS,
   RelayCloseCode,
   buildHello,
+  decodeRelayBinaryFrame,
+  encodeRelayBinaryFrame,
   encodeRelayMessage,
   parseServerMessage
 } from '../../../protocol/ts/index.ts'
-import type { ClientMessage, KeyPair, ServerMessage } from '../../../protocol/ts/index.ts'
-import type { RelayDesktopMessage, RelayServerMessage, RelayTransport, RelayTransportState } from './mobile-service'
+import type { ClientMessage, KeyPair, Role, ServerMessage } from '../../../protocol/ts/index.ts'
+import type { RelayServerMessage, RelayTransport, RelayTransportState } from './mobile-service'
 
 /** The slice of the WHATWG WebSocket the client uses (Node ≥ 22's global, or a fake). */
 export interface WebSocketLike {
   readonly readyState: number
-  send(data: string): void
+  /** Bytes queued by `send` that the OS hasn't taken yet; fakes may leave it out (0). */
+  readonly bufferedAmount?: number
+  /** Set to `'arraybuffer'` when binary frames were asked for. */
+  binaryType?: string
+  send(data: string | Uint8Array): void
   close(code?: number, reason?: string): void
   onopen: ((event: unknown) => void) | null
   onmessage: ((event: { data: unknown }) => void) | null
@@ -34,6 +40,13 @@ export interface RelayClientTimers {
 export interface RelayClientOptions {
   /** Our Ed25519 keypair (read lazily: the identity loads on first use). */
   ed25519: () => KeyPair
+  /** The role we sign in as (SPEC.md §3.8). Defaults to `desktop`. */
+  role?: Exclude<Role, 'phone'>
+  /**
+   * Ask for binary frames (SPEC.md §3.9): the relay then delivers every frame as a
+   * binary message, phones' included, and `ready` says whether it agreed.
+   */
+  binary?: boolean
   /** Our device ID, to check the relay's `ready`. */
   deviceId: () => string
   createSocket?: (url: string) => WebSocketLike
@@ -62,10 +75,19 @@ function defaultSocket(url: string): WebSocketLike {
   return new Ctor(url)
 }
 
-function describeClose(code: number, reason: string): string {
+/** How often a drain waiter checks the socket's `bufferedAmount` (Node's WebSocket has no drain event). */
+const DRAIN_POLL_MS = 10
+/**
+ * A socket the relay stopped reading (budget, a slow receiver; SPEC.md §3.10) gets no
+ * pongs either. While our own sends are still queued, silence is given this many idle
+ * timeouts before the relay counts as dead.
+ */
+const BACKLOGGED_IDLE_FACTOR = 3
+
+function describeClose(code: number, reason: string, role: string): string {
   switch (code) {
-    case RelayCloseCode.Auth: return 'Relay refused this desktop'
-    case RelayCloseCode.HelloTimeout: return 'Relay timed out waiting for this desktop'
+    case RelayCloseCode.Auth: return `Relay refused this ${role}`
+    case RelayCloseCode.HelloTimeout: return `Relay timed out waiting for this ${role}`
     case RelayCloseCode.Replaced: return 'Another connection took over'
     case RelayCloseCode.Rate: return 'Rate limited by the relay'
     case RelayCloseCode.TooBig: return 'Message too large for the relay'
@@ -75,10 +97,11 @@ function describeClose(code: number, reason: string): string {
 }
 
 /**
- * The desktop's connection to the relay (SPEC.md §3): opens `<relay>/v1`, answers the
- * challenge, keeps the socket alive with pings, notices a silent one, and reconnects
- * with exponential backoff until `close()`. Only `frame`, `peer` and `error` reach
- * the service, and only after `ready`.
+ * A host's connection to the relay (SPEC.md §3), as a desktop or a server: opens
+ * `<relay>/v1`, answers the challenge, keeps the socket alive with pings, notices a
+ * silent one, and reconnects with exponential backoff until `close()`. Only `frame`,
+ * `peer`, `pushed` and `error` reach the listeners, and only after `ready`; binary
+ * frames (§3.9) go to `onBinaryFrame` listeners.
  */
 export class RelayClient implements RelayTransport {
   private readonly timers: RelayClientTimers
@@ -96,7 +119,12 @@ export class RelayClient implements RelayTransport {
   private authTimer: unknown = null
   private pingTimer: unknown = null
   private lastReceivedAt = 0
+  private readyBinary = false
+  private drainTimer: unknown = null
+  private readonly drainWaiters: { below: number; fn: () => void }[] = []
+  private readonly role: Exclude<Role, 'phone'>
   private readonly messageListeners = new Set<(message: RelayServerMessage) => void>()
+  private readonly binaryListeners = new Set<(from: string, envelope: Uint8Array) => void>()
   private readonly stateListeners = new Set<(state: RelayTransportState) => void>()
 
   constructor(private readonly options: RelayClientOptions) {
@@ -106,6 +134,12 @@ export class RelayClient implements RelayTransport {
     this.minBackoff = options.minBackoffMs ?? 1000
     this.maxBackoff = options.maxBackoffMs ?? 30_000
     this.backoff = this.minBackoff
+    this.role = options.role ?? 'desktop'
+  }
+
+  /** The URL `connect` was given (without `/v1`), or null while closed. */
+  get relayUrl(): string | null {
+    return this.url === null ? null : this.url.slice(0, -RELAY_PATH.length)
   }
 
   connect(relayUrl: string): void {
@@ -121,9 +155,48 @@ export class RelayClient implements RelayTransport {
     this.setState({ kind: 'idle' })
   }
 
-  send(message: RelayDesktopMessage): boolean {
+  /** Any message a host may send after `ready` (SPEC.md §3.2–§3.4). False when not online. */
+  send(message: ClientMessage): boolean {
     if (!this.ready) return false
     return this.write(message)
+  }
+
+  /** A binary frame `[peer][envelope]` (SPEC.md §3.9). False when not online. */
+  sendBinary(peer: string, envelope: Uint8Array): boolean {
+    if (!this.ready) return false
+    const socket = this.socket
+    if (!socket || socket.readyState !== OPEN) return false
+    try {
+      socket.send(encodeRelayBinaryFrame(peer, envelope))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Whether the relay confirmed binary frames in `ready` (false on a relay from before servers, §3.11). */
+  isBinary(): boolean {
+    return this.ready && this.readyBinary
+  }
+
+  /** Bytes we sent that the OS hasn't taken yet (0 without a socket). */
+  bufferedAmount(): number {
+    return this.socket?.bufferedAmount ?? 0
+  }
+
+  /**
+   * Calls `fn` once `bufferedAmount()` is at most `below`, or once the socket is gone
+   * (the caller then finds whatever it waited to send has nowhere to go).
+   */
+  onBufferBelow(below: number, fn: () => void): void {
+    if (this.bufferedAmount() <= below || !this.socket) {
+      fn()
+      return
+    }
+    this.drainWaiters.push({ below, fn })
+    if (this.drainTimer === null) {
+      this.drainTimer = this.timers.setInterval(() => this.checkDrain(), DRAIN_POLL_MS)
+    }
   }
 
   getState(): RelayTransportState {
@@ -133,6 +206,12 @@ export class RelayClient implements RelayTransport {
   onMessage(listener: (message: RelayServerMessage) => void): () => void {
     this.messageListeners.add(listener)
     return () => { this.messageListeners.delete(listener) }
+  }
+
+  /** Binary frames from `from`: the envelope is a fresh copy the listener may keep. */
+  onBinaryFrame(listener: (from: string, envelope: Uint8Array) => void): () => void {
+    this.binaryListeners.add(listener)
+    return () => { this.binaryListeners.delete(listener) }
   }
 
   onStateChange(listener: (state: RelayTransportState) => void): () => void {
@@ -155,6 +234,7 @@ export class RelayClient implements RelayTransport {
       return
     }
     this.socket = socket
+    if (this.options.binary) socket.binaryType = 'arraybuffer'
     this.lastReceivedAt = this.timers.now()
     const authTimeout = this.options.authTimeoutMs ?? 15_000
     this.authTimer = this.timers.setTimeout(() => {
@@ -164,18 +244,34 @@ export class RelayClient implements RelayTransport {
     socket.onmessage = (event) => {
       if (this.socket !== socket) return
       this.lastReceivedAt = this.timers.now()
-      if (typeof event.data !== 'string') return
-      this.handle(event.data)
+      if (typeof event.data === 'string') this.handle(event.data)
+      else this.handleBinary(event.data)
     }
     socket.onclose = (event) => {
       if (this.socket !== socket) return
       this.socket = null
-      this.failed(describeClose(event.code, event.reason))
+      this.failed(describeClose(event.code, event.reason, this.role))
     }
     socket.onerror = () => {
       // `close` follows with the code; remember that the attempt itself failed.
       if (this.socket === socket && !this.ready) this.lastError = 'Relay unreachable'
     }
+  }
+
+  private handleBinary(data: unknown): void {
+    if (!this.ready) return
+    let bytes: Uint8Array
+    if (data instanceof ArrayBuffer) bytes = new Uint8Array(data)
+    else if (ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+    else return
+    let frame: { peer: string; envelope: Uint8Array }
+    try {
+      frame = decodeRelayBinaryFrame(bytes)
+    } catch (err) {
+      this.log(`relay sent a malformed binary frame: ${err instanceof Error ? err.message : String(err)}`)
+      return
+    }
+    for (const listener of this.binaryListeners) listener(frame.peer, frame.envelope)
   }
 
   private handle(text: string): void {
@@ -190,13 +286,15 @@ export class RelayClient implements RelayTransport {
     switch (message.t) {
       case 'challenge': {
         const keys = this.options.ed25519()
-        this.write(buildHello({ role: 'desktop', nonce: message.nonce, ed25519Priv: keys.priv, ed25519Pub: keys.pub }))
+        this.write(buildHello({ role: this.role, nonce: message.nonce, ed25519Priv: keys.priv, ed25519Pub: keys.pub, binary: this.options.binary }))
         return
       }
       case 'ready':
         if (message.id !== this.options.deviceId()) {
           this.log(`relay says our id is ${message.id}, expected ${this.options.deviceId()}`)
         }
+        this.readyBinary = message.binary === true
+        if (this.options.binary && !this.readyBinary) this.log('relay did not confirm binary frames (a relay from before servers)')
         this.onReady()
         return
       case 'ping':
@@ -228,7 +326,11 @@ export class RelayClient implements RelayTransport {
     const pingEvery = this.options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS
     const idleAfter = this.options.idleTimeoutMs ?? RELAY_IDLE_TIMEOUT_MS
     this.pingTimer = this.timers.setInterval(() => {
-      if (this.timers.now() - this.lastReceivedAt >= idleAfter) {
+      // Only total silence counts (§3.10): a relay holding our socket back delays
+      // our pongs too, so while our own sends are still queued it gets longer.
+      const silent = this.timers.now() - this.lastReceivedAt
+      const backlogged = this.bufferedAmount() > 0
+      if (silent >= idleAfter && (!backlogged || silent >= idleAfter * BACKLOGGED_IDLE_FACTOR)) {
         this.failed('Relay stopped responding')
         return
       }
@@ -258,9 +360,29 @@ export class RelayClient implements RelayTransport {
     const socket = this.socket
     this.socket = null
     this.ready = false
+    this.readyBinary = false
+    this.checkDrain()
     if (!socket) return
     socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null
     try { socket.close(code, reason) } catch { /* already closed */ }
+  }
+
+  /** Runs the drain waiters whose mark was reached (all of them once the socket is gone). */
+  private checkDrain(): void {
+    if (this.drainWaiters.length === 0) return
+    const buffered = this.bufferedAmount()
+    const gone = !this.socket
+    const due = this.drainWaiters.filter((w) => gone || buffered <= w.below)
+    if (due.length > 0) {
+      const remaining = this.drainWaiters.filter((w) => !due.includes(w))
+      this.drainWaiters.length = 0
+      this.drainWaiters.push(...remaining)
+    }
+    if (this.drainWaiters.length === 0 && this.drainTimer !== null) {
+      this.timers.clearInterval(this.drainTimer)
+      this.drainTimer = null
+    }
+    for (const waiter of due) waiter.fn()
   }
 
   private clearTimers(): void {

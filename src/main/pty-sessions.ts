@@ -21,6 +21,8 @@ export function trimScrollback(scrollback: string): string {
 interface PtyRuntime {
   attachedClientIds: Set<string>
   controllerClientId: string | null
+  /** Who holds the output back (a congested host link); the PTY is paused while any does. */
+  outputHolds: Set<string>
   cols: number
   rows: number
   scrollback: string
@@ -104,6 +106,33 @@ export class PtySessions {
         this.deps.log(`ptyControllerReassigned id=${tabId} clientId=${nextController ?? 'none'}`)
       }
     }
+  }
+
+  /**
+   * Flow control: `holder` (a congested link) holds the tab's output back. The PTY
+   * stops being read, so the program blocks on its writes rather than any output
+   * being dropped, until every holder has let go. False when there is no such tab.
+   */
+  holdOutput(tabId: string, holder: string): boolean {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime || runtime.exitCode !== null) return false
+    if (runtime.outputHolds.has(holder)) return true
+    runtime.outputHolds.add(holder)
+    if (runtime.outputHolds.size === 1) this.deps.ptyManager.pause(tabId)
+    return true
+  }
+
+  releaseOutput(tabId: string, holder: string): void {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime || !runtime.outputHolds.delete(holder)) return
+    if (runtime.outputHolds.size === 0) this.deps.ptyManager.resume(tabId)
+  }
+
+  /** Tabs `holder` holds back right now. */
+  heldBy(holder: string): string[] {
+    const ids: string[] = []
+    for (const [tabId, runtime] of this.runtimes) if (runtime.outputHolds.has(holder)) ids.push(tabId)
+    return ids
   }
 
   saveScrollback(tabId: string, data: string): void {
@@ -205,6 +234,7 @@ export class PtySessions {
       runtime = {
         attachedClientIds: new Set<string>(),
         controllerClientId: clientId,
+        outputHolds: new Set<string>(),
         cols,
         rows,
         scrollback: this.deps.scrollbackStorage.load(id) ?? '',

@@ -1,7 +1,12 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, powerMonitor, shell } from 'electron'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { HostServices } from './host/host-services'
+import { ServerHub } from './servers/server-hub'
+import { registerServerHandlers } from './ipc/servers'
+import { normalizeMobileConfig } from '../shared/mobile'
+import type { HostEnv } from './host/host-env'
 import { createDesktopHostEnv, logDebug } from './desktop-host-env'
 import { WindowClientHub, windowClientId } from './window-client-hub'
 import { createIpcRegistrar } from './ipc/registrar'
@@ -44,6 +49,9 @@ export class AppRuntime {
   /** The windows, as the host's clients. */
   private readonly clients = new WindowClientHub<BrowserWindow>()
   private readonly host: HostServices
+  private readonly env: HostEnv
+  /** The DevTool servers this desktop paired with, on the relay socket the phones use. */
+  private servers!: ServerHub
   private readonly windowStates = new Map<number, PersistedWindowState>()
   private updates!: Updates
   private started = false
@@ -53,8 +61,9 @@ export class AppRuntime {
   private startupWindowStates: PersistedWindowState[]
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
+    this.env = createDesktopHostEnv()
     this.host = new HostServices({
-      env: createDesktopHostEnv(),
+      env: this.env,
       clients: this.clients,
       onTaskArchived: (taskId) => this.forgetTaskInWindowStates(taskId)
     })
@@ -69,10 +78,46 @@ export class AppRuntime {
     this.started = true
 
     await this.host.start()
+    this.servers = this.createServerHub()
     this.updates = this.createUpdates()
     this.registerEventForwarders()
     this.registerIpcHandlers()
     this.updates.start()
+  }
+
+  private createServerHub(): ServerHub {
+    const mobile = () => normalizeMobileConfig(this.host.getConfig().mobile)
+    const servers = new ServerHub({
+      configDir: this.env.configDir,
+      relay: this.host.relay,
+      identity: this.host.identity,
+      relayUrl: () => mobile().relayUrl,
+      // Commit and bundle hash arrive with the bundled server (step 5).
+      build: { version: app.getVersion(), commit: '', builtAt: '', bundleSha: '' },
+      desktopName: () => mobile().desktopName?.trim() || os.hostname().replace(/\.local$/, ''),
+      log: (message) => this.logDebug(message)
+    })
+    servers.onStateChange((state) => this.clients.broadcast('servers-state-changed', state))
+    this.host.onConfigChanged(() => servers.relayUrlChanged())
+    servers.start()
+    this.devPairServer(servers)
+    return servers
+  }
+
+  /**
+   * Dev runs only (protocol/SERVER.md §7): `DEVTOOL_DEV_SERVER_PAIR=1` logs this
+   * desktop's keys for a server's `--dev-pair`; set to the code that server prints,
+   * it pairs with that server.
+   */
+  private devPairServer(servers: ServerHub): void {
+    const value = process.env.DEVTOOL_DEV_SERVER_PAIR?.trim()
+    if (!value || app.isPackaged) return
+    try {
+      this.logDebug(`servers devKeys=${servers.devKeys()}`)
+      if (value.startsWith('devtool-dev-pair:')) servers.devPair(value)
+    } catch (err) {
+      this.logDebug(`servers devPair error=${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   /** The updater, for the app menu's "Check for Updates…". */
@@ -136,6 +181,7 @@ export class AppRuntime {
         this.persistWindowSession()
       }
       this.host.detachClient(clientId)
+      this.servers?.detachClient(clientId)
     })
   }
 
@@ -173,6 +219,7 @@ export class AppRuntime {
   async shutdown(): Promise<void> {
     this.persistWindowSession()
     this.updates?.close()
+    this.servers?.stop()
     await this.host.shutdown()
   }
 
@@ -291,6 +338,7 @@ export class AppRuntime {
     })
 
     registerUpdateHandlers(ipc, { updates: () => this.updates })
+    registerServerHandlers(ipc, { servers: () => this.servers })
   }
 
   private updateWindowGeometry(windowId: number): void {

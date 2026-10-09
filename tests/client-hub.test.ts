@@ -78,7 +78,9 @@ describe('PtySessions client routing', () => {
       write: vi.fn(),
       resize: vi.fn(),
       kill: vi.fn(),
-      killAll: vi.fn()
+      killAll: vi.fn(),
+      pause: vi.fn(),
+      resume: vi.fn()
     }
     const scrollback = { save: vi.fn(), load: () => null, delete: vi.fn() }
     const sent: [string, string, ...unknown[]][] = []
@@ -136,5 +138,24 @@ describe('PtySessions client routing', () => {
     sent.length = 0
     callbacks.get('t1')!.onData!('more')
     expect(sent).toEqual([['win:1', 'pty-data', 't1', 'more']])
+  })
+
+  it('pauses a PTY while any link holds its output back, and resumes when the last lets go', () => {
+    const { sessions, ptyManager, callbacks, spawn } = setup()
+    spawn('link:d1:win:1')
+    expect(sessions.holdOutput('t1', 'link:d1')).toBe(true)
+    expect(sessions.holdOutput('t1', 'link:d1')).toBe(true)
+    expect(sessions.holdOutput('t1', 'link:d2')).toBe(true)
+    expect(ptyManager.pause).toHaveBeenCalledTimes(1)
+    expect(sessions.heldBy('link:d1')).toEqual(['t1'])
+    sessions.releaseOutput('t1', 'link:d1')
+    expect(ptyManager.resume).not.toHaveBeenCalled()
+    sessions.releaseOutput('t1', 'link:d2')
+    expect(ptyManager.resume).toHaveBeenCalledWith('t1')
+    expect(sessions.heldBy('link:d2')).toEqual([])
+    // Nothing to hold: no tab, or one whose process exited.
+    expect(sessions.holdOutput('nope', 'link:d1')).toBe(false)
+    callbacks.get('t1')!.onExit!(0)
+    expect(sessions.holdOutput('t1', 'link:d1')).toBe(false)
   })
 })

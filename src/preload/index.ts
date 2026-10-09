@@ -41,6 +41,7 @@ import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared
 import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
+import type { ServersState } from '../shared/servers'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
@@ -541,6 +542,13 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, state: MobileState) => callback(state)
     ipcRenderer.on('mobile-state-changed', handler)
     return () => ipcRenderer.removeListener('mobile-state-changed', handler)
+  },
+  // DevTool servers. Main owns the state; every change is also broadcast.
+  serversGetState: (): Promise<ServersState> => ipcRenderer.invoke('servers-get-state'),
+  onServersStateChanged: (callback: (state: ServersState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: ServersState) => callback(state)
+    ipcRenderer.on('servers-state-changed', handler)
+    return () => ipcRenderer.removeListener('servers-state-changed', handler)
   },
   // Updates (Settings → Updates). Main owns the state; every change is also broadcast.
   updatesGetStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-get-status'),

@@ -1,5 +1,7 @@
 import { HostServices } from '../main/host/host-services'
 import { ClientRegistry } from './client-registry'
+import { loadServerConfig, serverDisplayName } from './server-config'
+import { ServerLink, type ServerLinkOptions } from './server-link'
 import { ProcessPowerSave } from './power-save'
 import { createServerHostEnv, ensureServerDirs, type ServerHostEnv, type ServerManifest, type ServerPaths } from './server-env'
 import type { PowerSaveApi } from '../main/sleep-blocker'
@@ -46,7 +48,7 @@ export async function startServerHost(options: ServerHostOptions): Promise<Serve
     onClientGone: (clientId) => host?.detachClient(clientId),
     log: env.log
   })
-  host = new HostServices({ env, clients })
+  host = new HostServices({ env, clients, relayRole: 'server' })
   await host.start()
   host.registerIpcHandlers(clients.createRegistrar(env.log))
 
@@ -61,4 +63,26 @@ export async function startServerHost(options: ServerHostOptions): Promise<Serve
       return stopped
     }
   }
+}
+
+/**
+ * The host link in front of a started host: the paired desktops (`desktops.json`
+ * in the data dir) reach its channels through the relay named in `server.json`.
+ * Not started: call `start()`.
+ */
+export function createServerLink(server: ServerHost, overrides: Partial<ServerLinkOptions> = {}): ServerLink {
+  const dataDir = server.env.paths.dataDir
+  const { manifest } = server.env
+  return new ServerLink({
+    relay: server.host.relay,
+    identity: server.host.identity,
+    registry: server.clients,
+    terminals: server.host,
+    dataDir,
+    relayUrl: () => loadServerConfig(dataDir).relayUrl,
+    name: () => serverDisplayName(loadServerConfig(dataDir)),
+    build: { version: manifest.version, commit: manifest.commit, builtAt: manifest.builtAt, bundleSha: manifest.sha256 },
+    log: server.env.log,
+    ...overrides
+  })
 }
