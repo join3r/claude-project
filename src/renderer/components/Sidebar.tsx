@@ -1043,6 +1043,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           projects={inboxProjects}
           selectedTaskId={selectedTaskId}
           onSelectTask={handleSelectTask}
+          onOpenProject={selectProjectHome}
+          selectedProjectHomeId={selectedTaskId ? null : selectedProjectId}
           onTaskContextMenu={handleTaskContextMenu}
           onSettle={handleToggleSettled}
           onSnooze={handleSnoozeFromRow}

@@ -219,9 +219,8 @@ describe('partitionInbox', () => {
   it('splits tasks into the groups', () => {
     const result = partitionInbox(entries, statuses, since, NOW)
     expect(result.needsYou.map(e => e.task.id)).toEqual(['blocked-long', 'blocked-short'])
-    expect(result.yourTurn.map(e => e.task.id)).toEqual(['recent', 'older'])
+    expect(result.ready.map(e => e.task.id)).toEqual(['recent', 'older'])
     expect(result.working).toEqual([])
-    expect(result.quiet).toEqual([])
     expect(result.settled.map(e => e.task.id)).toEqual(['settled'])
     expect(result.snoozed.map(e => e.task.id)).toEqual(['snoozed'])
   })
@@ -262,12 +261,12 @@ describe('partitionInbox', () => {
       NOW
     )
     expect(result.needsYou.every(e => e.yourTurn)).toBe(true)
-    expect(result.yourTurn.find(e => e.task.id === 'recent')?.yourTurn).toBe(true)
+    expect(result.ready.find(e => e.task.id === 'recent')?.yourTurn).toBe(true)
     expect(result.settled.every(e => !e.yourTurn)).toBe(true)
     expect(result.snoozed.every(e => !e.yourTurn)).toBe(true)
   })
 
-  it('splits Needs you, Your turn, Working and Quiet', () => {
+  it('splits Needs you, Ready and Working, with your-turn rows first in Ready', () => {
     const asking = makeTask('asking', { eventAt: NOW - 5000 }, { aiTabIds: ['ask'] })
     const finished = makeTask('finished', { eventAt: NOW - 3000 }, { lastInteractedAt: NOW - 10_000, aiTabIds: ['fin'] })
     const running = makeTask('running', { eventAt: NOW - 1000 }, { aiTabIds: ['run'] })
@@ -282,11 +281,11 @@ describe('partitionInbox', () => {
     )
     expect(result.needsYou.map(e => e.task.id)).toEqual(['asking'])
     // Your turn is the agent having the last word without blocking: finished or exited.
-    expect(result.yourTurn.map(e => e.task.id)).toEqual(['finished', 'exited'])
+    // Nothing owed either way follows, each part by recency.
+    expect(result.ready.map(e => e.task.id)).toEqual(['finished', 'exited', 'answered', 'untouched'])
+    expect(result.ready.map(e => e.yourTurn)).toEqual([true, true, false, false])
     expect(result.working.map(e => e.task.id)).toEqual(['running'])
     expect(result.working[0].yourTurn).toBe(false)
-    // Nothing owed either way still shows, below the rest.
-    expect(result.quiet.map(e => e.task.id)).toEqual(['answered', 'untouched'])
   })
 
   it('puts the task that started working last at the top of Working', () => {
@@ -361,15 +360,15 @@ describe('inbox sources and the grouped layout', () => {
     expect(needsYou[0].yourTurn).toBe(true)
   })
 
-  it('flat order: needs you by longest wait, then your turn by recency', () => {
-    const { needsYou, yourTurn } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
-    expect([...needsYou, ...yourTurn].map(e => e.task.id))
+  it('flat order: needs you by longest wait, then ready by recency', () => {
+    const { needsYou, ready } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
+    expect([...needsYou, ...ready].map(e => e.task.id))
       .toEqual(['term-task', 'blocked', 'fresh', 'quiet', 'older'])
   })
 
   it('grouped: a project sits where its most urgent row is, its rows in flat order across streams', () => {
-    const { needsYou, yourTurn } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
-    const groups = groupInboxByProject([...needsYou, ...yourTurn])
+    const { needsYou, ready } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
+    const groups = groupInboxByProject([...needsYou, ...ready])
     expect(groups.map(g => `${g.project.name}: ${g.entries.map(e => `${e.stream.name}/${e.task.id}`).join(',')}`)).toEqual([
       'Stem: main/term-task',
       'DevTool: 0.5.0/blocked,bugfixes/fresh,main/quiet,0.5.0/older'
@@ -377,8 +376,8 @@ describe('inbox sources and the grouped layout', () => {
   })
 
   it('keeps two projects apart even when both only have main', () => {
-    const { yourTurn } = partitionInbox(inboxSources([devtool, stem]), {}, {}, NOW)
-    expect(groupInboxByProject(yourTurn).map(g => g.project.id).sort()).toEqual(['devtool', 'stem'])
+    const { ready } = partitionInbox(inboxSources([devtool, stem]), {}, {}, NOW)
+    expect(groupInboxByProject(ready).map(g => g.project.id).sort()).toEqual(['devtool', 'stem'])
   })
 
   it('never lists archived tasks or the tasks of an archived stream', () => {

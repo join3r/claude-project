@@ -31,6 +31,8 @@ export interface ChatToolItem {
   /** Subagent (Agent/Task tool) progress: how many tool calls it made, and the latest. */
   childCount?: number
   lastChild?: string
+  /** An Artifact publish: the page it went to. */
+  artifact?: { url: string; title?: string }
 }
 
 export type ChatItem =
@@ -610,23 +612,77 @@ function applyStreamEvent(draft: Draft, event: Json, current: string): Partial<C
   return {}
 }
 
-function applyToolResults(draft: Draft, content: unknown[]): void {
-  for (const raw of content) {
-    const block = obj(raw)
-    if (!block || block.type !== 'tool_result') continue
+/** "Published <path> at https://claude.ai/artifact/… (Version 1, …)". */
+const ARTIFACT_PUBLISHED = /^Published .+? at (https:\/\/claude\.ai\/\S+)/
+
+/**
+ * Where an Artifact call published, read from its result text. `meta` is the
+ * message's structured result (live: `tool_use_result`, transcript:
+ * `toolUseResult`), the only place the page's title shows up.
+ */
+function artifactOf(item: ChatToolItem, text: string, meta: Json | undefined): ChatToolItem['artifact'] {
+  if (item.name !== 'Artifact') return undefined
+  const url = ARTIFACT_PUBLISHED.exec(text)?.[1]
+  if (!url) return undefined
+  const title = (meta && str(meta.url) === url ? str(meta.title) : undefined) ?? str(item.input.title)
+  return title ? { url, title } : { url }
+}
+
+function applyToolResults(draft: Draft, content: unknown[], meta?: Json): void {
+  const results = content.filter((raw) => obj(raw)?.type === 'tool_result')
+  for (const raw of results) {
+    const block = obj(raw) as Json
     const index = draft.tool(str(block.tool_use_id))
     if (index === undefined) continue
     const isError = block.is_error === true
     const { text, images } = toolResultContent(block.content)
-    draft.update(index, (item) => item.kind === 'tool'
-      ? {
-          ...item,
-          status: item.status === 'denied' ? 'denied' : (isError ? 'error' : 'done'),
-          result: truncate(text, RESULT_TEXT_LIMIT),
-          ...(images.length > 0 ? { images } : {})
-        }
-      : item)
+    draft.update(index, (item) => {
+      if (item.kind !== 'tool') return item
+      // The structured result is per message, so it only names a lone result.
+      const artifact = isError ? undefined : artifactOf(item, text, results.length === 1 ? meta : undefined)
+      return {
+        ...item,
+        status: item.status === 'denied' ? 'denied' : (isError ? 'error' : 'done'),
+        result: truncate(text, RESULT_TEXT_LIMIT),
+        ...(images.length > 0 ? { images } : {}),
+        ...(artifact ? { artifact } : {})
+      }
+    })
   }
+}
+
+export interface ChatArtifact {
+  url: string
+  title: string
+  description?: string
+  /** The latest Artifact call that published it. */
+  toolUseId: string
+  /** How many times this session published it. */
+  publishes: number
+}
+
+/** The pages this session published, latest first, one per URL. */
+export function chatArtifacts(items: ChatItem[]): ChatArtifact[] {
+  const byUrl = new Map<string, ChatArtifact>()
+  for (const item of items) {
+    if (item.kind !== 'tool' || !item.artifact) continue
+    const { url } = item.artifact
+    const prev = byUrl.get(url)
+    const filePath = str(item.input.file_path)
+    const title = item.artifact.title
+      ?? prev?.title
+      ?? (filePath ? filePath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') : undefined)
+      ?? url
+    byUrl.delete(url)
+    byUrl.set(url, {
+      url,
+      title,
+      description: str(item.input.description) ?? prev?.description,
+      toolUseId: item.id,
+      publishes: (prev?.publishes ?? 0) + 1
+    })
+  }
+  return [...byUrl.values()].reverse()
 }
 
 function applyUserMessage(draft: Draft, m: Json, history: boolean): Partial<ChatState> {
@@ -647,7 +703,7 @@ function applyUserMessage(draft: Draft, m: Json, history: boolean): Partial<Chat
   }
 
   const blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : []
-  applyToolResults(draft, blocks)
+  applyToolResults(draft, blocks, obj(m.tool_use_result) ?? obj(m.toolUseResult))
 
   const texts: string[] = []
   let images = 0

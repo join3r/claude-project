@@ -74,6 +74,20 @@ describe('reduceAgentActivity', () => {
     expect(describeActivity(activity, 'working')).toBe('Thinking · Go')
   })
 
+  it('keeps the real prompt when the harness injects a tagged turn', () => {
+    const { activity } = fold([
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Check the new mail' },
+      { hook_event_name: 'Stop', last_assistant_message: 'Started.' },
+      { hook_event_name: 'UserPromptSubmit', prompt: '<task-notification>\n<task-id>a1</task-id>\n</task-notification>' }
+    ])
+    expect(describeActivity(activity, 'working')).toBe('Thinking · Check the new mail')
+
+    const command = fold([
+      { hook_event_name: 'UserPromptSubmit', prompt: '<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>42</command-args>' }
+    ]).activity
+    expect(command?.lastPrompt).toBe('/review 42')
+  })
+
   it('raises and resolves a permission dialog', () => {
     const { activity, events } = fold([
       { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'rm -rf dist' } },

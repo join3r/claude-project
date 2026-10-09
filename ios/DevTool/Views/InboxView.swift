@@ -2,12 +2,11 @@ import DevToolKit
 import SwiftUI
 
 /// Every task of every paired desktop in the desktop inbox's groups (§8.3):
-/// Needs you, Your turn and Quiet open; Working, Snoozed and Done for now folded
+/// Needs you and Ready open; Working, Snoozed and Done for now folded
 /// into one-line summaries. The toolbar switches to cards by project.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: TaskRef?
-    @State private var showQuiet = true
     @State private var showWorking = false
     @State private var showSettled = false
     @State private var showSnoozed = false
@@ -87,26 +86,16 @@ struct InboxView: View {
                 GroupHeader(title: "Needs you", count: partition.needsYou.count, tint: .orange)
             }
         }
-        if !partition.yourTurn.isEmpty {
+        if !partition.ready.isEmpty {
             Section {
-                ForEach(partition.yourTurn) { row($0, group: .yourTurn, now: now) }
+                ForEach(partition.ready) { row($0, group: $0.task.inboxGroup(now: now), now: now) }
             } header: {
-                GroupHeader(title: "Your turn", count: partition.yourTurn.count, tint: .primary)
-            }
-        }
-        if !partition.quiet.isEmpty {
-            Section {
-                if showQuiet {
-                    ForEach(partition.quiet) { row($0, group: .quiet, now: now) }
-                }
-            } header: {
-                GroupHeader(title: "Quiet", count: partition.quiet.count, tint: .primary, expanded: $showQuiet)
+                GroupHeader(title: "Ready", count: partition.ready.count, tint: .primary)
             }
         }
     }
 
-    /// One card per project (per desktop): Needs you, Your turn and Quiet
-    /// tasks, the stream as a label on each row.
+    /// One card per project (per desktop): Needs you and Ready tasks, the stream as a label on each row.
     @ViewBuilder
     private func byProject(_ partition: InboxPartition, now: Date) -> some View {
         let groups = partition.byProject
@@ -347,7 +336,7 @@ struct InboxRow: View {
             ProjectTileView(tile: entry.project.tile, size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if showDot { UnreadDot().alignmentGuide(.firstTextBaseline) { $0[.bottom] } }
+                    dot
                     Text(entry.project.name)
                         .font(.body.weight(.bold))
                         .layoutPriority(1)
@@ -373,7 +362,7 @@ struct InboxRow: View {
     private var projectCardRow: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if showDot { UnreadDot().alignmentGuide(.firstTextBaseline) { $0[.bottom] } }
+                dot
                 if let stream = streamName {
                     Text(stream)
                         .font(.caption)
@@ -421,9 +410,16 @@ struct InboxRow: View {
         .lineLimit(1)
     }
 
-    /// A working task drops its dot, as on the desktop: the agent has the ball.
-    private var showDot: Bool {
-        entry.task.unread && group != .working
+    /// Unread wins; a read task you owe a reply gets a ring, so Your turn
+    /// stands out inside Ready. A working task drops its dot, as on the
+    /// desktop: the agent has the ball.
+    @ViewBuilder
+    private var dot: some View {
+        if entry.task.unread && group != .working {
+            UnreadDot().alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+        } else if group == .yourTurn {
+            YourTurnDot().alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+        }
     }
 
     /// How long it has waited when it needs you, else since anything happened.
@@ -583,38 +579,24 @@ struct UnreadDot: View {
     }
 }
 
-/// A group's section header with its count. With `expanded` it opens and
-/// closes the section, as the desktop's Quiet group does.
+/// The ring of a read task still waiting on your reply: Your turn inside Ready.
+struct YourTurnDot: View {
+    var body: some View {
+        Circle()
+            .strokeBorder(Color.accentColor, lineWidth: 1.5)
+            .frame(width: 8, height: 8)
+            .accessibilityLabel("Your turn")
+    }
+}
+
+/// A group's section header with its count.
 struct GroupHeader: View {
     let title: String
     let count: Int
     var tint: Color?
-    var expanded: Binding<Bool>?
 
     var body: some View {
-        if let expanded {
-            Button {
-                withAnimation { expanded.wrappedValue.toggle() }
-            } label: {
-                label(chevron: expanded.wrappedValue)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(title), \(count)")
-            .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
-        } else {
-            label(chevron: nil)
-                .accessibilityElement(children: .combine)
-        }
-    }
-
-    private func label(chevron open: Bool?) -> some View {
         HStack(spacing: 6) {
-            if let open {
-                Image(systemName: "chevron.right")
-                    .imageScale(.small)
-                    .rotationEffect(.degrees(open ? 90 : 0))
-            }
             Text(title)
                 .foregroundStyle(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
             Text("\(count)")
@@ -623,6 +605,7 @@ struct GroupHeader: View {
         }
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
     }
 }
 

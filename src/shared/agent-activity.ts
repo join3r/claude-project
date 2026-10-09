@@ -65,6 +65,25 @@ export function firstLine(text: string | undefined, limit = TEXT_LIMIT): string 
   return clean.length > limit ? `${clean.slice(0, limit - 1)}…` : clean
 }
 
+/**
+ * Claude Code wraps harness-injected turns (background task notifications, slash
+ * command echoes, system reminders) in hyphenated pseudo-tags. Those are not
+ * something you said: a slash command reads as `/name args`, anything else keeps
+ * the previous prompt.
+ */
+function promptLine(prompt: string | undefined): string | undefined {
+  const trimmed = prompt?.trim()
+  if (!trimmed?.startsWith('<')) return firstLine(trimmed)
+  const command = /<command-name>([^<]*)<\/command-name>/.exec(trimmed)
+  if (command) {
+    const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(trimmed)?.[1]?.trim()
+    const name = command[1].trim()
+    return firstLine(args ? `${name} ${args}` : name)
+  }
+  if (/^<[a-z]+(?:-[a-z]+)+>/.test(trimmed)) return undefined
+  return firstLine(trimmed)
+}
+
 function basename(filePath: string | undefined): string | undefined {
   if (!filePath) return undefined
   const parts = filePath.split(/[\\/]/).filter(Boolean)
@@ -176,7 +195,7 @@ export function reduceAgentActivity(
     }
 
     case 'UserPromptSubmit':
-      next.lastPrompt = firstLine(str(body.prompt)) ?? next.lastPrompt
+      next.lastPrompt = promptLine(str(body.prompt)) ?? next.lastPrompt
       next.lastMessage = undefined
       next.tool = undefined
       next.waiting = undefined

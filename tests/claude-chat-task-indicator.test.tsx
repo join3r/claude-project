@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskIndicator from '../src/renderer/components/claude-chat/TaskIndicator'
+import ArtifactIndicator from '../src/renderer/components/claude-chat/ArtifactIndicator'
 import { TASK_LINGER_MS, type ChatTask } from '../src/shared/claude-chat'
 
 void React
@@ -114,5 +115,32 @@ describe('TaskIndicator', () => {
     expect(screen.getByText('Plan · 5s')).toBeTruthy()
     act(() => { vi.advanceTimersByTime(2000) })
     expect(screen.getByText('Plan · 7s')).toBeTruthy()
+  })
+})
+
+describe('ArtifactIndicator', () => {
+  const artifacts = [
+    { url: 'https://claude.ai/artifact/b', title: 'Inbox Grouping', description: 'Four alternatives', toolUseId: 'b1', publishes: 1 },
+    { url: 'https://claude.ai/artifact/a', title: 'Limit Bars', toolUseId: 'a2', publishes: 2 }
+  ]
+
+  it('is hidden with no artifacts', () => {
+    const { container } = render(<ArtifactIndicator artifacts={[]} onOpen={vi.fn()} onOpenExternal={vi.fn()} />)
+    expect(container.innerHTML).toBe('')
+  })
+
+  it('lists artifacts and opens them in the app or the browser', () => {
+    const onOpen = vi.fn()
+    const onOpenExternal = vi.fn()
+    render(<ArtifactIndicator artifacts={artifacts} onOpen={onOpen} onOpenExternal={onOpenExternal} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts: 2 artifacts' }))
+    expect(screen.getByText('Published 2 times')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Inbox Grouping' }))
+    expect(onOpen).toHaveBeenCalledWith('https://claude.ai/artifact/b')
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts: 2 artifacts' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open in browser' })[1])
+    expect(onOpenExternal).toHaveBeenCalledWith('https://claude.ai/artifact/a')
   })
 })
