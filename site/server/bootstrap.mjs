@@ -1662,7 +1662,8 @@ function parseHostInfo(value) {
   const h = value;
   const os6 = text(h, "os", 32);
   if (!os6) return void 0;
-  return { os: os6, arch: text(h, "arch", 32), hostname: text(h, "hostname", 255), node: text(h, "node", 32) };
+  const user = text(h, "user", 64);
+  return { os: os6, arch: text(h, "arch", 32), hostname: text(h, "hostname", 255), node: text(h, "node", 32), ...user ? { user } : {} };
 }
 function parseHandshakeVersion(bytes) {
   const o = parseObject(bytes);
@@ -2403,8 +2404,15 @@ function logToFile(file, maxBytes = LOG_FILE_MAX_BYTES) {
     size += Buffer.byteLength(line);
   };
 }
+function serverUser() {
+  try {
+    return os3.userInfo().username;
+  } catch {
+    return process.env.USER ?? "";
+  }
+}
 function serverHostInfo() {
-  return { os: process.platform, arch: process.arch, hostname: os3.hostname().replace(/\.local$/, ""), node: process.versions.node };
+  return { os: process.platform, arch: process.arch, hostname: os3.hostname().replace(/\.local$/, ""), node: process.versions.node, user: serverUser() };
 }
 
 // src/main/host/link/diagnostic-streams.ts

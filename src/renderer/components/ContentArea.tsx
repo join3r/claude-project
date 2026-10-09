@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
-import { featureAvailable } from '../../shared/project-features'
+import { featureAvailable, openInIdeAvailable } from '../../shared/project-features'
 import { localProjectFolder } from '../../shared/external-editors'
 import TaskPanes from './TaskPanes'
 import TaskLandingBanner from './TaskLandingBanner'
@@ -17,6 +17,7 @@ import TunnelPopup from './TunnelPopup'
 import UnsavedChangesModal from './UnsavedChangesModal'
 import StateSyncErrorModal from './StateSyncErrorModal'
 import OpenInIdeButton from './OpenInIdeButton'
+import { desktopPlatform } from '../hostPlatform'
 import { focusedPaneOf, paneIndexOfElement, setFocusedPane, useFocusedPane } from './paneFocus'
 import { zoomTargetForTabType } from './zoom'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
@@ -441,12 +442,13 @@ export default function ContentArea(): React.ReactElement {
                   />
                 </>
               )}
-              {canShowLocalTabs && featureAvailable(selectedProject, 'local-folder') && (
+              {canShowLocalTabs && openInIdeAvailable(selectedProject, desktopPlatform()) && (
                 <OpenInIdeButton
                   editors={config?.externalEditors?.editors ?? []}
                   defaultId={config?.externalEditors?.defaultId ?? null}
-                  folder={localProjectFolder(selectedProject, selectedTask)}
+                  folder={localProjectFolder(selectedProject, selectedTask, desktopPlatform())}
                   projectId={selectedProject?.id}
+                  serverId={selectedProject?.host}
                   onError={setOpenInIdeError}
                 />
               )}

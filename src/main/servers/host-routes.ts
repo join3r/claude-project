@@ -195,7 +195,11 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
 
   // agent CLIs on a host, and its login env after an install (ipc/host-agents.ts): the first argument names the host
   'host-agent-clis': { by: [{ host: 0 }] },
-  'host-refresh-env': { by: [{ host: 0 }] }
+  'host-refresh-env': { by: [{ host: 0 }] },
+
+  // Open in IDE's key on a server (ipc/host-ssh.ts): the desktop's main calls these, never a window
+  'host-ssh-authorize-key': { by: [{ host: 0 }] },
+  'host-ssh-revoke-key': { by: [{ host: 0 }] }
 }
 
 /**

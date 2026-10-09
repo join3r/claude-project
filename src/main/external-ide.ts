@@ -288,3 +288,67 @@ export function openFolderInEditor(
     child.once('spawn', () => finish())
   })
 }
+
+/** VS Code and its forks open `vscode-remote://ssh-remote+<host>` folders (Remote - SSH). */
+export function isVsCodeFamilyEditor(editor: Pick<ExternalEditor, 'name' | 'command'>): boolean {
+  const base = path.posix.basename(editor.command.trim().replace(/\\/g, '/')).toLowerCase().replace(/\.(exe|cmd|bat)$/, '')
+  if (['code', 'code-insiders', 'cursor', 'codium', 'vscodium', 'windsurf'].includes(base)) return true
+  const name = editor.name.toLowerCase()
+  return /visual studio code|vs ?code|\bcode\b|cursor|codium|windsurf/.test(name)
+    || /visual studio code|cursor\.app|vscodium|windsurf/i.test(editor.command)
+}
+
+/** `vscode-remote://ssh-remote+<alias><folder>`, each path segment percent-encoded. */
+export function sshRemoteFolderUri(alias: string, folder: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(alias)) throw new Error(`Bad ssh host alias ${alias}`)
+  if (!folder.startsWith('/') || /[\0\n\r]/.test(folder)) throw new Error('The server folder must be an absolute path')
+  return `vscode-remote://ssh-remote+${alias}${folder.split('/').map(encodeURIComponent).join('/')}`
+}
+
+/**
+ * Opens `folder` on a DevTool server in a VS Code-family editor, over the ssh
+ * host `alias` (DevTool's ssh config): `--folder-uri vscode-remote://ssh-remote+…`.
+ * The editor command is found as for a local folder.
+ */
+export function prepareOpenRemoteSpawn(editor: ExternalEditor, alias: string, folder: string, deps: ExternalIdeDeps = {}): PreparedSpawn {
+  const platform = deps.platform ?? process.platform
+  const existsSync = deps.existsSync ?? fs.existsSync
+  if (!isVsCodeFamilyEditor(editor)) {
+    throw new Error(`Open in IDE on a DevTool server works with VS Code and Cursor (Remote - SSH), not ${editor.name || editor.command}.`)
+  }
+  const uri = sshRemoteFolderUri(alias, folder)
+  const command = editor.command.trim()
+  if (!command) throw new Error('No editor command is set.')
+  let resolved: string
+  try {
+    resolved = resolveAgentCommand(command, { platform, env: deps.env ?? process.env, existsSync, path: pathModFor(platform) })
+  } catch {
+    throw new Error(`Cannot find "${command}". Set the path in Settings → Editor & Diff → External IDEs.`)
+  }
+  const pathMod = pathModFor(platform)
+  const gui = guiExeInsteadOfCursorCli(resolved, platform, existsSync, pathMod)
+  return conptySpawnArgv(gui, [...splitExtraArgs(editor.extraArgs ?? ''), '--folder-uri', uri], {
+    platform,
+    env: deps.env ?? process.env,
+    path: pathMod
+  })
+}
+
+export function openRemoteFolderInEditor(editor: ExternalEditor, alias: string, folder: string, deps: ExternalIdeDeps = {}): Promise<void> {
+  const prepared = prepareOpenRemoteSpawn(editor, alias, folder, deps)
+  const run = deps.spawn ?? spawn
+  const child = run(prepared.file, prepared.args, spawnOptionsForExternalIde(prepared, deps))
+  if (typeof child.once !== 'function') {
+    child.unref()
+    return Promise.resolve()
+  }
+  return new Promise((resolve, reject) => {
+    const finish = (err?: Error): void => {
+      child.unref()
+      if (err) reject(err)
+      else resolve()
+    }
+    child.once('error', (err: Error) => finish(err))
+    child.once('spawn', () => finish())
+  })
+}

@@ -23,7 +23,10 @@ export type ProjectFeature =
   | 'chat'
   /** Project Home's git posture and commit history. */
   | 'git-posture'
-  /** Open in IDE (this desktop's editors). Reveal in Finder never: see {@link revealAvailable}. */
+  /**
+   * Open in IDE (this desktop's editors; a server's folder over SSH, see
+   * {@link openInIdeAvailable}). Reveal in Finder never: see {@link revealAvailable}.
+   */
   | 'local-folder'
 
 const SERVER_FEATURES: Record<ProjectFeature, boolean> = {
@@ -35,7 +38,8 @@ const SERVER_FEATURES: Record<ProjectFeature, boolean> = {
   'task-worktrees': false, // step 8
   chat: true,
   'git-posture': true,
-  'local-folder': false // step 9 (Open in IDE over SSH)
+  // Open in IDE over SSH through DevTool's link (step 9), on macOS and Linux desktops.
+  'local-folder': true
 }
 
 const STEP_REASON = 'Not available for projects on a DevTool server yet.'
@@ -58,4 +62,14 @@ export function featureUnavailableReason(project: Pick<Project, 'host'> | null |
  */
 export function revealAvailable(project: Pick<Project, 'host'> | null | undefined): boolean {
   return !project?.host
+}
+
+/**
+ * Open in IDE: a server project's folder opens over SSH through a `nc -U`
+ * ProxyCommand, which v1 offers on macOS and Linux desktops only (plan
+ * decision), so it is hidden for server projects on Windows.
+ */
+export function openInIdeAvailable(project: Pick<Project, 'host'> | null | undefined, desktopPlatform: string): boolean {
+  if (!featureAvailable(project, 'local-folder')) return false
+  return !project?.host || desktopPlatform !== 'win32'
 }

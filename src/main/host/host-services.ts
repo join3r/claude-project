@@ -45,6 +45,7 @@ import { registerGitHandlers } from '../ipc/git'
 import { registerNotebookHandlers } from '../ipc/notebooks'
 import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
+import { registerHostSshHandlers } from '../ipc/host-ssh'
 import { detectAgentClis } from '../agent-clis'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../../shared/archive'
@@ -207,11 +208,14 @@ export class HostServices {
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
   private readonly remoteClients: boolean
+  /** A DevTool server's host (relay role `server`), not a desktop's own. */
+  private readonly isServer: boolean
 
   constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus, remoteClients }: HostServicesOptions) {
     this.env = env
     this.clients = clients
     this.remoteClients = remoteClients === true
+    this.isServer = relayRole === 'server'
     this.onTaskArchived = onTaskArchived ?? (() => {})
     const configDir = env.configDir
     const identity = new IdentityStore(path.join(configDir, 'mobile'), env.secrets, (message) => this.logDebug(message))
@@ -910,6 +914,7 @@ export class HostServices {
       detect: () => detectAgentClis({ env: getShellEnv(), config: this.config }),
       refreshEnv: () => this.refreshLoginEnv()
     })
+    registerHostSshHandlers(ipc, { isServer: this.isServer })
   }
 
   /**

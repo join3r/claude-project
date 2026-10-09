@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, nativeTheme, shell } from 'electron'
-import type { AppConfig, WindowViewState } from '../../shared/types'
+import type { AppConfig, ExternalEditor, WindowViewState } from '../../shared/types'
 import { detectExternalEditors, openFolderInEditor } from '../external-ide'
 import { resolveSafeProjectPath } from '../project-fs-path'
 import type { IpcContext, IpcRegistrar } from './registrar'
@@ -21,6 +21,8 @@ export interface WindowDeps {
   assertAllowedDirectory: (folder: string) => Promise<string>
   /** A DevTool server's project: its folders are on that server, not here. */
   isServerProject?: (projectId: string) => boolean
+  /** Opens a server project's folder over SSH (plan step 9); without it, server projects are refused. */
+  openOnServer?: (editor: ExternalEditor, projectId: string, folder: string) => Promise<void>
 }
 
 const NOT_ON_THIS_COMPUTER = 'This project is on a DevTool server; its folders aren\'t on this computer.'
@@ -96,10 +98,15 @@ export function registerWindowHandlers(ipc: IpcRegistrar<WindowIpcContext>, deps
   })
 
   ipc.handle('external-ide-detect', [], () => detectExternalEditors())
-  ipc.handle('open-in-ide', [v.string({ nonEmpty: true }), v.string({ nonEmpty: true }), optSafeId], async (_event, editorId, folder, projectId) => {
-    if (projectId && deps.isServerProject?.(projectId)) throw new Error(NOT_ON_THIS_COMPUTER)
+  ipc.handle('open-in-ide', [v.string({ nonEmpty: true }), v.string({ nonEmpty: true, max: 4096 }), optSafeId], async (_event, editorId, folder, projectId) => {
     const editors = deps.getConfig().externalEditors?.editors ?? []
     const editor = editors.find((item) => item.id === editorId)
+    if (projectId && deps.isServerProject?.(projectId)) {
+      if (!deps.openOnServer) throw new Error(NOT_ON_THIS_COMPUTER)
+      if (!editor) throw new Error('That editor is not in Settings.')
+      await deps.openOnServer(editor, projectId, folder)
+      return undefined
+    }
     if (!editor) throw new Error('That editor is not in Settings.')
     await deps.assertAllowedDirectory(folder)
     await openFolderInEditor(editor, folder)

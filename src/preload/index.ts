@@ -46,6 +46,7 @@ import type { AgentClisReport } from '../shared/agent-clis'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
+import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
 
 const api = {
   // Projects
@@ -135,6 +136,11 @@ const api = {
     ipcRenderer.invoke('external-ide-detect'),
   openInIde: (editorId: string, folder: string, projectId?: string): Promise<void> =>
     ipcRenderer.invoke('open-in-ide', editorId, folder, projectId),
+  /** Open in IDE on a DevTool server: what still needs the user's OK (null for a local project). */
+  serverIdeState: (projectId: string): Promise<ServerIdeState | null> =>
+    ipcRenderer.invoke('server-ide-state', projectId),
+  serverIdeSetup: (projectId: string, consent: ServerIdeConsent): Promise<ServerIdeState> =>
+    ipcRenderer.invoke('server-ide-setup', projectId, consent),
 
   /** Main-process platform. Renderer uses this for Windows-only Settings. */
   platform: process.platform,

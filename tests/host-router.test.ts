@@ -131,6 +131,14 @@ describe('step 7 routes (files, editor, Git panel, chat, conda, notebooks, agent
   })
 })
 
+describe('step 9 routes (Open in IDE\'s key on a server)', () => {
+  it('sends the authorized_keys channels to the server their first argument names', () => {
+    for (const channel of ['host-ssh-authorize-key', 'host-ssh-revoke-key']) {
+      expect(HOST_ROUTES[channel], channel).toEqual({ by: [{ host: 0 }] })
+    }
+  })
+})
+
 describe('HostRouter', () => {
   function setup() {
     const index = new RouteIndex()

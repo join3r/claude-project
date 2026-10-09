@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   detectExternalEditors,
   envForExternalIde,
+  isVsCodeFamilyEditor,
   openFolderInEditor,
   prepareOpenInIdeSpawn,
+  prepareOpenRemoteSpawn,
+  sshRemoteFolderUri,
   spawnOptionsForExternalIde,
   splitExtraArgs
 } from '../src/main/external-ide'
@@ -218,5 +221,33 @@ describe('openFolderInEditor', () => {
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined()
     expect(env.VSCODE_PID).toBeUndefined()
     expect(env.CHROME_CRASHPAD_PIPE_NAME).toBeUndefined()
+  })
+})
+
+describe('opening a DevTool server\'s folder over SSH (plan step 9)', () => {
+  const mac = { platform: 'darwin' as const, env: { PATH: '/usr/bin' }, existsSync: (p: string) => p.startsWith('/Applications/') }
+
+  it('builds the vscode-remote URI, percent-encoding each path segment', () => {
+    expect(sshRemoteFolderUri('devtool-box', '/home/dev/my app#1')).toBe('vscode-remote://ssh-remote+devtool-box/home/dev/my%20app%231')
+    expect(() => sshRemoteFolderUri('devtool-box', 'relative')).toThrow(/absolute/)
+    expect(() => sshRemoteFolderUri('bad host', '/x')).toThrow()
+  })
+
+  it('opens VS Code and Cursor with --folder-uri, extra args first', () => {
+    const code = { id: 'c', name: 'Visual Studio Code', command: '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code', extraArgs: '--new-window' }
+    expect(prepareOpenRemoteSpawn(code, 'devtool-box', '/srv/app', mac)).toEqual({
+      file: code.command,
+      args: ['--new-window', '--folder-uri', 'vscode-remote://ssh-remote+devtool-box/srv/app']
+    })
+    const cursor = { id: 'u', name: 'Cursor', command: '/Applications/Cursor.app/Contents/MacOS/Cursor', extraArgs: '' }
+    expect(prepareOpenRemoteSpawn(cursor, 'devtool-box', '/srv/app', mac).args).toEqual(['--folder-uri', 'vscode-remote://ssh-remote+devtool-box/srv/app'])
+  })
+
+  it('refuses editors without Remote - SSH', () => {
+    expect(isVsCodeFamilyEditor({ name: 'Cursor', command: 'cursor' })).toBe(true)
+    expect(isVsCodeFamilyEditor({ name: 'My editor', command: '/usr/local/bin/codium' })).toBe(true)
+    expect(isVsCodeFamilyEditor({ name: 'Zed', command: '/usr/local/bin/zed' })).toBe(false)
+    expect(isVsCodeFamilyEditor({ name: 'Xcode', command: '/usr/bin/xed' })).toBe(false)
+    expect(() => prepareOpenRemoteSpawn({ id: 'z', name: 'Zed', command: '/usr/local/bin/zed', extraArgs: '' }, 'devtool-box', '/srv', mac)).toThrow(/VS Code and Cursor/)
   })
 })

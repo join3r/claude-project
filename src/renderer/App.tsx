@@ -6,6 +6,7 @@ import ContentArea from './components/ContentArea'
 import FileBrowserPanel from './components/FileBrowserPanel'
 import { Palette } from './palette/Palette'
 import MobilePairingPrompt from './components/MobilePairingPrompt'
+import ServerIdeConsentModal from './components/servers/ServerIdeConsentModal'
 import Toasts from './components/Toasts'
 import { paletteEvents } from './palette/paletteEvents'
 
@@ -97,6 +98,7 @@ function AppInner(): React.ReactElement {
       <FileBrowserPanel />
       <Palette />
       <MobilePairingPrompt />
+      <ServerIdeConsentModal />
       <Toasts />
     </div>
   )

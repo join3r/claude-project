@@ -29,7 +29,7 @@ Message 1 (desktop):
   "build": { "version": "0.6.0", "commit": "", "builtAt": "", "bundleSha": "" },
   "features": [], "name": "join3r-mbp" }
 ```
-The desktop's `build` is the server bundle it carries (§10): its commit, build time and content hash. Message 2 (server) is the same shape with `app: "devtool-server"`, its own `build` from `manifest.json` (all empty in a server that has no bundle yet), its display name, `host: {os, arch, hostname, node}` and `result`:
+The desktop's `build` is the server bundle it carries (§10): its commit, build time and content hash. Message 2 (server) is the same shape with `app: "devtool-server"`, its own `build` from `manifest.json` (all empty in a server that has no bundle yet), its display name, `host: {os, arch, hostname, node, user?}` (`user`, the login the server runs as, since step 9) and `result`:
 - `ok`: the session is up.
 - `incompatible`: no common version (§2.3). No session.
 - `unknown-device`: the server has no pairing whose Noise key matches. No session.
