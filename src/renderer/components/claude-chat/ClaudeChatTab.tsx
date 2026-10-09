@@ -22,6 +22,9 @@ import { takePendingPrompt } from '../promptBox'
 import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
 import { chatContextMenuAt } from './chatContextMenu'
 import { handleCodeCopyClick, handleCodeRunClick } from './markdown'
+import ServerOfflineOverlay, { useServerOnline } from '../ServerOfflineOverlay'
+import AgentCliMissing from '../AgentCliMissing'
+import { useAgentCliGate } from '../../agentClis'
 
 interface Props {
   tabId: string
@@ -31,6 +34,8 @@ interface Props {
   taskId: string
   projectDir: string
   sshConfig?: SshConfig
+  /** The DevTool server the project is on (`Project.host`): its `claude` runs the chat. */
+  serverId?: string
   /** The project's extra Claude CLI args (shared with the terminal tab). */
   extraArgs?: string
 }
@@ -45,7 +50,7 @@ interface Props {
  * state machine as the terminal tab — main sends the SDK's in-process hooks on
  * the channels the curl hooks use.
  */
-export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, extraArgs }: Props): React.ReactElement {
+export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
   const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab } = useApp()
   const statusStore = useTabStatusStore()
   const state = useChatState(tabId)
@@ -62,6 +67,14 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   const sideSeq = useRef(0)
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const [permissionsOpen, setPermissionsOpen] = useState(false)
+  // A server chat waits for its server, and attaches again (a fresh snapshot) each
+  // time the server comes back: the server let go of this window when the link dropped.
+  const serverOnline = useServerOnline(serverId)
+  const prevServerOnlineRef = useRef(serverOnline)
+  const [attachEpoch, setAttachEpoch] = useState(0)
+  // The server's own `claude` runs the chat: without one, "isn't installed · Install".
+  const { gate: cliGate, entry: cliEntry } = useAgentCliGate(serverId, 'claude')
+  const cliReady = cliGate.state === 'ready'
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind, backgroundTasks?: number): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
@@ -112,9 +125,19 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
     })
   }, [tabId, projectId, taskId, sessionId, applyStatus, markTaskEvent, updateTabSessionId, statusStore])
 
+  useEffect(() => {
+    const wasOnline = prevServerOnlineRef.current
+    prevServerOnlineRef.current = serverOnline
+    if (!serverId || !serverOnline || wasOnline || !attachedRef.current) return
+    attachedRef.current = false
+    setAttachEpoch(n => n + 1)
+  }, [serverOnline, serverId])
+
   // Attach once the tab is first shown; stay attached while hidden (the process runs on).
   useEffect(() => {
     if (!visible || attachedRef.current || !sessionId) return
+    if (!serverOnline) return // wait for the DevTool server
+    if (!cliReady) return // wait for the server's `claude` (checked, or installed)
     attachedRef.current = true
     setAttachError(null)
     attachChat(tabId, {
@@ -147,7 +170,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       attachedRef.current = false
       setAttachError(err instanceof Error ? err.message : String(err))
     })
-  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, taskId])
+  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, taskId, serverOnline, attachEpoch, cliReady])
 
   useEffect(() => {
     if (visible) applyStatus('visit')
@@ -413,6 +436,10 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
         />
       </div>
       <LinkContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} onOpenInApp={openLink} />
+      {serverId && <ServerOfflineOverlay serverId={serverId} />}
+      {serverId && cliEntry && cliGate.state === 'missing' && (
+        <AgentCliMissing serverId={serverId} agent="claude" entry={cliEntry} projectId={projectId} taskId={taskId} tabId={tabId} />
+      )}
       {permissionsOpen && (
         <PermissionsDialog
           cwd={sshConfig ? null : projectDir}

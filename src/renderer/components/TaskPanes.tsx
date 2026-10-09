@@ -128,7 +128,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
       return <ChatUnavailable visible={tabVisible} onSwitch={() => convertClaudeTab(projectId, task.id, tab.id, 'claude')} />
     }
     if (tab.type === 'claude-chat') {
-      return <ClaudeChatTab tabId={tab.id} visible={tabVisible} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} extraArgs={project.aiToolArgs?.claude} />
+      return <ClaudeChatTab tabId={tab.id} visible={tabVisible} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} serverId={project.host} extraArgs={project.aiToolArgs?.claude} />
     }
     if (tab.type === 'diff' && tab.filePath) {
       return <DiffTab tabId={tab.id} visible={tabVisible} filePath={tab.filePath} projectDir={projectDir} projectId={projectId} effectiveTheme={effectiveTheme} />

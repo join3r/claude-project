@@ -10,8 +10,10 @@ import {
   type CondaEnvInfo
 } from '../../shared/conda'
 import { useApp } from '../context/AppContext'
+import { useHostPlatform } from '../hostPlatform'
+import ServerFolderList from './servers/ServerFolderList'
 import TagPicker from './TagPicker'
-import { Modal, SetBlock, Field, HelperText, PrimaryButton, Switch } from './ui'
+import { Modal, SetBlock, Field, HelperText, LinkBtn, PrimaryButton, Switch } from './ui'
 import ThemedSelect from './ThemedSelect'
 import {
   dashboardIconUrl,
@@ -48,9 +50,12 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [tagIds, setTagIds] = useState<string[]>(project.tagIds ?? [])
   const [directory, setDirectory] = useState(project.directory)
-  const [condaValue, setCondaValue] = useState(() =>
-    condaSelectValue(project, [], typeof process !== 'undefined' ? process.platform : '')
-  )
+  // Conda envs and folders are the project's host's: a DevTool server's, or this desktop's.
+  const platform = useHostPlatform(project.host)
+  const [condaValue, setCondaValue] = useState(() => condaSelectValue(project, [], platform))
+  /** Browse… on a server project: its folders, picked inline (there is no native dialog for them). */
+  const [browsingServer, setBrowsingServer] = useState(false)
+  const [serverPick, setServerPick] = useState('')
   const [condaEnvs, setCondaEnvs] = useState<CondaEnvInfo[]>([])
   const [condaError, setCondaError] = useState<string | null>(null)
   const [condaLoading, setCondaLoading] = useState(false)
@@ -81,7 +86,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
           condaSelectValue(
             condaEnvFromSelection(current, result.envs),
             result.envs,
-            typeof process !== 'undefined' ? process.platform : ''
+            platform
           )
         )
         if (result.error && result.envs.length === 0) {
@@ -99,7 +104,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
         if (!cancelled) setCondaLoading(false)
       })
     return () => { cancelled = true }
-  }, [canPickConda, project.id])
+  }, [canPickConda, project.id, platform])
 
   const suggestions = useMemo(() => {
     if (!iconMetadata || !iconQuery.trim()) return []
@@ -139,6 +144,10 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   }
 
   const handlePickDirectory = async () => {
+    if (project.host) {
+      setBrowsingServer(open => !open)
+      return
+    }
     const picked = await window.api.pickDirectory().catch(() => null)
     if (picked) setDirectory(picked)
   }
@@ -173,6 +182,21 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
               …
             </button>
           </div>
+          {browsingServer && project.host && (
+            <div className="flex flex-col gap-2 mt-2">
+              <ServerFolderList serverId={project.host} initialDir={directory.trim()} onListing={(listing) => setServerPick(listing.path)} />
+              <div className="flex items-center justify-end gap-3">
+                <LinkBtn onClick={() => setBrowsingServer(false)}>Cancel</LinkBtn>
+                <PrimaryButton
+                  disabled={!serverPick}
+                  onClick={() => {
+                    setDirectory(serverPick)
+                    setBrowsingServer(false)
+                  }}
+                >Use this folder</PrimaryButton>
+              </div>
+            </div>
+          )}
           <HelperText>Update this when the project folder is moved.</HelperText>
         </SetBlock>
       )}

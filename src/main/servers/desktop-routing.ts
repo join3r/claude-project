@@ -5,6 +5,10 @@ import type { IpcContext, IpcRegistrar } from '../ipc/registrar'
 import { HostRouter, LOCAL_HOST, RouteIndex, type RouterHub } from './host-router'
 import { MAIN_CLIENT_ID, ServerProjects } from './server-projects'
 import type { ServerEvent } from './server-hub'
+import type { ChatImage } from '../../shared/claude-chat'
+import type { ImageCodec } from '../mobile/chat-image'
+import { fitChatImagesForLink } from './link-chat-images'
+import { LinkError, LinkErrorCode } from '../host/link/errors'
 
 /** The part of ServerHub the desktop's routing uses. */
 export interface RoutingHub {
@@ -28,6 +32,8 @@ export interface DesktopRoutingDeps {
     broadcast(channel: string, ...args: unknown[]): void
   }
   log: (message: string) => void
+  /** Scales a server chat's images down to fit a link message (Electron's nativeImage). */
+  images?: ImageCodec
 }
 
 /**
@@ -64,7 +70,13 @@ export class DesktopRouting {
       },
       custom: {
         'save-projects': (serverId, ctx, args) =>
-          this.projects.save(serverId, ctx.clientId, args[1] as { baseRevision: number; data: ProjectsData }, ctx.isFocused())
+          this.projects.save(serverId, ctx.clientId, args[1] as { baseRevision: number; data: ProjectsData }, ctx.isFocused()),
+        // Pasted screenshots can outgrow one link message: scaled here, where the codec is.
+        'chat-send': (serverId, ctx, args) => this.callServer(serverId, ctx, 'chat-send', [
+          args[0],
+          args[1],
+          deps.images ? fitChatImagesForLink(args[2] as ChatImage[] | undefined, deps.images) : args[2]
+        ])
       }
     })
     this.reindex()
@@ -108,6 +120,12 @@ export class DesktopRouting {
     hub.onStateChange((state) => this.onServersState(state))
     this.projects.attach(hub)
     this.onServersState(hub.getState())
+  }
+
+  private callServer(serverId: string, ctx: IpcContext, ch: string, args: unknown[]): Promise<unknown> {
+    const hub = this.hub
+    if (!hub) return Promise.reject(new LinkError(LinkErrorCode.ServerOffline, 'Servers are not started yet'))
+    return hub.call(serverId, ctx.clientId, ch, args, { focused: ctx.isFocused() })
   }
 
   private routerHub(): RouterHub | null {

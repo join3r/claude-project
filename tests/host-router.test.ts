@@ -90,6 +90,47 @@ describe('host route table', () => {
   })
 })
 
+describe('step 7 routes (files, editor, Git panel, chat, conda, notebooks, agent CLIs)', () => {
+  const routeKeys = (channel: string): unknown[] => {
+    const route = HOST_ROUTES[channel]
+    return typeof route === 'object' && 'by' in route ? route.by : []
+  }
+
+  it('sends every call those features make to the project\'s host, by the argument that names it', () => {
+    // Where the preload puts the project id: the last argument of the path-taking calls.
+    const byProject: Record<string, number> = {
+      'fb-read-directory': 2, 'fb-read-file': 2, 'fb-write-file': 3, 'fb-create-file': 3, 'fb-create-directory': 3,
+      'fb-rename': 3, 'fb-delete': 2, 'fb-git-status': 1, 'fb-git-diff': 2, 'fb-git-stage': 3, 'fb-git-unstage': 3,
+      'fb-git-discard': 3, 'fb-git-pull': 2, 'fb-git-commit': 3, 'fb-git-push': 2, 'git-project-posture': 1,
+      'git-commit-history': 1, 'conda-list-envs': 0, 'chat-list-files': 1, 'chat-permissions-read': 1,
+      'chat-permissions-update': 5, 'claude-session-exists': 2
+    }
+    for (const [channel, at] of Object.entries(byProject)) expect(routeKeys(channel), channel).toEqual([{ project: at }])
+    for (const channel of ['chat-detach', 'chat-bash', 'chat-login', 'chat-login-code', 'chat-login-dismiss', 'chat-logout',
+      'chat-respond', 'chat-interrupt', 'chat-set-mode', 'notebook-kernel-execute', 'notebook-kernel-interrupt']) {
+      expect(routeKeys(channel), channel).toEqual([{ tab: 0 }])
+    }
+    expect(HOST_ROUTES['chat-send']).toEqual({ by: [{ tab: 0 }], remote: 'custom' })
+    for (const channel of ['host-agent-clis', 'host-refresh-env']) expect(routeKeys(channel), channel).toEqual([{ host: 0 }])
+  })
+
+  it('pins a chat and a kernel to their host when they start, and lets go when they end', () => {
+    expect(HOST_ROUTES['chat-attach']).toEqual({ by: [{ projectField: [1, 'projectId'] }, { tab: 0 }], pin: 'set' })
+    expect(HOST_ROUTES['chat-close']).toEqual({ by: [{ tab: 0 }], pin: 'clear' })
+    expect(HOST_ROUTES['notebook-kernel-start']).toEqual({ by: [{ project: 1 }, { tab: 0 }], pin: 'set' })
+    expect(HOST_ROUTES['notebook-kernel-restart']).toEqual({ by: [{ project: 1 }, { tab: 0 }], pin: 'set' })
+    expect(HOST_ROUTES['notebook-kernel-shutdown']).toEqual({ by: [{ tab: 0 }], pin: 'clear' })
+  })
+
+  it('forwards a server\'s chat and kernel events only for tabs pinned there, and its hooks for its own tabs', () => {
+    expect(SERVER_EVENTS['chat-event']).toBe('pinned-tab')
+    expect(SERVER_EVENTS['notebook-kernel-event']).toBe('pinned-tab')
+    for (const channel of ['hook-session-start', 'hook-working', 'hook-stopped', 'hook-notification', 'hook-activity', 'agent-activity']) {
+      expect(SERVER_EVENTS[channel], channel).toBe('server-tab')
+    }
+  })
+})
+
 describe('HostRouter', () => {
   function setup() {
     const index = new RouteIndex()

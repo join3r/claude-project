@@ -42,6 +42,7 @@ import type { UpdateStatus } from '../shared/updates'
 import type { ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult, SshInstallExit, SshInstallTarget } from '../shared/servers'
 import type { ProjectsSources, ProjectsUpdate, SourceSaveResult } from '../shared/projects-sources'
 import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shared/host-fs'
+import type { AgentClisReport } from '../shared/agent-clis'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
@@ -562,6 +563,9 @@ const api = {
     ipcRenderer.on('server-clone-progress', handler)
     return () => ipcRenderer.removeListener('server-clone-progress', handler)
   },
+  // A host's agent CLIs (`host`: 'local' or a server id), and its login env again after an install.
+  hostAgentClis: (host: string): Promise<AgentClisReport> => ipcRenderer.invoke('host-agent-clis', host),
+  hostRefreshEnv: (host: string): Promise<{ path: string }> => ipcRenderer.invoke('host-refresh-env', host),
   // DevTool servers. Main owns the state; every change is also broadcast.
   serversGetState: (): Promise<ServersState> => ipcRenderer.invoke('servers-get-state'),
   /** A fresh install one-liner (15 minutes, single use); replaces the phone QR and any earlier invite. */
