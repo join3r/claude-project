@@ -23,7 +23,7 @@ function task(id: string, inbox: Task['inbox'], lastInteractedAt?: number): Task
   }
 }
 
-// a: your turn (main) · b: your turn (0.5.0) · c: needs you (0.5.0) · d: working (main) · e: quiet (0.5.0)
+// a: your turn (main) · b: your turn (0.5.0) · c: needs you (0.5.0) · d: working (main) · e: idle, you spoke last (0.5.0)
 const devtool: Project = {
   id: 'p',
   name: 'DevTool',
@@ -85,14 +85,18 @@ const row = (id: string) => screen.getAllByTestId('inbox-row').find(el => el.dat
 afterEach(() => cleanup())
 
 describe('InboxPanel', () => {
-  it('flat: Needs you, Your turn, Working (never folded), Quiet', () => {
+  it('flat: Needs you, Ready (your turn first), then Working, never folded', () => {
     renderPanel('flat')
-    expect(headers()).toEqual(['Needs you1', 'Your turn3', 'Working1', 'Quiet1'])
-    // Working is always open, so the task you just sent a prompt to stays in sight.
-    expect(rowIds()).toEqual(['c', 'b', 'a', 'f', 'd', 'e'])
+    expect(headers()).toEqual(['Needs you1', 'Ready4', 'Working1'])
+    // Everything idle sits above Working; e (you had the last word) follows the replies you owe.
+    expect(rowIds()).toEqual(['c', 'b', 'a', 'f', 'e', 'd'])
     expect(row('d').className).toContain('opacity-50')
+    // Only the rows waiting on your reply carry a dot.
+    expect(row('b').querySelector('span.rounded-full[title="Unread"]')).toBeTruthy()
+    expect(row('e').querySelector('span.rounded-full[title]')).toBeNull()
+    fireEvent.click(screen.getByText('Ready'))
     fireEvent.click(screen.getByText('Working'))
-    expect(rowIds()).toEqual(['c', 'b', 'a', 'f', 'd', 'e'])
+    expect(rowIds()).toEqual(['c', 'b', 'a', 'f', 'e', 'd'])
   })
 
   it('flat rows lead with the project, then the stream unless it is main', () => {
@@ -119,7 +123,7 @@ describe('InboxPanel', () => {
     expect(groups.map(group => group.querySelector('[data-testid="inbox-project-header"]')?.textContent))
       .toEqual(['DevTool5', 'Stem1'])
     // Name and count (no tiles unless Settings asks for them). DevTool holds the task that needs you, so it comes first; Working rows sit in their project.
-    expect(rowIds()).toEqual(['c', 'b', 'a', 'd', 'e', 'f'])
+    expect(rowIds()).toEqual(['c', 'b', 'a', 'e', 'd', 'f'])
     expect(screen.queryAllByTestId('inbox-group-header')).toEqual([])
     expect(row('d').className).toContain('opacity-50')
     const place = (id: string) => row(id).querySelector('[data-testid="inbox-row-place"]')?.textContent

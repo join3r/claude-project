@@ -44,7 +44,7 @@ type Props = {
   showIcons?: boolean
 }
 
-type GroupKey = 'needsYou' | 'yourTurn' | 'working' | 'quiet' | 'settled' | 'snoozed'
+type GroupKey = 'needsYou' | 'ready' | 'working' | 'settled' | 'snoozed'
 
 /**
  * Third line of a row: what the task needs or is doing, or when it wakes. Blocked
@@ -81,14 +81,14 @@ function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey, agent: Tas
 
 const TILE = 16
 
-/** The row's dot: the sidebar's colours for the same states. */
-const ROW_STATE: Record<GroupKey, SidebarTaskState> = {
-  needsYou: 'attention',
-  yourTurn: 'unread',
-  working: 'working',
-  quiet: null,
-  settled: null,
-  snoozed: null
+/** The row's dot: the sidebar's colours for the same states. In Ready only the rows waiting on your reply get one. */
+function rowState(group: GroupKey, entry: InboxEntry): SidebarTaskState {
+  switch (group) {
+    case 'needsYou': return 'attention'
+    case 'working': return 'working'
+    case 'ready': return entry.yourTurn ? 'unread' : null
+    default: return null
+  }
 }
 
 function InboxRow({
@@ -172,7 +172,7 @@ function InboxRow({
       data-testid="inbox-row"
       data-task-id={task.id}
     >
-      <span className="flex items-center h-[18px] shrink-0"><StateDot state={ROW_STATE[group]} hollow /></span>
+      <span className="flex items-center h-[18px] shrink-0"><StateDot state={rowState(group, entry)} hollow /></span>
       <div className="flex-1 min-w-0">
       {placeLine && (
         <div className="flex items-center gap-1.5 min-h-[18px]">
@@ -298,10 +298,9 @@ export default function InboxPanel({
   showIcons = false
 }: Props): React.ReactElement {
   // Fold state lives with the panel, as it always has for Snoozed and Done for now.
-  // Working is never folded: the task you just sent a prompt to moves there and
-  // must stay in sight.
-  const [folded, setFolded] = useState<Record<'quiet' | 'settled' | 'snoozed', boolean>>({
-    quiet: false,
+  // Ready and Working are never folded: Ready holds the replies you owe, and the
+  // task you just sent a prompt to moves to Working and must stay in sight.
+  const [folded, setFolded] = useState<Record<'settled' | 'snoozed', boolean>>({
     settled: true,
     snoozed: true
   })
@@ -316,7 +315,7 @@ export default function InboxPanel({
   // below, as in the flat list.
   const projectGroups = useMemo(
     () => (grouped
-      ? groupInboxByProject([...partition.needsYou, ...partition.yourTurn, ...partition.working, ...partition.quiet])
+      ? groupInboxByProject([...partition.needsYou, ...partition.ready, ...partition.working])
       : []),
     [grouped, partition]
   )
@@ -324,7 +323,7 @@ export default function InboxPanel({
   const total = Object.values(partition).reduce((sum, entries) => sum + entries.length, 0)
 
   const groupOf = (entry: InboxEntry): GroupKey =>
-    entry.status === 'attention' ? 'needsYou' : entry.status === 'working' ? 'working' : entry.yourTurn ? 'yourTurn' : 'quiet'
+    entry.status === 'attention' ? 'needsYou' : entry.status === 'working' ? 'working' : 'ready'
 
   const renderRow = (entry: InboxEntry, group: GroupKey, showProject = true): React.ReactElement => (
     <InboxRow
@@ -391,9 +390,8 @@ export default function InboxPanel({
         ))}
       </>) : (<>
         {section('Needs you', 'needsYou', partition.needsYou)}
-        {section('Your turn', 'yourTurn', partition.yourTurn)}
+        {section('Ready', 'ready', partition.ready)}
         {section('Working', 'working', partition.working)}
-        {section('Quiet', 'quiet', partition.quiet, 'quiet')}
       </>)}
 
       {section('Snoozed', 'snoozed', partition.snoozed, 'snoozed')}

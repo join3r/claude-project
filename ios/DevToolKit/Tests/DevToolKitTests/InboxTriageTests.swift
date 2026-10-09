@@ -35,9 +35,9 @@ import Testing
         let partition = InboxPartition([("a", a), ("b", b)], now: Self.now)
         // A live agent wins over snooze and settle.
         #expect(partition.needsYou.map(\.task.id) == ["waiting-long", "waiting-short", "snoozed-attention"])
-        // "recent" had an event and no word since; "older" and "woke" had nothing happen after you.
-        #expect(partition.yourTurn.map(\.task.id) == ["recent"])
-        #expect(partition.quiet.map(\.task.id) == ["older", "woke"])
+        // Ready: "recent" had an event and no word since, so it leads; "older"
+        // and "woke" had nothing happen after you.
+        #expect(partition.ready.map(\.task.id) == ["recent", "older", "woke"])
         #expect(partition.working.map(\.task.id) == ["snoozed-busy"])
         #expect(partition.settled.map(\.task.id) == ["settled-new", "settled-old"])
         // A snooze wins over a settle; "until it needs me" sorts last.
@@ -53,7 +53,7 @@ import Testing
         #expect(unread.unreadCount == 1)
     }
 
-    @Test func splitsYourTurnWorkingAndQuietAsTheDesktop() {
+    @Test func splitsReadyAndWorkingAsTheDesktop() {
         let a = inbox("a", [
             InboxTask(id: "busy", name: "", status: .working, since: Self.nowMs - 1_000, eventAt: Self.nowMs, tabs: [tab("1", .working, since: Self.nowMs - 1_000)]),
             InboxTask(id: "finished", name: "", lastInteractedAt: Self.nowMs - 100, eventAt: Self.nowMs - 10, tabs: []),
@@ -65,8 +65,9 @@ import Testing
         ])
         let partition = InboxPartition([("a", a)], now: Self.now)
         #expect(partition.working.map(\.task.id) == ["busy", "busy-older"])
-        #expect(partition.yourTurn.map(\.task.id) == ["finished", "exited"])
-        #expect(partition.quiet.map(\.task.id) == ["answered", "tie", "fresh"])
+        // Your turn first, then Quiet, each by recency.
+        #expect(partition.ready.map(\.task.id) == ["finished", "exited", "answered", "tie", "fresh"])
+        #expect(partition.ready.map { $0.task.inboxGroup(now: Self.now) } == [.yourTurn, .yourTurn, .quiet, .quiet, .quiet])
         #expect(InboxTask(id: "x", name: "", status: .attention, tabs: []).isYourTurn)
         #expect(!InboxTask(id: "x", name: "", status: .working, eventAt: 9, tabs: []).isYourTurn)
         #expect(InboxGroup.allCases.filter(\.isOpen) == [.needsYou, .yourTurn, .working, .quiet])

@@ -67,12 +67,11 @@ extension InboxTask {
 public struct InboxPartition: Sendable, Equatable {
     /// Longest wait first.
     public var needsYou: [InboxEntry] = []
-    /// Most recent activity first.
-    public var yourTurn: [InboxEntry] = []
+    /// The agent is idle and you can act: Your turn tasks first, then Quiet
+    /// ones, each by most recent activity (the desktop's Ready group).
+    public var ready: [InboxEntry] = []
     /// Most recent activity first; shown folded.
     public var working: [InboxEntry] = []
-    /// Most recent activity first.
-    public var quiet: [InboxEntry] = []
     /// Newest settle first.
     public var settled: [InboxEntry] = []
     /// Soonest wake first; "until it needs me" last.
@@ -102,28 +101,28 @@ public struct InboxPartition: Sendable, Equatable {
             }.map(\.0)
         }
         needsYou = sorted(.needsYou, by: { $0.since ?? nowMs }, descending: false)
-        yourTurn = sorted(.yourTurn, by: \.lastActivityAt, descending: true)
+        ready = sorted(.yourTurn, by: \.lastActivityAt, descending: true)
+            + sorted(.quiet, by: \.lastActivityAt, descending: true)
         working = sorted(.working, by: \.lastActivityAt, descending: true)
-        quiet = sorted(.quiet, by: \.lastActivityAt, descending: true)
         settled = sorted(.settled, by: { $0.settledAt ?? 0 }, descending: true)
         snoozed = sorted(.snoozed, by: { $0.snoozeUntilAttention ? Int64.max : ($0.snoozedUntil ?? Int64.max) }, descending: false)
     }
 
     public var isEmpty: Bool {
-        needsYou.isEmpty && yourTurn.isEmpty && working.isEmpty && quiet.isEmpty && settled.isEmpty && snoozed.isEmpty
+        needsYou.isEmpty && ready.isEmpty && working.isEmpty && settled.isEmpty && snoozed.isEmpty
     }
 
     /// The Inbox badge, as the desktop's: unread tasks that are neither snoozed nor settled.
     public var unreadCount: Int {
-        (needsYou + yourTurn + working + quiet).filter(\.task.unread).count
+        (needsYou + ready + working).filter(\.task.unread).count
     }
 
     /// The open, unfolded groups gathered by project for the grouped layout
-    /// (the desktop's `groupInboxByProject`): Needs you, Your turn and Quiet.
+    /// (the desktop's `groupInboxByProject`): Needs you and Ready.
     /// A project sits where its most urgent task sits in the flat list and
     /// keeps that order inside. Working, Snoozed and Done for now stay folded rows.
     public var byProject: [InboxProjectGroup] {
-        InboxProjectGroup.group(needsYou + yourTurn + quiet)
+        InboxProjectGroup.group(needsYou + ready)
     }
 
     /// The one-line summary of a folded group: "claude-project · DevTool

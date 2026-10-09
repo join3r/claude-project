@@ -98,12 +98,14 @@ export interface InboxEntry extends InboxSource {
 export interface InboxPartition {
   /** Blocked on you: a question, a permission prompt, a terminal bell. */
   needsYou: InboxEntry[]
-  /** The agent finished and you haven't answered (`isYourTurn`, not attention), or its landing stopped. */
-  yourTurn: InboxEntry[]
+  /**
+   * The agent is idle and you can act. Rows waiting on your reply (`yourTurn`:
+   * the agent finished and you haven't answered, or its landing stopped) come
+   * first, then the rest, where you had the last word or nothing happened yet.
+   */
+  ready: InboxEntry[]
   /** The agent is running: nothing for you to do yet. */
   working: InboxEntry[]
-  /** Nothing pending either way: you had the last word, or nothing has happened yet. */
-  quiet: InboxEntry[]
   settled: InboxEntry[]
   snoozed: InboxEntry[]
 }
@@ -112,7 +114,7 @@ export interface InboxPartition {
  * Splits tasks into the inbox groups. A live agent wins over snooze and settle:
  * a task that needs you or is working shows there, the same as its header chip,
  * and drops back to Snoozed / Done for now once the agent goes quiet. So does a
- * landing stopped on a conflict or a blocked stream (Your turn). Snooze wins over
+ * landing stopped on a conflict or a blocked stream (Ready). Snooze wins over
  * settle (an explicitly snoozed task stays hidden even if it was settled earlier).
  */
 export function partitionInbox(
@@ -121,7 +123,9 @@ export function partitionInbox(
   statusSince: Record<string, number>,
   now: number
 ): InboxPartition {
-  const partition: InboxPartition = { needsYou: [], yourTurn: [], working: [], quiet: [], settled: [], snoozed: [] }
+  const partition: InboxPartition = { needsYou: [], ready: [], working: [], settled: [], snoozed: [] }
+  const yourTurn: InboxEntry[] = []
+  const idle: InboxEntry[] = []
 
   for (const { task, project, stream } of entries) {
     const status = taskStatus(task, allStatuses)
@@ -140,24 +144,23 @@ export function partitionInbox(
     } else if (landingNeedsYou(task)) {
       // A stopped landing waits for you whatever else goes on (a busy terminal) or was put away.
       entry.yourTurn = true
-      partition.yourTurn.push(entry)
+      yourTurn.push(entry)
     } else if (status === 'working') partition.working.push(entry)
     else if (isSnoozed(task, now)) partition.snoozed.push(entry)
     else if (isSettled(task)) partition.settled.push(entry)
     else {
       entry.yourTurn = isYourTurn(task, status)
-      if (entry.yourTurn) partition.yourTurn.push(entry)
-      else partition.quiet.push(entry)
+      if (entry.yourTurn) yourTurn.push(entry)
+      else idle.push(entry)
     }
   }
 
   const byRecency = (a: InboxEntry, b: InboxEntry): number => lastActivityAt(b.task) - lastActivityAt(a.task)
   // Longest wait first — the point of the tier is surfacing what has been blocked longest.
   partition.needsYou.sort((a, b) => (a.since ?? now) - (b.since ?? now))
-  partition.yourTurn.sort(byRecency)
+  partition.ready = [...yourTurn.sort(byRecency), ...idle.sort(byRecency)]
   // Newest start first, so a task you just sent a prompt to lands at the top.
   partition.working.sort((a, b) => (b.since ?? lastActivityAt(b.task)) - (a.since ?? lastActivityAt(a.task)))
-  partition.quiet.sort(byRecency)
   partition.settled.sort((a, b) => (inboxState(b.task).settledAt ?? 0) - (inboxState(a.task).settledAt ?? 0))
   partition.snoozed.sort((a, b) => wakeAt(a.task) - wakeAt(b.task))
 

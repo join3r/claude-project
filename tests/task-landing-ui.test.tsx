@@ -89,7 +89,8 @@ describe('a stopped landing in the inbox', () => {
     // A busy terminal doesn't hide it.
     expect(isYourTurn(conflict, 'working')).toBe(true)
     const partition = partitionInbox([{ task: conflict, project, stream }], { 'tab-agent': 'working' }, {}, NOW)
-    expect(partition.yourTurn.map(entry => entry.task.id)).toEqual(['t1'])
+    expect(partition.ready.map(entry => entry.task.id)).toEqual(['t1'])
+    expect(partition.ready[0].yourTurn).toBe(true)
     expect(partition.snoozed).toEqual([])
     expect(partition.working).toEqual([])
 
