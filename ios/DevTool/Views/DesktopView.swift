@@ -95,9 +95,9 @@ struct DesktopView: View {
                 quietSection(overview.quiet, desktop: desktop, inbox: inbox)
             }
         } else {
-            Section(several ? desktop.name : "") {
+            Section {
                 if offline {
-                    Label("Nothing cached from this desktop yet", systemImage: "tray")
+                    Label("Nothing cached from this \(desktop.isServer ? "server" : "desktop") yet", systemImage: "tray")
                         .foregroundStyle(.secondary)
                 } else {
                     HStack(spacing: 10) {
@@ -106,11 +106,18 @@ struct DesktopView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            } header: {
+                HStack(spacing: 4) {
+                    Text(several ? desktop.name : "")
+                    if several && desktop.isServer { ServerGlyph() }
+                }
             }
         }
     }
 
-    /// "Online · 22 projects · 2 need you", under the desktop's title.
+    /// "Online · 22 projects · 2 need you", under the desktop's title. A
+    /// DevTool server's rack goes by its name, or leads the line under the
+    /// navigation title.
     private func statusLine(_ desktop: DesktopRecord, inbox: Inbox, now: Date, named: Bool) -> some View {
         let state = model.state(of: desktop.id)
         let needYou = inbox.projects.flatMap(\.tasks).filter { $0.needsYou(now: now) }.count
@@ -119,9 +126,13 @@ struct DesktopView: View {
         if needYou > 0 { parts.append(needYou == 1 ? "1 needs you" : "\(needYou) need you") }
         return VStack(alignment: .leading, spacing: 2) {
             if named {
-                Text(desktop.name).font(.title3.weight(.bold)).foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Text(desktop.name).font(.title3.weight(.bold)).foregroundStyle(.primary)
+                    if desktop.isServer { ServerGlyph() }
+                }
             }
             HStack(spacing: 6) {
+                if desktop.isServer && !named { ServerGlyph() }
                 Circle().fill(state.dotColor).frame(width: 8, height: 8)
                 Text(parts.joined(separator: " · "))
                     .lineLimit(1)
@@ -440,7 +451,7 @@ struct DesktopBanners: View {
             Section {
                 ForEach(offline) { desktop in
                     OfflineBanner(
-                        title: desktops.count == 1 ? "Desktop" : desktop.name,
+                        title: desktops.count == 1 ? model.kindTitle(desktop.id) : desktop.name,
                         lastSeen: lastSeen(desktop)
                     )
                 }

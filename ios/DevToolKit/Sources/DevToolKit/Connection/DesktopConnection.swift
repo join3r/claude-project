@@ -20,6 +20,10 @@ public struct DesktopRecord: Codable, Sendable, Equatable, Identifiable {
     /// The `features` of the desktop's last hello (§8.1), kept so an offline
     /// desktop still shows what it can do. nil until the first session.
     public var features: [String]?
+    /// Desktop or DevTool server, from the last hello's `app` (§4.3), kept so
+    /// an offline server still shows as one. nil (a record from before servers,
+    /// or no session yet) reads as a desktop.
+    public var hostKind: HostKind?
 
     public init(
         id: String,
@@ -30,7 +34,8 @@ public struct DesktopRecord: Codable, Sendable, Equatable, Identifiable {
         keysReference: String,
         pairedAt: Date = Date(),
         lastSeen: Date? = nil,
-        features: [String]? = nil
+        features: [String]? = nil,
+        hostKind: HostKind? = nil
     ) {
         self.id = id
         self.name = name
@@ -41,7 +46,11 @@ public struct DesktopRecord: Codable, Sendable, Equatable, Identifiable {
         self.pairedAt = pairedAt
         self.lastSeen = lastSeen
         self.features = features
+        self.hostKind = hostKind
     }
+
+    /// The peer is a headless DevTool server rather than the desktop app.
+    public var isServer: Bool { hostKind == .server }
 
     /// Whether the desktop's last hello listed `feature` (`DesktopFeature`).
     public func supports(_ feature: String) -> Bool {
@@ -104,6 +113,9 @@ public enum DesktopConnectionEvent: Sendable, Equatable {
     /// The `features` of the desktop's hello (§8.1), sent just before each
     /// `.online`.
     case features(Set<String>)
+    /// Desktop or DevTool server, from the hello's `app` (§4.3), sent with
+    /// `.features` just before each `.online`.
+    case hostKind(HostKind)
 }
 
 /// A live link to one desktop through the relay.

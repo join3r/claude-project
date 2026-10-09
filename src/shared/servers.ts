@@ -132,6 +132,13 @@ export interface SshInstallExit {
 
 export const RELAY_TOO_OLD_FOR_SERVERS = 'This relay is too old for servers'
 
+/**
+ * A server's phones (Settings › Servers › Pair a phone, plan step 10): the server
+ * pushes its `MobileState` to its desktops on this channel, and a desktop hands it
+ * to its windows as `(serverId, state)`, the id being the server it came from.
+ */
+export const SERVER_MOBILE_STATE_CHANNEL = 'server-mobile-state-changed'
+
 /** Where the install script and the bootstrap are served from; `DEVTOOL_INSTALL_URL` overrides it. */
 export const DEFAULT_INSTALL_URL = 'https://devtool.awantech.sk'
 

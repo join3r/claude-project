@@ -56,6 +56,16 @@ final class AppModel {
         desktops.first { $0.id == id }
     }
 
+    /// Whether the peer is a DevTool server rather than the desktop app (§4.3).
+    func isServer(_ id: String) -> Bool {
+        desktop(id)?.isServer ?? false
+    }
+
+    /// "Server" or "Desktop", as in "Server offline".
+    func kindTitle(_ id: String) -> String {
+        isServer(id) ? "Server" : "Desktop"
+    }
+
     func state(of id: String) -> ConnectionState {
         states[id] ?? .idle
     }
@@ -308,6 +318,11 @@ final class AppModel {
                 desktops[index].features = sorted
                 store.saveDesktops(desktops)
             }
+        case .hostKind(let kind):
+            if let index = desktops.firstIndex(where: { $0.id == desktopId }), desktops[index].hostKind != kind {
+                desktops[index].hostKind = kind
+                store.saveDesktops(desktops)
+            }
         case .pairing(.revoked):
             states[desktopId] = .revoked
         case .pairing:
@@ -494,8 +509,10 @@ extension AppModel {
     static let mockOnlineId = "4f1c2b9e7d6a53108e2f9c4b1a7d3e60"
     static let mockOfflineId = "9a8b7c6d5e4f30211203f4e5d6c7b8a9"
 
-    /// Two paired desktops: one live (mock connection), one offline with a cached inbox.
-    static func mock() -> AppModel {
+    /// Two paired desktops: one live (mock connection), one offline with a
+    /// cached inbox. `offlineIsServer` (`-mockServer`) makes the offline one a
+    /// DevTool server, as its last hello would have.
+    static func mock(offlineIsServer: Bool = false) -> AppModel {
         let now = Date()
         let lastSeen = now.addingTimeInterval(-47 * 60)
         let relay = URL(string: "wss://relay.devtool.awantech.sk")!
@@ -511,7 +528,8 @@ extension AppModel {
             desktopX25519PublicKey: Data(repeating: 3, count: 32).base64URLEncodedString,
             desktopEd25519PublicKey: Data(repeating: 4, count: 32).base64URLEncodedString,
             keysReference: KeychainStore.deviceIdentityLabel,
-            pairedAt: now.addingTimeInterval(-86_400 * 10), lastSeen: lastSeen
+            pairedAt: now.addingTimeInterval(-86_400 * 10), lastSeen: lastSeen,
+            hostKind: offlineIsServer ? .server : nil
         )
         var cached = MockInbox.sample(desktopId: mockOfflineId, desktopName: "studio-mini", now: lastSeen)
         cached.projects = [

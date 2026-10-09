@@ -563,6 +563,19 @@ const api = {
     ipcRenderer.on('server-clone-progress', handler)
     return () => ipcRenderer.removeListener('server-clone-progress', handler)
   },
+  // A server's phones (Settings › Servers › Pair a phone), by server id. Each change answers with the new state.
+  serverMobileGetState: (serverId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-get-state', serverId),
+  serverMobileStartPairing: (serverId: string): Promise<MobilePairingInvite> => ipcRenderer.invoke('server-mobile-start-pairing', serverId),
+  serverMobileCancelPairing: (serverId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-cancel-pairing', serverId),
+  serverMobileAccept: (serverId: string, phoneId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-accept', serverId, phoneId),
+  serverMobileReject: (serverId: string, phoneId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-reject', serverId, phoneId),
+  serverMobileRevoke: (serverId: string, phoneId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-revoke', serverId, phoneId),
+  /** A server's phone state as it changes; `serverId` is the server it came from. */
+  onServerMobileStateChanged: (callback: (serverId: string, state: MobileState) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, serverId: string, state: MobileState) => callback(serverId, state)
+    ipcRenderer.on('server-mobile-state-changed', handler)
+    return () => ipcRenderer.removeListener('server-mobile-state-changed', handler)
+  },
   // A host's agent CLIs (`host`: 'local' or a server id), and its login env again after an install.
   hostAgentClis: (host: string): Promise<AgentClisReport> => ipcRenderer.invoke('host-agent-clis', host),
   hostRefreshEnv: (host: string): Promise<{ path: string }> => ipcRenderer.invoke('host-refresh-env', host),

@@ -18,6 +18,8 @@ public actor MockDesktopConnection: DesktopConnection {
 
     private let desktopName: String
     private let behavior: Behavior
+    /// What its hello says it is (§4.3).
+    private let hostKind: HostKind
     private let flipInterval: Duration
     private let continuation: AsyncStream<DesktopConnectionEvent>.Continuation
     private var inbox: Inbox
@@ -45,9 +47,11 @@ public actor MockDesktopConnection: DesktopConnection {
         behavior: Behavior = .online,
         flipInterval: Duration = .seconds(4),
         inbox: Inbox? = nil,
-        streamStep: Duration = .milliseconds(250)
+        streamStep: Duration = .milliseconds(250),
+        hostKind: HostKind = .desktop
     ) {
         self.streamStep = streamStep
+        self.hostKind = hostKind
         chats = MockChats.all()
         self.desktopId = desktopId
         self.desktopName = desktopName
@@ -726,6 +730,7 @@ public actor MockDesktopConnection: DesktopConnection {
             guard (try? await Task.sleep(for: .milliseconds(200))) != nil else { return }
         }
 
+        continuation.yield(.hostKind(hostKind))
         continuation.yield(.features([
             DesktopFeature.taskNew, DesktopFeature.chatSettings,
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
@@ -819,7 +824,8 @@ public struct MockDesktopConnectionFactory: DesktopConnectionFactory {
     public func connection(for desktop: DesktopRecord) -> any DesktopConnection {
         let behavior: MockDesktopConnection.Behavior =
             offline[desktop.id].map { .offline(lastSeen: $0) } ?? .online
-        return MockDesktopConnection(desktopId: desktop.id, desktopName: desktop.name, behavior: behavior)
+        return MockDesktopConnection(desktopId: desktop.id, desktopName: desktop.name, behavior: behavior,
+                                     hostKind: desktop.hostKind ?? .desktop)
     }
 
     public func pairingConnection(for invite: PairingInvite, deviceName: String) -> any DesktopConnection {

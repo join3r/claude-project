@@ -125,7 +125,10 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
     // After the caller's answer is out: unpairing drops its session.
     setTimeout(() => {
       // Its identity goes with the data, so the pairs are useless: unpair while the relay still hears it.
-      if (deleteData) for (const desktop of link?.desktops.list() ?? []) link?.unpair(desktop.id)
+      if (deleteData) {
+        for (const desktop of link?.desktops.list() ?? []) link?.unpair(desktop.id)
+        server.host.revokeAllPhones()
+      }
       setTimeout(() => stop(`uninstall (${why})`, false, removeEverything), 300)
     }, 300)
   }
@@ -222,7 +225,7 @@ async function controlCommand(request: ControlRequest, { link, updater, server, 
         supervisor: currentSupervisor(),
         relay: { url: loadServerConfig(paths.dataDir).relayUrl, state: relay.kind, ...(relay.kind === 'offline' && relay.error ? { error: relay.error } : {}) },
         desktops: link.desktops.list().map((d) => ({ id: d.id, name: d.name, online: connected.has(d.id), pairedAt: d.pairedAt, lastSeen: d.lastSeen, ...(d.build?.version ? { version: d.build.version } : {}) })),
-        phones: [],
+        phones: server.host.mobile.getState().devices.map((p) => ({ id: p.id, name: p.name, online: p.online, lastSeen: p.lastSeen })),
         update: updater.info().update
       }
       return status
@@ -239,10 +242,28 @@ async function controlCommand(request: ControlRequest, { link, updater, server, 
     case 'revoke-all': {
       const desktops = link.desktops.list()
       for (const desktop of desktops) link.unpair(desktop.id)
+      const phones = server.host.revokeAllPhones()
       // Let the revokes reach the relay before the caller stops us.
       await new Promise((resolve) => setTimeout(resolve, 300))
-      return { count: desktops.length }
+      return { count: desktops.length, phones }
     }
+    // `devtool-server pair --phone` and `unpair` of a phone (plan step 10).
+    case 'phone-pair':
+      return server.host.mobile.startPairing()
+    case 'phone-state':
+      return server.host.mobile.getState()
+    case 'phone-cancel':
+      server.host.mobile.cancelPairing()
+      return server.host.mobile.getState()
+    case 'phone-accept':
+      server.host.mobile.accept(String(request.id ?? ''))
+      return server.host.mobile.getState()
+    case 'phone-reject':
+      server.host.mobile.reject(String(request.id ?? ''))
+      return server.host.mobile.getState()
+    case 'phone-revoke':
+      server.host.mobile.revoke(String(request.id ?? ''))
+      return server.host.mobile.getState()
     default:
       throw new Error(`unknown command ${request.cmd}`)
   }

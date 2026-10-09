@@ -1,6 +1,7 @@
 import type { MobilePairingInvite, MobileState } from '../../shared/mobile'
 import type { IpcRegistrar } from './registrar'
 import { relayUrl } from './config-sanitize'
+import { safeId } from './schemas'
 import { v } from './validate'
 
 /** The part of MobileService the IPC surface drives. */
@@ -47,6 +48,34 @@ export function registerMobileHandlers(ipc: IpcRegistrar, deps: { mobile: () => 
     return deps.mobile().getState()
   })
   ipc.handle('mobile-revoke', [deviceId], (_event, phoneId) => {
+    deps.mobile().revoke(phoneId)
+    return deps.mobile().getState()
+  })
+}
+
+/**
+ * A host's phones, named by host (plan step 10): a desktop's Settings › Servers ›
+ * Pair a phone drives a server's phones through these, routed by the first
+ * argument (`local` or a server id), which is ignored here as for
+ * `server-list-dirs`. Each change answers with the new state, which the host
+ * also pushes (`server-mobile-state-changed` on a server).
+ */
+export function registerHostMobileHandlers(ipc: IpcRegistrar, deps: { mobile: () => MobileControl }): void {
+  ipc.handle('server-mobile-get-state', [safeId], () => deps.mobile().getState())
+  ipc.handle('server-mobile-start-pairing', [safeId], () => deps.mobile().startPairing())
+  ipc.handle('server-mobile-cancel-pairing', [safeId], () => {
+    deps.mobile().cancelPairing()
+    return deps.mobile().getState()
+  })
+  ipc.handle('server-mobile-accept', [safeId, deviceId], (_event, _host, phoneId) => {
+    deps.mobile().accept(phoneId)
+    return deps.mobile().getState()
+  })
+  ipc.handle('server-mobile-reject', [safeId, deviceId], (_event, _host, phoneId) => {
+    deps.mobile().reject(phoneId)
+    return deps.mobile().getState()
+  })
+  ipc.handle('server-mobile-revoke', [safeId, deviceId], (_event, _host, phoneId) => {
     deps.mobile().revoke(phoneId)
     return deps.mobile().getState()
   })

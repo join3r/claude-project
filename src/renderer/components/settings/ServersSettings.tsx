@@ -8,6 +8,7 @@ import { showToast } from '../../toasts'
 import { Field, Group, GrpHead, HelperText, LinkBtn } from '../ui'
 import { describePlatform } from '../servers/addServerFlow'
 import RemoveServerDialog, { OFFLINE_UNINSTALL_COMMAND } from '../servers/RemoveServerDialog'
+import { PairedPhones, PhonePairingPanel, useServerPhones } from '../servers/ServerPhones'
 import { RelayLine } from './RelaySettings'
 
 function errorText(err: unknown): string {
@@ -123,6 +124,7 @@ function ServerRow({ server, now, onRemove }: { server: ServerStatus; now: numbe
   const online = server.state === 'online'
   const build = server.build
   const host = server.host
+  const phones = useServerPhones(server.id, online)
 
   const act = (kind: 'code' | 'update' | 'restart', run: () => Promise<void>): void => {
     setBusy(kind)
@@ -194,13 +196,23 @@ function ServerRow({ server, now, onRemove }: { server: ServerStatus; now: numbe
           )}
         </div>
       )}
+      <PairedPhones online={online} phones={phones} now={now} />
+      <PhonePairingPanel serverName={server.name} online={online} phones={phones} now={now} />
       {message && <div className={`pl-3.5 text-sm ${message.bad ? 'text-danger' : 'text-text-muted'}`}>{message.text}</div>}
+      {(phones.error || phones.notice) && (
+        <div className={`pl-3.5 text-sm ${phones.error ? 'text-danger' : 'text-text-muted'}`} data-testid="phone-message">{phones.error ?? phones.notice}</div>
+      )}
       <div className="pl-3.5 pt-1 flex items-center gap-4">
         <LinkBtn
           disabled={!online || busy !== null}
           title={online ? undefined : 'The server has to be online'}
           onClick={() => act('code', async () => setCode(await window.api.serversDeviceCode(server.id)))}
         >{busy === 'code' ? 'Asking the server…' : 'Add another device'}</LinkBtn>
+        <LinkBtn
+          disabled={!online || phones.busy || phones.panelOpen}
+          title={online ? undefined : 'The server has to be online'}
+          onClick={phones.start}
+        >Pair a phone</LinkBtn>
         <LinkBtn
           disabled={!online || busy !== null || !!server.upload}
           title={online ? undefined : 'The server has to be online'}

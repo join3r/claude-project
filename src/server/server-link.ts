@@ -28,12 +28,13 @@ import {
 import { PeerStore, type PeerRecord } from '../main/host/link/peer-store'
 import type { HostLinkPort, RelayMux } from '../main/host/link/relay-mux'
 import { relayLinkTransport } from '../main/host/link/relay-transport'
-import { answerHandshake, type SealedChannel } from '../main/host/link/secure'
+import { answerHandshake, isLinkHandshake, type SealedChannel } from '../main/host/link/secure'
 import { LinkSession, type IncomingCall, type LinkTimers } from '../main/host/link/session'
 import type { StreamKinds } from '../main/host/link/stream'
 import { HOST_LINK_MIN_VERSION, HOST_LINK_PROTOCOL_VERSION } from '../main/host/link/version'
 import type { ServerHostInfo } from '../shared/servers'
 import type { ClientRegistry } from './client-registry'
+import { printable } from '../shared/printable'
 
 /** Terminal output batching on the server (plan: at most one message per tab and client per 16 ms). */
 export const PTY_COALESCE_MS = 16
@@ -88,12 +89,6 @@ export interface ServerLinkOptions {
   onPaired?: (desktop: PeerRecord) => void
   /** A desktop's session came up or went away. */
   onSessionsChanged?: () => void
-  /**
-   * Peers that are phones, which the mobile service answers. Everything else is
-   * taken to be a desktop, so one the server doesn't know hears `unknown-device`.
-   * (The server's phones arrive with step 10; until then there are none.)
-   */
-  isPhone?: (peerId: string) => boolean
   /** Tests: speak another protocol version range. */
   version?: VersionInfo
   timers?: LinkTimers
@@ -152,11 +147,17 @@ export class ServerLink {
     this.streams = options.streams ?? diagnosticStreamKinds()
     this.version = options.version ?? { v: HOST_LINK_PROTOCOL_VERSION, min: HOST_LINK_MIN_VERSION }
     this.now = options.now ?? Date.now
-    const isPhone = options.isPhone ?? (() => false)
-    this.port = options.relay.hostPort((peerId) => this.desktops.has(peerId) || !isPhone(peerId), {
+    // The link owns its paired desktops and the one it is pairing with by token.
+    // Every other peer is the phones' (the mobile service on the same socket),
+    // except a desktop's pairing hello for this server's code and a link
+    // handshake from a desktop this server has forgotten, which then hears
+    // `unknown-device` (protocol/SERVER.md §3).
+    this.port = options.relay.hostPort((peerId) => this.desktops.has(peerId) || this.tokenPairing?.desktopId === peerId, {
       frame: (from, envelope) => this.onFrame(from, envelope),
       peer: (message) => this.onPeer(message),
-      error: (message) => this.onRelayError(message)
+      error: (message) => this.onRelayError(message),
+      pairing: (from, envelope) => this.onFrame(from, envelope),
+      claimHandshake: (_from, envelope) => isLinkHandshake(this.options.identity.get().x25519, envelope.subarray(1))
     })
     this.port.onStateChange((state) => this.onRelayState(state))
     this.port.onOfferTaken(() => {
@@ -342,7 +343,7 @@ export class ServerLink {
       build: reply.build
     }
     this.desktops.add(record)
-    this.options.log(`link paired desktop=${record.id} name=${JSON.stringify(record.name)} (install token)`)
+    this.options.log(`link paired desktop=${record.id} name=${JSON.stringify(printable(record.name))} (install token)`)
     this.options.onPaired?.(record)
     pending.resolve(record)
   }
@@ -476,7 +477,7 @@ export class ServerLink {
     }
     this.port.sendBinary(from, outcome.envelope)
     const hello = outcome.hello
-    this.options.log(`link desktop=${from} pairing result=${outcome.result}${outcome.reason ? ` reason=${outcome.reason}` : ''}${hello ? ` name=${JSON.stringify(hello.name)}` : ''}`)
+    this.options.log(`link desktop=${from} pairing result=${outcome.result}${outcome.reason ? ` reason=${outcome.reason}` : ''}${hello ? ` name=${JSON.stringify(printable(hello.name))}` : ''}`)
     if (outcome.result !== 'ok' || !hello || !code) return
     const now = this.now()
     const record: PeerRecord = {
@@ -522,7 +523,7 @@ export class ServerLink {
     }
     this.port.sendBinary(from, outcome.envelope)
     const hello = outcome.hello
-    this.options.log(`link desktop=${from} handshake result=${outcome.result}${hello ? ` name=${JSON.stringify(hello.name)} version=${hello.build.version}` : ''}${outcome.update ? ` update=${outcome.update}` : ''}`)
+    this.options.log(`link desktop=${from} handshake result=${outcome.result}${hello ? ` name=${JSON.stringify(printable(hello.name))} version=${JSON.stringify(printable(hello.build.version, 40))}` : ''}${outcome.update ? ` update=${outcome.update}` : ''}`)
     if (outcome.result !== 'ok' || !outcome.channel || !hello) return
     this.desktops.touchLastSeen(from, this.now())
     this.desktops.setBuild(from, hello.build)

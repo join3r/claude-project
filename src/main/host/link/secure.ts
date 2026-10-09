@@ -103,6 +103,21 @@ export interface ResponderOutcome {
 }
 
 /**
+ * Whether a Noise message 1 (the envelope's body) was written for the link, not
+ * for a phone's channel: only the link's prologue opens it. A server tells an
+ * unknown desktop's handshake from a phone's this way (protocol/SERVER.md §3),
+ * since nothing in message 1 is readable before that.
+ */
+export function isLinkHandshake(staticKey: KeyPair, body: Uint8Array): boolean {
+  try {
+    createResponder({ prologue: PROLOGUE, s: staticKey }).readMessage(body)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * The server's side: reads message 1, lets `decide` check the desktop's static key
  * (the version is negotiated here first), and writes message 2. Throws ProtocolError
  * when message 1 doesn't decrypt or parse; the caller drops it without replying

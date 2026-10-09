@@ -17,6 +17,7 @@ import {
 import { parseMainArgs } from '../src/server/main'
 import { checkPlatform, parseBootstrapArgs, takeToken } from '../src/server/bootstrap'
 import { serverPaths } from '../src/server/server-env'
+import { renderTerminalQr } from '../src/server/qr-terminal'
 import type { ServiceContext } from '../src/server/service'
 
 const dirs: string[] = []
@@ -38,6 +39,9 @@ describe('argument parsing', () => {
     expect(parseCliArgs(['logs', '-f', '-n', '50'])).toEqual({ cmd: 'logs', follow: true, lines: 50 })
     expect(parseCliArgs(['pair'])).toEqual({ cmd: 'pair', wait: true })
     expect(parseCliArgs(['pair', '--no-wait'])).toEqual({ cmd: 'pair', wait: false })
+    expect(parseCliArgs(['pair', '--phone'])).toEqual({ cmd: 'pair', wait: true, phone: true })
+    expect(parseCliArgs(['pair', '--no-wait', '--phone'])).toEqual({ cmd: 'pair', wait: false, phone: true })
+    expect(() => parseCliArgs(['pair', '--tablet'])).toThrow(/--phone and --no-wait/)
     expect(parseCliArgs(['unpair', 'abc123'])).toEqual({ cmd: 'unpair', target: 'abc123' })
     expect(parseCliArgs(['uninstall'])).toEqual({ cmd: 'uninstall', data: 'ask', yes: false })
     expect(parseCliArgs(['uninstall', '--delete-data', '-y'])).toEqual({ cmd: 'uninstall', data: 'delete', yes: true })
@@ -48,6 +52,15 @@ describe('argument parsing', () => {
     expect(() => parseCliArgs(['uninstall', '--keep-data', '--delete-data'])).toThrow(/choose one/)
     expect(() => parseCliArgs(['frobnicate'])).toThrow(/unknown command/)
     expect(() => parseCliArgs([])).toThrow(/usage/)
+  })
+
+  it('draws a pairing link as a terminal QR code: half blocks, dark on light', () => {
+    const qr = renderTerminalQr('devtool://pair?d=' + 'x'.repeat(300))
+    const lines = qr.split('\n').filter(Boolean)
+    // Two module rows per line, and the same width on every line.
+    expect(lines.length).toBeGreaterThan(20)
+    expect(qr).toContain('\x1b[47m\x1b[30m')
+    expect(qr).toMatch(/[▀▄█]/)
   })
 
   it('parses the launcher: daemon, check, version, CLI commands', () => {
@@ -157,6 +170,115 @@ describe.skipIf(process.platform === 'win32')('the CLI against a running server'
     expect(await runCli(['unpair', 'a1a1'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(0)
     expect(unpaired).toEqual(['b2'.repeat(16), 'a1'.repeat(16)])
     expect(await runCli(['unpair', 'zzz'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(1)
+  })
+
+  it('pair --phone: prints the link and a QR, asks Accept in the terminal, and unpairs a phone by name', async () => {
+    const phoneId = 'e5'.repeat(16)
+    const uri = 'devtool://pair?d=eyJ2IjoxfQ'
+    const exp = Math.floor(Date.now() / 1000) + 300
+    const asked: string[] = []
+    let state: Record<string, unknown> = { invite: { uri, exp }, pending: null, devices: [] }
+    let polls = 0
+    const paths = await serve((cmd, request) => {
+      asked.push(cmd === 'phone-accept' || cmd === 'phone-revoke' ? `${cmd} ${String(request.id)}` : cmd)
+      if (cmd === 'phone-pair') return { uri, exp }
+      if (cmd === 'phone-state') {
+        // The phone scans the code on the second poll.
+        if (++polls === 2) state = { invite: null, pending: { phoneId, name: 'Vladimir’s iPhone', online: true }, devices: [] }
+        return state
+      }
+      if (cmd === 'phone-accept') {
+        state = { invite: null, pending: null, devices: [{ id: phoneId, name: 'Vladimir’s iPhone' }] }
+        return state
+      }
+      if (cmd === 'status') return { ...status, phones: [{ id: phoneId, name: 'Vladimir’s iPhone', online: false, lastSeen: null }] }
+      if (cmd === 'phone-revoke') return { invite: null, pending: null, devices: [] }
+      throw new Error('nope')
+    })
+    const questions: string[] = []
+    const out = { ...io(), qr: async (text: string) => `[QR of ${text}]`, pollMs: 5, confirm: async (q: string) => { questions.push(q); return true } }
+    expect(await runCli(['pair', '--phone'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(0)
+    expect(out.lines).toContain(`[QR of ${uri}]`)
+    expect(out.lines).toContain(`  ${uri}`)
+    expect(questions).toEqual([expect.stringContaining('Vladimir’s iPhone (e5e5e5e5) wants to pair with this server')])
+    expect(out.lines.at(-1)).toBe('Paired with Vladimir’s iPhone (e5e5e5e5).')
+    expect(asked).toEqual(['phone-pair', 'phone-state', 'phone-state', `phone-accept ${phoneId}`])
+
+    const listed = io()
+    expect(await runCli(['status'], { bundleDir: '.', io: listed, paths, ctx: ctx(paths) })).toBe(0)
+    expect(listed.lines.join('\n')).toMatch(/Vladimir’s iPhone\s+e5e5e5e5\s+last seen never/)
+    expect(await runCli(['unpair', 'Vladimir’s iPhone'], { bundleDir: '.', io: listed, paths, ctx: ctx(paths) })).toBe(0)
+    expect(asked.at(-1)).toBe(`phone-revoke ${phoneId}`)
+    expect(listed.lines.at(-1)).toBe('Removed the phone Vladimir’s iPhone (e5e5e5e5).')
+  })
+
+  it('prints peer-chosen names safely: no escape sequences, no bidi, capped, with the id next to them', async () => {
+    const evil = 'Evil\u001b[2K\u001b[1A\rTrusted iPhone‮\u0008' + 'x'.repeat(100)
+    const phoneId = 'e7'.repeat(16)
+    const uri = 'devtool://pair?d=eyJ2IjozfQ'
+    const exp = Math.floor(Date.now() / 1000) + 300
+    let polls = 0
+    const paths = await serve((cmd) => {
+      if (cmd === 'phone-pair') return { uri, exp }
+      if (cmd === 'phone-state') {
+        if (++polls === 1) return { invite: null, pending: { phoneId, name: evil, online: true }, devices: [] }
+        return { invite: null, pending: null, devices: [] }
+      }
+      if (cmd === 'phone-reject') return { invite: null, pending: null, devices: [] }
+      if (cmd === 'status') {
+        return { ...status, name: 'box\u001b]0;title\u0007', desktops: [{ ...status.desktops[0], name: evil, version: '0.6.0\u001b[31m' }], phones: [{ id: phoneId, name: evil, online: true }] }
+      }
+      if (cmd === 'phone-revoke') return { invite: null, pending: null, devices: [] }
+      throw new Error('nope')
+    })
+    const questions: string[] = []
+    const out = { ...io(), pollMs: 5, confirm: async (q: string) => { questions.push(q); return false } }
+    expect(await runCli(['pair', '--phone'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(1)
+    const shown = [...questions, ...out.lines, ...out.errors].join('\n')
+    const unsafe = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/u
+    expect(shown).not.toMatch(unsafe)
+    expect(questions[0]).toMatch(/^Evil�\[2K�\[1A�Trusted iPhone�x+… \(e7e7e7e7\) wants to pair with this server\./)
+    expect(out.lines.at(-1)).toMatch(/^Rejected Evil.*… \(e7e7e7e7\)\.$/)
+
+    const listed = io()
+    expect(await runCli(['status'], { bundleDir: '.', io: listed, paths, ctx: ctx(paths) })).toBe(0)
+    expect(listed.lines.join('\n')).not.toMatch(unsafe)
+    expect(listed.lines.join('\n')).toContain('DevTool 0.6.0�[31m')
+    expect(await runCli(['unpair', 'e7e7'], { bundleDir: '.', io: listed, paths, ctx: ctx(paths) })).toBe(0)
+    expect(listed.lines.at(-1)).toMatch(/^Removed the phone Evil\ufffd.*… \(e7e7e7e7\)\.$/)
+    expect(listed.lines.at(-1)).not.toMatch(unsafe)
+  })
+
+  it('pair --phone without a terminal: Accept in DevTool; and a link another code replaced', async () => {
+    const phoneId = 'e6'.repeat(16)
+    const uri = 'devtool://pair?d=eyJ2IjoyfQ'
+    const exp = Math.floor(Date.now() / 1000) + 300
+    let polls = 0
+    const paths = await serve((cmd) => {
+      if (cmd === 'phone-pair') return { uri, exp }
+      if (cmd === 'phone-state') {
+        polls++
+        if (polls < 3) return { invite: null, pending: { phoneId, name: 'iPad', online: true }, devices: [] }
+        return { invite: null, pending: null, devices: [{ id: phoneId, name: 'iPad' }] }
+      }
+      throw new Error('nope')
+    })
+    const out = { ...io(), pollMs: 5 }
+    expect(await runCli(['pair', '--phone'], { bundleDir: '.', io: out, paths, ctx: ctx(paths) })).toBe(0)
+    expect(out.lines).toContain('iPad (e6e6e6e6) wants to pair. Accept it in DevTool: Settings, Servers, this server.')
+    expect(out.lines.at(-1)).toBe('Paired with iPad (e6e6e6e6).')
+
+    const replaced = await serve((cmd) => {
+      if (cmd === 'phone-pair') return { uri, exp }
+      if (cmd === 'phone-state') return { invite: null, pending: null, devices: [] }
+      throw new Error('nope')
+    })
+    const gone = { ...io(), pollMs: 5 }
+    expect(await runCli(['pair', '--phone'], { bundleDir: '.', io: gone, paths: replaced, ctx: ctx(replaced) })).toBe(1)
+    expect(gone.errors).toEqual(['Another pairing code replaced this link (only one works at a time).'])
+    const noWait = io()
+    expect(await runCli(['pair', '--phone', '--no-wait'], { bundleDir: '.', io: noWait, paths: replaced, ctx: ctx(replaced) })).toBe(0)
+    expect(noWait.lines.at(-1)).toMatch(/Accept the phone in DevTool/)
   })
 
   it('a long home gets a fresh private dir in the temp dir, recorded under run/ for the CLI', async () => {

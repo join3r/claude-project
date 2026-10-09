@@ -297,6 +297,8 @@ export class HostRouter {
       }
       case 'own-window':
         return args
+      case 'server-self':
+        return [serverId, ...args]
     }
   }
 

@@ -211,4 +211,38 @@ describe('ServerHub on a relay from before servers', () => {
     expect(frames).toEqual([SERVER])
     expect(mobileMessages).toHaveLength(1)
   })
+
+  it('gives an unknown peer\'s message 1 to the port that claims it, and every other one to the phones', () => {
+    const client = new FakeClient()
+    const mux = new RelayMux(client)
+    const frames: string[] = []
+    const asked: string[] = []
+    const port = mux.hostPort((id) => id === SERVER, {
+      frame: (from, envelope) => frames.push(`${from}:${envelope[0]}`),
+      peer: () => {},
+      error: () => {},
+      // A forgotten desktop's link handshake opens under the link prologue; a phone's doesn't.
+      claimHandshake: (from, envelope) => {
+        asked.push(from)
+        return envelope[1] === 0xdd
+      }
+    })
+    const mobileMessages: RelayServerMessage[] = []
+    const mobile = mux.mobileTransport()
+    mobile.onMessage((m) => mobileMessages.push(m))
+    port.connect('ws://r')
+    mobile.connect('ws://r')
+    client.setState({ kind: 'online' })
+    const desktop = 'd'.repeat(32)
+    client.pushBinary(desktop, new Uint8Array([0x01, 0xdd]))
+    client.push({ t: 'frame', from: desktop, data: b64uEncode(new Uint8Array([0x01, 0xdd])) })
+    client.pushBinary(PHONE, new Uint8Array([0x01, 0x11]))
+    // Only message 1 is ever offered; a phone's transport frames go straight to mobile.
+    client.pushBinary(PHONE, new Uint8Array([0x03, 0xdd]))
+    // A known server's frames never ask.
+    client.pushBinary(SERVER, new Uint8Array([0x01, 0x11]))
+    expect(frames).toEqual([`${desktop}:1`, `${desktop}:1`, `${SERVER}:1`])
+    expect(asked).toEqual([desktop, desktop, PHONE])
+    expect(mobileMessages.map((m) => m.t === 'frame' && m.from)).toEqual([PHONE, PHONE])
+  })
 })

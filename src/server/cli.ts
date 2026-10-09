@@ -3,6 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import readline from 'readline'
+import { renderTerminalQr } from './qr-terminal'
+import { printable } from '../shared/printable'
 import { NotRunningError, UnsafeControlSocketError, controlRequest } from './control'
 import type { ServerUpdateState } from '../main/host/link/link-channels'
 import { loadServerManifest, serverPaths, type ServerPaths } from './server-env'
@@ -30,7 +32,9 @@ export const CLI_USAGE = `usage: devtool-server <command>
   status              Is it running, what version, which desktops, the relay
   logs [-f] [-n N]    The server's log (-f follows it)
   pair [--no-wait]    A pairing code for another desktop (DevTool: Add server, I have a code)
-  unpair <id|name>    Remove a paired desktop
+  pair --phone [--no-wait]
+                      A pairing link and QR code for a phone, then Accept here
+  unpair <id|name>    Remove a paired desktop or phone
   restart             Restart the server (switches to a staged update)
   start               Start it if it isn't running
   update              How updates work
@@ -41,7 +45,7 @@ export const CLI_USAGE = `usage: devtool-server <command>
 export type CliCommand =
   | { cmd: 'status' }
   | { cmd: 'logs'; follow: boolean; lines: number }
-  | { cmd: 'pair'; wait: boolean }
+  | { cmd: 'pair'; wait: boolean; phone?: true }
   | { cmd: 'unpair'; target: string }
   | { cmd: 'restart' }
   | { cmd: 'start' }
@@ -81,11 +85,11 @@ export function parseCliArgs(argv: string[]): CliCommand {
       return { cmd: 'logs', follow, lines }
     }
     case 'pair': {
-      if (rest.some((arg) => arg !== '--no-wait')) throw new Error('pair takes only --no-wait')
-      return { cmd: 'pair', wait: !rest.includes('--no-wait') }
+      if (rest.some((arg) => arg !== '--no-wait' && arg !== '--phone')) throw new Error('pair takes only --phone and --no-wait')
+      return { cmd: 'pair', wait: !rest.includes('--no-wait'), ...(rest.includes('--phone') ? { phone: true as const } : {}) }
     }
     case 'unpair': {
-      if (rest.length !== 1 || rest[0].startsWith('-')) throw new Error('usage: devtool-server unpair <desktop id or name>')
+      if (rest.length !== 1 || rest[0].startsWith('-')) throw new Error('usage: devtool-server unpair <desktop or phone id or name>')
       return { cmd: 'unpair', target: rest[0] }
     }
     case 'uninstall': {
@@ -121,7 +125,7 @@ export interface DaemonStatus {
   supervisor: string
   relay: { url: string; state: string; error?: string }
   desktops: { id: string; name: string; online: boolean; pairedAt: number; lastSeen: number | null; version?: string }[]
-  phones: { id: string; name: string }[]
+  phones: { id: string; name: string; online?: boolean; lastSeen?: number | null }[]
   update: ServerUpdateState | null
 }
 
@@ -138,11 +142,23 @@ export interface CliIo {
   err: (line: string) => void
   /** Asks a yes/no question; null when there is no terminal to ask on. */
   confirm: (question: string) => Promise<boolean | null>
+  /** A QR code of `text` drawn for this terminal; null when output isn't a terminal. */
+  qr?: (text: string) => Promise<string | null>
+  /** Milliseconds between polls of the daemon while waiting (tests make it short). */
+  pollMs?: number
 }
 
 const defaultIo: CliIo = {
   out: (line) => process.stdout.write(`${line}\n`),
   err: (line) => process.stderr.write(`${line}\n`),
+  qr: async (text) => {
+    if (!process.stdout.isTTY) return null
+    try {
+      return renderTerminalQr(text)
+    } catch {
+      return null
+    }
+  },
   confirm: async (question) => {
     if (!process.stdin.isTTY) return null
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
@@ -195,7 +211,7 @@ export async function runCli(argv: string[], options: { bundleDir: string; io?: 
       case 'logs':
         return await logs(io, paths, record, command.follow, command.lines)
       case 'pair':
-        return await pair(io, paths, command.wait)
+        return command.phone ? await pairPhone(io, paths, command.wait) : await pair(io, paths, command.wait)
       case 'unpair':
         return await unpair(io, paths, command.target)
       case 'restart':
@@ -239,16 +255,19 @@ async function status(io: CliIo, paths: ServerPaths, ctx: ServiceContext, record
     return 3
   }
   const update = daemon.update ? `${daemon.update.version} (${daemon.update.commit.slice(0, 12)}) ${daemon.update.state === 'staged' ? 'staged: switches once no tab is working (or devtool-server restart)' : 'restarting'}` : 'none'
-  io.out(`DevTool server "${daemon.name}" (${daemon.serverId})`)
+  io.out(`DevTool server "${printable(daemon.name)}" (${daemon.serverId})`)
   io.out(`  running   yes, pid ${daemon.pid}; ${service.detail}`)
   io.out(`  version   ${daemon.version} (commit ${daemon.commit.slice(0, 12)}${daemon.builtAt ? `, built ${daemon.builtAt}` : ''}) on Node ${daemon.node}`)
   io.out(`  relay     ${daemon.relay.url}: ${daemon.relay.state}${daemon.relay.error ? ` (${daemon.relay.error})` : ''}`)
   io.out(`  update    ${update}`)
   io.out(`  desktops  ${daemon.desktops.length === 0 ? 'none (pair one with: devtool-server pair)' : daemon.desktops.length}`)
   for (const desktop of daemon.desktops) {
-    io.out(`    ${desktop.name.padEnd(20)} ${desktop.id.slice(0, 8)}  ${desktop.online ? 'connected' : `last seen ${ago(desktop.lastSeen)}`}${desktop.version ? `  DevTool ${desktop.version}` : ''}`)
+    io.out(`    ${printable(desktop.name).padEnd(20)} ${desktop.id.slice(0, 8)}  ${desktop.online ? 'connected' : `last seen ${ago(desktop.lastSeen)}`}${desktop.version ? `  DevTool ${printable(desktop.version, 40)}` : ''}`)
   }
-  io.out(`  phones    ${daemon.phones.length === 0 ? 'none' : daemon.phones.map((p) => p.name).join(', ')}`)
+  io.out(`  phones    ${daemon.phones.length === 0 ? 'none (pair one with: devtool-server pair --phone)' : daemon.phones.length}`)
+  for (const phone of daemon.phones) {
+    io.out(`    ${printable(phone.name).padEnd(20)} ${phone.id.slice(0, 8)}  ${phone.online ? 'connected' : `last seen ${ago(phone.lastSeen ?? null)}`}`)
+  }
   io.out(`  home      ${daemon.home}`)
   return 0
 }
@@ -288,7 +307,7 @@ async function pair(io: CliIo, paths: ServerPaths, wait: boolean): Promise<numbe
       return 1
     }
     if (state.state === 'paired') {
-      io.out(`Paired with ${state.desktop?.name ?? 'a desktop'} (${state.desktop?.id.slice(0, 8) ?? '?'}).`)
+      io.out(`Paired with ${state.desktop ? printable(state.desktop.name) : 'a desktop'} (${state.desktop?.id.slice(0, 8) ?? '?'}).`)
       return 0
     }
     if (state.state === 'expired' || state.state === 'cancelled') {
@@ -300,23 +319,111 @@ async function pair(io: CliIo, paths: ServerPaths, wait: boolean): Promise<numbe
 
 async function unpair(io: CliIo, paths: ServerPaths, target: string): Promise<number> {
   const daemon = await controlRequest(paths, { cmd: 'status' }) as DaemonStatus
-  const matches = daemon.desktops.filter((d) => d.id === target || d.id.startsWith(target.toLowerCase()) || d.name === target)
+  const matching = (d: { id: string; name: string }) => d.id === target || d.id.startsWith(target.toLowerCase()) || d.name === target
+  const matches = [
+    ...daemon.desktops.filter(matching).map((d) => ({ ...d, kind: 'desktop' as const })),
+    ...(daemon.phones ?? []).filter(matching).map((p) => ({ ...p, kind: 'phone' as const }))
+  ]
   if (matches.length === 0) {
-    io.err(`No paired desktop matches "${target}". See: devtool-server status`)
+    io.err(`No paired desktop or phone matches "${target}". See: devtool-server status`)
     return 1
   }
   if (matches.length > 1) {
-    io.err(`"${target}" matches ${matches.length} desktops; use more of the id.`)
+    io.err(`"${target}" matches ${matches.length} devices; use more of the id.`)
     return 1
   }
-  await controlRequest(paths, { cmd: 'unpair', id: matches[0].id })
-  io.out(`Removed ${matches[0].name} (${matches[0].id.slice(0, 8)}).`)
+  const [match] = matches
+  await controlRequest(paths, match.kind === 'phone' ? { cmd: 'phone-revoke', id: match.id } : { cmd: 'unpair', id: match.id })
+  io.out(`Removed ${match.kind === 'phone' ? 'the phone ' : ''}${printable(match.name)} (${match.id.slice(0, 8)}).`)
   return 0
+}
+
+/** What the daemon's `phone-*` requests answer: its MobileState, as far as the CLI reads it. */
+interface PhoneState {
+  invite: { uri: string; exp: number } | null
+  pending: { phoneId: string; name: string; online: boolean } | null
+  devices: { id: string; name: string }[]
+}
+
+/**
+ * `pair --phone`: a QR code and link for DevTool on a phone, then the phone's
+ * request answered here (or in DevTool, Settings › Servers › Pair a phone).
+ */
+async function pairPhone(io: CliIo, paths: ServerPaths, wait: boolean): Promise<number> {
+  const invite = await controlRequest(paths, { cmd: 'phone-pair' }) as { uri: string; exp: number }
+  const qr = await io.qr?.(invite.uri) ?? null
+  if (qr) {
+    io.out('On your phone: open DevTool, tap Pair, and scan this code.')
+    io.out('')
+    io.out(qr)
+    io.out('Or open this link on the phone:')
+  } else {
+    io.out('Open this link with DevTool on your phone (or paste it under Paste pairing link):')
+  }
+  io.out('')
+  io.out(`  ${invite.uri}`)
+  io.out('')
+  io.out(`It works once, until ${new Date(invite.exp * 1000).toLocaleTimeString()}.`)
+  if (!wait) {
+    io.out('Accept the phone in DevTool: Settings, Servers, this server, Pair a phone.')
+    return 0
+  }
+  io.out('Waiting for the phone... (Ctrl-C to stop waiting; the link stays valid)')
+  /** A phone as the terminal shows it: its name made printable, and its id's first 8 characters. */
+  const label = (phone: { phoneId: string; name: string }) => `${printable(phone.name)} (${phone.phoneId.slice(0, 8)})`
+  let asked = null as { phoneId: string; name: string } | null
+  let told = false
+  const paired = (state: PhoneState, phoneId: string) => state.devices.some((d) => d.id === phoneId)
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, io.pollMs ?? 1000))
+    let state = await controlRequest(paths, { cmd: 'phone-state' }) as PhoneState
+    if (asked && paired(state, asked.phoneId)) {
+      io.out(`Paired with ${label(asked)}.`)
+      return 0
+    }
+    const pending = state.pending
+    if (pending && pending.phoneId !== asked?.phoneId) {
+      asked = { phoneId: pending.phoneId, name: pending.name }
+      const answer = await io.confirm(`${label(pending)} wants to pair with this server. Accept only if it is your phone and you just scanned the code. Accept?`)
+      if (answer === null) {
+        if (!told) io.out(`${label(pending)} wants to pair. Accept it in DevTool: Settings, Servers, this server.`)
+        told = true
+        continue
+      }
+      try {
+        state = await controlRequest(paths, { cmd: answer ? 'phone-accept' : 'phone-reject', id: pending.phoneId }) as PhoneState
+      } catch (err) {
+        // Answered in DevTool meanwhile.
+        state = await controlRequest(paths, { cmd: 'phone-state' }) as PhoneState
+        if (!paired(state, pending.phoneId)) throw err
+      }
+      if (!answer) {
+        io.out(`Rejected ${label(pending)}.`)
+        return 1
+      }
+      if (paired(state, pending.phoneId)) {
+        io.out(`Paired with ${label(pending)}.`)
+        return 0
+      }
+      continue
+    }
+    if (pending) continue
+    if (asked) {
+      io.err(`${label(asked)} did not pair: the request was rejected or ran out.`)
+      return 1
+    }
+    if (!state.invite || state.invite.uri !== invite.uri) {
+      io.err(invite.exp * 1000 <= Date.now()
+        ? 'The link expired. Run devtool-server pair --phone again.'
+        : 'Another pairing code replaced this link (only one works at a time).')
+      return 1
+    }
+  }
 }
 
 /**
  * Removes the server's files: with `deleteData` the whole home, else everything
- * but `data/` (the identity, the paired desktops, projects and settings).
+ * but `data/` (the identity, the paired desktops and phones, projects and settings).
  */
 export function removeServerFiles(paths: ServerPaths, deleteData: boolean): void {
   if (deleteData) {
@@ -331,7 +438,7 @@ export function removeServerFiles(paths: ServerPaths, deleteData: boolean): void
 async function uninstall(io: CliIo, paths: ServerPaths, ctx: ServiceContext, record: ServiceRecord | null, data: 'keep' | 'delete' | 'ask', yes: boolean): Promise<number> {
   let deleteData = data === 'delete'
   if (data === 'ask') {
-    const answer = await io.confirm(`Also delete the server's data (paired desktops, projects and settings in ${paths.dataDir})?`)
+    const answer = await io.confirm(`Also delete the server's data (paired desktops and phones, projects and settings in ${paths.dataDir})?`)
     deleteData = answer === true
   }
   if (!yes && data !== 'ask') {
@@ -341,8 +448,9 @@ async function uninstall(io: CliIo, paths: ServerPaths, ctx: ServiceContext, rec
   if (deleteData) {
     // Its identity goes away, so its pairs are useless: tell the relay (and the desktops) first.
     try {
-      const result = await controlRequest(paths, { cmd: 'revoke-all' }, 10_000) as { count?: number }
+      const result = await controlRequest(paths, { cmd: 'revoke-all' }, 10_000) as { count?: number; phones?: number }
       if (result?.count) io.out(`Unpaired ${result.count} desktop${result.count === 1 ? '' : 's'}.`)
+      if (result?.phones) io.out(`Unpaired ${result.phones} phone${result.phones === 1 ? '' : 's'}.`)
     } catch {
       // Not running: the relay pairs stay until DevTool removes this server.
     }

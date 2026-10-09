@@ -32,8 +32,9 @@ export interface ServerHost {
  * channel registered on the client registry. No transport: whoever starts it
  * registers clients (the host link in the daemon, a test in process).
  *
- * Phones stay off: the MobileService is built but dormant, as on a desktop
- * with Mobile off (the server's config has it off until it pairs phones).
+ * Phones (plan step 10): the host's MobileService answers them on the server's
+ * relay socket, with the relay and name from `server.json`. It stays dormant, as
+ * on a desktop with Mobile off, until the first phone pairing turns it on.
  */
 export async function startServerHost(options: ServerHostOptions): Promise<ServerHost> {
   ensureServerDirs(options.paths)
@@ -58,7 +59,11 @@ export async function startServerHost(options: ServerHostOptions): Promise<Serve
     // No window may be attached: shells' and Codex's status comes from their output here.
     terminalStatus: 'host',
     // Every window is on a desktop: a chat's /login asks for the pasted code.
-    remoteClients: true
+    remoteClients: true,
+    phones: {
+      relayUrl: () => loadServerConfig(options.paths.dataDir).relayUrl,
+      name: () => serverDisplayName(loadServerConfig(options.paths.dataDir))
+    }
   })
   await host.start()
   host.registerIpcHandlers(clients.createRegistrar(env.log))

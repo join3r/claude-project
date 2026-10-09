@@ -277,6 +277,27 @@ describe('HostRouter', () => {
     expect(t.logs.some(l => l.includes('ch=config-updated'))).toBe(false)
   })
 
+  it('hands a server\'s phone state to windows tagged with that server, and routes its phone calls by the host argument', async () => {
+    const t = setup()
+    const state = { enabled: true, devices: [] }
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'server-mobile-state-changed', args: [state] })
+    // A server can't speak for another one: the id in front is always the sender's.
+    t.router.deliver({ serverId: 'srvA', client: 'win:2', ch: 'server-mobile-state-changed', args: ['srvB', state] })
+    expect(t.broadcast).toEqual([['server-mobile-state-changed', 'srvA', state]])
+    expect(t.sent).toEqual([['win:2', 'server-mobile-state-changed', 'srvA', 'srvB', state]])
+    // Its plain `mobile-state-changed` is this desktop's own Settings › Mobile, never a server's.
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'mobile-state-changed', args: [state] })
+    expect(t.broadcast).toHaveLength(1)
+
+    for (const ch of ['server-mobile-get-state', 'server-mobile-start-pairing', 'server-mobile-cancel-pairing', 'server-mobile-accept', 'server-mobile-reject', 'server-mobile-revoke']) {
+      expect(HOST_ROUTES[ch]).toEqual({ by: [{ host: 0 }] })
+    }
+    t.register('server-mobile-accept')
+    await t.invoke('server-mobile-accept', ['srvA', 'e'.repeat(32)])
+    expect(t.calls.at(-1)).toMatchObject({ serverId: 'srvA', ch: 'server-mobile-accept', args: ['srvA', 'e'.repeat(32)] })
+    expect(await t.invoke('server-mobile-accept', ['local', 'e'.repeat(32)])).toBe('local-answer')
+  })
+
   it('drops a server\'s push about a tab, task or project it doesn\'t own', async () => {
     const t = setup()
     // Output for a tab pinned nowhere (this desktop's, or the server's never spawned here).

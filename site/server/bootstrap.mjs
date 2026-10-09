@@ -2125,25 +2125,53 @@ var RelayMux = class {
     for (const lease of this.hostLeases) if (lease.wanted && lease.handlers.pairing) return lease;
     return null;
   }
+  /** A Noise message 1 from a peer nobody owns: the port that recognises it as its own, if any. */
+  handshakeOwner(from, envelope2) {
+    if (envelope2[0] !== FrameKind.Handshake1) return null;
+    for (const lease of this.hostLeases) {
+      if (!lease.wanted || !lease.handlers.claimHandshake) continue;
+      try {
+        if (lease.handlers.claimHandshake(from, envelope2)) return lease;
+      } catch (err) {
+        this.log(`relayMux claimHandshake error=${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return null;
+  }
+  /** Bytes from a peer no port owns: a pairing hello or a handshake a port claims, else null (the phones'). */
+  unownedFrame(from, envelope2) {
+    const pairing = this.pairingOwner(envelope2);
+    if (pairing) {
+      pairing.handlers.pairing(from, envelope2);
+      return true;
+    }
+    const handshake = this.handshakeOwner(from, envelope2);
+    if (handshake) {
+      handshake.handlers.frame(from, envelope2);
+      return true;
+    }
+    return false;
+  }
   route(message) {
     switch (message.t) {
       case "frame": {
         const owner = this.ownerOf(message.from);
         if (owner) {
-          let bytes;
+          let bytes2;
           try {
-            bytes = b64uDecode(message.data);
+            bytes2 = b64uDecode(message.data);
           } catch {
             return;
           }
-          if (bytes.length > 0) owner.handlers.frame(message.from, bytes);
+          if (bytes2.length > 0) owner.handlers.frame(message.from, bytes2);
           return;
         }
-        const pairing = this.pairingOwnerOfJson(message.data);
-        if (pairing) {
-          pairing.lease.handlers.pairing(message.from, pairing.bytes);
-          return;
+        let bytes = null;
+        try {
+          bytes = b64uDecode(message.data);
+        } catch {
         }
+        if (bytes && bytes.length > 0 && this.unownedFrame(message.from, bytes)) return;
         break;
       }
       case "peer": {
@@ -2171,27 +2199,13 @@ var RelayMux = class {
     }
     this.toMobile(message);
   }
-  pairingOwnerOfJson(data) {
-    let bytes;
-    try {
-      bytes = b64uDecode(data);
-    } catch {
-      return null;
-    }
-    const lease = bytes.length > 0 ? this.pairingOwner(bytes) : null;
-    return lease ? { lease, bytes } : null;
-  }
   routeBinary(from, envelope2) {
     const owner = this.ownerOf(from);
     if (owner) {
       owner.handlers.frame(from, envelope2);
       return;
     }
-    const pairing = this.pairingOwner(envelope2);
-    if (pairing) {
-      pairing.handlers.pairing(from, envelope2);
-      return;
-    }
+    if (this.unownedFrame(from, envelope2)) return;
     this.toMobile({ t: "frame", from, data: b64uEncode(envelope2) });
   }
   toMobile(message) {
@@ -2810,6 +2824,14 @@ var SealedChannel = class {
 function sealed(handshake, log) {
   return new SealedChannel(new FramedTransport(handshake.split(), { log, isWhole: isLinkMessageByte }));
 }
+function isLinkHandshake(staticKey, body) {
+  try {
+    createResponder({ prologue: PROLOGUE2, s: staticKey }).readMessage(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function answerHandshake(staticKey, body, reply, decide, log, local = LOCAL_VERSION) {
   const handshake = createResponder({ prologue: PROLOGUE2, s: staticKey });
   const payload = handshake.readMessage(body);
@@ -3260,6 +3282,20 @@ var LinkSession = class {
   }
 };
 
+// src/shared/printable.ts
+var BIDI_AND_SEPARATORS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/gu;
+var CONTROLS = /[\u0000-\u001f\u007f-\u009f]/gu;
+var PRINTABLE_MAX = 64;
+function stripBidi(text2) {
+  return text2.replace(BIDI_AND_SEPARATORS, "");
+}
+function printable(text2, max = PRINTABLE_MAX) {
+  const clean = stripBidi(typeof text2 === "string" ? text2 : String(text2 ?? "")).replace(CONTROLS, "\uFFFD").trim();
+  const chars = Array.from(clean);
+  const cut = chars.length > max ? `${chars.slice(0, Math.max(1, max - 1)).join("").trimEnd()}\u2026` : clean;
+  return cut || "(no name)";
+}
+
 // src/server/server-link.ts
 var PTY_COALESCE_MS = 16;
 var PTY_MESSAGE_CHARS = 16 * 1024;
@@ -3274,11 +3310,12 @@ var ServerLink = class {
     this.streams = options.streams ?? diagnosticStreamKinds();
     this.version = options.version ?? { v: HOST_LINK_PROTOCOL_VERSION, min: HOST_LINK_MIN_VERSION };
     this.now = options.now ?? Date.now;
-    const isPhone = options.isPhone ?? (() => false);
-    this.port = options.relay.hostPort((peerId) => this.desktops.has(peerId) || !isPhone(peerId), {
+    this.port = options.relay.hostPort((peerId) => this.desktops.has(peerId) || this.tokenPairing?.desktopId === peerId, {
       frame: (from, envelope2) => this.onFrame(from, envelope2),
       peer: (message) => this.onPeer(message),
-      error: (message) => this.onRelayError(message)
+      error: (message) => this.onRelayError(message),
+      pairing: (from, envelope2) => this.onFrame(from, envelope2),
+      claimHandshake: (_from, envelope2) => isLinkHandshake(this.options.identity.get().x25519, envelope2.subarray(1))
     });
     this.port.onStateChange((state) => this.onRelayState(state));
     this.port.onOfferTaken(() => {
@@ -3467,7 +3504,7 @@ var ServerLink = class {
       build: reply.build
     };
     this.desktops.add(record);
-    this.options.log(`link paired desktop=${record.id} name=${JSON.stringify(record.name)} (install token)`);
+    this.options.log(`link paired desktop=${record.id} name=${JSON.stringify(printable(record.name))} (install token)`);
     this.options.onPaired?.(record);
     pending.resolve(record);
   }
@@ -3589,7 +3626,7 @@ var ServerLink = class {
     }
     this.port.sendBinary(from, outcome.envelope);
     const hello = outcome.hello;
-    this.options.log(`link desktop=${from} pairing result=${outcome.result}${outcome.reason ? ` reason=${outcome.reason}` : ""}${hello ? ` name=${JSON.stringify(hello.name)}` : ""}`);
+    this.options.log(`link desktop=${from} pairing result=${outcome.result}${outcome.reason ? ` reason=${outcome.reason}` : ""}${hello ? ` name=${JSON.stringify(printable(hello.name))}` : ""}`);
     if (outcome.result !== "ok" || !hello || !code) return;
     const now = this.now();
     const record = {
@@ -3632,7 +3669,7 @@ var ServerLink = class {
     }
     this.port.sendBinary(from, outcome.envelope);
     const hello = outcome.hello;
-    this.options.log(`link desktop=${from} handshake result=${outcome.result}${hello ? ` name=${JSON.stringify(hello.name)} version=${hello.build.version}` : ""}${outcome.update ? ` update=${outcome.update}` : ""}`);
+    this.options.log(`link desktop=${from} handshake result=${outcome.result}${hello ? ` name=${JSON.stringify(printable(hello.name))} version=${JSON.stringify(printable(hello.build.version, 40))}` : ""}${outcome.update ? ` update=${outcome.update}` : ""}`);
     if (outcome.result !== "ok" || !outcome.channel || !hello) return;
     this.desktops.touchLastSeen(from, this.now());
     this.desktops.setBuild(from, hello.build);
@@ -4589,7 +4626,7 @@ async function runBootstrap(args, io = { out: (line) => process.stdout.write(`${
     features: ["bootstrap"],
     log,
     streams: /* @__PURE__ */ new Map([[BUNDLE_STREAM_KIND, async (stream, context) => {
-      io.out(`Receiving the DevTool server from ${desktop?.name ?? "DevTool"}...`);
+      io.out(`Receiving the DevTool server from ${desktop ? printable(desktop.name) : "DevTool"}...`);
       await updater.streamHandler()(stream, context);
     }]]),
     linkCall: (call) => {
@@ -4618,7 +4655,7 @@ async function runBootstrap(args, io = { out: (line) => process.stdout.write(`${
   try {
     link.start();
     if (ticket) {
-      io.out(`Pairing with ${ticket.name || "DevTool"} through ${relayUrl}...`);
+      io.out(`Pairing with ${ticket.name ? printable(ticket.name) : "DevTool"} through ${relayUrl}...`);
       desktop = await link.pairWithInstallToken(ticket, { bootstrap: BOOTSTRAP_PROTOCOL });
     } else {
       const code = await link.createPairingCode();
@@ -4633,14 +4670,14 @@ async function runBootstrap(args, io = { out: (line) => process.stdout.write(`${
         new Promise((_, reject) => setTimeout(() => reject(new InstallError("The pairing code expired. Run the installer again.")), Math.max(0, code.exp * 1e3 - Date.now())).unref())
       ]);
     }
-    io.out(`Paired with ${desktop.name}.`);
+    io.out(`Paired with ${printable(desktop.name)}.`);
     const result = await Promise.race([
       done,
-      new Promise((_, reject) => setTimeout(() => reject(new InstallError(`${desktop?.name ?? "DevTool"} paired but did not finish sending the server. Keep DevTool open and run the command again.`)), DONE_TIMEOUT_MS).unref())
+      new Promise((_, reject) => setTimeout(() => reject(new InstallError(`${desktop ? printable(desktop.name) : "DevTool"} paired but did not finish sending the server. Keep DevTool open and run the command again.`)), DONE_TIMEOUT_MS).unref())
     ]);
     log(`bootstrap done desktop=${result.desktopId} uploaded=${result.uploaded}`);
     const bundle = installed();
-    if (!bundle) throw new InstallError(`${desktop.name} has no server bundle to send. Update DevTool (a dev build needs npm run build:server) and run the command again.`);
+    if (!bundle) throw new InstallError(`${printable(desktop.name)} has no server bundle to send. Update DevTool (a dev build needs npm run build:server) and run the command again.`);
     io.out(`DevTool server ${bundle.manifest.version} (${bundle.manifest.commit.slice(0, 12)}) is in ${paths.home}.`);
   } catch (err) {
     cleanup();
@@ -4665,7 +4702,7 @@ ${check.output}`);
   io.out(`Service: ${service.record.kind === "systemd" ? `systemd user unit ${service.record.name}` : service.record.kind === "launchd" ? `LaunchAgent ${service.record.name} (${service.record.domain})` : "background process with an @reboot crontab line"}`);
   for (const note of service.notes) io.out(note);
   const linked = linkCliOnPath(paths, os5.homedir(), process.env.PATH ?? "", paths.home === path13.join(os5.homedir(), DEFAULT_SERVER_HOME_NAME));
-  io.out(`Waiting for ${desktop.name} to see the server online...`);
+  io.out(`Waiting for ${printable(desktop.name)} to see the server online...`);
   const desktopId = desktop.id;
   const until = Date.now() + ONLINE_TIMEOUT_MS;
   for (; ; ) {
@@ -4678,13 +4715,13 @@ ${check.output}`);
       lastError = err instanceof NotRunningError ? "the server is not running" : String(err);
     }
     if (Date.now() > until) {
-      throw new InstallError(`The service is installed, but ${desktop.name} did not connect within ${ONLINE_TIMEOUT_MS / 1e3} s${lastError ? ` (${lastError})` : ""}. See: ${path13.join(paths.binDir, "devtool-server")} logs`);
+      throw new InstallError(`The service is installed, but ${printable(desktop.name)} did not connect within ${ONLINE_TIMEOUT_MS / 1e3} s${lastError ? ` (${lastError})` : ""}. See: ${path13.join(paths.binDir, "devtool-server")} logs`);
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   const cli = linked ? "devtool-server" : path13.join(paths.binDir, "devtool-server");
   io.out("");
-  io.out(`Connected to ${desktop.name}. DevTool shows "${name}" online.`);
+  io.out(`Connected to ${printable(desktop.name)}. DevTool shows "${printable(name)}" online.`);
   io.out(`Manage it with: ${cli} status`);
 }
 function takeToken(args, env = process.env, warn = (line) => process.stderr.write(`${line}

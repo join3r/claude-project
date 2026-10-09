@@ -123,7 +123,7 @@ struct TaskStatusView: View {
         List {
             if offline {
                 Section {
-                    OfflineBanner(title: "Desktop", lastSeen: lastSeen)
+                    OfflineBanner(title: model.kindTitle(ref.desktopId), lastSeen: lastSeen)
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -254,7 +254,7 @@ struct TaskInfoSheet: View {
             .listSectionSpacing(.compact)
             if offline {
                 Section {
-                    OfflineBanner(title: "Desktop", lastSeen: lastSeen)
+                    OfflineBanner(title: model.kindTitle(ref.desktopId), lastSeen: lastSeen)
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -279,7 +279,7 @@ struct TaskInfoSheet: View {
                 if let landing = task.landing {
                     LabeledContent("Landing", value: landing.label(streamName: streamName.isEmpty ? "its stream" : streamName))
                 }
-                LabeledContent("Desktop", value: model.desktop(ref.desktopId)?.name ?? "")
+                LabeledContent(model.kindTitle(ref.desktopId), value: model.desktop(ref.desktopId)?.name ?? "")
                 LabeledContent("Status") {
                     StatusChip(status: task.status, since: task.since)
                 }

@@ -113,7 +113,19 @@ struct TabTypeIcon: View {
     }
 }
 
-/// "Desktop offline · last seen 14:02", shown above a stale (cached) inbox.
+/// The small `server.rack` by a DevTool server's name (its hello's `app`,
+/// SPEC.md §4.3). Desktops show nothing.
+struct ServerGlyph: View {
+    var body: some View {
+        Image(systemName: "server.rack")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Server")
+    }
+}
+
+/// "Desktop offline · last seen 14:02" ("Server offline" for a DevTool
+/// server), shown above a stale (cached) inbox.
 struct OfflineBanner: View {
     let title: String
     let lastSeen: Date?

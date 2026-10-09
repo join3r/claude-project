@@ -1,4 +1,4 @@
-import { b64uDecode, b64uEncode } from '../../../../protocol/ts/index.ts'
+import { FrameKind, b64uDecode, b64uEncode } from '../../../../protocol/ts/index.ts'
 import type { ClientMessage, ErrorMessage, PeerMessage } from '../../../../protocol/ts/index.ts'
 import type { RelayServerMessage, RelayTransport, RelayTransportState } from '../../mobile/mobile-service'
 import { PairFrame } from './pairing'
@@ -45,9 +45,16 @@ export interface HostLinkHandlers {
   error(message: ErrorMessage): void
   /**
    * A pairing hello (`0x05`, protocol/SERVER.md §7) from a peer no port owns yet:
-   * a new server answering this desktop's invite. Only one port should take these.
+   * a new server answering this desktop's invite, or a desktop proving a server's
+   * code. Only one port should take these.
    */
   pairing?(from: string, envelope: Uint8Array): void
+  /**
+   * A Noise message 1 (`0x01`) from a peer no port owns: true when it is this
+   * port's (a server telling a desktop it no longer knows from a phone, protocol/SERVER.md §3).
+   * The port then gets it through `frame`; otherwise it goes to the phones.
+   */
+  claimHandshake?(from: string, envelope: Uint8Array): boolean
 }
 
 interface Lease {
@@ -77,6 +84,8 @@ const IDLE: RelayTransportState = { kind: 'idle' }
  *
  * Routing is by peer ID: a `frame`, `peer` or `error { to }` about a peer some
  * host link `owns` goes to that link, everything else to the mobile transports.
+ * A frame from a peer nobody owns is a link's only when it is a pairing hello
+ * (`0x05`) or a message 1 the link claims (`claimHandshake`).
  * Binary frames for phones are turned back into JSON `frame`s, since the mobile
  * service speaks JSON; a host link always gets bytes.
  */
@@ -220,6 +229,35 @@ export class RelayMux {
     return null
   }
 
+  /** A Noise message 1 from a peer nobody owns: the port that recognises it as its own, if any. */
+  private handshakeOwner(from: string, envelope: Uint8Array): HostLease | null {
+    if (envelope[0] !== FrameKind.Handshake1) return null
+    for (const lease of this.hostLeases) {
+      if (!lease.wanted || !lease.handlers.claimHandshake) continue
+      try {
+        if (lease.handlers.claimHandshake(from, envelope)) return lease
+      } catch (err) {
+        this.log(`relayMux claimHandshake error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    return null
+  }
+
+  /** Bytes from a peer no port owns: a pairing hello or a handshake a port claims, else null (the phones'). */
+  private unownedFrame(from: string, envelope: Uint8Array): boolean {
+    const pairing = this.pairingOwner(envelope)
+    if (pairing) {
+      pairing.handlers.pairing!(from, envelope)
+      return true
+    }
+    const handshake = this.handshakeOwner(from, envelope)
+    if (handshake) {
+      handshake.handlers.frame(from, envelope)
+      return true
+    }
+    return false
+  }
+
   private route(message: RelayServerMessage): void {
     switch (message.t) {
       case 'frame': {
@@ -234,11 +272,13 @@ export class RelayMux {
           if (bytes.length > 0) owner.handlers.frame(message.from, bytes)
           return
         }
-        const pairing = this.pairingOwnerOfJson(message.data)
-        if (pairing) {
-          pairing.lease.handlers.pairing!(message.from, pairing.bytes)
-          return
+        let bytes: Uint8Array | null = null
+        try {
+          bytes = b64uDecode(message.data)
+        } catch {
+          // Not ours to judge: the mobile service drops it.
         }
+        if (bytes && bytes.length > 0 && this.unownedFrame(message.from, bytes)) return
         break
       }
       case 'peer': {
@@ -267,28 +307,13 @@ export class RelayMux {
     this.toMobile(message)
   }
 
-  private pairingOwnerOfJson(data: string): { lease: HostLease; bytes: Uint8Array } | null {
-    let bytes: Uint8Array
-    try {
-      bytes = b64uDecode(data)
-    } catch {
-      return null
-    }
-    const lease = bytes.length > 0 ? this.pairingOwner(bytes) : null
-    return lease ? { lease, bytes } : null
-  }
-
   private routeBinary(from: string, envelope: Uint8Array): void {
     const owner = this.ownerOf(from)
     if (owner) {
       owner.handlers.frame(from, envelope)
       return
     }
-    const pairing = this.pairingOwner(envelope)
-    if (pairing) {
-      pairing.handlers.pairing!(from, envelope)
-      return
-    }
+    if (this.unownedFrame(from, envelope)) return
     // A phone's frame on a binary socket: the mobile service reads JSON frames.
     this.toMobile({ t: 'frame', from, data: b64uEncode(envelope) })
   }

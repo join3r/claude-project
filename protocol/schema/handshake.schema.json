@@ -29,7 +29,7 @@
       "properties": {
         "v": { "$ref": "#/$defs/version" },
         "min": { "$ref": "#/$defs/version" },
-        "app": { "type": "string", "description": "e.g. devtool/0.3.2" },
+        "app": { "type": "string", "description": "devtool/<version> from a desktop, devtool-server/<version> from a DevTool server (SPEC.md §4.3)" },
         "features": { "type": "array", "items": { "type": "string" } },
         "desktopName": { "type": "string" },
         "result": { "enum": ["ok", "pending", "rejected", "incompatible", "unknown-device"] }

@@ -5,6 +5,9 @@ import Foundation
 /// - `-mockDesktop` (or env `DEVTOOL_MOCK_DESKTOP=1`): preload two mock paired
 ///   desktops (one online, one offline) and keep all state in memory, so the
 ///   UI can be exercised and screenshotted without a relay.
+/// - `-mockServer` (Debug builds, with `-mockDesktop`): the offline mock desktop
+///   "studio-mini" is a DevTool server, so its `server.rack` glyph and "Server
+///   offline" show.
 /// - `-demoRoute sidebar|desktop|project|task|taskStatus|pair|pairConfirm|pairWait|settings`
 ///   (Debug builds, with `-mockDesktop`): open a screen directly, for screenshots.
 /// - `-demoRoute project|newStream|newTask [-demoProject <projectId>]`: the first
@@ -68,6 +71,7 @@ struct LaunchOptions: Sendable {
     }
 
     var mockDesktop: Bool
+    var mockServer = false
     var demoRoute: DemoRoute?
     var pairLink: String?
     var autoConfirmPairing = false
@@ -105,6 +109,7 @@ struct LaunchOptions: Sendable {
             pairLink = args[index + 1]
         }
         autoConfirmPairing = args.contains("-autoConfirmPairing")
+        mockServer = args.contains("-mockServer")
         func value(_ flag: String) -> String? {
             guard let index = args.firstIndex(of: flag), index + 1 < args.count else { return nil }
             return args[index + 1]

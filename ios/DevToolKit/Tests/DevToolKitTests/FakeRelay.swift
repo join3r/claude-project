@@ -82,6 +82,8 @@ actor FakeRelay: WebSocketConnector {
         var pushRegistration: PushRegisterParams?
         /// The hello's `features` (§8.1).
         var features: [String] = [DesktopFeature.taskNew]
+        /// The hello's `app` (§4.3); `devtool-server/…` makes it a server.
+        var helloApp = "fake/1"
         /// Tabs added with `task.new`, at the end of task `t`.
         var newTabs: [String] = []
         var streamNewParams: [StreamNewParams] = []
@@ -311,7 +313,7 @@ actor FakeRelay: WebSocketConnector {
             } else {
                 result = .rejected
             }
-            let reply = DesktopHello(v: reply.v, min: reply.min, app: "fake/1", features: features, desktopName: name, result: result)
+            let reply = DesktopHello(v: reply.v, min: reply.min, app: helloApp, features: features, desktopName: name, result: result)
             guard let msg2 = try? responder.writeMessage(reply.json.jsonData) else { return [] }
             var out = [frame(.handshake2, msg2)]
             guard result == .ok || result == .pending, let transport = try? responder.split() else { return out }
