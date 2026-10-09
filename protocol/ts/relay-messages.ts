@@ -34,7 +34,26 @@ export const RELAY_BUFFER_LOW_WATER_BYTES = 1024 * 1024
 export const RELAY_PHONE_BUFFER_CAP_BYTES = 8 * 1024 * 1024
 /** ...and desktops and servers. */
 export const RELAY_HOST_BUFFER_CAP_BYTES = 32 * 1024 * 1024
+/**
+ * A receiver whose send queue went over the high-water mark must drain to the
+ * low-water mark within this long, or the relay drops it and lets its senders go.
+ */
+export const RELAY_STALL_TIMEOUT_MS = 15_000
+/** Payload bytes per second (and burst) across all connections from one IP, any role. */
+export const RELAY_IP_BYTES_PER_SECOND = 16 * 1024 * 1024
+export const RELAY_IP_BYTES_BURST = 64 * 1024 * 1024
+/** Pushes per second (and burst) one connection may send; more are answered `rate` (§7.2). */
+export const RELAY_PUSH_RATE_PER_SECOND = 50
+export const RELAY_PUSH_RATE_BURST = 200
 export const RELAY_CONNECTIONS_PER_IP_PER_MINUTE = 20
+/** Open connections (authenticated or not) one IP may hold at once. */
+export const RELAY_MAX_CONNECTIONS_PER_IP = 64
+/** Pending pairs one device may be part of at once. */
+export const RELAY_MAX_PENDING_PER_DEVICE = 16
+/** Authorized pairs one device may be part of. */
+export const RELAY_MAX_PAIRS_PER_DEVICE = 256
+/** New pairs that devices on one IP may authorize per hour (burst as many). */
+export const RELAY_NEW_PAIRS_PER_IP_PER_HOUR = 60
 /** Binary relay frames start with the raw 16 bytes behind the peer's device ID (§3.9). */
 export const RELAY_BINARY_ID_BYTES = 16
 

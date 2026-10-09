@@ -183,4 +183,19 @@ describe('config', () => {
     })
     expect(() => loadConfig({ PORT: 'x' })).toThrow()
   })
+
+  it('reads limits from the environment, with K/M/G sizes', () => {
+    expect(loadConfig({}).limits).toBeUndefined()
+    expect(loadConfig({
+      RELAY_HOST_BYTES_PER_SECOND: '4M', RELAY_HOST_BYTES_BURST: '16m', RELAY_IP_BYTES_PER_SECOND: '8388608',
+      RELAY_IP_BYTES_BURST: '1G', RELAY_MAX_QUEUED_BYTES: '256M', RELAY_MAX_CONNECTIONS_PER_IP: '10',
+      RELAY_NEW_PAIRS_PER_IP_PER_HOUR: '5', RELAY_STALL_TIMEOUT_MS: '20000'
+    }).limits).toEqual({
+      hostBytesPerSecond: 4 << 20, hostBytesBurst: 16 << 20, ipBytesPerSecond: 8 << 20, ipBytesBurst: 1 << 30,
+      maxQueuedBytes: 256 << 20, maxConnectionsPerIp: 10, newPairsPerIpPerHour: 5, stallTimeoutMs: 20000
+    })
+    expect(() => loadConfig({ RELAY_MAX_CONNECTIONS_PER_IP: '10K' })).toThrow(/RELAY_MAX_CONNECTIONS_PER_IP/)
+    expect(() => loadConfig({ RELAY_HOST_BYTES_PER_SECOND: '0' })).toThrow(/RELAY_HOST_BYTES_PER_SECOND/)
+    expect(() => loadConfig({ RELAY_IP_BYTES_BURST: 'lots' })).toThrow(/RELAY_IP_BYTES_BURST/)
+  })
 })

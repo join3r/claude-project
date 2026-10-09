@@ -40,6 +40,8 @@ export interface RelayStore {
   deletePair(a: string, b: string): boolean
   /** Every pair `id` is part of, as owner or as peer. */
   pairsOf(id: string): Pair[]
+  /** How many pairs `id` is part of. */
+  countPairs(id: string): number
   close(): void
 }
 
@@ -91,6 +93,12 @@ export class MemoryStore implements RelayStore, PushStore {
 
   pairsOf(id: string): Pair[] {
     return [...this.#pairs.values()].filter((p) => p.ownerId === id || p.peerId === id).map((p) => ({ ...p }))
+  }
+
+  countPairs(id: string): number {
+    let n = 0
+    for (const p of this.#pairs.values()) if (p.ownerId === id || p.peerId === id) n++
+    return n
   }
 
   /** Phones that `hostId` (a desktop or server) authorized. */
@@ -201,6 +209,7 @@ export class SqliteStore implements RelayStore, PushStore {
   readonly #put: StatementSync
   readonly #delete: StatementSync
   readonly #of: StatementSync
+  readonly #count: StatementSync
   readonly #pushGet: StatementSync
   readonly #pushBump: StatementSync
   readonly #pushRetire: StatementSync
@@ -226,6 +235,7 @@ export class SqliteStore implements RelayStore, PushStore {
     )
     this.#delete = this.#db.prepare('DELETE FROM pairs WHERE (owner_id = ? AND peer_id = ?) OR (owner_id = ? AND peer_id = ?)')
     this.#of = this.#db.prepare('SELECT * FROM pairs WHERE owner_id = ? UNION ALL SELECT * FROM pairs WHERE peer_id = ?')
+    this.#count = this.#db.prepare('SELECT (SELECT COUNT(*) FROM pairs WHERE owner_id = ?) + (SELECT COUNT(*) FROM pairs WHERE peer_id = ?) AS n')
     this.#pushGet = this.#db.prepare('SELECT generation FROM push_devices WHERE device_id = ?')
     this.#pushBump = this.#db.prepare(
       `INSERT INTO push_devices (device_id, generation, updated_at) VALUES (?, 1, ?)
@@ -265,6 +275,10 @@ export class SqliteStore implements RelayStore, PushStore {
 
   pairsOf(id: string): Pair[] {
     return (this.#of.all(id, id) as unknown as PairRow[]).map(rowToPair)
+  }
+
+  countPairs(id: string): number {
+    return Number((this.#count.get(id, id) as { n: number }).n)
   }
 
   /** Phones that `hostId` (a desktop or server) authorized. */

@@ -644,17 +644,33 @@ function maskedFrame(opcode: number, payload: Buffer): Buffer {
 
 /** A desktop (Node's WebSocket) paired with a server on a raw socket the test can stop reading. */
 async function desktopAndRawServer(limits: Partial<RelayLimits>) {
-  const server = await relay({ limits })
+  // Every test client is on 127.0.0.1: lift the per-IP byte budget unless a test sets it.
+  const server = await relay({ limits: { ipBytesPerSecond: 1 << 30, ipBytesBurst: 1 << 30, ...limits } })
   const dDev = makeDevice()
-  const sDev = makeDevice()
   const desktop = await auth(server, 'desktop', dDev, undefined, { binary: true })
+  const { srv, sDev } = await addRawServer(server, desktop, dDev)
+  return { server, desktop, srv, dDev, sDev }
+}
+
+/** Another server on a raw socket, paired with `desktop` by token. */
+async function addRawServer(server: RelayServer, desktop: TestClient, dDev: Device) {
+  const sDev = makeDevice()
   const secret = await offer(desktop)
   const srv = await RawClient.connect(server)
   cleanups.push(() => srv.socket.destroy())
   await srv.auth('server', sDev, { pair: { to: dDev.id, token: secret.token }, binary: true })
   desktop.send({ t: 'authorize', peer: sDev.id, pub: pubOf(sDev) })
   await roundTrip(desktop)
-  return { server, desktop, srv, dDev, sDev }
+  return { srv, sDev }
+}
+
+/** Polls `get` until it is truthy, or fails after `ms`. */
+async function until(get: () => boolean, ms = 5000, what = 'condition'): Promise<void> {
+  const deadline = Date.now() + ms
+  while (!get()) {
+    if (Date.now() > deadline) throw new Error(`${what} not met in ${ms} ms`)
+    await sleep(10)
+  }
 }
 
 const CHUNK = 64 * 1024
@@ -784,5 +800,235 @@ describe('database from before servers', () => {
     expect(await phone.nextOfType('peer')).toEqual({ t: 'peer', id: dDev.id, state: 'online' })
     phone.frame(dDev.id, 'Aw')
     expect(await desktop.nextOfType('frame')).toEqual({ t: 'frame', from: pDev.id, data: 'Aw' })
+  })
+})
+
+describe('hardening', () => {
+  const fast = { hostBytesPerSecond: 1 << 30, hostBytesBurst: 1 << 30 }
+
+  /** Sends numbered 64 KiB frames from `desktop` to `to` until `done()`. */
+  async function flood(desktop: TestClient, to: string, done: () => boolean, from = 0): Promise<number> {
+    let sent = from
+    while (!done()) {
+      if (sent - from >= 2048) throw new Error('flooded 128 MiB without effect')
+      for (let i = 0; i < 16; i++) desktop.sendBinary(to, numbered(sent++))
+      await sleep(10)
+    }
+    return sent
+  }
+
+  it('drops a receiver that keeps pinging but never reads, and lets its sender go', async () => {
+    const { server, desktop, srv, sDev } = await desktopAndRawServer({
+      ...fast,
+      bufferHighWaterBytes: 256 * 1024,
+      bufferLowWaterBytes: 64 * 1024,
+      stallTimeoutMs: 500
+    })
+    srv.socket.pause()
+    // Alive as far as the idle timeout goes: it writes, it just never reads.
+    const pings = setInterval(() => srv.send({ t: 'ping' }), 100)
+    try {
+      let sent = await flood(desktop, sDev.id, () => server.relay.stats().paused > 0)
+      const pausedAt = Date.now()
+      await until(() => server.relay.stats().online === 1, 3000, 'stalled receiver dropped')
+      expect(Date.now() - pausedAt).toBeGreaterThanOrEqual(300)
+      expect(server.relay.stats()).toMatchObject({ dropped: 1, paused: 0, connections: 1 })
+      await roundTrip(desktop)
+      desktop.sendBinary(sDev.id, numbered(sent++))
+      expect(await desktop.next((m) => m.t === 'error' && m.code === 'offline')).toEqual({ t: 'error', code: 'offline', to: sDev.id })
+      expect(desktop.isClosed).toBe(false)
+    } finally {
+      clearInterval(pings)
+    }
+  })
+
+  it('drops a stalled receiver even after its senders left', async () => {
+    const { server, desktop, srv, sDev } = await desktopAndRawServer({ ...fast, bufferHighWaterBytes: 256 * 1024, bufferLowWaterBytes: 64 * 1024, stallTimeoutMs: 400 })
+    srv.socket.pause()
+    const pings = setInterval(() => srv.send({ t: 'ping' }), 100)
+    try {
+      await flood(desktop, sDev.id, () => server.relay.stats().paused > 0)
+      desktop.ws.close()
+      await until(() => server.relay.stats().online === 0, 3000, 'stalled receiver dropped')
+      expect(server.relay.stats()).toMatchObject({ dropped: 1, queued: 0 })
+    } finally {
+      clearInterval(pings)
+    }
+  })
+
+  it('keeps a receiver that drains in time', async () => {
+    const { server, desktop, srv, sDev } = await desktopAndRawServer({ ...fast, bufferHighWaterBytes: 256 * 1024, bufferLowWaterBytes: 64 * 1024, stallTimeoutMs: 1500 })
+    srv.socket.pause()
+    const sent = await flood(desktop, sDev.id, () => server.relay.stats().paused > 0)
+    await sleep(300)
+    srv.socket.resume()
+    await until(() => srv.binaryCount === sent, 10_000, 'everything delivered')
+    await sleep(1500)
+    expect(server.relay.stats()).toMatchObject({ dropped: 0, online: 2, paused: 0 })
+  })
+
+  it('drops the largest queues first once the relay-wide ceiling is passed', async () => {
+    const { server, desktop, srv: big, dDev, sDev: bigDev } = await desktopAndRawServer({
+      ...fast,
+      bufferHighWaterBytes: 1 << 30,
+      hostBufferCapBytes: 1 << 30,
+      maxQueuedBytes: 1024 * 1024,
+      queueSweepMs: 50
+    })
+    const { srv: small, sDev: smallDev } = await addRawServer(server, desktop, dDev)
+    big.socket.pause()
+    small.socket.pause()
+    for (let i = 0; i < 4; i++) desktop.sendBinary(smallDev.id, numbered(i))
+    await flood(desktop, bigDev.id, () => server.relay.stats().dropped > 0)
+    await sleep(200)
+    expect(server.relay.stats()).toMatchObject({ dropped: 1, online: 2 })
+    desktop.sendBinary(bigDev.id, numbered(0))
+    expect(await desktop.next((m) => m.t === 'error' && m.code === 'offline')).toMatchObject({ to: bigDev.id })
+    small.socket.resume()
+    await until(() => small.binaryCount === 4, 3000, 'small receiver served')
+  })
+
+  it('caps open connections per IP, and admits again once one closes', async () => {
+    const server = await relay({ limits: { maxConnectionsPerIp: 2 } })
+    const a = await TestClient.connect(server)
+    const b = await TestClient.connect(server)
+    clients.push({ close: () => a.ws.close(), get isClosed() { return a.isClosed } })
+    clients.push({ close: () => b.ws.close(), get isClosed() { return b.isClosed } })
+    await expect(TestClient.connect(server)).rejects.toThrow()
+    a.ws.close()
+    await until(() => server.relay.stats().connections === 1, 3000, 'socket released')
+    const c = await TestClient.connect(server)
+    clients.push({ close: () => c.ws.close(), get isClosed() { return c.isClosed } })
+    expect(server.relay.stats().connections).toBe(2)
+  })
+
+  it('shares one byte budget across every connection from an IP', async () => {
+    const server = await relay({ limits: { ipBytesPerSecond: 256 * 1024, ipBytesBurst: 256 * 1024 } })
+    const sDev = makeDevice()
+    const srv = await auth(server, 'server', sDev, undefined, { binary: true })
+    const desktops: TestClient[] = []
+    for (let i = 0; i < 2; i++) {
+      const dDev = makeDevice()
+      const desktop = await auth(server, 'desktop', dDev, undefined, { binary: true })
+      const secret = await offer(desktop)
+      srv.send({ t: 'pair', to: dDev.id, token: b64uEncode(secret.token) })
+      await srv.next((m) => m.t === 'peer' && m.id === dDev.id)
+      desktop.send({ t: 'authorize', peer: sDev.id, pub: pubOf(sDev) })
+      await roundTrip(desktop)
+      desktops.push(desktop)
+    }
+    await sleep(1100) // let the IP budget refill after the setup
+    const started = Date.now()
+    for (let i = 0; i < 4; i++) for (const desktop of desktops) desktop.sendBinary(sDev.id, new Uint8Array(64 * 1024).fill(i + 1))
+    for (let i = 0; i < 8; i++) await srv.nextBinary(5000)
+    // Each desktop alone is well within its own 8 MiB/s; together they pass the IP's 256 KiB/s.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(600)
+    for (const desktop of desktops) expect(desktop.isClosed).toBe(false)
+  })
+
+  it('limits pushes per connection', async () => {
+    const server = await relay({ limits: { pushRatePerSecond: 1, pushRateBurst: 2 } })
+    const srv = await auth(server, 'server', makeDevice())
+    for (let id = 1; id <= 3; id++) srv.send({ t: 'push', id, cap: 'c', data: 'AQ' })
+    const results = [await srv.nextOfType('pushed'), await srv.nextOfType('pushed'), await srv.nextOfType('pushed')]
+    expect(results.map((r) => r.result)).toEqual(['unavailable', 'unavailable', 'rate'])
+  })
+
+  it('caps pending pairs per device, pairs per device, and new pairs per IP', async () => {
+    const server = await relay({ limits: { maxPendingPerDevice: 2, maxPairsPerDevice: 2, newPairsPerIpPerHour: 2 } })
+    const sDev = makeDevice()
+    const srv = await auth(server, 'server', sDev)
+    const devs: Device[] = []
+    const desktops: TestClient[] = []
+    for (let i = 0; i < 3; i++) {
+      devs.push(makeDevice())
+      desktops.push(await auth(server, 'desktop', devs[i]))
+    }
+    const pairWith = async (desktop: TestClient): Promise<void> => {
+      const secret = await offer(srv)
+      desktop.send({ t: 'pair', to: sDev.id, token: b64uEncode(secret.token) })
+      await roundTrip(desktop)
+    }
+    await pairWith(desktops[0])
+    await pairWith(desktops[1])
+    await pairWith(desktops[2])
+    expect(await desktops[2].nextOfType('error')).toMatchObject({ code: 'forbidden', message: 'too many pending pairs', to: sDev.id })
+    expect(server.relay.stats().pending).toBe(2)
+
+    srv.send({ t: 'authorize', peer: devs[0].id, pub: pubOf(devs[0]) })
+    srv.send({ t: 'authorize', peer: devs[1].id, pub: pubOf(devs[1]) })
+    await roundTrip(srv)
+    expect((await srv.drain(50)).filter((m) => m.t === 'error')).toEqual([])
+    // Two pairs now: a third is refused. With one revoked, the IP's third new pair is.
+    await pairWith(desktops[2])
+    srv.send({ t: 'authorize', peer: devs[2].id, pub: pubOf(devs[2]) })
+    expect(await srv.nextOfType('error')).toMatchObject({ code: 'forbidden', message: 'too many pairs', to: devs[2].id })
+    srv.send({ t: 'revoke', peer: devs[0].id })
+    srv.send({ t: 'authorize', peer: devs[2].id, pub: pubOf(devs[2]) })
+    expect(await srv.nextOfType('error')).toMatchObject({ code: 'rate', to: devs[2].id })
+    // Repeating an existing authorize is free.
+    srv.send({ t: 'authorize', peer: devs[1].id, pub: pubOf(devs[1]) })
+    await roundTrip(srv)
+    expect((await srv.drain(50)).filter((m) => m.t === 'error')).toEqual([])
+  })
+
+  it('does not rewrite a pair that is already stored', async () => {
+    let writes = 0
+    const store = new MemoryStore()
+    const putPair = store.putPair.bind(store)
+    store.putPair = (pair) => {
+      writes++
+      putPair(pair)
+    }
+    const server = await relay({ store })
+    const { desktop, sDev } = await tokenFlow(server)
+    for (let i = 0; i < 20; i++) desktop.send({ t: 'authorize', peer: sDev.id, pub: pubOf(sDev) })
+    await roundTrip(desktop)
+    expect(writes).toBe(1)
+  })
+
+  it('makes hosts pay per watched ID', async () => {
+    const server = await relay({ limits: { hostRatePerSecond: 100, hostRateBurst: 10 } })
+    const desktop = await auth(server, 'desktop', makeDevice())
+    const ids = Array.from({ length: 50 }, () => makeDevice().id)
+    const started = Date.now()
+    desktop.send({ t: 'watch', desktops: ids })
+    desktop.send({ t: 'ping' })
+    await desktop.nextOfType('pong', 5000)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300)
+  })
+
+  it('forgets the oldest lastSeen beyond its cap', async () => {
+    const server = await relay({ limits: { maxLastSeen: 2 } })
+    const dDev = makeDevice()
+    const pDev = makeDevice()
+    const desktop = await auth(server, 'desktop', dDev)
+    const secret = await offer(desktop)
+    const phone = await auth(server, 'phone', pDev, { to: dDev.id, token: secret.token })
+    desktop.send({ t: 'authorize', peer: pDev.id, pub: pubOf(pDev) })
+    await roundTrip(desktop)
+    phone.ws.close()
+    await desktop.next((m) => m.t === 'peer' && m.id === pDev.id && m.state === 'offline')
+    desktop.ws.close()
+    await until(() => server.relay.stats().connections === 0, 3000, 'both gone')
+    const other = await auth(server, 'phone', makeDevice())
+    other.ws.close()
+    await until(() => server.relay.stats().connections === 0, 3000, 'third gone')
+    // The phone's lastSeen was the oldest of three: the roster no longer reports it.
+    const back = await auth(server, 'desktop', dDev)
+    expect(await back.drain(100)).toEqual([])
+  })
+
+  it('keeps pairing refusals out of the info log', async () => {
+    const lines: Array<{ level: string; event: string }> = []
+    const capture = (level: string) => (event: string): void => void lines.push({ level, event })
+    const server = await relay({ logger: { debug: capture('debug'), info: capture('info'), warn: capture('warn'), error: capture('error') } })
+    const host = await auth(server, 'desktop', makeDevice())
+    const target = await auth(server, 'server', makeDevice())
+    await offer(target)
+    for (let i = 0; i < 50; i++) host.send({ t: 'pair', to: target.id, token: b64uEncode(makeDevice().ed.pub) })
+    await roundTrip(host)
+    expect(lines.filter((l) => l.event === 'pair-refused').length).toBe(50)
+    expect(lines.filter((l) => l.level === 'info' && l.event === 'pair-refused')).toEqual([])
   })
 })

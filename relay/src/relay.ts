@@ -11,10 +11,19 @@ import {
   RELAY_HOST_RATE_BURST,
   RELAY_HOST_RATE_PER_SECOND,
   RELAY_IDLE_TIMEOUT_MS,
+  RELAY_IP_BYTES_BURST,
+  RELAY_IP_BYTES_PER_SECOND,
+  RELAY_MAX_CONNECTIONS_PER_IP,
   RELAY_MAX_FRAME_BYTES,
+  RELAY_MAX_PAIRS_PER_DEVICE,
+  RELAY_MAX_PENDING_PER_DEVICE,
+  RELAY_NEW_PAIRS_PER_IP_PER_HOUR,
   RELAY_PHONE_BUFFER_CAP_BYTES,
+  RELAY_PUSH_RATE_BURST,
+  RELAY_PUSH_RATE_PER_SECOND,
   RELAY_RATE_BURST,
   RELAY_RATE_PER_SECOND,
+  RELAY_STALL_TIMEOUT_MS,
   RelayCloseCode,
   UnsupportedMessageError,
   b64uDecode,
@@ -70,20 +79,42 @@ export interface RelayLimits {
   hostRateBurst: number
   hostBytesPerSecond: number
   hostBytesBurst: number
+  /** Every connection from one IP shares this byte budget, throttled like a host's. */
+  ipBytesPerSecond: number
+  ipBytesBurst: number
+  /** Pushes per connection; more are answered `rate`. */
+  pushRatePerSecond: number
+  pushRateBurst: number
   /** Backpressure (§3.10): a receiver queue over the high-water mark pauses its senders... */
   bufferHighWaterBytes: number
   /** ...until it is back at the low-water mark. */
   bufferLowWaterBytes: number
+  /** A receiver that doesn't get from the high-water to the low-water mark this fast is dropped. */
+  stallTimeoutMs: number
   /** Past these the receiver is disconnected. */
   phoneBufferCapBytes: number
   hostBufferCapBytes: number
+  /** All send queues together; past it the largest queues are dropped first. */
+  maxQueuedBytes: number
+  /** How often the relay adds up its send queues against `maxQueuedBytes`. */
+  queueSweepMs: number
   connectionsPerIpPerMinute: number
+  /** Open sockets per IP, authenticated or not. */
+  maxConnectionsPerIp: number
   /** Offers whose `exp` is further out than this are clamped to it. */
   maxOfferTtlSeconds: number
   /** Most IDs one `watch` may carry. */
   maxWatch: number
   /** Pushes one connection may have awaiting a result; more are answered `rate`. */
   maxPushesInFlight: number
+  /** Pending pairs one device may be part of at once. */
+  maxPendingPerDevice: number
+  /** Authorized pairs one device may be part of. */
+  maxPairsPerDevice: number
+  /** New pairs that the devices on one IP may authorize per hour. */
+  newPairsPerIpPerHour: number
+  /** Devices whose `lastSeen` the relay remembers; the oldest are forgotten first. */
+  maxLastSeen: number
 }
 
 export const DEFAULT_LIMITS: RelayLimits = {
@@ -97,14 +128,26 @@ export const DEFAULT_LIMITS: RelayLimits = {
   hostRateBurst: RELAY_HOST_RATE_BURST,
   hostBytesPerSecond: RELAY_HOST_BYTES_PER_SECOND,
   hostBytesBurst: RELAY_HOST_BYTES_BURST,
+  ipBytesPerSecond: RELAY_IP_BYTES_PER_SECOND,
+  ipBytesBurst: RELAY_IP_BYTES_BURST,
+  pushRatePerSecond: RELAY_PUSH_RATE_PER_SECOND,
+  pushRateBurst: RELAY_PUSH_RATE_BURST,
   bufferHighWaterBytes: RELAY_BUFFER_HIGH_WATER_BYTES,
   bufferLowWaterBytes: RELAY_BUFFER_LOW_WATER_BYTES,
+  stallTimeoutMs: RELAY_STALL_TIMEOUT_MS,
   phoneBufferCapBytes: RELAY_PHONE_BUFFER_CAP_BYTES,
   hostBufferCapBytes: RELAY_HOST_BUFFER_CAP_BYTES,
+  maxQueuedBytes: 512 * 1024 * 1024,
+  queueSweepMs: 1000,
   connectionsPerIpPerMinute: RELAY_CONNECTIONS_PER_IP_PER_MINUTE,
+  maxConnectionsPerIp: RELAY_MAX_CONNECTIONS_PER_IP,
   maxOfferTtlSeconds: 900,
   maxWatch: 256,
-  maxPushesInFlight: 64
+  maxPushesInFlight: 64,
+  maxPendingPerDevice: RELAY_MAX_PENDING_PER_DEVICE,
+  maxPairsPerDevice: RELAY_MAX_PAIRS_PER_DEVICE,
+  newPairsPerIpPerHour: RELAY_NEW_PAIRS_PER_IP_PER_HOUR,
+  maxLastSeen: 100_000
 }
 
 export interface Clock {
@@ -119,6 +162,8 @@ export interface Connection {
   send(text: string): void
   sendBinary(data: Uint8Array): void
   close(code: number, reason: string): void
+  /** Drops the socket at once, with whatever it had queued and no close frame. */
+  terminate(): void
   /** Bytes queued for this socket that the OS hasn't taken yet. */
   bufferedBytes(): number
   /** Calls `fn` once, when that queue is at or below `bytes`. A later call replaces it. */
@@ -164,11 +209,13 @@ export interface RelayStats {
   paused: number
   /** Bytes queued for all sockets that the OS hasn't taken yet. */
   queued: number
+  /** Connections dropped for not reading (stalled, or over the relay-wide queue ceiling). */
+  dropped: number
 }
 
 export interface Relay {
   readonly limits: RelayLimits
-  /** Per-IP connection budget; call before accepting a socket. */
+  /** Per-IP connection budget and cap; call before accepting a socket. */
   admit(ip: string): boolean
   open(conn: Connection, info: { ip: string }): ConnectionHandle
   stats(): RelayStats
@@ -179,14 +226,25 @@ export interface Relay {
 /** Why a connection's reading is paused: its own budget, or a receiver it fills up. */
 type PauseReason = 'rate' | Client
 
+/** What the relay keeps per client IP while it has sockets, or budgets still recovering. */
+interface IpState {
+  connections: number
+  /** Payload bytes from every connection of this IP. */
+  bytes: TokenBucket
+  /** New pairs authorized from this IP. */
+  newPairs: TokenBucket
+}
+
 interface Client {
   readonly conn: Connection
   readonly ip: string
+  readonly ipState: IpState
   readonly nonce: string
   /** Messages. Phones (and everyone before hello) `take`; desktops and servers `spend`. */
   bucket: TokenBucket
   /** Payload bytes; desktops and servers only. */
   bytes: TokenBucket | null
+  readonly pushes: TokenBucket
   id: string | null
   role: Role | null
   pub: string | null
@@ -196,6 +254,8 @@ interface Client {
   helloTimer: ReturnType<typeof setTimeout> | null
   idleTimer: ReturnType<typeof setTimeout> | null
   throttleTimer: ReturnType<typeof setTimeout> | null
+  /** Armed while the send queue is over the high-water mark and hasn't drained since. */
+  stallTimer: ReturnType<typeof setTimeout> | null
   rateStrikeAt: number | null
   /** Hosts whose presence this client asked for (`watch`), with the role each holds. */
   watched: Map<string, Role>
@@ -263,6 +323,8 @@ export function createRelay(options: RelayOptions): Relay {
   const store = options.store
   const clock = options.clock ?? systemClock
   const limits: RelayLimits = { ...DEFAULT_LIMITS, ...options.limits }
+  // A low-water mark above the high-water mark would release (and disarm) at once.
+  limits.bufferLowWaterBytes = Math.min(limits.bufferLowWaterBytes, limits.bufferHighWaterBytes)
   const log = options.logger ?? silentLogger
   const forwarder = options.push ?? null
   const ipLimiter = new IpLimiter(limits.connectionsPerIpPerMinute)
@@ -274,17 +336,51 @@ export function createRelay(options: RelayOptions): Relay {
   const offers = new Map<string, Offer>()
   /** Pending peers, keyed `ownerId:peerId`. Survive a reconnect of either side until `expMs`. */
   const pending = new Map<string, Pending>()
-  /** When each device last disconnected (unix ms). Memory only. */
+  /** The same pending pairs, by each device in them (both sides). */
+  const pendingOf = new Map<string, Set<Pending>>()
+  /** When each device last disconnected (unix ms), oldest first. Memory only, capped. */
   const lastSeen = new Map<string, number>()
+  const perIp = new Map<string, IpState>()
+  let dropped = 0
 
-  const pruneTimer = setInterval(() => ipLimiter.prune(clock.now()), 60_000)
+  const pruneTimer = setInterval(() => prune(clock.now()), 60_000)
   pruneTimer.unref?.()
+  const sweepTimer = setInterval(sweepQueues, limits.queueSweepMs)
+  sweepTimer.unref?.()
 
   const pendingKey = (ownerId: string, peerId: string): string => `${ownerId}:${peerId}`
+
+  function prune(now: number): void {
+    ipLimiter.prune(now)
+    for (const [ip, state] of perIp) {
+      if (state.connections === 0 && state.bytes.isFull(now) && state.newPairs.isFull(now)) perIp.delete(ip)
+    }
+  }
+
+  function ipStateFor(ip: string): IpState {
+    let state = perIp.get(ip)
+    if (!state) {
+      const now = clock.now()
+      state = {
+        connections: 0,
+        bytes: new TokenBucket(limits.ipBytesPerSecond, limits.ipBytesBurst, now),
+        newPairs: new TokenBucket(limits.newPairsPerIpPerHour / 3600, limits.newPairsPerIpPerHour, now)
+      }
+      perIp.set(ip, state)
+    }
+    return state
+  }
+
+  function rememberSeen(id: string, at: number): void {
+    lastSeen.delete(id)
+    lastSeen.set(id, at)
+    if (lastSeen.size > limits.maxLastSeen) lastSeen.delete(lastSeen.keys().next().value!)
+  }
 
   function send(client: Client, message: ServerMessage): void {
     if (client.closed) return
     client.conn.send(encodeRelayMessage(message))
+    watchQueue(client)
   }
 
   function sendError(client: Client, code: RelayErrorCode, message?: string, to?: string): void {
@@ -304,6 +400,35 @@ export function createRelay(options: RelayOptions): Relay {
     return p && p.expMs > clock.now() ? p : null
   }
 
+  function pendingCount(id: string): number {
+    return pendingOf.get(id)?.size ?? 0
+  }
+
+  function addPending(p: Pending): void {
+    removePending(p.ownerId, p.peerId)
+    pending.set(pendingKey(p.ownerId, p.peerId), p)
+    for (const id of [p.ownerId, p.peerId]) {
+      let set = pendingOf.get(id)
+      if (!set) pendingOf.set(id, (set = new Set()))
+      set.add(p)
+    }
+  }
+
+  /** Removes the pending pair (owner, peer), if any. Returns whether there was one. */
+  function removePending(ownerId: string, peerId: string): boolean {
+    const key = pendingKey(ownerId, peerId)
+    const p = pending.get(key)
+    if (!p) return false
+    clearTimeout(p.timer)
+    pending.delete(key)
+    for (const id of [p.ownerId, p.peerId]) {
+      const set = pendingOf.get(id)
+      set?.delete(p)
+      if (set?.size === 0) pendingOf.delete(id)
+    }
+    return true
+  }
+
   /** The authorized or pending pair between `a` and `b`, in whichever orientation. */
   function linkBetween(a: string, b: string): Link | null {
     const pair = store.findPair(a, b)
@@ -315,20 +440,8 @@ export function createRelay(options: RelayOptions): Relay {
   function linksOf(id: string): Link[] {
     const links: Link[] = store.pairsOf(id).map(pairLink)
     const now = clock.now()
-    for (const p of pending.values()) {
-      if ((p.ownerId === id || p.peerId === id) && p.expMs > now) links.push(p)
-    }
+    for (const p of pendingOf.get(id) ?? []) if (p.expMs > now) links.push(p)
     return links
-  }
-
-  /** Cancels the pending pair (owner, peer), if any. Returns whether there was one. */
-  function cancelPending(ownerId: string, peerId: string): boolean {
-    const key = pendingKey(ownerId, peerId)
-    const p = pending.get(key)
-    if (!p) return false
-    clearTimeout(p.timer)
-    pending.delete(key)
-    return true
   }
 
   function peerMessage(id: string, state: PeerState, seen?: number): ServerMessage {
@@ -383,7 +496,7 @@ export function createRelay(options: RelayOptions): Relay {
     send(ownerHosts ? owner : peer, peerMessage(ownerHosts ? link.peerId : link.ownerId, 'online'))
   }
 
-  // ---- reading: pause, throttle, backpressure (§3.10) -------------------------------
+  // ---- reading: pause, throttle, backpressure, stalls (§3.10) -------------------------
 
   function pauseFor(client: Client, reason: PauseReason): void {
     if (client.closed || client.pausedBy.has(reason)) return
@@ -397,15 +510,19 @@ export function createRelay(options: RelayOptions): Relay {
     client.conn.resume()
   }
 
-  /** Desktops and servers over budget: stop reading until both buckets are out of debt. */
+  /** How long until every budget this client spends from is out of debt. */
+  function budgetWait(client: Client, now: number): number {
+    return Math.max(client.bucket.waitMs(now), client.bytes?.waitMs(now) ?? 0, client.ipState.bytes.waitMs(now))
+  }
+
+  /** Over budget: stop reading until every bucket it spends from is out of debt. */
   function throttle(client: Client, waitMs: number): void {
-    if (client.throttleTimer) return
+    if (client.throttleTimer || client.closed) return
     pauseFor(client, 'rate')
     const wake = (): void => {
       client.throttleTimer = null
       if (client.closed) return
-      const now = clock.now()
-      const again = Math.max(client.bucket.waitMs(now), client.bytes?.waitMs(now) ?? 0)
+      const again = budgetWait(client, clock.now())
       if (again > 0) {
         client.throttleTimer = setTimeout(wake, again)
         client.throttleTimer.unref?.()
@@ -417,16 +534,35 @@ export function createRelay(options: RelayOptions): Relay {
     client.throttleTimer.unref?.()
   }
 
+  /**
+   * After anything was queued for `client`: once its queue is over the high-water mark,
+   * it has `stallTimeoutMs` to drain to the low-water mark, or it is dropped.
+   */
+  function watchQueue(client: Client): void {
+    if (client.stallTimer || client.closed || client.conn.bufferedBytes() <= limits.bufferHighWaterBytes) return
+    client.stallTimer = setTimeout(() => {
+      client.stallTimer = null
+      kill(client, 'stalled')
+    }, limits.stallTimeoutMs)
+    client.stallTimer.unref?.()
+    client.conn.onBufferBelow(limits.bufferLowWaterBytes, () => drained(client))
+  }
+
+  function drained(client: Client): void {
+    if (client.stallTimer) clearTimeout(client.stallTimer)
+    client.stallTimer = null
+    releaseSenders(client)
+  }
+
   /** After a frame reached `receiver`: hold its sender back while the receiver's queue is too long. */
   function applyBackpressure(sender: Client, receiver: Client): void {
     const queued = receiver.conn.bufferedBytes()
-    if (queued <= limits.bufferHighWaterBytes) return
+    if (queued <= limits.bufferHighWaterBytes || receiver.closed) return
     if (!receiver.blockedSenders.has(sender)) {
       receiver.blockedSenders.add(sender)
       pauseFor(sender, receiver)
       log.debug('backpressure', { from: sender.id, to: receiver.id, queued })
     }
-    receiver.conn.onBufferBelow(limits.bufferLowWaterBytes, () => releaseSenders(receiver))
   }
 
   function releaseSenders(receiver: Client): void {
@@ -436,15 +572,47 @@ export function createRelay(options: RelayOptions): Relay {
     for (const sender of senders) resumeFor(sender, receiver)
   }
 
+  /**
+   * Drops a connection that isn't reading what we queue for it. A close frame would
+   * only wait behind that queue, so the socket goes at once; the client sees 1006.
+   */
+  function kill(client: Client, reason: 'stalled' | 'queue-ceiling'): void {
+    if (client.closed) return
+    dropped++
+    log.info('dropped', { id: client.id, role: client.role, ip: client.ip, reason, queued: client.conn.bufferedBytes() })
+    cleanup(client)
+    client.conn.terminate()
+  }
+
+  /** Relay-wide ceiling on queued bytes: drop the largest queues until back under it. */
+  function sweepQueues(): void {
+    let total = 0
+    const queues: Array<{ client: Client; queued: number }> = []
+    for (const client of clients) {
+      const queued = client.conn.bufferedBytes()
+      if (queued === 0) continue
+      total += queued
+      queues.push({ client, queued })
+    }
+    if (total <= limits.maxQueuedBytes) return
+    queues.sort((a, b) => b.queued - a.queued)
+    for (const { client, queued } of queues) {
+      if (total <= limits.maxQueuedBytes) break
+      kill(client, 'queue-ceiling')
+      total -= queued
+    }
+  }
+
   // ---- lifecycle ------------------------------------------------------------------
 
   function clearTimers(client: Client): void {
-    if (client.helloTimer) clearTimeout(client.helloTimer)
-    if (client.idleTimer) clearTimeout(client.idleTimer)
-    if (client.throttleTimer) clearTimeout(client.throttleTimer)
+    for (const timer of [client.helloTimer, client.idleTimer, client.throttleTimer, client.stallTimer]) {
+      if (timer) clearTimeout(timer)
+    }
     client.helloTimer = null
     client.idleTimer = null
     client.throttleTimer = null
+    client.stallTimer = null
   }
 
   /** Forgets a connection. Presence and offers go with it unless a newer socket took over the ID. */
@@ -452,6 +620,7 @@ export function createRelay(options: RelayOptions): Relay {
     if (!clients.has(client)) return
     clients.delete(client)
     client.closed = true
+    client.ipState.connections--
     clearTimers(client)
     releaseSenders(client)
     for (const reason of client.pausedBy) if (reason !== 'rate') reason.blockedSenders.delete(client)
@@ -459,7 +628,7 @@ export function createRelay(options: RelayOptions): Relay {
     const id = client.id
     if (id === null || online.get(id) !== client) return
     online.delete(id)
-    lastSeen.set(id, clock.now())
+    rememberSeen(id, clock.now())
     offers.delete(id)
     announce(client, 'offline')
     log.info('disconnected', { id, role: client.role })
@@ -522,6 +691,7 @@ export function createRelay(options: RelayOptions): Relay {
   /**
    * `client` presented `token` for `ownerId`'s offer (hello `pair`, or the `pair`
    * message): make it pending under that offer. Returns whether a new pending pair exists.
+   * Refusals log at debug only: a client can send them as fast as its budget allows.
    */
   function attachPending(client: Client, ownerId: string, token: string): boolean {
     const peerId = client.id!
@@ -531,30 +701,33 @@ export function createRelay(options: RelayOptions): Relay {
       return false
     }
     if (store.findPair(ownerId, peerId)) return false
+    const key = pendingKey(ownerId, peerId)
     const existing = livePending(ownerId, peerId)
     if (existing && existing.peerPub === client.pub && existing.peerRole === peerRole) return false
     const offer = offers.get(ownerId)
     const now = clock.now()
     const presented = sha256(b64uDecode(token))
     if (!offer || offer.expMs <= now || !constantTimeEqual(presented, offer.tokenHash)) {
-      log.info('pair-refused', { peer: peerId, owner: ownerId })
+      log.debug('pair-refused', { peer: peerId, owner: ownerId })
       sendError(client, 'forbidden', 'no live pairing offer matches this token', ownerId)
       return false
     }
     if (!mayPair(offer.ownerRole, peerRole)) {
-      log.info('pair-refused', { peer: peerId, owner: ownerId, roles: `${peerRole}/${offer.ownerRole}` })
+      log.debug('pair-refused', { peer: peerId, owner: ownerId, roles: `${peerRole}/${offer.ownerRole}` })
       sendError(client, 'forbidden', `a ${peerRole} cannot pair with a ${offer.ownerRole}`, ownerId)
+      return false
+    }
+    if (!pending.has(key) && (pendingCount(ownerId) >= limits.maxPendingPerDevice || pendingCount(peerId) >= limits.maxPendingPerDevice)) {
+      log.debug('pair-refused', { peer: peerId, owner: ownerId, reason: 'too many pending' })
+      sendError(client, 'forbidden', 'too many pending pairs', ownerId)
       return false
     }
     // One use: the next device needs the owner's next offer.
     offers.delete(ownerId)
-    const key = pendingKey(ownerId, peerId)
-    const old = pending.get(key)
-    if (old) clearTimeout(old.timer)
     const timer = setTimeout(() => lapse(key), Math.max(0, offer.expMs - now))
     timer.unref?.()
-    pending.set(key, { ownerId, ownerRole: offer.ownerRole, peerId, peerRole, peerPub: client.pub!, expMs: offer.expMs, timer })
-    log.info('pending', { peer: peerId, owner: ownerId, role: peerRole })
+    addPending({ ownerId, ownerRole: offer.ownerRole, peerId, peerRole, peerPub: client.pub!, expMs: offer.expMs, timer })
+    log.debug('pending', { peer: peerId, owner: ownerId, role: peerRole })
     return true
   }
 
@@ -562,8 +735,8 @@ export function createRelay(options: RelayOptions): Relay {
   function lapse(key: string): void {
     const p = pending.get(key)
     if (!p) return
-    pending.delete(key)
-    log.info('pending-expired', { peer: p.peerId, owner: p.ownerId })
+    removePending(p.ownerId, p.peerId)
+    log.debug('pending-expired', { peer: p.peerId, owner: p.ownerId })
     const peer = onlineAs(p.peerId, p.peerRole)
     if (!peer) return
     const owner = onlineAs(p.ownerId, p.ownerRole)
@@ -603,6 +776,17 @@ export function createRelay(options: RelayOptions): Relay {
     const kind = pendingHere?.peerRole ?? existing?.kind
     if (knownPub === undefined || kind === undefined) return sendError(client, 'forbidden', 'peer is neither pending nor authorized', peerId)
     if (knownPub !== msg.pub) return sendError(client, 'forbidden', 'pub does not match the authenticated peer', peerId)
+    if (existing && existing.kind === kind && existing.ownerPub === client.pub) {
+      // Already stored as is: repeating `authorize` costs no write.
+      if (pendingHere) removePending(ownerId, peerId)
+      return
+    }
+    if (!existing) {
+      if (store.countPairs(ownerId) >= limits.maxPairsPerDevice || store.countPairs(peerId) >= limits.maxPairsPerDevice) {
+        return sendError(client, 'forbidden', 'too many pairs', peerId)
+      }
+      if (!client.ipState.newPairs.take(clock.now())) return sendError(client, 'rate', 'too many new pairs from this address; try again later', peerId)
+    }
     store.putPair({
       ownerId,
       ownerRole: client.role!,
@@ -612,8 +796,8 @@ export function createRelay(options: RelayOptions): Relay {
       peerPub: msg.pub,
       createdAt: existing?.createdAt ?? clock.now()
     })
-    cancelPending(ownerId, peerId)
-    cancelPending(peerId, ownerId)
+    removePending(ownerId, peerId)
+    removePending(peerId, ownerId)
     log.info('authorized', { owner: ownerId, peer: peerId, kind })
   }
 
@@ -624,10 +808,11 @@ export function createRelay(options: RelayOptions): Relay {
     const p = pending.get(pendingKey(selfId, otherId)) ?? pending.get(pendingKey(otherId, selfId))
     const link: Link | null = pair ? pairLink(pair) : (p ?? null)
     if (!link) return
-    store.deletePair(selfId, otherId)
-    cancelPending(selfId, otherId)
-    cancelPending(otherId, selfId)
-    log.info('revoked', { by: selfId, peer: otherId })
+    if (pair) store.deletePair(selfId, otherId)
+    removePending(selfId, otherId)
+    removePending(otherId, selfId)
+    if (pair) log.info('revoked', { by: selfId, peer: otherId })
+    else log.debug('pending-cancelled', { by: selfId, peer: otherId })
     client.watched.delete(otherId)
     const other = onlineAs(otherId, roleIn(link, otherId))
     if (other) {
@@ -640,15 +825,23 @@ export function createRelay(options: RelayOptions): Relay {
     if (msg.desktops.length > limits.maxWatch) return sendError(client, 'bad-request', `watch at most ${limits.maxWatch} desktops`)
     const selfId = client.id!
     const role = client.role!
+    // Hosts pay for each ID: one watch can produce as many replies as it names.
+    if (client.bytes) {
+      const wait = client.bucket.spend(msg.desktops.length, clock.now())
+      if (wait > 0) throttle(client, wait)
+    }
+    // One indexed query for the watcher's pairs, instead of one per ID.
+    const hosts = new Map<string, Role>()
+    for (const pair of store.pairsOf(selfId)) {
+      const link = pairLink(pair)
+      if (roleIn(link, selfId) !== role) continue
+      const other = otherSide(link, selfId)
+      if (HOST_RANK[other.role] > HOST_RANK[role]) hosts.set(other.id, other.role)
+    }
     const watched = new Map<string, Role>()
     for (const target of msg.desktops) {
-      if (watched.has(target)) continue
-      const pair = store.findPair(selfId, target)
-      if (!pair) continue
-      const link = pairLink(pair)
-      const targetRole = roleIn(link, target)
-      if (roleIn(link, selfId) !== role || HOST_RANK[targetRole] <= HOST_RANK[role]) continue
-      watched.set(target, targetRole)
+      const targetRole = hosts.get(target)
+      if (targetRole !== undefined) watched.set(target, targetRole)
     }
     client.watched = watched
     for (const [target, targetRole] of watched) {
@@ -667,8 +860,12 @@ export function createRelay(options: RelayOptions): Relay {
     if (!link || roleIn(link, senderId) !== sender.role) return sendError(sender, 'forbidden', 'not paired', to)
     const receiver = onlineAs(to, roleIn(link, to))
     if (!receiver) return sendError(sender, 'offline', undefined, to)
-    if (receiver.binary) receiver.conn.sendBinary(encodeRelayBinaryFrame(senderId, envelope ?? b64uDecode(b64!)))
-    else send(receiver, { t: 'frame', from: senderId, data: b64 ?? b64uEncode(envelope!) })
+    if (receiver.binary) {
+      receiver.conn.sendBinary(encodeRelayBinaryFrame(senderId, envelope ?? b64uDecode(b64!)))
+      watchQueue(receiver)
+    } else {
+      send(receiver, { t: 'frame', from: senderId, data: b64 ?? b64uEncode(envelope!) })
+    }
     applyBackpressure(sender, receiver)
   }
 
@@ -685,6 +882,8 @@ export function createRelay(options: RelayOptions): Relay {
 
   function onPush(client: Client, msg: PushMessage): void {
     const reply = (result: PushResult): void => send(client, { t: 'pushed', id: msg.id, result })
+    // Each push may cost an HTTPS call upstream: keep it at the budget desktops always had.
+    if (!client.pushes.take(clock.now())) return reply('rate')
     if (!forwarder) return reply('unavailable')
     if (client.pushesInFlight >= limits.maxPushesInFlight) return reply('rate')
     client.pushesInFlight++
@@ -736,10 +935,11 @@ export function createRelay(options: RelayOptions): Relay {
     if (client.closed) return
     if (data.length > limits.maxFrameBytes) return drop(client, RelayCloseCode.TooBig, 'message too big')
     const now = clock.now()
+    // Every connection of an IP shares one byte budget, throttled (§3.10).
+    let wait = client.ipState.bytes.spend(data.length, now)
     if (client.bytes) {
-      // Desktops and servers: throttled (reading paused), never refused (§3.10).
-      const wait = Math.max(client.bucket.spend(1, now), client.bytes.spend(data.length, now))
-      if (wait > 0) throttle(client, wait)
+      // Desktops and servers: throttled (reading paused), never refused.
+      wait = Math.max(wait, client.bucket.spend(1, now), client.bytes.spend(data.length, now))
     } else if (!client.bucket.take(now)) {
       if (client.rateStrikeAt !== null && now - client.rateStrikeAt < limits.rateStrikeWindowMs) {
         log.info('rate-closed', { id: client.id, ip: client.ip })
@@ -749,6 +949,7 @@ export function createRelay(options: RelayOptions): Relay {
       client.rateStrikeAt = now
       return sendError(client, 'rate', 'too many messages; slow down')
     }
+    if (wait > 0) throttle(client, wait)
     client.idleTimer?.refresh()
     if (client.id === null) {
       if (isBinary) return authFail(client, 'expected hello')
@@ -761,17 +962,26 @@ export function createRelay(options: RelayOptions): Relay {
   return {
     limits,
     admit(ip) {
+      // A refused attempt still counts toward the per-minute budget.
       const ok = ipLimiter.admit(ip, clock.now())
-      if (!ok) log.info('ip-limited', { ip })
-      return ok
+      const open = perIp.get(ip)?.connections ?? 0
+      if (ok && open < limits.maxConnectionsPerIp) return true
+      // Debug only: a refused client can retry as fast as it opens TCP connections.
+      log.debug('ip-limited', { ip, open })
+      return false
     },
     open(conn, info) {
+      const now = clock.now()
+      const ipState = ipStateFor(info.ip)
+      ipState.connections++
       const client: Client = {
         conn,
         ip: info.ip,
+        ipState,
         nonce: b64uEncode(randomBytes(32)),
-        bucket: new TokenBucket(limits.ratePerSecond, limits.rateBurst, clock.now()),
+        bucket: new TokenBucket(limits.ratePerSecond, limits.rateBurst, now),
         bytes: null,
+        pushes: new TokenBucket(limits.pushRatePerSecond, limits.pushRateBurst, now),
         id: null,
         role: null,
         pub: null,
@@ -780,6 +990,7 @@ export function createRelay(options: RelayOptions): Relay {
         helloTimer: null,
         idleTimer: null,
         throttleTimer: null,
+        stallTimer: null,
         rateStrikeAt: null,
         watched: new Map(),
         pushesInFlight: 0,
@@ -792,7 +1003,8 @@ export function createRelay(options: RelayOptions): Relay {
         drop(client, RelayCloseCode.HelloTimeout, 'hello timeout')
       }, limits.helloTimeoutMs)
       client.idleTimer = setTimeout(() => {
-        // We aren't reading a paused socket, so its silence isn't the client's.
+        // We aren't reading a paused socket, so its silence isn't the client's. Pauses are
+        // bounded: by the budgets, and by the stall timeout of whoever holds it back.
         if (client.pausedBy.size > 0) return client.idleTimer?.refresh()
         log.info('idle-timeout', { id: client.id, ip: client.ip })
         drop(client, RelayCloseCode.GoingAway, 'idle timeout')
@@ -810,12 +1022,12 @@ export function createRelay(options: RelayOptions): Relay {
         if (client.pausedBy.size > 0) paused++
         queued += client.conn.bufferedBytes()
       }
-      return { connections: clients.size, online: online.size, offers: offers.size, pending: pending.size, paused, queued }
+      return { connections: clients.size, online: online.size, offers: offers.size, pending: pending.size, paused, queued, dropped }
     },
     shutdown() {
       clearInterval(pruneTimer)
-      for (const p of pending.values()) clearTimeout(p.timer)
-      pending.clear()
+      clearInterval(sweepTimer)
+      for (const p of [...pending.values()]) removePending(p.ownerId, p.peerId)
       for (const client of [...clients]) drop(client, RelayCloseCode.GoingAway, 'server shutting down')
     }
   }

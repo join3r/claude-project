@@ -42,6 +42,12 @@ export class TokenBucket {
     this.#refill(now)
     return this.#tokens >= 0 ? 0 : Math.ceil((-this.#tokens / this.#rate) * 1000)
   }
+
+  /** Back at its burst: forgetting it changes nothing. */
+  isFull(now: number): boolean {
+    this.#refill(now)
+    return this.#tokens >= this.#burst
+  }
 }
 
 /**

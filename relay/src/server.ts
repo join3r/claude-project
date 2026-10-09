@@ -158,6 +158,9 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
     res.writeHead(404, { 'Content-Type': 'text/plain' })
     res.end('not found')
   })
+  // A socket that never finishes its request headers (the upgrade included) isn't a
+  // relay connection yet, so the per-IP caps don't see it: don't hold it for long.
+  http.headersTimeout = 10_000
   http.on('connection', (socket: Socket) => {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
@@ -182,6 +185,7 @@ export async function startRelayServer(options: RelayServerOptions): Promise<Rel
         send: (text) => ws.sendText(text),
         sendBinary: (data) => ws.sendBinary(data),
         close: (code, reason) => ws.close(code, reason),
+        terminate: () => ws.terminate(),
         bufferedBytes: () => ws.bufferedAmount,
         onBufferBelow: (bytes, fn) => ws.onBufferBelow(bytes, fn),
         setBufferCap: (bytes) => ws.setMaxBufferedBytes(bytes),

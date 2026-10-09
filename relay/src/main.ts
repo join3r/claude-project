@@ -72,9 +72,10 @@ const server = await startRelayServer({
   trustProxy: config.trustProxy,
   logger: log,
   gateway,
-  pushUpstream: config.push.role === 'forward' ? config.push.upstream : undefined
+  pushUpstream: config.push.role === 'forward' ? config.push.upstream : undefined,
+  limits: config.limits
 })
-log.info('listening', { host: config.host, port: server.port, db: dbPath, trustProxy: config.trustProxy })
+log.info('listening', { host: config.host, port: server.port, db: dbPath, trustProxy: config.trustProxy, ...config.limits })
 
 let stopping = false
 async function stop(signal: string): Promise<void> {
