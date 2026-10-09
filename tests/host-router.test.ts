@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { HostRouter, LOCAL_HOST, RouteIndex, type RouterHub } from '../src/main/servers/host-router'
-import { HOST_ROUTES, SERVER_EVENTS } from '../src/main/servers/host-routes'
+import { HOST_ROUTES, SERVER_EVENTS, SERVER_PRIVATE_EVENTS } from '../src/main/servers/host-routes'
 import type { IpcContext, IpcRegistrar } from '../src/main/ipc/registrar'
 import { fixtureProject } from './helpers/streams-fixtures'
 import type { HostServices } from '../src/main/host/host-services'
@@ -85,7 +85,8 @@ describe('host route table', () => {
       for (const match of fs.readFileSync(file, 'utf8').matchAll(pattern)) pushed.add(match[1])
     }
     for (const channel of ['servers-state-changed']) pushed.delete(channel)
-    expect([...pushed].filter(ch => !(ch in SERVER_EVENTS))).toEqual([])
+    // Forwarded (with an ownership check) or deliberately kept from the windows.
+    expect([...pushed].filter(ch => !(ch in SERVER_EVENTS) && !SERVER_PRIVATE_EVENTS.includes(ch))).toEqual([])
   })
 })
 
@@ -113,6 +114,7 @@ describe('HostRouter', () => {
     const sent: unknown[][] = []
     const broadcast: unknown[][] = []
     const projectUpdates: unknown[][] = []
+    const logs: string[] = []
     const router = new HostRouter({
       hub: () => hub,
       index,
@@ -123,7 +125,7 @@ describe('HostRouter', () => {
       onProjectsUpdate: (serverId, update) => projectUpdates.push([serverId, update]),
       custom: { 'save-projects': (serverId, c, args) => ({ custom: serverId, clientId: c.clientId, payload: args[1] }) },
       desktop: { 'load-projects': (_c, args, local) => ({ ...(local(args) as object), srvA: { revision: 9 } }) },
-      log: () => {}
+      log: (message) => logs.push(message)
     })
     const { registrar, handlers } = recordingRegistrar()
     const wrapped = router.wrap(registrar)
@@ -136,7 +138,7 @@ describe('HostRouter', () => {
       else wrapped.onSync(channel, [], fn as never, false)
     }
     const invoke = (channel: string, args: unknown[], c = ctx()) => handlers.get(channel)!.handler(c, ...args)
-    return { router, index, hub, calls, sent, broadcast, projectUpdates, register, invoke, local }
+    return { router, index, hub, calls, sent, broadcast, projectUpdates, register, invoke, local, logs }
   }
 
   it('spawns a server project\'s PTY on its server, as the calling window, and keeps the tab there', async () => {
@@ -177,23 +179,105 @@ describe('HostRouter', () => {
   it('routes a tab that left the data to the host it was on', async () => {
     const t = setup()
     t.register('chat-close', 'on')
-    // The data no longer has the server's tab (its task was closed): the index still knows it.
+    // The data no longer has the server's tab (its task was closed, the tab never
+    // started here, so it isn't pinned): the index still knows where it was.
     t.index.update([fixtureProject({ id: 'local-p', directory: '/home/me/l' })])
     t.invoke('chat-close', ['srv-tab'])
     await Promise.resolve()
     expect(t.calls.map(c => [c.serverId, c.ch])).toEqual([['srvA', 'chat-close']])
   })
 
-  it('sends pushes from a server to the window they name, or to every window', () => {
+  it('sends pushes from a server to the window they name, or to every window', async () => {
     const t = setup()
+    t.register('pty-spawn')
+    await t.invoke('pty-spawn', ['srv-tab', '', '/srv/p', 80, 24, undefined, undefined, 'srv-p', undefined])
     t.router.deliver({ serverId: 'srvA', client: 'win:2', ch: 'pty-data', args: ['srv-tab', 'output'] })
     t.router.deliver({ serverId: 'srvA', client: '*', ch: 'agent-activity', args: ['srv-tab', { tool: 'Bash' }] })
-    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'config-updated', args: [{ theme: 'dark' }] })
-    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'something-new', args: [] })
     t.router.deliver({ serverId: 'srvA', client: '*', ch: 'projects-updated', args: [{ source: 'local', revision: 3 }] })
     expect(t.sent).toEqual([['win:2', 'pty-data', 'srv-tab', 'output']])
     expect(t.broadcast).toEqual([['agent-activity', 'srv-tab', { tool: 'Bash' }]])
+    // Always the pushing server's own source, whatever the push says.
     expect(t.projectUpdates).toEqual([['srvA', { source: 'local', revision: 3 }]])
+  })
+
+  it('never forwards a channel off the list, nor this desktop\'s own ones', () => {
+    const t = setup()
+    for (const ch of ['config-updated', 'notes-updated', 'theme-changed', 'menu-new-task', 'updates-status', 'mobile-state-changed',
+      'servers-state-changed', 'ssh-status-changed', 'socks-proxy-status-changed', 'something-new']) {
+      t.router.deliver({ serverId: 'srvA', client: '*', ch, args: [{}] })
+      t.router.deliver({ serverId: 'srvA', client: 'win:1', ch, args: [{}] })
+    }
+    expect(t.sent).toEqual([])
+    expect(t.broadcast).toEqual([])
+    // Logged once each; a server's own config and notes pushes are expected and dropped quietly.
+    expect(t.logs).toContain('router dropServerEvent server=srvA ch=menu-new-task reason=not a forwarded channel')
+    expect(t.logs.some(l => l.includes('ch=config-updated'))).toBe(false)
+  })
+
+  it('drops a server\'s push about a tab, task or project it doesn\'t own', async () => {
+    const t = setup()
+    // Output for a tab pinned nowhere (this desktop's, or the server's never spawned here).
+    t.router.deliver({ serverId: 'srvA', client: 'win:1', ch: 'pty-data', args: ['local-tab', 'injected\r'] })
+    t.router.deliver({ serverId: 'srvA', client: 'win:1', ch: 'pty-data', args: ['srv-tab', 'not attached'] })
+    t.router.deliver({ serverId: 'srvA', client: 'win:1', ch: 'chat-event', args: ['local-tab', 1, {}] })
+    // Hooks, activity, task and project pushes about this desktop's things.
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'hook-working', args: ['local-tab'] })
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'agent-activity', args: ['local-tab', { tool: 'rm -rf' }] })
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'task-worktree-state', args: ['local-t', { phase: 'failed' }] })
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'archive-changed', args: ['local-p'] })
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'tasks-removed', args: [{ projectId: 'local-p', taskId: 'local-t', tabIds: ['local-tab'] }] })
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'tabs-restart', args: [{ tabIds: ['local-tab'] }] })
+    // Another server's tab, pinned there.
+    t.index.pin('b-tab', 'srvB')
+    t.router.deliver({ serverId: 'srvA', client: 'win:1', ch: 'pty-data', args: ['b-tab', 'x'] })
+    // A per-window push sent as a broadcast.
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'server-clone-progress', args: ['op', 'line'] })
+    expect(t.sent).toEqual([])
+    expect(t.broadcast).toEqual([])
+
+    // Its own: a removal keeps only its tab ids.
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'tasks-removed', args: [{ projectId: 'srv-p', taskId: 'srv-t', tabIds: ['srv-tab', 'local-tab'] }] })
+    t.router.deliver({ serverId: 'srvA', client: '*', ch: 'tabs-restart', args: [{ tabIds: ['srv-tab', 'local-tab'] }] })
+    expect(t.broadcast).toEqual([
+      ['tasks-removed', { projectId: 'srv-p', taskId: 'srv-t', tabIds: ['srv-tab'] }],
+      ['tabs-restart', { tabIds: ['srv-tab'] }]
+    ])
+  })
+
+  it('keeps a local tab here when a server claims its id, and a pinned tab where it was pinned', async () => {
+    const t = setup()
+    t.register('pty-spawn')
+    t.register('pty-write', 'on')
+    t.register('pty-kill', 'on')
+    const local = fixtureProject({ id: 'local-p', directory: '/home/me/l', tasks: [{ id: 'local-t', tabs: { left: [{ id: 'local-tab', type: 'terminal', title: 'T' }] } }] })
+    const greedy = { ...fixtureProject({ id: 'srv-p', directory: '/srv/p', tasks: [{ id: 'local-t', tabs: { left: [{ id: 'local-tab', type: 'terminal', title: 'T' }] } }] }), host: 'srvA' }
+    t.index.update([greedy, local])
+    t.invoke('pty-write', ['local-tab', 'secret keystrokes'])
+    expect(t.local.get('pty-write')).toHaveBeenCalledTimes(1)
+    expect(t.calls).toEqual([])
+
+    // Pinned at spawn: later data can't move it, until the process ends.
+    await t.invoke('pty-spawn', ['tab-x', '', '/home/me/l', 80, 24, undefined, undefined, 'local-p', undefined])
+    t.index.update([local, { ...greedy, streams: [{ id: 's', name: 'main', isMain: true, tasks: [{ id: 't2', name: 't', panes: [{ tabs: [{ id: 'tab-x', type: 'terminal', title: 'T' }], activeTabId: 'tab-x', width: 1 }] }] }] }])
+    t.invoke('pty-write', ['tab-x', 'more keystrokes'])
+    expect(t.calls).toEqual([])
+    expect(t.local.get('pty-write')).toHaveBeenCalledTimes(2)
+    t.invoke('pty-kill', ['tab-x'])
+    expect(t.index.pinnedHost('tab-x')).toBeUndefined()
+
+    // Two servers claiming one id: neither gets it.
+    t.index.update([{ ...greedy, id: 'a' }, { ...greedy, id: 'b', host: 'srvB' }])
+    expect(t.router.hostFor('pty-write', ['local-tab', 'x'])).toBe(LOCAL_HOST)
+  })
+
+  it('takes only a server\'s own tabs from its merged answer', async () => {
+    const t = setup()
+    t.register('get-agent-activity', 'handle', {})
+    const hub = t.hub as { call: RouterHub['call'] }
+    const call = hub.call
+    hub.call = async (serverId, clientId, ch, args, options) =>
+      ch === 'get-agent-activity' ? { 'srv-tab': { tool: 'Bash' }, 'local-tab': { tool: 'fake' } } : call(serverId, clientId, ch, args, options)
+    expect(await t.invoke('get-agent-activity', [])).toEqual({ 'srv-tab': { tool: 'Bash' } })
   })
 
   it('merges every online server\'s answer into this desktop\'s', async () => {

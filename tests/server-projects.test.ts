@@ -5,7 +5,7 @@ import path from 'path'
 import { ServerProjects, type ServerProjectsHub } from '../src/main/servers/server-projects'
 import { LinkError, LinkErrorCode } from '../src/main/host/link/errors'
 import type { ProjectsUpdate } from '../src/shared/projects-sources'
-import type { ProjectsData } from '../src/shared/types'
+import type { Project, ProjectsData } from '../src/shared/types'
 import type { ServersState } from '../src/shared/servers'
 import { fixtureProject } from './helpers/streams-fixtures'
 
@@ -155,5 +155,85 @@ describe('ServerProjects (the desktop\'s copy of each server\'s projects)', () =
     expect(projects.foreignProjects().map(p => p.id)).toEqual(['new'])
     await saving
     expect(seen[0]).toEqual(['new'])
+  })
+
+  it('drops a server\'s project, task or tab whose id is this desktop\'s or an earlier server\'s, and logs it', async () => {
+    const configDir = tempDir()
+    const logs: string[] = []
+    const tab = (id: string) => ({ id, type: 'terminal' as const, title: 'T' })
+    const local = fixtureProject({ id: 'local-p', directory: '/l', tasks: [{ id: 'local-t', tabs: { left: [tab('local-tab')] } }] })
+    const serverData: ProjectsData = {
+      projects: [
+        // Claims the local project's id outright.
+        fixtureProject({ id: 'local-p', directory: '/srv/evil' }),
+        // Its own project, with a task and a tab that reuse local ids next to its own.
+        fixtureProject({ id: 'srv-p', directory: '/srv/p', tasks: [
+          { id: 'local-t', tabs: { left: [tab('x')] } },
+          { id: 'srv-t', tabs: { left: [tab('local-tab'), tab('srv-tab')] } }
+        ] })
+      ],
+      tags: [], projectOrder: [], pinnedItems: []
+    }
+    const fake = fakeHub(state([{ id: 'srvA', online: true }]), serverData)
+    const projects = new ServerProjects({ configDir, broadcast: () => {}, log: (m) => logs.push(m), localProjects: () => [local] })
+    projects.attach(fake.hub)
+    await flush()
+    const shown = projects.sources().srvA.data.projects
+    expect(shown.map(p => p.id)).toEqual(['srv-p'])
+    const tasks = shown[0].streams.flatMap(s => s.tasks)
+    expect(tasks.map(t => t.id)).toEqual(['srv-t'])
+    expect(tasks[0].panes.flatMap(p => p.tabs.map(t => t.id))).toEqual(['srv-tab'])
+    expect(tasks[0].panes[0].activeTabId).toBe('srv-tab')
+    expect(logs.find(l => l.includes('reason=id-collision'))).toMatch(/project:local-p.*task:local-t.*tab:local-tab/)
+
+    // A later server can't take an earlier one's ids either.
+    const both = fakeHub(state([{ id: 'srvA', online: true }, { id: 'srvB', online: true }]), serverData)
+    const two = new ServerProjects({ configDir: tempDir(), broadcast: () => {}, log: () => {}, localProjects: () => [] })
+    two.attach(both.hub)
+    await flush()
+    expect(two.sources().srvA.data.projects.map(p => p.id)).toEqual(['local-p', 'srv-p'])
+    expect(two.sources().srvB.data.projects).toEqual([])
+  })
+
+  it('never lets a server project be an SSH project, nor open this desktop\'s files in a browser tab', async () => {
+    const withSsh = { ...fixtureProject({ id: 's1', directory: '/srv/s1', tasks: [{ id: 't1', tabs: { left: [
+      { id: 'web', type: 'browser', title: 'B', url: 'http://localhost:3000/' },
+      { id: 'file', type: 'browser', title: 'B', url: 'file:///Users/me/.ssh/id_ed25519' }
+    ] } }] }), ssh: { host: 'attacker.example', port: 22, username: 'me', remoteDir: '' }, tunnel: { host: 'x', sourcePort: 1, destinationPort: 2 } } as Project
+    const fake = fakeHub(state([{ id: 'srvA', online: true }]), { projects: [withSsh], tags: [], projectOrder: [], pinnedItems: [] })
+    const projects = new ServerProjects({ configDir: tempDir(), broadcast: () => {}, log: () => {} })
+    projects.attach(fake.hub)
+    await flush()
+    const [shown] = projects.sources().srvA.data.projects
+    expect(shown.host).toBe('srvA')
+    expect(shown).not.toHaveProperty('ssh')
+    expect(shown).not.toHaveProperty('tunnel')
+    const tabs = shown.streams.flatMap(s => s.tasks).flatMap(t => t.panes).flatMap(p => p.tabs)
+    expect(tabs.map(t => [t.id, t.url])).toEqual([['web', 'http://localhost:3000/'], ['file', undefined]])
+  })
+
+  it('sends a server only its own projects, and keeps the ones it hid for colliding', async () => {
+    const local = fixtureProject({ id: 'local-p', directory: '/l' })
+    const fake = fakeHub(state([{ id: 'srvA', online: true }, { id: 'srvB', online: true }]), {
+      projects: [fixtureProject({ id: 'local-p', directory: '/srv/dupe' }), fixtureProject({ id: 'a1', directory: '/srv/a1' })],
+      tags: [], projectOrder: [], pinnedItems: []
+    })
+    const projects = new ServerProjects({ configDir: tempDir(), broadcast: () => {}, log: () => {}, localProjects: () => [local] })
+    projects.attach(fake.hub)
+    await flush()
+    const revision = projects.sources().srvA.revision
+    const slice: ProjectsData = {
+      projects: [
+        local,
+        { ...fixtureProject({ id: 'b1', directory: '/srv/b1' }), host: 'srvB' },
+        { ...fixtureProject({ id: 'a1', directory: '/srv/a1' }), name: 'renamed', host: 'srvA' }
+      ],
+      tags: [], projectOrder: [], pinnedItems: []
+    }
+    await projects.save('srvA', 'win:1', { baseRevision: revision, data: slice })
+    const sent = fake.calls.filter(c => c.ch === 'save-projects-slice' && c.serverId === 'srvA').at(-1)!.args[0] as { data: { projects: Project[] } }
+    // Not the local project, not srvB's; its own a1, and its hidden copy of `local-p` as it had it.
+    expect(sent.data.projects.map(p => [p.id, p.directory])).toEqual([['a1', '/srv/a1'], ['local-p', '/srv/dupe']])
+    expect(sent.data.projects.every(p => p.host === undefined)).toBe(true)
   })
 })

@@ -1,52 +1,112 @@
 import type { Project } from '../../shared/types'
 import type { IpcContext, IpcRegistrar } from '../ipc/registrar'
 import { LinkError, LinkErrorCode } from '../host/link/errors'
-import { HOST_ROUTES, SERVER_EVENTS, type HostRoute, type RouteKey } from './host-routes'
+import { HOST_ROUTES, SERVER_EVENTS, SERVER_PRIVATE_EVENTS, type HostRoute, type RouteKey, type ServerEventScope } from './host-routes'
 import type { ServerEvent } from './server-hub'
 
 /** The route of everything this desktop serves itself. */
 export const LOCAL_HOST = 'local'
 
+type Owners = Map<string, Set<string>>
+
+function addOwner(map: Owners, id: string, host: string): void {
+  const owners = map.get(id)
+  if (owners) owners.add(host)
+  else map.set(id, new Set([host]))
+}
+
+/** This desktop when it owns the id; else the one server that does; else nothing (unknown, or claimed twice). */
+function soleOwner(owners: ReadonlySet<string> | undefined): string | undefined {
+  if (!owners || owners.size === 0) return undefined
+  if (owners.has(LOCAL_HOST)) return LOCAL_HOST
+  return owners.size === 1 ? owners.values().next().value : undefined
+}
+
 /**
  * Which host each project, task and tab is on, from the merged projects data
- * (this desktop's store plus every server's). Ids are never forgotten: a tab
- * removed from the data keeps its last host, so closing it (`pty-kill`,
- * `chat-close`) still reaches the server running it.
+ * (this desktop's store plus every server's).
+ *
+ * - An id this desktop owns routes here, whatever a server claims; an id two
+ *   servers claim routes nowhere but here. (ServerProjects already drops a
+ *   server's ids that collide; this is the second fence.)
+ * - A tab is pinned to its host when its process starts there (`pty-spawn`,
+ *   `chat-attach`, a kernel start, routed by project), and unpinned when it ends.
+ *   A pinned tab's calls and pushes follow the pin, not the data.
+ * - An id that left the data keeps its last sole owner, so a tab closed
+ *   before it ever started still reaches its host.
  */
 export class RouteIndex {
-  private readonly projects = new Map<string, string>()
-  private readonly tasks = new Map<string, string>()
-  private readonly tabs = new Map<string, string>()
+  private projects: Owners = new Map()
+  private tasks: Owners = new Map()
+  private tabs: Owners = new Map()
+  private readonly retired = new Map<string, string>()
+  private readonly pins = new Map<string, string>()
 
   update(projects: readonly Project[]): void {
+    const before = this.tabs
+    const nextProjects: Owners = new Map()
+    const nextTasks: Owners = new Map()
+    const nextTabs: Owners = new Map()
     for (const project of projects) {
       const host = project.host ?? LOCAL_HOST
-      this.projects.set(project.id, host)
+      addOwner(nextProjects, project.id, host)
       for (const stream of Array.isArray(project.streams) ? project.streams : []) {
         for (const task of Array.isArray(stream.tasks) ? stream.tasks : []) {
-          this.tasks.set(task.id, host)
+          addOwner(nextTasks, task.id, host)
           for (const pane of Array.isArray(task.panes) ? task.panes : []) {
-            for (const tab of Array.isArray(pane.tabs) ? pane.tabs : []) this.tabs.set(tab.id, host)
+            for (const tab of Array.isArray(pane.tabs) ? pane.tabs : []) addOwner(nextTabs, tab.id, host)
           }
         }
       }
     }
+    for (const [tabId, owners] of before) {
+      if (nextTabs.has(tabId)) continue
+      const owner = soleOwner(owners)
+      if (owner) this.retired.set(tabId, owner)
+    }
+    for (const tabId of nextTabs.keys()) this.retired.delete(tabId)
+    this.projects = nextProjects
+    this.tasks = nextTasks
+    this.tabs = nextTabs
   }
 
-  remember(kind: 'task' | 'tab', id: string, host: string): void {
-    (kind === 'task' ? this.tasks : this.tabs).set(id, host)
+  pin(tabId: string, host: string): void {
+    this.pins.set(tabId, host)
+  }
+
+  unpin(tabId: string): void {
+    this.pins.delete(tabId)
+  }
+
+  pinnedHost(tabId: string): string | undefined {
+    return this.pins.get(tabId)
   }
 
   hostOfProject(id: string): string | undefined {
-    return this.projects.get(id)
+    return soleOwner(this.projects.get(id))
   }
 
   hostOfTask(id: string): string | undefined {
-    return this.tasks.get(id)
+    return soleOwner(this.tasks.get(id))
   }
 
   hostOfTab(id: string): string | undefined {
-    return this.tabs.get(id)
+    return this.pins.get(id) ?? soleOwner(this.tabs.get(id)) ?? (this.tabs.has(id) ? undefined : this.retired.get(id))
+  }
+
+  /** The tab is that server's: pinned there, or (unpinned) only that server's data has it. */
+  tabOf(tabId: string, serverId: string): boolean {
+    const pinned = this.pins.get(tabId)
+    if (pinned !== undefined) return pinned === serverId
+    return soleOwner(this.tabs.get(tabId)) === serverId
+  }
+
+  taskOf(taskId: string, serverId: string): boolean {
+    return soleOwner(this.tasks.get(taskId)) === serverId
+  }
+
+  projectOf(projectId: string, serverId: string): boolean {
+    return soleOwner(this.projects.get(projectId)) === serverId
   }
 }
 
@@ -82,6 +142,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** The tab id a route's tab key names, if it has one. */
+function tabArg(keys: readonly RouteKey[], args: unknown[]): string | undefined {
+  for (const key of keys) {
+    if ('tab' in key && typeof args[key.tab] === 'string' && args[key.tab]) return args[key.tab] as string
+  }
+  return undefined
+}
+
 function isPromise(value: unknown): value is Promise<unknown> {
   return isRecord(value) && typeof (value as { then?: unknown }).then === 'function'
 }
@@ -97,7 +165,8 @@ function isPromise(value: unknown): value is Promise<unknown> {
 export class HostRouter {
   private readonly routes: Readonly<Record<string, HostRoute>>
   private readonly registered = new Set<string>()
-  private readonly unknownEvents = new Set<string>()
+  /** Drops already logged (once per server, channel and reason). */
+  private readonly droppedEvents = new Set<string>()
 
   constructor(private readonly options: HostRouterOptions) {
     this.routes = options.routes ?? HOST_ROUTES
@@ -155,24 +224,75 @@ export class HostRouter {
     return LOCAL_HOST
   }
 
-  /** A push from a server, for this desktop's windows. */
+  /**
+   * A push from a server, for this desktop's windows: only the channels in
+   * SERVER_EVENTS, only about what that server owns, and only to the window it
+   * names (or every window for `*`). Anything else is dropped and logged.
+   */
   deliver(event: ServerEvent): void {
-    const rule = SERVER_EVENTS[event.ch]
-    if (!rule) {
-      if (!this.unknownEvents.has(event.ch)) {
-        this.unknownEvents.add(event.ch)
-        this.options.log(`router dropUnknownEvent server=${event.serverId} ch=${event.ch}`)
+    const { serverId, ch } = event
+    const scope = SERVER_EVENTS[ch]
+    if (!scope) {
+      if (!SERVER_PRIVATE_EVENTS.includes(ch)) this.logDrop(serverId, ch, 'not a forwarded channel')
+      return
+    }
+    if (scope === 'projects') {
+      // Always this server's own source, whatever the push names.
+      this.options.onProjectsUpdate(serverId, event.args[0])
+      return
+    }
+    const args = this.ownedArgs(scope, serverId, event.args)
+    if (!args) {
+      this.logDrop(serverId, ch, 'not about something it owns')
+      return
+    }
+    if (event.client === '*') {
+      if (scope === 'own-window') {
+        this.logDrop(serverId, ch, 'a broadcast of a per-window push')
+        return
       }
-      return
+      this.options.windows.broadcast(ch, ...args)
+    } else if (typeof event.client === 'string' && /^win:\d+$/.test(event.client)) {
+      this.options.windows.send(event.client, ch, ...args)
+    } else {
+      this.logDrop(serverId, ch, `no such window ${String(event.client)}`)
     }
-    if (rule === 'drop') return
-    if (rule === 'projects') {
-      this.options.onProjectsUpdate(event.serverId, event.args[0])
-      return
+  }
+
+  /** The push's arguments when they are about what `serverId` owns (cut down where a list allows); null otherwise. */
+  private ownedArgs(scope: Exclude<ServerEventScope, 'projects'>, serverId: string, args: unknown[]): unknown[] | null {
+    const { index } = this.options
+    const first = args[0]
+    switch (scope) {
+      case 'pinned-tab':
+        return typeof first === 'string' && index.pinnedHost(first) === serverId ? args : null
+      case 'server-tab':
+        return typeof first === 'string' && index.tabOf(first, serverId) ? args : null
+      case 'server-task':
+        return typeof first === 'string' && index.taskOf(first, serverId) ? args : null
+      case 'server-project':
+        return typeof first === 'string' && index.projectOf(first, serverId) ? args : null
+      case 'removal': {
+        if (!isRecord(first) || typeof first.projectId !== 'string' || !index.projectOf(first.projectId, serverId)) return null
+        if (typeof first.taskId !== 'string' || !index.taskOf(first.taskId, serverId)) return null
+        const tabIds = Array.isArray(first.tabIds) ? first.tabIds.filter((id): id is string => typeof id === 'string' && index.tabOf(id, serverId)) : []
+        return [{ projectId: first.projectId, taskId: first.taskId, tabIds }, ...args.slice(1)]
+      }
+      case 'tab-list': {
+        if (!isRecord(first) || !Array.isArray(first.tabIds)) return null
+        const tabIds = first.tabIds.filter((id): id is string => typeof id === 'string' && index.tabOf(id, serverId))
+        return tabIds.length > 0 ? [{ ...first, tabIds }, ...args.slice(1)] : null
+      }
+      case 'own-window':
+        return args
     }
-    // Tab and task ids are global, so the arguments go to the windows as they are.
-    if (event.client === '*') this.options.windows.broadcast(event.ch, ...event.args)
-    else this.options.windows.send(event.client, event.ch, ...event.args)
+  }
+
+  private logDrop(serverId: string, ch: string, reason: string): void {
+    const key = `${serverId}\u0000${ch}\u0000${reason}`
+    if (this.droppedEvents.has(key)) return
+    this.droppedEvents.add(key)
+    this.options.log(`router dropServerEvent server=${serverId} ch=${ch} reason=${reason}`)
   }
 
   private claim(channel: string): void {
@@ -190,9 +310,12 @@ export class HostRouter {
       if (!handler) throw new Error(`No desktop handler for ${channel}`)
       return handler(ctx, args, local)
     }
-    if (route === 'merge') return this.merge(channel, ctx, args, local)
+    if ('merge' in route) return this.merge(channel, route.merge, ctx, args, local)
     if ('splitTabs' in route) return this.split(channel, route.splitTabs, route.everyServer === true, ctx, args, local)
-    const host = this.resolve(route.by, args)
+    const { host, via } = this.resolveVia(route.by, args)
+    const tabId = tabArg(route.by, args)
+    if (tabId && route.pin === 'set' && via !== 'default') this.options.index.pin(tabId, host)
+    if (tabId && route.pin === 'clear') this.options.index.unpin(tabId)
     if (host === LOCAL_HOST) return local(args)
     switch (route.remote ?? 'call') {
       case 'skip':
@@ -213,19 +336,17 @@ export class HostRouter {
     return hub.call(serverId, ctx.clientId, channel, args, { focused: ctx.isFocused() })
   }
 
-  /** The first key that resolves wins; tab and task keys then remember that host. */
+  /** The first key that resolves wins; none means this desktop. */
   private resolve(keys: readonly RouteKey[], args: unknown[]): string {
-    let host: string | undefined
+    return this.resolveVia(keys, args).host
+  }
+
+  private resolveVia(keys: readonly RouteKey[], args: unknown[]): { host: string; via: 'key' | 'default' } {
     for (const key of keys) {
-      host = this.lookup(key, args)
-      if (host) break
+      const host = this.lookup(key, args)
+      if (host) return { host, via: 'key' }
     }
-    if (!host) return LOCAL_HOST
-    for (const key of keys) {
-      if ('tab' in key && typeof args[key.tab] === 'string') this.options.index.remember('tab', args[key.tab] as string, host)
-      if ('task' in key && typeof args[key.task] === 'string') this.options.index.remember('task', args[key.task] as string, host)
-    }
-    return host
+    return { host: LOCAL_HOST, via: 'default' }
   }
 
   private lookup(key: RouteKey, args: unknown[]): string | undefined {
@@ -252,17 +373,23 @@ export class HostRouter {
     return typeof named === 'string' && named ? named : undefined
   }
 
-  /** This desktop's answer and every online server's, merged (records of tab or task ids). */
-  private async merge(channel: string, ctx: IpcContext, args: unknown[], local: (args: unknown[]) => unknown): Promise<unknown> {
+  /**
+   * This desktop's answer and every online server's, merged: records keyed by
+   * tab or task id, each server's cut down to the ids it owns.
+   */
+  private async merge(channel: string, keys: 'tabs' | 'tasks', ctx: IpcContext, args: unknown[], local: (args: unknown[]) => unknown): Promise<unknown> {
     const hub = this.options.hub()
+    const { index } = this.options
+    const owns = (id: string, serverId: string) => (keys === 'tabs' ? index.tabOf(id, serverId) : index.taskOf(id, serverId))
     const remote = (hub?.onlineServers() ?? []).map(serverId => hub!.call(serverId, ctx.clientId, channel, args, { focused: ctx.isFocused() })
+      .then(answer => (isRecord(answer) ? Object.fromEntries(Object.entries(answer).filter(([id]) => owns(id, serverId))) : null))
       .catch((err) => {
         this.logFailure(channel, err, serverId)
         return null
       }))
     const answers = await Promise.all([Promise.resolve(local(args)), ...remote])
     const merged: Record<string, unknown> = {}
-    // The local answer last: on a clash (there shouldn't be one) this desktop wins.
+    // The local answer last: on a clash this desktop wins.
     for (const answer of [...answers.slice(1), answers[0]]) {
       if (isRecord(answer)) Object.assign(merged, answer)
     }

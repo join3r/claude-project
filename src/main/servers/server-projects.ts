@@ -11,7 +11,7 @@ import {
   type SourceEnvelope,
   type SourceSaveResult
 } from '../../shared/projects-sources'
-import type { Project, ProjectsData, ProjectsSaveResult } from '../../shared/types'
+import type { Project, ProjectsData, ProjectsSaveResult, Stream, Task, TaskPane } from '../../shared/types'
 import type { ServersState } from '../../shared/servers'
 import { LinkError, LinkErrorCode } from '../host/link/errors'
 
@@ -27,6 +27,8 @@ export interface ServerProjectsHub {
 
 export interface ServerProjectsDeps {
   configDir: string
+  /** This desktop's own projects: a server's ids that collide with theirs are dropped. */
+  localProjects?: () => readonly Project[]
   /** Tell every local window about a server's new slice. */
   broadcast: (update: ProjectsUpdate) => void
   log: (message: string) => void
@@ -41,6 +43,100 @@ interface Entry {
 
 /** Server ids are base64url device ids; anything else never names a directory. */
 const SERVER_ID_RE = /^[A-Za-z0-9_-]{1,128}$/
+
+/** The ids a set of projects uses, by kind. */
+interface Claimed {
+  projects: Set<string>
+  streams: Set<string>
+  tasks: Set<string>
+  tabs: Set<string>
+}
+
+function claimedBy(projects: readonly Project[]): Claimed {
+  const claimed: Claimed = { projects: new Set(), streams: new Set(), tasks: new Set(), tabs: new Set() }
+  for (const project of projects) {
+    claimed.projects.add(project.id)
+    for (const stream of Array.isArray(project.streams) ? project.streams : []) {
+      claimed.streams.add(stream.id)
+      for (const task of Array.isArray(stream.tasks) ? stream.tasks : []) {
+        claimed.tasks.add(task.id)
+        for (const pane of Array.isArray(task.panes) ? task.panes : []) {
+          for (const tab of Array.isArray(pane.tabs) ? pane.tabs : []) claimed.tabs.add(tab.id)
+        }
+      }
+    }
+  }
+  return claimed
+}
+
+const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0
+
+/** A browser tab's page from a server: web pages only, never this desktop's files or other schemes. */
+function webUrlOrNothing(url: unknown): string | undefined {
+  if (typeof url !== 'string') return undefined
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' || url === 'about:blank' ? url : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A server's project as this desktop may use it, or null: `host` is the server,
+ * it is never an SSH project (no `ssh` or `tunnel`: this desktop would connect
+ * on the server's say-so), and every project, stream, task and tab id already
+ * claimed (by this desktop, an earlier server, or earlier in this data) is
+ * dropped, so a server can't take over a local tab's calls. Kept ids are claimed.
+ * A browser tab keeps its page only when it is a web page (a `file:` URL would
+ * show this desktop's files in a server's tab).
+ */
+function sanitizeProject(raw: Project, serverId: string, claimed: Claimed, dropped: string[]): Project | null {
+  if (!raw || !isId(raw.id) || claimed.projects.has(raw.id)) {
+    dropped.push(`project:${raw?.id}`)
+    return null
+  }
+  const streams: Stream[] = []
+  for (const stream of Array.isArray(raw.streams) ? raw.streams : []) {
+    if (!stream || !isId(stream.id) || claimed.streams.has(stream.id)) {
+      dropped.push(`stream:${stream?.id}`)
+      continue
+    }
+    const tasks: Task[] = []
+    for (const task of Array.isArray(stream.tasks) ? stream.tasks : []) {
+      if (!task || !isId(task.id) || claimed.tasks.has(task.id)) {
+        dropped.push(`task:${task?.id}`)
+        continue
+      }
+      const panes: TaskPane[] = []
+      for (const pane of Array.isArray(task.panes) ? task.panes : []) {
+        const tabs = (Array.isArray(pane?.tabs) ? pane.tabs : []).filter(tab => {
+          if (tab && isId(tab.id) && !claimed.tabs.has(tab.id)) {
+            claimed.tabs.add(tab.id)
+            return true
+          }
+          dropped.push(`tab:${tab?.id}`)
+          return false
+        }).map(tab => {
+          if (tab.url === undefined) return tab
+          const { url, ...rest } = tab
+          const safe = webUrlOrNothing(url)
+          return safe === undefined ? rest : { ...rest, url: safe }
+        })
+        if (tabs.length === 0 && (pane?.tabs?.length ?? 0) > 0) continue
+        const activeTabId = tabs.some(tab => tab.id === pane.activeTabId) ? pane.activeTabId : tabs[tabs.length - 1]?.id ?? null
+        panes.push({ ...pane, tabs, activeTabId })
+      }
+      claimed.tasks.add(task.id)
+      tasks.push({ ...task, panes })
+    }
+    claimed.streams.add(stream.id)
+    streams.push({ ...stream, tasks })
+  }
+  claimed.projects.add(raw.id)
+  const { ssh: _ssh, tunnel: _tunnel, ...rest } = raw
+  return { ...rest, streams, host: serverId }
+}
 
 /**
  * The desktop's copy of every paired server's projects (plan step 6): one
@@ -63,6 +159,12 @@ export class ServerProjects {
   private readonly listeners = new Set<() => void>()
   private hub: ServerProjectsHub | null = null
   private online = new Set<string>()
+  /** Servers by pairing date: on an id two servers claim, the earlier one keeps it. */
+  private order: string[] = []
+  /** Every server's projects as windows see them (sanitized); null when stale. */
+  private view: Map<string, Project[]> | null = null
+  /** The drops last logged, per server. */
+  private readonly loggedDrops = new Map<string, string>()
 
   constructor(private readonly deps: ServerProjectsDeps) {
     this.loadCaches()
@@ -85,13 +187,34 @@ export class ServerProjects {
   /** Every server project there is (with `host`), the ones being saved included. */
   foreignProjects(): Project[] {
     const byId = new Map<string, Project>()
-    for (const [serverId, entry] of this.entries) {
-      for (const project of withHost(entry.data.projects, serverId)) byId.set(project.id, project)
+    for (const projects of this.sanitized().values()) {
+      for (const project of projects) byId.set(project.id, project)
     }
+    const local = new Set((this.deps.localProjects?.() ?? []).map(p => p.id))
     for (const [serverId, projects] of this.pending) {
-      for (const project of withHost(projects, serverId)) if (!byId.has(project.id)) byId.set(project.id, project)
+      for (const project of withHost(projects, serverId)) {
+        if (!byId.has(project.id) && !local.has(project.id)) byId.set(project.id, project)
+      }
     }
     return [...byId.values()]
+  }
+
+  /**
+   * This desktop's projects changed: a server's ids that now collide with them
+   * are dropped (and windows told), ones that no longer do come back.
+   */
+  localChanged(): void {
+    const before = this.view
+    this.view = null
+    if (!before) return
+    const after = this.sanitized()
+    let changed = false
+    for (const serverId of this.entries.keys()) {
+      if (JSON.stringify(before.get(serverId) ?? []) === JSON.stringify(after.get(serverId) ?? [])) continue
+      changed = true
+      this.deps.broadcast({ source: serverId, ...this.envelope(serverId) })
+    }
+    if (changed) this.notify()
   }
 
   isOnline(serverId: string): boolean {
@@ -111,14 +234,19 @@ export class ServerProjects {
   async save(serverId: string, clientId: string, payload: { baseRevision: number; data: ProjectsData }, focused = false): Promise<SourceSaveResult> {
     const hub = this.hub
     if (!hub || !this.online.has(serverId)) return this.offlineRefusal(serverId)
-    // A slice holds this server's projects only; another host's never travel here.
-    const projects = payload.data.projects.filter(p => !p.host || p.host === serverId)
-    this.pending.set(serverId, withoutHost(projects))
+    // A slice holds this server's projects only: a local project (no `host`) or
+    // another server's never travels to this one.
+    const kept = payload.data.projects.filter(p => p.host === serverId)
+    // Its projects this desktop dropped for colliding ids stay on the server.
+    const shown = new Set((this.sanitized().get(serverId) ?? []).map(p => p.id))
+    const hidden = (this.entries.get(serverId)?.data.projects ?? []).filter(p => isId(p?.id) && !shown.has(p.id) && !kept.some(k => k.id === p.id))
+    const projects = [...withoutHost(kept), ...hidden]
+    this.pending.set(serverId, withoutHost(kept))
     this.notify()
     try {
       const result = await hub.call(serverId, clientId, 'save-projects-slice', [{
         baseRevision: payload.baseRevision,
-        data: { projects: withoutHost(projects) }
+        data: { projects }
       }], { focused }) as ProjectsSaveResult
       if (result.ok) return { ok: true, revision: result.revision }
       this.update(serverId, result.revision, result.data)
@@ -162,6 +290,7 @@ export class ServerProjects {
   forget(serverId: string): void {
     const had = this.entries.delete(serverId)
     this.online.delete(serverId)
+    this.view = null
     if (SERVER_ID_RE.test(serverId)) {
       try {
         fs.rmSync(this.cacheDir(serverId), { recursive: true, force: true })
@@ -177,6 +306,11 @@ export class ServerProjects {
   // ---- internals ------------------------------------------------------------------
 
   private onServersState(state: ServersState): void {
+    const order = [...state.servers].sort((a, b) => a.pairedAt - b.pairedAt).map(s => s.id)
+    if (order.join('\u0000') !== this.order.join('\u0000')) {
+      this.order = order
+      this.view = null
+    }
     const paired = new Set(state.servers.map(s => s.id))
     for (const serverId of [...this.entries.keys()]) {
       if (!paired.has(serverId)) this.forget(serverId)
@@ -199,6 +333,7 @@ export class ServerProjects {
   private update(serverId: string, revision: number, data: ProjectsData): void {
     const entry: Entry = { revision, data: { ...emptyProjectsData(), ...data, projects: withoutHost(data.projects) } }
     this.entries.set(serverId, entry)
+    this.view = null
     this.writeCache(serverId, entry)
     this.notify()
     this.deps.broadcast({ source: serverId, ...this.envelope(serverId) })
@@ -215,8 +350,35 @@ export class ServerProjects {
 
   /** The server's slice as windows see it. */
   private slice(serverId: string): ProjectsData {
-    const entry = this.entries.get(serverId)
-    return { ...emptyProjectsData(), projects: withHost(entry?.data.projects ?? [], serverId) }
+    return { ...emptyProjectsData(), projects: this.sanitized().get(serverId) ?? [] }
+  }
+
+  /**
+   * Every server's projects, sanitized (see `sanitizeProject`): ids this desktop
+   * owns are claimed first, then each server's in pairing order.
+   */
+  private sanitized(): Map<string, Project[]> {
+    if (this.view) return this.view
+    const claimed = claimedBy(this.deps.localProjects?.() ?? [])
+    const known = this.order.filter(id => this.entries.has(id))
+    const rest = [...this.entries.keys()].filter(id => !known.includes(id)).sort()
+    const view = new Map<string, Project[]>()
+    for (const serverId of [...known, ...rest]) {
+      const dropped: string[] = []
+      const projects: Project[] = []
+      for (const raw of this.entries.get(serverId)!.data.projects) {
+        const project = sanitizeProject(raw, serverId, claimed, dropped)
+        if (project) projects.push(project)
+      }
+      view.set(serverId, projects)
+      const key = dropped.join(',')
+      if (key !== (this.loggedDrops.get(serverId) ?? '')) {
+        this.loggedDrops.set(serverId, key)
+        if (key) this.deps.log(`serverProjects dropped server=${serverId} reason=id-collision ids=${key.slice(0, 400)}`)
+      }
+    }
+    this.view = view
+    return view
   }
 
   private offlineRefusal(serverId: string): SourceSaveResult {

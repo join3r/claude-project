@@ -48,6 +48,7 @@ export class DesktopRouting {
   constructor(private readonly deps: DesktopRoutingDeps) {
     this.projects = new ServerProjects({
       configDir: deps.configDir,
+      localProjects: () => this.host?.getProjectsData().projects ?? [],
       broadcast: (update) => deps.windows.broadcast('projects-updated', update),
       log: deps.log
     })
@@ -92,7 +93,12 @@ export class DesktopRouting {
 
   attachHost(host: RoutedHost): void {
     this.host = host
-    host.onProjectsChanged(() => this.reindex())
+    host.onProjectsChanged(() => {
+      // A server's ids that collide with this desktop's are dropped from its view.
+      this.projects.localChanged()
+      this.reindex()
+    })
+    this.projects.localChanged()
     this.reindex()
   }
 
@@ -129,7 +135,10 @@ export class DesktopRouting {
     if (!hub) return
     try {
       const activity = await hub.call(serverId, MAIN_CLIENT_ID, 'get-agent-activity') as Record<string, unknown> | null
-      for (const [tabId, entry] of Object.entries(activity ?? {})) this.deps.windows.broadcast('agent-activity', tabId, entry)
+      for (const [tabId, entry] of Object.entries(activity ?? {})) {
+        // Only its own tabs: a server can't set what a local tab shows.
+        if (this.index.tabOf(tabId, serverId)) this.deps.windows.broadcast('agent-activity', tabId, entry)
+      }
     } catch (err) {
       this.deps.log(`servers activityRefresh server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)
     }
