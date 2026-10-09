@@ -1,6 +1,8 @@
 // src/renderer/palette/paletteEvents.ts
 type EventMap = {
   'open-settings': void
+  /** Add server: the install command for a new DevTool server. */
+  'open-add-server': void
   'open-project-settings': void
   /** The New Task composer, on the current project and stream (what ⌘N opens). */
   'open-new-task': void

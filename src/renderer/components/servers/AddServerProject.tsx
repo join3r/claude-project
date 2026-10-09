@@ -6,17 +6,22 @@ import type { ServerStatus } from '../../../shared/servers'
 import { Field, HelperText, LinkBtn, Modal, PrimaryButton, SegCtl, Select, SetBlock, Switch } from '../ui'
 import ServerRepoDiscovery from './ServerRepoDiscovery'
 
-type Mode = 'browse' | 'clone' | 'found'
+export type AddServerProjectMode = 'browse' | 'clone' | 'found'
 
-const MODES: ReadonlyArray<{ value: Mode; label: string }> = [
+const MODES: ReadonlyArray<{ value: AddServerProjectMode; label: string }> = [
   { value: 'browse', label: 'Pick a folder' },
   { value: 'clone', label: 'Clone repository' },
   { value: 'found', label: 'Found on this server' }
 ]
 
 interface Props {
-  /** The paired servers; at least one. */
+  /** The paired servers. With none, it offers Add server instead. */
   servers: ServerStatus[]
+  /** Start on this server and mode (Add server's "Choose a folder…"). */
+  initialServerId?: string
+  initialMode?: AddServerProjectMode
+  /** No server yet: open Add server. */
+  onAddServer: () => void
   /** Folders that already are projects, per server. */
   existingDirectories: (serverId: string) => ReadonlySet<string>
   onAdd: (serverId: string, projects: Array<{ name: string; directory: string }>) => void
@@ -37,13 +42,31 @@ function baseName(dir: string): string {
  * picked on the server, a repository cloned there, or the repositories found
  * under its home.
  */
-export default function AddServerProject({ servers, existingDirectories, onAdd, onClose }: Props): React.ReactElement {
-  const firstOnline = servers.find(s => s.state === 'online') ?? servers[0]
+export default function AddServerProject({ servers, initialServerId, initialMode, onAddServer, existingDirectories, onAdd, onClose }: Props): React.ReactElement {
+  const firstOnline = servers.find(s => s.id === initialServerId) ?? servers.find(s => s.state === 'online') ?? servers[0]
   const [serverId, setServerId] = useState(firstOnline?.id ?? '')
-  const [mode, setMode] = useState<Mode>('browse')
+  const [mode, setMode] = useState<AddServerProjectMode>(initialMode ?? 'browse')
   const server = servers.find(s => s.id === serverId)
   const online = server?.state === 'online'
   const existing = useMemo(() => existingDirectories(serverId), [existingDirectories, serverId])
+
+  if (servers.length === 0) {
+    return (
+      <Modal title="Add Server Project" onClose={onClose} width="w-[480px]">
+        <div className="flex flex-col gap-1.5 py-1" data-testid="no-servers">
+          <div className="text-base text-text">No servers yet</div>
+          <HelperText>
+            A DevTool server is a Linux or macOS machine that runs your terminals and agents, even while this computer sleeps.
+            Add one with a single command, then pick its projects here.
+          </HelperText>
+        </div>
+        <div className="flex items-center justify-end gap-3 pt-1">
+          <LinkBtn onClick={onClose}>Cancel</LinkBtn>
+          <PrimaryButton onClick={onAddServer}>Add server…</PrimaryButton>
+        </div>
+      </Modal>
+    )
+  }
 
   return (
     <Modal title="Add Server Project" onClose={onClose} width="w-[560px]">

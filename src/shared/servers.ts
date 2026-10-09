@@ -51,6 +51,12 @@ export interface ServerStatus {
   updateReady?: ServerPendingUpdate
   /** While the desktop uploads its bundle: bytes sent so far and the total. */
   upload?: { sent: number; total: number }
+  /**
+   * The installer (bootstrap) is or was the last one connected: the server is
+   * being installed and its service hasn't connected yet. Add server shows
+   * "Connected" only once this is gone.
+   */
+  installing?: boolean
   /** Epoch ms. */
   pairedAt: number
   /** Epoch ms; null until it was seen after pairing. */

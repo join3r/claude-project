@@ -57,7 +57,8 @@ describe.skipIf(!bundle || process.platform === 'win32')('bootstrap', () => {
     expect(fs.readlinkSync(path.join(home, 'node', 'current'))).toBe(bundle!.manifest.node)
     expect(readLocalBundle(path.join(home, 'current'))?.manifest.sha256).toBe(bundle!.manifest.sha256)
     const server = d.hub.getState().servers[0]
-    expect(server).toMatchObject({ name: 'box', host: { os: process.platform } })
+    // The installer connected, the service hasn't yet: Add server keeps waiting.
+    expect(server).toMatchObject({ name: 'box', host: { os: process.platform }, installing: true })
     expect(d.hub.getState().invite).toMatchObject({ status: 'paired', serverId: server.id })
     expect(new PeerStore(path.join(home, 'data'), 'desktops.json').list().map((r) => r.id)).toEqual([d.identity.get().id])
     expect(d.log.some((line) => line.includes('update=server-empty uploading'))).toBe(true)

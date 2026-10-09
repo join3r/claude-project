@@ -130,6 +130,8 @@ export class ServerHub {
   private readonly restarting = new Map<string, { until: number; timer: unknown }>()
   /** What each server last said about its updates. */
   private readonly infos = new Map<string, ServerInfo>()
+  /** Servers whose last handshake was the installer's (`bootstrap`): their service hasn't connected yet. */
+  private readonly installing = new Set<string>()
   /** A bundle sha a server refused: not sent again to it until DevTool restarts. */
   private readonly failedUploads = new Map<string, string>()
   /** Servers removed while the relay was away: revoked at the next `ready` (`servers/pending-revokes.json`). */
@@ -209,6 +211,7 @@ export class ServerHub {
           // `updating` is the restart into the new build, when the link is about to drop.
           ...(restarting && status.state !== 'incompatible' ? { state: 'updating' as const } : {}),
           ...(upload ? { upload: { ...upload } } : {}),
+          ...(this.installing.has(record.id) ? { installing: true } : {}),
           ...(update?.state === 'staged' && !restarting ? { updateReady: { version: update.version, commit: update.commit, builtAt: update.builtAt } } : {}),
           pairedAt: record.pairedAt,
           lastSeen: record.lastSeen,
@@ -367,7 +370,8 @@ export class ServerHub {
     const now = this.timers.now()
     this.savePaired({
       id: serverId,
-      name: reply.name || ticket.name || 'server',
+      // Paired again: keep the name this desktop gave it.
+      name: this.store.get(serverId)?.name || reply.name || ticket.name || 'server',
       x25519Pub: b64uEncode(ticket.x25519Pub),
       ed25519Pub: b64uEncode(ticket.ed25519Pub),
       pairedAt: this.store.get(serverId)?.pairedAt ?? now,
@@ -559,6 +563,7 @@ export class ServerHub {
     this.connections.delete(serverId)
     this.store.remove(serverId)
     this.infos.delete(serverId)
+    this.installing.delete(serverId)
     this.failedUploads.delete(serverId)
     this.endRestarting(serverId)
     if (this.invite?.serverId === serverId) this.clearInvite()
@@ -672,7 +677,7 @@ export class ServerHub {
     invite.serverId = from
     this.savePaired({
       id: from,
-      name: hello.name || hello.host?.hostname || 'server',
+      name: this.store.get(from)?.name || hello.name || hello.host?.hostname || 'server',
       x25519Pub: b64uEncode(outcome.remoteStatic),
       ed25519Pub: hello.ed,
       pairedAt: this.store.get(from)?.pairedAt ?? now,
@@ -750,6 +755,8 @@ export class ServerHub {
         if (reply.host) this.store.setHost(record.id, reply.host)
         this.store.touchLastSeen(record.id, this.timers.now())
         this.endRestarting(record.id)
+        if (reply.features.includes('bootstrap')) this.installing.add(record.id)
+        else this.installing.delete(record.id)
         // Paired after our last `watch` (the relay may have read it before the pair existed): watch again.
         if (!this.reported.has(record.id)) this.sendWatch()
         this.emitState()

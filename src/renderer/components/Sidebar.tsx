@@ -6,7 +6,8 @@ import type { Task, Project, PinnedItem, PendingWorktreeSetup, Stream } from '..
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
-import AddServerProject from './servers/AddServerProject'
+import AddServerProject, { type AddServerProjectMode } from './servers/AddServerProject'
+import AddServerDialog from './servers/AddServerDialog'
 import { useServersState } from '../serversState'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
@@ -158,9 +159,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     setSnoozeSubmenu(false)
   }, [])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [addServerOpen, setAddServerOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [serverProjectOpen, setServerProjectOpen] = useState(false)
+  /** Add server's "Choose a folder…" opens Server project on that server's folder browser. */
+  const [serverProjectStart, setServerProjectStart] = useState<{ serverId: string; mode: AddServerProjectMode } | null>(null)
   const serversState = useServersState()
   const pairedServers = serversState.servers
   /** A DevTool server's project whose server isn't online: listed greyed out, from the cache. */
@@ -311,6 +315,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   useEffect(() => {
     return paletteEvents.on('open-settings', () => setSettingsOpen(true))
+  }, [])
+  useEffect(() => {
+    return paletteEvents.on('open-add-server', () => setAddServerOpen(true))
   }, [])
   useEffect(() => {
     return paletteEvents.on('open-project-settings', () => {
@@ -1012,10 +1019,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 <div className="border-t border-hair mt-1 pt-1">
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
-                  {pairedServers.length > 0 && (
-                    <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setServerProjectOpen(true) }}>Server project…</button>
-                  )}
+                  <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setServerProjectStart(null); setServerProjectOpen(true) }}>Server project…</button>
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setShellCommandModalOpen(true) }}>Custom shell</button>
+                </div>
+                <div className="border-t border-hair mt-1 pt-1">
+                  <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setAddServerOpen(true) }}>Add server…</button>
                 </div>
               </div>
             )}
@@ -1110,9 +1118,12 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         />
       )}
 
-      {serverProjectOpen && pairedServers.length > 0 && (
+      {serverProjectOpen && (
         <AddServerProject
           servers={pairedServers}
+          initialServerId={serverProjectStart?.serverId}
+          initialMode={serverProjectStart?.mode}
+          onAddServer={() => { setServerProjectOpen(false); setAddServerOpen(true) }}
           existingDirectories={serverDirectories}
           onAdd={(serverId, items) => {
             const created = addServerProjects(serverId, items)
@@ -1121,6 +1132,23 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             if (created[0]) setProjectExpanded(created[0].id, true)
           }}
           onClose={() => setServerProjectOpen(false)}
+        />
+      )}
+
+      {addServerOpen && (
+        <AddServerDialog
+          existingDirectories={serverDirectories}
+          onAddProjects={(serverId, items) => {
+            const created = addServerProjects(serverId, items)
+            setSidebarTab('projects')
+            if (created[0]) setProjectExpanded(created[0].id, true)
+          }}
+          onChooseFolder={(serverId) => {
+            setAddServerOpen(false)
+            setServerProjectStart({ serverId, mode: 'browse' })
+            setServerProjectOpen(true)
+          }}
+          onClose={() => setAddServerOpen(false)}
         />
       )}
 

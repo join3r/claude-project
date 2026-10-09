@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { GitBranch } from 'lucide-react'
 import type { HostRepoDiscovery } from '../../../shared/host-fs'
-import { HelperText, PrimaryButton } from '../ui'
+import { HelperText, LinkBtn, PrimaryButton } from '../ui'
 
 export interface ServerRepoDiscoveryProps {
   serverId: string
@@ -63,11 +63,11 @@ export default function ServerRepoDiscovery({ serverId, existingDirectories, onA
   return (
     <div className="flex flex-col gap-2 min-h-0" data-testid="server-repo-discovery">
       {error ? (
-        <HelperText>Couldn't look for repositories: {error}</HelperText>
+        <HelperText>Couldn't look for repositories: {error} <LinkBtn onClick={scan}>Look again</LinkBtn></HelperText>
       ) : !result ? (
         <HelperText>Looking for git repositories…</HelperText>
       ) : result.repos.length === 0 ? (
-        <HelperText>No git repositories under {result.root}.</HelperText>
+        <HelperText>No git repositories under {result.root}. <LinkBtn onClick={scan}>Look again</LinkBtn></HelperText>
       ) : (
         <>
           <div className="flex items-center justify-between gap-3 text-sm text-text-muted">
@@ -110,9 +110,11 @@ export default function ServerRepoDiscovery({ serverId, existingDirectories, onA
       )}
       <div className="flex items-center justify-end gap-3 pt-1">
         {secondary}
-        <PrimaryButton onClick={add} disabled={picked.size === 0}>
-          {picked.size > 1 ? `Add ${picked.size} projects` : 'Add project'}
-        </PrimaryButton>
+        {offered.length > 0 && (
+          <PrimaryButton onClick={add} disabled={picked.size === 0}>
+            {picked.size > 1 ? `Add ${picked.size} projects` : 'Add project'}
+          </PrimaryButton>
+        )}
       </div>
     </div>
   )
