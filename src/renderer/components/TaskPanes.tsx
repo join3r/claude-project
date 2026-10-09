@@ -13,6 +13,7 @@ import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
 import { findStreamOfTask, needsTaskWorktree, tabSpawnDir, taskTabs, waitsForTaskWorktree } from '../../shared/streams'
 import { isStatusTab } from '../../shared/inbox-state'
+import { featureAvailable } from '../../shared/project-features'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
 import TaskWorktreePanel from './TaskWorktreePanel'
@@ -51,7 +52,7 @@ function paneColumn(index: number): number {
  * node, so terminals keep their session and browser webviews don't reload.
  */
 export default function TaskPanes({ project, task, visible, projectDir }: Props): React.ReactElement {
-  const { effectiveTheme, setPaneWidths } = useApp()
+  const { effectiveTheme, setPaneWidths, convertClaudeTab } = useApp()
   const focusedPane = useFocusedPane(task.id)
   const gridRef = useRef<HTMLDivElement | null>(null)
   const [dragWidths, setDragWidths] = useState<number[] | null>(null)
@@ -102,7 +103,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
 
   const renderTab = (tab: Tab, tabVisible: boolean): React.ReactNode => {
     if (tab.type === 'terminal') {
-      return <TerminalTab tabId={tab.id} visible={tabVisible} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} shellCommand={project.shellCommand} cwd={tab.cwd} isMainTab={isStatusTab(task, tab.id)} />
+      return <TerminalTab tabId={tab.id} visible={tabVisible} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} serverId={project.host} shellCommand={project.shellCommand} cwd={tab.cwd} isMainTab={isStatusTab(task, tab.id)} />
     }
     if (tab.type === 'browser') {
       return <BrowserTab tabId={tab.id} visible={tabVisible} initialUrl={tab.url} projectId={projectId} taskId={task.id} sshConfig={project.ssh} />
@@ -118,9 +119,13 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           taskId={task.id}
           projectDir={projectDir}
           sshConfig={project.ssh}
+          serverId={project.host}
           extraArgs={project.aiToolArgs?.[tab.type as AiTabType]}
         />
       )
+    }
+    if (tab.type === 'claude-chat' && !featureAvailable(project, 'chat')) {
+      return <ChatUnavailable visible={tabVisible} onSwitch={() => convertClaudeTab(projectId, task.id, tab.id, 'claude')} />
     }
     if (tab.type === 'claude-chat') {
       return <ClaudeChatTab tabId={tab.id} visible={tabVisible} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} extraArgs={project.aiToolArgs?.claude} />
@@ -270,6 +275,22 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
   )
 }
 
+/** A Claude chat tab of a DevTool server's project: chat runs on servers in a later version. */
+function ChatUnavailable({ visible, onSwitch }: { visible: boolean; onSwitch: () => void }): React.ReactElement {
+  return (
+    <div className="w-full h-full flex-col items-center justify-center gap-3 text-sm text-text-muted" style={{ display: visible ? 'flex' : 'none' }}>
+      <div>Claude chat doesn't run on DevTool servers yet.</div>
+      <button
+        type="button"
+        onClick={onSwitch}
+        className="px-3 py-1 rounded-md border border-border bg-surface-2 text-text cursor-pointer hover:bg-surface-3"
+      >
+        Open in Claude Code (terminal)
+      </button>
+    </div>
+  )
+}
+
 /**
  * A task in a worktree stream gets a worktree of its own just before its
  * first tab spawns. Until then (and while its setup runs or awaits approval,
@@ -288,6 +309,7 @@ function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
 } {
   const stream = findStreamOfTask(project, task.id)
   const possible = !!stream?.workspace && !!stream.taskWorktrees && !project.ssh && !task.sharesStreamWorktree
+    && featureAvailable(project, 'task-worktrees')
   const state = useTaskWorktreeState(task.id, possible)
   const held = useTaskSpawnHeld(task.id)
   // Being closed: its worktree just went (landed or discarded) and the task goes next.

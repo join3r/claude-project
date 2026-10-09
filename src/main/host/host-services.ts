@@ -22,6 +22,7 @@ import { bracketedPaste } from '../pty-paste'
 import { NotesStorage } from '../notes-storage'
 import { RevisionStore } from '../revision-store'
 import { TabActivityRegistry } from '../tab-activity-registry'
+import { TerminalStatusTracker } from '../terminal-status-tracker'
 import { SleepBlocker } from '../sleep-blocker'
 import type { ActivityUpdate } from '../../shared/agent-activity'
 import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from '../task-teardown'
@@ -99,7 +100,8 @@ import type {
   TunnelConfig,
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
-  NotesRecord
+  NotesRecord,
+  TabStatusValue
 } from '../../shared/types'
 import type { ClientHub } from './client-hub'
 import type { HostEnv } from './host-env'
@@ -132,6 +134,12 @@ export interface HostServicesOptions {
     /** The first revision (a server starts from the clock; see RevisionStore). */
     initialRevision?: number
   }
+  /**
+   * Who works out the status of tabs without hooks (shells, Codex): the windows
+   * showing them (a desktop, `report-tab-status`), or the host itself from their
+   * PTY output (a server, so it has statuses with no window attached).
+   */
+  terminalStatus?: 'windows' | 'host'
 }
 
 /**
@@ -191,7 +199,7 @@ export class HostServices {
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
 
-  constructor({ env, clients, onTaskArchived, relayRole, projects }: HostServicesOptions) {
+  constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus }: HostServicesOptions) {
     this.env = env
     this.clients = clients
     this.onTaskArchived = onTaskArchived ?? (() => {})
@@ -295,8 +303,21 @@ export class HostServices {
       log: (message) => this.logDebug(message),
       piExtensionPath: () => env.resourcePath(PI_EXTENSION_RESOURCE),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
-      onKill: (tabId) => this.shutdownNotebookKernel(tabId)
+      onKill: (tabId) => this.shutdownNotebookKernel(tabId),
+      terminalStatus: terminalStatus === 'host' ? this.hostTerminalStatus() : undefined
     })
+  }
+
+  /** The terminal status heuristics run here, feeding the activity registry like a window's reports. */
+  private hostTerminalStatus(): { output: (tabId: string, data: string) => void; forget: (tabId: string) => void } {
+    const tracker = new TerminalStatusTracker({
+      getStatus: (tabId) => this.activityRegistry.getStatus(tabId),
+      report: (tabId, status) => this.activityRegistry.reported(tabId, status)
+    })
+    return {
+      output: (tabId, data) => tracker.output(tabId, data),
+      forget: (tabId) => tracker.forget(tabId)
+    }
   }
 
   /**
@@ -643,6 +664,11 @@ export class HostServices {
 
   terminalOutputHeldBy(holder: string): string[] {
     return this.ptySessions.heldBy(holder)
+  }
+
+  /** Every tab's status as this host has it (hooks, reports, or its own terminal heuristics). */
+  tabStatuses(): Record<string, TabStatusValue> {
+    return this.activityRegistry.getSnapshot()
   }
 
   async shutdown(): Promise<void> {

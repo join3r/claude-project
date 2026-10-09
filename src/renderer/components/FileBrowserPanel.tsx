@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { featureAvailable } from '../../shared/project-features'
 import { findStreamOfTask, needsTaskWorktree, taskWorkspace } from '../../shared/streams'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
@@ -45,6 +46,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
   const isLocalProject = !!selectedProject
     && !isRemoteProject(selectedProject)
     && !isShellCommandProject(selectedProject)
+    && featureAvailable(selectedProject, 'files')
     && !!selectedProject.directory
   const gitStatus = useGitStatus(effectiveDir, fileBrowserOpen && isLocalProject, selectedProjectId ?? undefined)
   const linkToAgent = useLinkToAgent(selectedProjectId ?? '', selectedTaskId ?? '')

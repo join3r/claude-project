@@ -67,6 +67,20 @@ export interface PtySessionsDeps {
   condaEnvForProject?: (projectId?: string) => CondaEnvInfo | undefined
   /** A tab's process was killed (closing a notebook tab also stops its kernel). */
   onKill?: (tabId: string) => void
+  /**
+   * Host-side status (a DevTool server): output of the tabs no hook reports on
+   * (shells, Codex), and the end of any tab's process. Unset on a desktop, whose
+   * windows report those tabs' status themselves.
+   */
+  terminalStatus?: {
+    output: (tabId: string, data: string) => void
+    forget: (tabId: string) => void
+  }
+}
+
+/** Claude and pi tabs report their status through hooks; the rest only have their output. */
+function hasStatusHooks(shell: string, extraEnv?: Record<string, string>): boolean {
+  return (shell === 'claude' || shell === AI_TAB_META.pi.command) && !!extraEnv?.DEVTOOL_TAB_ID
 }
 
 /**
@@ -161,6 +175,7 @@ export class PtySessions {
   discard(tabId: string): void {
     this.deps.ptyManager.kill(tabId)
     this.runtimes.delete(tabId)
+    this.deps.terminalStatus?.forget(tabId)
   }
 
   killAll(): void {
@@ -204,6 +219,7 @@ export class PtySessions {
     }
     this.deps.ptyManager.kill(id)
     this.runtimes.delete(id)
+    this.deps.terminalStatus?.forget(id)
     this.deps.onKill?.(id)
     // No process, no activity: a status left at 'working' here would show the
     // task as busy for the rest of the session.
@@ -262,6 +278,8 @@ export class PtySessions {
     // 'exited') describes a process that no longer exists.
     deps.activityRegistry.reset(id)
     deps.broadcastAgentActivity(id)
+    deps.terminalStatus?.forget(id)
+    const statusOutput = deps.terminalStatus && !hasStatusHooks(shell, extraEnv) ? deps.terminalStatus.output : null
 
     // Capture the current runtime so callbacks can verify they belong to the
     // right generation.  After a kill+respawn cycle the same `id` maps to a
@@ -276,6 +294,7 @@ export class PtySessions {
         if (!runtime || runtime !== expectedRuntime) return
         runtime.scrollback = trimScrollback(runtime.scrollback + data)
         this.broadcastToAttached(id, 'pty-data', id, data)
+        statusOutput?.(id, data)
         // Layer 3: a slave printing "Shared connection to <host> closed" means
         // the master's tunnel is dead — force an immediate reconnect instead
         // of waiting for the next health-check tick (up to 10s) and without
@@ -289,6 +308,7 @@ export class PtySessions {
         const runtime = this.runtimes.get(id)
         if (!runtime || runtime !== expectedRuntime) return
         runtime.exitCode = exitCode
+        deps.terminalStatus?.forget(id)
         deps.activityRegistry.exited(id)
         deps.broadcastAgentActivity(id)
         deps.log(`ptyExit id=${id} exitCode=${exitCode}`)

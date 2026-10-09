@@ -6,6 +6,7 @@ import { useGitPosture } from '../hooks/useGitPosture'
 import { useCommitHistory } from '../hooks/useCommitHistory'
 import { useProjectArchive } from '../hooks/archiveStore'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { featureAvailable } from '../../shared/project-features'
 import type { Project, Stream, TabStatusValue } from '../../shared/types'
 import { archivedTasksOf, visibleArchive } from '../../shared/archive'
 import { projectTasks, streamDirectory } from '../../shared/streams'
@@ -184,7 +185,9 @@ function ArchivedStreamsLine({ project }: { project: Project }): React.ReactElem
 export function ProjectHome({ projectId }: Props): React.ReactElement | null {
   const actions = useApp()
   const project = actions.projects.find(p => p.id === projectId)
-  const isLocal = project ? !isRemoteProject(project) && !isShellCommandProject(project) : false
+  const isLocal = project
+    ? !isRemoteProject(project) && !isShellCommandProject(project) && featureAvailable(project, 'git-posture')
+    : false
   const projectDir = isLocal && project?.directory ? project.directory : ''
   const posture = useGitPosture(projectDir, isLocal, project?.id)
   const { commits } = useCommitHistory(projectDir, isLocal, project?.id)

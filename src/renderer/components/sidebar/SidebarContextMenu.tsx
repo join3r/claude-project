@@ -2,6 +2,7 @@ import React from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { isEphemeralProject, isRemoteProject, isShellCommandProject } from '../../../shared/types'
+import { featureAvailable } from '../../../shared/project-features'
 import type { PinnedItem, Project, Task } from '../../../shared/types'
 import { useMenuPosition } from '../../hooks/useMenuPosition'
 import { isSettled, isSnoozed, isUnread, snoozePresets } from '../inbox'
@@ -28,7 +29,7 @@ export function revealFolder(
   streamId?: string
 ): string | null {
   const project = projects.find(p => p.id === projectId)
-  if (!project || isRemoteProject(project) || isShellCommandProject(project)) return null
+  if (!project || isRemoteProject(project) || isShellCommandProject(project) || !featureAvailable(project, 'local-folder')) return null
   const workspace = taskId
     ? taskWorkspace(project, taskId)
     : streamId ? project.streams.find(stream => stream.id === streamId)?.workspace : undefined

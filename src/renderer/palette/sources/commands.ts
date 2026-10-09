@@ -5,6 +5,7 @@ import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, NEW_TASK_NAME, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
 import { claudeTabType, createTab } from '../../components/newTaskTabs'
+import { featureAvailable } from '../../../shared/project-features'
 import { currentStreamId, findStreamOfTask, findTaskInProject, taskTabs } from '../../../shared/streams'
 
 function currentPinTargets(actions: any): { project: PinnedItem | null; task: PinnedItem | null; isPinned: (item: PinnedItem) => boolean } {
@@ -113,7 +114,9 @@ for (const aiType of AI_TAB_TYPES) {
       const { selectedProjectId, selectedTaskId, projects, config } = ctx.actions
       const project = projects.find(p => p.id === selectedProjectId)
       if (!project) return
-      const tab = createTab(claudeTabType(aiType, config?.claudeDefaultView ?? 'terminal'))
+      // No chat view on a DevTool server's project yet: Claude starts in its terminal there.
+      const view = featureAvailable(project, 'chat') ? config?.claudeDefaultView ?? 'terminal' : 'terminal'
+      const tab = createTab(claudeTabType(aiType, view))
       ctx.actions.addTask(project.id, NEW_TASK_NAME, [tab], currentStreamId(project, selectedTaskId))
     }
   })

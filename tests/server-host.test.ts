@@ -181,6 +181,14 @@ describe.skipIf(process.platform === 'win32')('server host (in process)', () => 
     expect(stale).toMatchObject({ ok: false, revision: after.revision })
   })
 
+  it('works out a shell\'s status itself, with no window\'s help', async () => {
+    const tabId = 'status-tab'
+    await server.clients.call(a.id, 'pty-spawn', [tabId, '/bin/sh', projectDir, 80, 24, ['-c', 'echo busy; sleep 30'], {}, undefined, undefined])
+    await ptyText(a, tabId, 'busy')
+    await expect.poll(() => server.host.tabStatuses()[tabId]).toBe('working')
+    await server.clients.call(a.id, 'pty-kill', [tabId])
+  })
+
   it('runs a chat tab against the configured claude', async () => {
     const fakeClaude = path.resolve('tests/helpers/fake-claude.mjs')
     await server.clients.call(a.id, 'save-config', [{ claudeCommand: fakeClaude }])

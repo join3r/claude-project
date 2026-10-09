@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META, isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { featureAvailable } from '../../shared/project-features'
 import type { Project, AiTabType } from '../../shared/types'
 import {
   condaEnvFromSelection,
@@ -56,6 +57,7 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
   const [hideFromMobile, setHideFromMobile] = useState(!!project.hideFromMobile)
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const canEditDirectory = !isRemoteProject(project) && !isShellCommandProject(project)
+    && featureAvailable(project, 'project-settings-local')
   const canPickConda = canEditDirectory
 
   useEffect(() => {
