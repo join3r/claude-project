@@ -247,13 +247,13 @@ final class ChatModel {
     }
 
     /// Returns true when the desktop took the message.
-    func send(_ text: String) async -> Bool {
+    func send(_ text: String, images: [SentImage] = []) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let connection = connection() else { return false }
         sending = true
         defer { sending = false }
         do {
-            try await connection.sendChat(tabId: route.tabId, text: text)
+            try await connection.sendChat(tabId: route.tabId, text: text, images: images)
             return true
         } catch {
             show(error)

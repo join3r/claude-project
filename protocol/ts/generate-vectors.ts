@@ -561,6 +561,9 @@ function chatMessages(): unknown {
       params('chat.earlier', { tabId: 'tab-chat', before: 'u1', limit: 20 }),
       params('chat.earlier', { tabId: 'tab-chat', before: 'u1', limit: 500 }),
       params('chat.send', { tabId: 'tab-chat', text: 'Reply with just the word hi' }),
+      // `images` (feature `send.images`) go with the text; an empty list is no images.
+      params('chat.send', { tabId: 'tab-chat', text: 'What is wrong here?', images: [{ mediaType: 'image/jpeg', data: '/9j/4AAQ' }] }),
+      params('chat.send', { tabId: 'tab-chat', text: 'Go', images: [] }),
       params('chat.answer', { tabId: 'tab-chat', promptId: 'req-1', answer: { behavior: 'allow' } }),
       params('chat.answer', { tabId: 'tab-chat', promptId: 'req-1', answer: { behavior: 'allow', always: true } }),
       params('chat.answer', { tabId: 'tab-chat', promptId: 'req-1', answer: { behavior: 'allow', always: false } }),
@@ -598,6 +601,7 @@ function chatMessages(): unknown {
         { op: 'chat.send', json: text({ tabId: 't' }) },
         { op: 'chat.send', json: text({ tabId: 't', text: '   ' }) },
         { op: 'chat.send', json: text({ tabId: 't', text: 'x'.repeat(32001) }) },
+        { op: 'chat.send', json: text({ tabId: 't', text: 'Go', images: [{ mediaType: 'image/tiff', data: 'AAAA' }] }) },
         { op: 'chat.earlier', json: text({ tabId: 't', before: 'u1', limit: 0 }) },
         { op: 'chat.earlier', json: text({ tabId: 't', before: 'u1', limit: -3 }) },
         { op: 'chat.answer', json: text({ tabId: 't', promptId: 'p', answer: { behavior: 'maybe' } }) },
@@ -635,7 +639,7 @@ function chatMessages(): unknown {
         text({ projectId: 'p1', streamId: null, prompt: 'Go', mode: null, extra: true }),
         // Version 1's `workspace` is gone: it is ignored like any unknown field.
         text({ projectId: 'p1', prompt: 'Go', workspace: true }),
-        // `images` (feature `task.images`) go with the prompt; an empty list is no images.
+        // `images` (feature `send.images`) go with the prompt; an empty list is no images.
         text({ projectId: 'p1', prompt: 'What is wrong here?', images: [{ mediaType: 'image/jpeg', data: '/9j/4AAQ' }, { mediaType: 'image/png', data: 'iVBORw0K' }] }),
         text({ projectId: 'p1', prompt: 'Go', images: [] })
       ].map((json) => ({ json, expected: parseTaskNewParams(JSON.parse(json)) })),

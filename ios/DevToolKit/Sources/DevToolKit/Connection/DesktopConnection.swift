@@ -204,12 +204,15 @@ extension DesktopConnection {
         return try decode(result, ChatEarlierResult.parse)
     }
 
-    /// `chat.send`: `text` is at most 32000 chars.
-    public func sendChat(tabId: String, text: String) async throws {
+    /// `chat.send`: `text` is at most 32000 chars. `images` go only to a
+    /// desktop that lists `send.images`.
+    public func sendChat(tabId: String, text: String, images: [SentImage] = []) async throws {
         guard text.count <= ChatOp.maxSendLength else {
             throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Messages are limited to \(ChatOp.maxSendLength) characters.")
         }
-        _ = try await request(ChatOp.send, params: .object(["tabId": .string(tabId), "text": .string(text)]))
+        let params = ChatParams.send(tabId: tabId, text: text, images: images)
+        // Pictures take a while to go through the relay.
+        _ = try await request(ChatOp.send, params: params.json, timeout: images.isEmpty ? Self.defaultRequestTimeout : .seconds(60))
     }
 
     /// `chat.answer`. An already-answered prompt throws `.remote(code: "gone")`.
@@ -229,7 +232,7 @@ extension DesktopConnection {
     /// which includes starting Claude, so this waits longer than other ops; a
     /// retry after a timeout could make a second task.
     /// `images` go only to a desktop that lists `task.images`.
-    public func newTask(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [TaskNewImage] = []) async throws -> TaskNewResult {
+    public func newTask(projectId: String, streamId: String? = nil, prompt: String, mode: String? = nil, images: [SentImage] = []) async throws -> TaskNewResult {
         guard prompt.utf16.count <= ChatOp.maxSendLength else {
             throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Prompts are limited to \(ChatOp.maxSendLength) characters.")
         }

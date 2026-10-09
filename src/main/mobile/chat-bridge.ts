@@ -272,7 +272,7 @@ export class ChatBridge {
       case ChatOp.Send:
         await this.ensureRuntime(resolved)
         this.deps.onPhoneSend?.(state.phone.id, params.tabId)
-        await this.deps.chats.send(params.tabId, (params as ChatSendParams).text)
+        await this.deps.chats.send(params.tabId, (params as ChatSendParams).text, (params as ChatSendParams).images)
         return {}
       case ChatOp.Answer: {
         const { promptId, answer } = params as ChatAnswerParams

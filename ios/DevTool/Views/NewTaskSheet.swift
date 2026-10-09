@@ -169,10 +169,8 @@ struct NewTaskSheet: View {
                     } footer: {
                         if let imagesUnsupported, !images.isEmpty {
                             Text(imagesUnsupported)
-                        } else if imagesSupported {
-                            Text("The task is named from this prompt. Paste up to \(TaskNewImage.maxCount) pictures into it to send them along.")
                         } else {
-                            Text("The task is named from this prompt.")
+                            Text("The task is named from this prompt. Paste up to \(SentImage.maxCount) pictures into it to send them along.")
                         }
                     }
                     if let error {
@@ -281,17 +279,17 @@ struct NewTaskSheet: View {
     private var offline: Bool { selection.map { model.isOffline($0.desktopId) } ?? true }
     /// The picked desktop takes pictures with `task.new`.
     private var imagesSupported: Bool {
-        selection.map { model.supports(DesktopFeature.taskImages, on: $0.desktopId) } ?? false
+        selection.map { model.supports(DesktopFeature.sendImages, on: $0.desktopId) } ?? false
     }
-    /// The prompt's Paste for pictures, for a desktop that takes them.
+    /// The prompt's Paste for pictures. A desktop that can't take them gets
+    /// the footer's note rather than a Paste that does nothing.
     private var pasteImages: (([UIImage]) -> Void)? {
-        guard imagesSupported else { return nil }
-        return { addPasted($0) }
+        { addPasted($0) }
     }
 
-    /// Pasted pictures, past the first `TaskNewImage.maxCount` dropped.
+    /// Pasted pictures, past the first `SentImage.maxCount` dropped.
     private func addPasted(_ pasted: [UIImage]) {
-        let room = TaskNewImage.maxCount - images.count
+        let room = SentImage.maxCount - images.count
         images += pasted.prefix(max(room, 0)).map { PickedImage(pasted: $0) }
     }
 

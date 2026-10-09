@@ -616,7 +616,7 @@ struct FakeChat {
             guard let index = items.firstIndex(where: { $0.id == before }) else { return self.error(id, AppErrorCode.notFound) }
             let start = max(0, index - (limit ?? 100))
             return [.resOk(id: id, result: ChatEarlierResult(items: Array(items[start..<index]), hasEarlier: start > 0).json)]
-        case .send(_, let text):
+        case .send(_, let text, _):
             sent.append(text)
             status.busy = true
             status.turnStartedAt = 1_790_000_000_000

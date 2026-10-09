@@ -224,8 +224,8 @@ public enum DesktopFeature {
     /// The desktop answers `task.land` and sends tasks' `branch` and `landing`
     /// (§8.15, §4.4).
     public static let taskLand = "task.land"
-    /// The desktop's `task.new` takes `images` (§8.4).
-    public static let taskImages = "task.images"
+    /// The desktop's `chat.send` and `task.new` take `images` (§6.3, §8.4).
+    public static let sendImages = "send.images"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

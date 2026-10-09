@@ -2,7 +2,7 @@ import DevToolKit
 import SwiftUI
 import UIKit
 
-/// A picture pasted into a new task's prompt: kept scaled down to what could
+/// A picture pasted into a prompt or a chat's composer: kept scaled down to what could
 /// be sent, encoded only when the task starts, once the share of each is known.
 struct PickedImage: Identifiable {
     let id = UUID()
@@ -28,18 +28,18 @@ struct PickedImage: Identifiable {
         }
     }
 
-    /// `task.new`'s `images` (§8.4): JPEGs, each within its share of the
+    /// `images` for `chat.send` or `task.new` (§6.3, §8.4): JPEGs, each within its share of the
     /// message, scaled down further and compressed harder until it fits.
-    nonisolated static func encode(_ images: [UIImage]) -> [TaskNewImage] {
+    nonisolated static func encode(_ images: [UIImage]) -> [SentImage] {
         guard !images.isEmpty else { return [] }
-        let budget = TaskNewImage.maxData / images.count
+        let budget = SentImage.maxData / images.count
         return images.compactMap { image in
             for side in [maxSide, 1600, 1280, 1024, 768, 512] {
                 let sized = scaled(image, maxSide: side)
                 for quality in [0.8, 0.6] as [CGFloat] {
                     guard let data = sized.jpegData(compressionQuality: quality) else { return nil }
                     let base64 = data.base64EncodedString()
-                    if base64.utf8.count <= budget { return TaskNewImage(mediaType: "image/jpeg", data: base64) }
+                    if base64.utf8.count <= budget { return SentImage(mediaType: "image/jpeg", data: base64) }
                 }
             }
             return nil
@@ -47,10 +47,11 @@ struct PickedImage: Identifiable {
     }
 }
 
-/// The pictures pasted into the prompt, each with a remove button.
+/// The pictures pasted into a prompt, each with a remove button.
 struct TaskImagesStrip: View {
     @Binding var images: [PickedImage]
     let disabled: Bool
+    var side: CGFloat = 88
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -68,7 +69,7 @@ struct TaskImagesStrip: View {
         Image(uiImage: picked.image)
             .resizable()
             .scaledToFill()
-            .frame(width: 88, height: 88)
+            .frame(width: side, height: side)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -93,8 +94,9 @@ struct TaskImagesStrip: View {
     }
 }
 
-/// The New task prompt: a growing text field whose Paste also takes
-/// pictures (`onPasteImages`; nil pastes text only, as a plain field does).
+/// A growing text field whose Paste also takes pictures (`onPasteImages`;
+/// nil pastes text only, as a plain field does): the New task prompt and a
+/// chat's composer.
 /// SwiftUI's TextField offers no Paste for an image on the pasteboard.
 struct PromptTextView: UIViewRepresentable {
     @Binding var text: String
@@ -114,14 +116,14 @@ struct PromptTextView: UIViewRepresentable {
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        view.placeholder.text = placeholder
-        view.accessibilityLabel = placeholder
         return view
     }
 
     func updateUIView(_ view: PastingTextView, context: Context) {
         context.coordinator.parent = self
         if view.text != text { view.text = text }
+        view.placeholder.text = placeholder
+        view.accessibilityLabel = placeholder
         view.updatePlaceholder()
         view.isEditable = !disabled
         view.onPasteImages = disabled ? nil : onPasteImages
@@ -195,10 +197,18 @@ final class PastingTextView: UITextView {
     /// Pictures on the pasteboard become the task's pictures; anything else
     /// pastes as text.
     override func paste(_ sender: Any?) {
-        if let onPasteImages, UIPasteboard.general.hasImages, let images = UIPasteboard.general.images, !images.isEmpty {
-            onPasteImages(images)
+        let pasteboard = UIPasteboard.general
+        guard onPasteImages != nil, pasteboard.hasImages else { return super.paste(sender) }
+        if let images = pasteboard.images, !images.isEmpty {
+            onPasteImages?(images)
             return
         }
-        super.paste(sender)
+        // Only promised by the app that copied it: ask for it instead.
+        for provider in pasteboard.itemProviders where provider.canLoadObject(ofClass: UIImage.self) {
+            provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
+                guard let image = object as? UIImage else { return }
+                Task { @MainActor in self?.onPasteImages?([image]) }
+            }
+        }
     }
 }

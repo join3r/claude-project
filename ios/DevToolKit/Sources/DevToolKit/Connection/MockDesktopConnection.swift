@@ -189,9 +189,11 @@ public actor MockDesktopConnection: DesktopConnection {
             }
             return ChatImageResult(mediaType: "image/png", data: data).json
         case ChatOp.send:
-            let tabId = try string("tabId"), text = try string("text")
+            guard case .send(let tabId, let text, let images)? = try? ChatParams.parse(op: op, params) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Bad chat.send")
+            }
             guard chats[tabId] != nil else { throw notFound() }
-            startReply(tabId: tabId, text: text)
+            startReply(tabId: tabId, text: text, images: images.count)
             return .object([:])
         case ChatOp.answer:
             let tabId = try string("tabId"), promptId = try string("promptId")
@@ -736,7 +738,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
-            DesktopFeature.taskLand, DesktopFeature.taskImages,
+            DesktopFeature.taskLand, DesktopFeature.sendImages,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

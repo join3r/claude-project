@@ -34,13 +34,15 @@ export const TASK_NEW_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypass
 export type TaskNewMode = (typeof TASK_NEW_MODES)[number]
 
 /**
- * The handshake feature (§8.1) a desktop lists when `task.new` takes `images`:
- * pictures sent with the first prompt, as the desktop composer attaches them.
+ * The handshake feature (§8.1) a desktop lists when `chat.send` and `task.new`
+ * take `images`: pictures sent with the message, as the desktop composer
+ * attaches them.
  */
-export const TASK_IMAGES_FEATURE = 'task.images'
+export const SEND_IMAGES_FEATURE = 'send.images'
 
-export interface TaskNewImage { mediaType: string; data: string }
-export interface TaskNewParams { projectId: string; streamId?: string; prompt: string; mode?: TaskNewMode; images?: TaskNewImage[] }
+/** A picture a phone sends with a message (§6.3, §8.4). */
+export interface SentImage { mediaType: string; data: string }
+export interface TaskNewParams { projectId: string; streamId?: string; prompt: string; mode?: TaskNewMode; images?: SentImage[] }
 export interface TaskNewResult { taskId: string; tabId: string }
 
 /**
@@ -274,9 +276,9 @@ export const ChatLimits = {
   imageDefaultSide: 2048,
   /** `chat.image` base64 `data`, so the result fits one message (§6.1). */
   imageData: 3_000_000,
-  /** `task.new` images: how many, and their base64 `data` in total, so the req fits one message (§6.1). */
-  taskImages: 4,
-  taskImageData: 3_000_000,
+  /** `chat.send` / `task.new` images: how many, and their base64 `data` in total, so the req fits one message (§6.1). */
+  sentImages: 4,
+  sentImageData: 3_000_000,
   /** `chat.btw` question (§8.14). */
   btwQuestion: 20_000,
   /** `chat.permissions.update` rule (§8.14). */
@@ -407,7 +409,7 @@ export interface ChatViewEvent extends ChatViewStatus {
 
 export interface ChatTabParams { tabId: string }
 export interface ChatEarlierParams { tabId: string; before: string; limit?: number }
-export interface ChatSendParams { tabId: string; text: string }
+export interface ChatSendParams { tabId: string; text: string; images?: SentImage[] }
 export interface ChatDetailParams { tabId: string; itemId: string }
 
 export type ChatAnswer =
@@ -758,7 +760,8 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
       const text = str(o, 'text')
       if (text.length > ChatLimits.send) fail(`text over ${ChatLimits.send} characters`)
       if (!text.trim()) fail('text is empty')
-      return { tabId, text }
+      const images = sentImages(o)
+      return images ? { tabId, text, images } : { tabId, text }
     }
     case ChatOp.Answer:
       return { tabId, promptId: str(o, 'promptId'), answer: parseAnswer(o.answer) }
@@ -771,8 +774,8 @@ export function parseChatParams(op: string, params: unknown): ChatParams | null 
  * `task.new` params (the desktop's side). Throws ProtocolError — `bad-request` — on
  * a missing `projectId`, a blank prompt or one over {@link ChatLimits.send}
  * characters, a `mode` outside {@link TASK_NEW_MODES}, or `images` that aren't
- * {@link CHAT_IMAGE_TYPES} or go over {@link ChatLimits.taskImages} /
- * {@link ChatLimits.taskImageData}.
+ * {@link CHAT_IMAGE_TYPES} or go over {@link ChatLimits.sentImages} /
+ * {@link ChatLimits.sentImageData}.
  */
 export function parseTaskNewParams(params: unknown): TaskNewParams {
   const o = obj(params, 'params')
@@ -788,22 +791,30 @@ export function parseTaskNewParams(params: unknown): TaskNewParams {
     if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
     out.mode = mode as TaskNewMode
   }
-  if (!absent(o, 'images')) {
-    const images = arr(o, 'images').map((value) => {
-      const image = obj(value, 'image')
-      const mediaType = str(image, 'mediaType')
-      if (!(CHAT_IMAGE_TYPES as readonly string[]).includes(mediaType)) fail(`unknown mediaType ${mediaType}`)
-      const data = str(image, 'data')
-      if (!data) fail('image data is empty')
-      return { mediaType, data }
-    })
-    if (images.length > ChatLimits.taskImages) fail(`more than ${ChatLimits.taskImages} images`)
-    if (images.reduce((sum, image) => sum + image.data.length, 0) > ChatLimits.taskImageData) {
-      fail(`images over ${ChatLimits.taskImageData} characters`)
-    }
-    if (images.length > 0) out.images = images
-  }
+  const images = sentImages(o)
+  if (images) out.images = images
   return out
+}
+
+/**
+ * `images` of `chat.send` and `task.new`: undefined when absent or empty. Throws on
+ * a type outside {@link CHAT_IMAGE_TYPES}, empty `data`, or more than the limits.
+ */
+function sentImages(o: Obj): SentImage[] | undefined {
+  if (absent(o, 'images')) return undefined
+  const images = arr(o, 'images').map((value) => {
+    const image = obj(value, 'image')
+    const mediaType = str(image, 'mediaType')
+    if (!(CHAT_IMAGE_TYPES as readonly string[]).includes(mediaType)) fail(`unknown mediaType ${mediaType}`)
+    const data = str(image, 'data')
+    if (!data) fail('image data is empty')
+    return { mediaType, data }
+  })
+  if (images.length > ChatLimits.sentImages) fail(`more than ${ChatLimits.sentImages} images`)
+  if (images.reduce((sum, image) => sum + image.data.length, 0) > ChatLimits.sentImageData) {
+    fail(`images over ${ChatLimits.sentImageData} characters`)
+  }
+  return images.length > 0 ? images : undefined
 }
 
 /** `task.close` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `taskId`. */

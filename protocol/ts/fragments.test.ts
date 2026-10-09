@@ -164,10 +164,17 @@ describe('chat parsers', () => {
     expect(parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [] })).toEqual({ projectId: 'p1', prompt: 'Go' })
     expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/tiff', data: 'x' }] })).toThrow(ProtocolError)
     expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [{ mediaType: 'image/png', data: '' }] })).toThrow(ProtocolError)
-    expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: Array(ChatLimits.taskImages + 1).fill(png) })).toThrow(ProtocolError)
-    const half = { mediaType: 'image/jpeg', data: 'x'.repeat(ChatLimits.taskImageData / 2) }
+    expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: Array(ChatLimits.sentImages + 1).fill(png) })).toThrow(ProtocolError)
+    const half = { mediaType: 'image/jpeg', data: 'x'.repeat(ChatLimits.sentImageData / 2) }
     expect(parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [half, half] }).images).toHaveLength(2)
     expect(() => parseTaskNewParams({ projectId: 'p1', prompt: 'Go', images: [half, half, png] })).toThrow(ProtocolError)
+  })
+
+  it('parses chat.send images (§6.3) like task.new', () => {
+    const png = { mediaType: 'image/png', data: 'iVBO' }
+    expect(parseChatParams('chat.send', { tabId: 't', text: 'Look', images: [png] })).toEqual({ tabId: 't', text: 'Look', images: [png] })
+    expect(parseChatParams('chat.send', { tabId: 't', text: 'Look', images: [] })).toEqual({ tabId: 't', text: 'Look' })
+    expect(() => parseChatParams('chat.send', { tabId: 't', text: 'Look', images: [{ mediaType: 'image/bmp', data: 'x' }] })).toThrow(ProtocolError)
   })
 
   it('parses stream.new (§8.12): trims, drops branch fields without a worktree, names no tab', () => {

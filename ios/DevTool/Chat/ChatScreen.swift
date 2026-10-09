@@ -7,12 +7,14 @@ struct ChatScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: ChatModel
     @State private var draft = ""
+    /// Pictures pasted into the composer, sent with the next message.
+    @State private var pictures: [PickedImage] = []
     @State private var atBottom = true
     @State private var detailItem: ChatItem?
     @State private var viewerImage: ChatImageRef?
     @State private var sideQuestion: SideQuestion?
     @State private var showingPermissions = false
-    @FocusState private var composerFocused: Bool
+    @State private var composerFocused = false
     /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
     @State private var viewportHeight: CGFloat = 0
 
@@ -295,6 +297,9 @@ struct ChatScreen: View {
                 CommandSuggestions(commands: suggestions, maxHeight: viewportHeight > 0 ? viewportHeight * 0.3 : 270, pick: pick)
                     .transition(.opacity)
             }
+            if !pictures.isEmpty {
+                pastedPictures
+            }
             composer
         }
         .padding(.horizontal, 12)
@@ -364,15 +369,34 @@ struct ChatScreen: View {
 
     private var canSend: Bool {
         !readOnly && !model.sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && draft.count <= ChatOp.maxSendLength
+            && draft.count <= ChatOp.maxSendLength && (pictures.isEmpty || picturesSupported)
+    }
+
+    /// The desktop takes pictures with `chat.send`.
+    private var picturesSupported: Bool {
+        app.supports(DesktopFeature.sendImages, on: route.desktopId)
+    }
+
+    private var pastedPictures: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TaskImagesStrip(images: $pictures, disabled: model.sending, side: 64)
+            if !picturesSupported {
+                Text("\(app.desktop(route.desktopId)?.name ?? "This desktop") can't take pictures yet. Update DevTool there, or remove them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField(offline ? "\(app.kindTitle(route.desktopId)) offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message Claude"),
-                      text: $draft, axis: .vertical)
-                .lineLimit(1...6)
-                .focused($composerFocused)
+            PromptTextView(text: $draft, focused: $composerFocused,
+                           placeholder: offline ? "\(app.kindTitle(route.desktopId)) offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message Claude"),
+                           disabled: readOnly, minLines: 1, maxLines: 6) { pasted in
+                let room = SentImage.maxCount - pictures.count
+                pictures += pasted.prefix(max(room, 0)).map { PickedImage(pasted: $0) }
+            }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -408,15 +432,20 @@ struct ChatScreen: View {
 
     private func send() {
         guard canSend else { return }
-        if supportsCommands, runCommand(draft) { return }
+        if pictures.isEmpty, supportsCommands, runCommand(draft) { return }
         let text = draft
+        let sent = pictures
         draft = ""
+        pictures = []
         atBottom = true
         // Hand the screen back to the transcript: the reply and any card land there.
         composerFocused = false
         Task {
-            if await !model.send(text), draft.isEmpty {
-                draft = text // Give the text back so it isn't lost.
+            let picked = sent.map(\.image)
+            let images = await Task.detached(priority: .userInitiated) { PickedImage.encode(picked) }.value
+            if await !model.send(text, images: images), draft.isEmpty {
+                draft = text // Give the text (and pictures) back so they aren't lost.
+                if pictures.isEmpty { pictures = sent }
             }
         }
     }
