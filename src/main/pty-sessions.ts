@@ -147,6 +147,14 @@ export class PtySessions {
     this.deps.ptyManager.write(id, data)
   }
 
+  /** Main's own input to a tab's live process (no window involved). False when it has none. */
+  writeFromMain(id: string, data: string): boolean {
+    const runtime = this.runtimes.get(id)
+    if (!runtime || runtime.exitCode !== null) return false
+    this.deps.ptyManager.write(id, data)
+    return true
+  }
+
   resize(windowId: number, windowFocused: boolean, id: string, cols: number, rows: number): void {
     const runtime = this.runtimes.get(id)
     if (!runtime || !runtime.attachedWindowIds.has(windowId)) return

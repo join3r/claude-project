@@ -28,6 +28,8 @@ import type {
   EnsureTaskWorktreeOptions,
   PendingWorktreeSetup,
   StreamSetupResult,
+  TaskLanding,
+  TaskLandingResult,
   TaskWorktreeResult,
   TaskWorktreeState,
   WorktreeSetupDecision
@@ -442,6 +444,31 @@ const api = {
   /** A new stream worktree's held setup commands: approve this config and run them. */
   streamWorktreeSetupRun: (projectId: string, streamId: string, pending: PendingWorktreeSetup): Promise<StreamSetupResult> =>
     ipcRenderer.invoke('stream-worktree-setup-run', projectId, streamId, pending),
+
+  // Landing a task's worktree into its stream (main's TaskLandingManager). A stop is also on `Task.landing`.
+  /** Close (default): land, then remove the worktree and branch; the caller archives. `keepWorktree`: the Land action. */
+  taskLand: (projectId: string, taskId: string, options?: { keepWorktree?: boolean }): Promise<TaskLandingResult> =>
+    ipcRenderer.invoke('task-land', projectId, taskId, options),
+  taskLandingRetry: (projectId: string, taskId: string): Promise<TaskLandingResult> =>
+    ipcRenderer.invoke('task-landing-retry', projectId, taskId),
+  taskLandingAbort: (projectId: string, taskId: string): Promise<TaskLandingResult> =>
+    ipcRenderer.invoke('task-landing-abort', projectId, taskId),
+  /** Ask the task's agent to resolve the conflict; the landing resumes once it goes idle with the rebase done. */
+  taskLandingFix: (projectId: string, taskId: string): Promise<TaskLandingResult> =>
+    ipcRenderer.invoke('task-landing-fix', projectId, taskId),
+  taskUpdateFromStream: (projectId: string, taskId: string): Promise<TaskLandingResult> =>
+    ipcRenderer.invoke('task-update-from-stream', projectId, taskId),
+  /** Commits on the stream the task's branch doesn't have yet ("<stream> +N"); null when unknown. */
+  taskStreamAhead: (projectId: string, taskId: string): Promise<number | null> =>
+    ipcRenderer.invoke('task-stream-ahead', projectId, taskId),
+  /** Close without landing: `keep` the branch (and `Task.workspace`, for reopen) or `discard` both. */
+  taskWorktreeClose: (projectId: string, taskId: string, mode: 'keep' | 'discard'): Promise<TaskLandingResult> =>
+    ipcRenderer.invoke('task-worktree-close', projectId, taskId, mode),
+  onTaskLandingState: (callback: (taskId: string, landing: TaskLanding | null) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, taskId: string, landing: TaskLanding | null) => callback(taskId, landing)
+    ipcRenderer.on('task-landing-state', handler)
+    return () => ipcRenderer.removeListener('task-landing-state', handler)
+  },
 
   // Archive: `<config dir>/archive/<projectId>.json`. Each change resolves to the archive as it now is.
   archiveLoad: (projectId: string): Promise<ProjectArchive> => ipcRenderer.invoke('archive-load', projectId),

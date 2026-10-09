@@ -42,6 +42,11 @@ export interface TaskWorktreeDeps {
   /** A task's state changed; null when it has none any more. */
   onState?(taskId: string, state: TaskWorktreeState | null): void
   log?(message: string): void
+  /**
+   * Setup commands finished in a new task worktree: note what they left
+   * untracked, so landing doesn't commit it (`recordSetupArtifacts` in task-landing.ts).
+   */
+  recordSetupArtifacts?(worktreeRoot: string): Promise<void>
   /** How long to wait for a window's save to bring a task main does not know yet. */
   waitMs?: number
 }
@@ -109,6 +114,12 @@ export class TaskWorktreeManager {
   dismiss(taskId: string): void {
     const phase = this.states.get(taskId)?.phase
     if (phase === 'failed' || phase === 'setup-failed') this.setState(taskId, null)
+  }
+
+  /** The task's worktree is gone (landed, kept as a branch, discarded): drop its held setup and state. */
+  forget(taskId: string): void {
+    this.held.delete(taskId)
+    this.setState(taskId, null)
   }
 
   /** Every task with a state, for a window that just loaded. */
@@ -224,12 +235,19 @@ export class TaskWorktreeManager {
     return this.afterSetup(taskId, held.workspace, setup, held)
   }
 
-  private afterSetup(
+  private async afterSetup(
     taskId: string,
     workspace: WorkspaceConfig,
     setup: WorktreeSetupResult,
     roots: { sourceRoot: string; worktreeRoot: string }
-  ): TaskWorktreeResult {
+  ): Promise<TaskWorktreeResult> {
+    if (setup.status !== 'needs-approval') {
+      try {
+        await this.deps.recordSetupArtifacts?.(roots.worktreeRoot)
+      } catch (err) {
+        this.deps.log?.(`task worktree setup artifacts task=${taskId} error=${errorMessage(err)}`)
+      }
+    }
     if (setup.status === 'needs-approval') {
       this.held.set(taskId, { workspace, pending: setup.pending, ...roots })
       this.setState(taskId, { phase: 'needs-approval', branch: workspace.branchName, pending: setup.pending })

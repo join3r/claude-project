@@ -110,10 +110,40 @@ export interface TaskLanding {
    * `fixing`: the task's agent was asked to resolve the conflict.
    */
   state: 'landing' | 'conflict' | 'blocked' | 'fixing'
+  /**
+   * What was asked for, so a stopped landing resumes the same way: `close` lands
+   * and removes the worktree and branch (the task is being closed), `land` lands
+   * and keeps the worktree, `update` only rebases onto the stream. Absent = `close`.
+   */
+  intent?: TaskLandingIntent
   /** The conflicted files (`conflict`), or the stream's files in the way (`blocked`). */
   files?: string[]
   message?: string
 }
+
+export type TaskLandingIntent = 'close' | 'land' | 'update'
+
+/**
+ * What a landing call (main's `TaskLandingManager`) came to.
+ *  - `landed`: the stream was fast-forwarded to the task's squashed commit.
+ *  - `updated`: the task's branch was rebased onto the stream's tip.
+ *  - `nothing`: nothing to land, or (update) already on the stream's tip.
+ *  - `conflict` / `blocked`: stopped; the same is on `Task.landing`.
+ *  - `working`: refused, the task's agent is mid-turn.
+ *  - `fixing`: the agent was asked to resolve the conflict.
+ *  - `aborted`: the rebase was undone. `removed`: the worktree is gone.
+ */
+export type TaskLandingResult =
+  | { status: 'landed' }
+  | { status: 'updated' }
+  | { status: 'nothing' }
+  | { status: 'conflict'; files: string[] }
+  | { status: 'blocked'; files: string[]; message: string }
+  | { status: 'working' }
+  | { status: 'fixing' }
+  | { status: 'aborted' }
+  | { status: 'removed' }
+  | { status: 'failed'; error: string }
 
 /**
  * One agent session (or one terminal) and the tabs that came with it. Lives in a

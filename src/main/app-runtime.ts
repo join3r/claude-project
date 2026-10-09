@@ -19,6 +19,9 @@ import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
 import { FileSetupApprovals } from './worktree-setup-approvals'
 import { TaskWorktreeManager } from './task-worktree'
+import { recordSetupArtifacts, TaskLandingManager } from './task-landing'
+import { LocalGitRunner } from './git-runner'
+import { bracketedPaste } from './pty-paste'
 import { NotesStorage } from './notes-storage'
 import { RevisionStore } from './revision-store'
 import { TabActivityRegistry } from './tab-activity-registry'
@@ -59,10 +62,12 @@ import type { CondaEnvInfo } from '../shared/conda'
 import { registerMobileHandlers } from './ipc/mobile'
 import { registerUpdateHandlers } from './ipc/updates'
 import { registerTaskWorktreeHandlers } from './ipc/task-worktrees'
+import { registerTaskLandingHandlers } from './ipc/task-landing'
 import { createUpdates, type Updates } from './updates'
 import { probeRedirect } from './release-redirect'
 import { decideUpdateMode } from '../shared/updates'
-import { removeTaskFromProject } from '../shared/streams'
+import { findTaskInProject, removeTaskFromProject } from '../shared/streams'
+import { chatTabConfig } from '../shared/chat-tab-config'
 import { MobileService } from './mobile/mobile-service'
 import { PairingsStore } from './mobile/pairings-store'
 import { IdentityStore } from './mobile/identity'
@@ -177,6 +182,8 @@ export class AppRuntime {
   private readonly projectsStore: RevisionStore<ProjectsData>
   /** Tasks' own worktrees, made just before their first spawn. */
   private readonly taskWorktrees: TaskWorktreeManager
+  /** Tasks' worktrees landing back into their streams. */
+  private readonly taskLanding: TaskLandingManager
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private startupWindowStates: PersistedWindowState[]
@@ -197,6 +204,7 @@ export class AppRuntime {
       persist: (data) => this.notesStorage.save(data),
       broadcast: (envelope) => this.broadcastToAllWindows('notes-updated', envelope)
     })
+    const gitRunner = new LocalGitRunner()
     this.taskWorktrees = new TaskWorktreeManager({
       projects: {
         peek: () => this.projectsStore.peek(),
@@ -205,6 +213,28 @@ export class AppRuntime {
       },
       git: this.workspaceManager,
       onState: (taskId, state) => this.broadcastToAllWindows('task-worktree-state', taskId, state),
+      log: (message) => this.logDebug(message),
+      recordSetupArtifacts: (worktreeRoot) => recordSetupArtifacts(gitRunner, worktreeRoot)
+    })
+    this.taskLanding = new TaskLandingManager({
+      projects: {
+        peek: () => this.projectsStore.peek(),
+        commit: (data) => { this.commitProjects(data) }
+      },
+      runner: gitRunner,
+      git: this.workspaceManager,
+      activity: this.activityRegistry,
+      sendToAgent: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
+      forgetWorktree: (taskId) => this.taskWorktrees.forget(taskId),
+      onState: (taskId, landing) => this.broadcastToAllWindows('task-landing-state', taskId, landing),
+      onResumed: (projectId, taskId, intent, result) => {
+        // A close that stopped on a conflict and was finished by the agent: nobody
+        // is waiting to archive it, so main does, as for a phone's close.
+        if (intent !== 'close' || result.status !== 'landed') return
+        const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+        const task = findTaskInProject(project, taskId)
+        if (project && task) void this.archiveTaskFromMain(project, task)
+      },
       log: (message) => this.logDebug(message)
     })
     this.forgetArchivesOfVanishedProjects()
@@ -267,6 +297,7 @@ export class AppRuntime {
     this.updates = this.createUpdates()
     this.registerEventForwarders()
     this.registerIpcHandlers()
+    void this.taskLanding.reconcile()
     this.mobileService.start()
     this.updates.start()
   }
@@ -597,6 +628,28 @@ export class AppRuntime {
     this.commitProjects(removeTabFromData(this.projectsStore.peek(), task.id, tab.id))
   }
 
+  /**
+   * Type a prompt into an agent tab and submit it, from main (a landing's
+   * "Ask agent to fix"): a chat tab gets its runtime started if no window has
+   * it; a terminal agent gets it pasted (bracketed, as a window's link insert
+   * does, control characters replaced) and Enter a beat later. A terminal agent must be running already.
+   */
+  private async sendToAgentTab(project: Project, task: Task, tab: Tab, text: string): Promise<void> {
+    if (tab.type === 'claude-chat') {
+      if (!tab.sessionId) throw new Error('Open the task\'s chat once, then ask again')
+      if (!this.chatManager.snapshot(tab.id)) {
+        const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
+        stop()
+      }
+      await this.chatManager.send(tab.id, text)
+      return
+    }
+    if (!this.ptySessions.writeFromMain(tab.id, bracketedPaste(text))) {
+      throw new Error('The task\'s agent is not running. Open the task, then ask again.')
+    }
+    setTimeout(() => this.ptySessions.writeFromMain(tab.id, '\r'), 150)
+  }
+
   /** Run a shell script on a remote project's host over its control socket; resolves its stdout. */
   private async remoteExec(projectId: string, sshConfig: SshConfig, script: string): Promise<string> {
     const { stdout } = await execFileAsync(this.sshManager.getSshCommand(), [
@@ -911,6 +964,7 @@ export class AppRuntime {
     })
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
+    registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
     registerUpdateHandlers(ipc, { updates: () => this.updates })
   }
 
