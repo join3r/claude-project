@@ -88,6 +88,7 @@ import {
   TASK_TRIAGE_FEATURE
 } from '../../../protocol/ts/index.ts'
 import { normalizeMobileConfig } from '../../shared/mobile'
+import { LOCAL_SOURCE } from '../../shared/projects-sources'
 import type {
   AppConfig,
   Project,
@@ -122,6 +123,15 @@ export interface HostServicesOptions {
    * drops it from the window view states it persists.
    */
   onTaskArchived?: (taskId: string) => void
+  /** How this host's projects.json is kept (see `ProjectsNormalizeOptions`). */
+  projects?: {
+    /** A desktop's server projects: its local order and pins may name them. */
+    foreign?: () => readonly Project[]
+    /** A server keeps tag ids only its desktops know. */
+    keepUnknownTagIds?: boolean
+    /** The first revision (a server starts from the clock; see RevisionStore). */
+    initialRevision?: number
+  }
 }
 
 /**
@@ -181,7 +191,7 @@ export class HostServices {
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
 
-  constructor({ env, clients, onTaskArchived, relayRole }: HostServicesOptions) {
+  constructor({ env, clients, onTaskArchived, relayRole, projects }: HostServicesOptions) {
     this.env = env
     this.clients = clients
     this.onTaskArchived = onTaskArchived ?? (() => {})
@@ -197,7 +207,12 @@ export class HostServices {
       log: (message) => this.logDebug(`relay ${message}`)
     })
     this.relay = new RelayMux(this.relayClient, (message) => this.logDebug(message))
-    this.storage = new Storage(configDir)
+    this.storage = new Storage(configDir, {
+      projectsNormalize: () => ({
+        foreignProjects: projects?.foreign?.() ?? [],
+        keepUnknownTagIds: projects?.keepUnknownTagIds
+      })
+    })
     this.scrollbackStorage = new ScrollbackStorage(path.join(configDir, 'scrollback'))
     this.archiveStorage = new ArchiveStorage(path.join(configDir, 'archive'))
     this.notesStorage = new NotesStorage(configDir)
@@ -208,9 +223,10 @@ export class HostServices {
     this.storage.backupProjectsOnStartup()
     this.projectsStore = new RevisionStore<ProjectsData>({
       initial: this.storage.loadProjects(),
-      normalize: (data) => Storage.normalizeProjectsData(data as unknown as Record<string, unknown>),
+      normalize: (data) => this.storage.normalizeProjects(data),
       persist: (data) => this.storage.saveProjects(data),
-      broadcast: (envelope) => this.clients.broadcast('projects-updated', envelope)
+      broadcast: (envelope) => this.clients.broadcast('projects-updated', { source: LOCAL_SOURCE, ...envelope }),
+      initialRevision: projects?.initialRevision
     })
     // Notes only gained a canonical copy in main when they gained a revision: before
     // that `notes-save` proxied straight to disk, which is why note changes never
@@ -294,6 +310,11 @@ export class HostServices {
 
   getProjectsData(): ProjectsData {
     return this.projectsStore.peek()
+  }
+
+  /** After every commit of this host's projects (a desktop's router re-indexes them). */
+  onProjectsChanged(listener: (data: ProjectsData) => void): () => void {
+    return this.projectsStore.subscribe(listener)
   }
 
   getConfig(): AppConfig {

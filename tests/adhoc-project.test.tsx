@@ -32,15 +32,15 @@ let saved: ProjectsData[]
 beforeEach(() => {
   saved = []
   ;(window as any).api = {
-    loadProjects: vi.fn().mockResolvedValue({
+    loadProjects: vi.fn().mockResolvedValue({ local: {
       revision: 0,
       data: { projects: buildProjects(), tags: [], projectOrder: ['p1'], pinnedItems: [] }
-    }),
+    } }),
     loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG }),
     loadWindowState: vi.fn().mockResolvedValue(null),
     notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
     notesSave: vi.fn().mockResolvedValue({ ok: true, revision: 1 }),
-    saveProjects: vi.fn().mockImplementation((payload: { data: ProjectsData }) => {
+    saveProjects: vi.fn().mockImplementation((_source: string, payload: { data: ProjectsData }) => {
       saved.push(payload.data)
       return Promise.resolve({ ok: true, revision: saved.length })
     }),

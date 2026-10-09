@@ -125,13 +125,32 @@ export function quarantine(file: string): string | null {
   }
 }
 
+/**
+ * How a host's projects are normalized beyond the defaults. A desktop's local
+ * `projectOrder` and `pinnedItems` also name its server projects, which live in
+ * other stores; a server keeps tag ids its desktops own.
+ */
+export interface ProjectsNormalizeOptions {
+  /** Projects of other stores this data may refer to (a desktop's server projects, with `host`). */
+  foreignProjects?: readonly Project[]
+  /** Keep tag ids no tag here names (a server: tags belong to its desktops). */
+  keepUnknownTagIds?: boolean
+}
+
+export interface StorageOptions {
+  /** Read at every load and save of projects.json. */
+  projectsNormalize?: () => ProjectsNormalizeOptions
+}
+
 export class Storage {
   private configPath: string
   private projectsPath: string
   private windowSessionPath: string
   private backupsDir: string
+  private readonly projectsNormalize: () => ProjectsNormalizeOptions
 
-  constructor(dir: string) {
+  constructor(dir: string, options: StorageOptions = {}) {
+    this.projectsNormalize = options.projectsNormalize ?? (() => ({}))
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })
     }
@@ -252,7 +271,7 @@ export class Storage {
     if (result.kind === 'missing') return EMPTY_PROJECTS()
     if (result.kind === 'ok') {
       try {
-        return Storage.normalizeProjectsData(result.data)
+        return this.normalizeProjects(result.data)
       } catch (err) {
         return this.recoverProjects(err)
       }
@@ -271,7 +290,7 @@ export class Storage {
       if (backup.kind !== 'ok') continue
       let data: ProjectsData
       try {
-        data = Storage.normalizeProjectsData(backup.data)
+        data = this.normalizeProjects(backup.data)
       } catch {
         continue
       }
@@ -288,7 +307,12 @@ export class Storage {
     return EMPTY_PROJECTS()
   }
 
-  static normalizeProjectsData(data: Record<string, unknown>): ProjectsData {
+  /** {@link Storage.normalizeProjectsData} with this host's options. */
+  normalizeProjects(data: ProjectsData | Record<string, unknown>): ProjectsData {
+    return Storage.normalizeProjectsData(data as Record<string, unknown>, this.projectsNormalize())
+  }
+
+  static normalizeProjectsData(data: Record<string, unknown>, options: ProjectsNormalizeOptions = {}): ProjectsData {
     // Pre-streams data (Project › Task › Tab) is converted here, once: the result is
     // in the new shape, so the next save writes it and later loads skip this.
     const migration = migrateProjects(Array.isArray(data.projects) ? data.projects : [])
@@ -299,7 +323,8 @@ export class Storage {
     // without going through the renderer. Safe because such a project is always
     // created in the same write as its first task.
     const projects = allProjects.filter(p => !isSpentEphemeralProject(p))
-    const projectIds = new Set(projects.map(p => p.id))
+    const foreignProjects = options.foreignProjects ?? []
+    const projectIds = new Set([...projects, ...foreignProjects].map(p => p.id))
     const tagIds = new Set(
       (Array.isArray(data.tags) ? data.tags as Tag[] : [])
         .filter((t): t is Tag => typeof t?.id === 'string' && typeof t?.name === 'string')
@@ -326,7 +351,7 @@ export class Storage {
 
     const normalizedProjects = projects.map(project => ({
       ...project,
-      tagIds: (project.tagIds ?? []).filter(id => tagIds.has(id))
+      tagIds: options.keepUnknownTagIds ? (project.tagIds ?? []) : (project.tagIds ?? []).filter(id => tagIds.has(id))
     }))
 
     const now = Date.now()
@@ -351,12 +376,15 @@ export class Storage {
       projects: normalizedProjects,
       tags,
       projectOrder,
-      pinnedItems: normalizePinnedItems(migratePinnedItems(data.pinnedItems, migration.migratedStreamIds), normalizedProjects)
-    })
+      pinnedItems: normalizePinnedItems(
+        migratePinnedItems(data.pinnedItems, migration.migratedStreamIds),
+        [...normalizedProjects, ...foreignProjects]
+      )
+    }, { foreignProjects, keepUnknownTagIds: options.keepUnknownTagIds })
   }
 
   saveProjects(data: ProjectsData): void {
-    const normalized = Storage.normalizeProjectsData(data as unknown as Record<string, unknown>)
+    const normalized = this.normalizeProjects(data)
     atomicWriteFileSync(this.projectsPath, JSON.stringify(normalized, null, 2))
   }
 

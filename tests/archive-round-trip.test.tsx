@@ -36,15 +36,15 @@ beforeEach(() => {
   resetArchiveStore()
   archive = emptyArchive()
   api = {
-    loadProjects: vi.fn().mockResolvedValue({
+    loadProjects: vi.fn().mockResolvedValue({ local: {
       revision: 0,
       data: { projects: buildProjects(), tags: [], projectOrder: ['p1'], pinnedItems: [{ type: 'stream', projectId: 'p1', streamId: 'stream-w1' }] }
-    }),
+    } }),
     loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG }),
     loadWindowState: vi.fn().mockResolvedValue(null),
     notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
     notesSave: vi.fn().mockResolvedValue({ ok: true, revision: 1 }),
-    saveProjects: vi.fn().mockImplementation((_payload: { data: ProjectsData }) => Promise.resolve({ ok: true, revision: 1 })),
+    saveProjects: vi.fn().mockImplementation((_source: string, _payload: { data: ProjectsData }) => Promise.resolve({ ok: true, revision: 1 })),
     saveConfig: vi.fn().mockResolvedValue(undefined),
     saveWindowState: vi.fn().mockResolvedValue(undefined),
     getNativeTheme: vi.fn().mockResolvedValue('dark'),
@@ -173,10 +173,10 @@ describe('reopening into task worktrees', () => {
   }
 
   function withStreams(streams: Stream[]): void {
-    api.loadProjects.mockResolvedValue({
+    api.loadProjects.mockResolvedValue({ local: {
       revision: 0,
       data: { projects: [fixtureProject({ id: 'p1', directory: '/tmp/p1', streams })], tags: [], projectOrder: ['p1'], pinnedItems: [] }
-    })
+    } })
   }
 
   const relStream = (tasks: Task[] = []): Stream => ({ id: 'stream-rel', name: 'rel', workspace: STREAM_WS, taskWorktrees: true, tasks, archivedTaskCount: 1 })

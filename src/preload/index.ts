@@ -10,8 +10,6 @@ import type {
   NotesRecord,
   NotesSaveResult,
   ProjectsData,
-  ProjectsEnvelope,
-  ProjectsSaveResult,
   SshConfig,
   TabStatusValue,
   TaskRemoval,
@@ -42,6 +40,7 @@ import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
 import type { ServersState } from '../shared/servers'
+import type { ProjectsSources, ProjectsUpdate, SourceSaveResult } from '../shared/projects-sources'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
@@ -49,12 +48,14 @@ import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind
 const api = {
   // Projects
   // Projects and notes are revision-guarded: a save quotes the revision it was
-  // derived from and main refuses it if another window got there first.
-  loadProjects: (): Promise<ProjectsEnvelope> => ipcRenderer.invoke('load-projects'),
-  saveProjects: (payload: { baseRevision: number; data: ProjectsData }): Promise<ProjectsSaveResult> =>
-    ipcRenderer.invoke('save-projects', payload),
-  onProjectsUpdated: (callback: (envelope: ProjectsEnvelope) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, envelope: ProjectsEnvelope) => callback(envelope)
+  // derived from and main refuses it if another window got there first. Projects
+  // come from several sources (this desktop, each DevTool server), each with its
+  // own revision (shared/projects-sources.ts).
+  loadProjects: (): Promise<ProjectsSources> => ipcRenderer.invoke('load-projects'),
+  saveProjects: (source: string, payload: { baseRevision: number; data: ProjectsData }): Promise<SourceSaveResult> =>
+    ipcRenderer.invoke('save-projects', source, payload),
+  onProjectsUpdated: (callback: (update: ProjectsUpdate) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, update: ProjectsUpdate) => callback(update)
     ipcRenderer.on('projects-updated', handler)
     return () => ipcRenderer.removeListener('projects-updated', handler)
   },

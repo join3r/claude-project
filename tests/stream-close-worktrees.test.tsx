@@ -79,7 +79,7 @@ describe('streamTasksCloseQuestion', () => {
 describe('closing a stream whose tasks have worktrees of their own', () => {
   let saved: ProjectsData[]
   let current: ProjectsData
-  let broadcast: ((envelope: { revision: number; data: ProjectsData }) => void) | null
+  let broadcast: ((update: { source: string; revision: number; data: ProjectsData }) => void) | null
   let api: Record<string, ReturnType<typeof vi.fn>>
   let previews: Record<string, TaskLandingPreview>
   let landResults: Record<string, TaskLandingResult>
@@ -94,11 +94,11 @@ describe('closing a stream whose tasks have worktrees of their own', () => {
     landResults = {}
     let revision = 100
     api = {
-      loadProjects: vi.fn().mockImplementation(async () => ({ revision: 0, data: current })),
+      loadProjects: vi.fn().mockImplementation(async () => ({ local: { revision: 0, data: current } })),
       loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG, autoCollapseQuietStreams: false }),
       loadWindowState: vi.fn().mockResolvedValue({ expandedProjectIds: ['p1'], sidebarTab: 'projects' }),
       notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
-      saveProjects: vi.fn().mockImplementation((payload: { data: ProjectsData }) => {
+      saveProjects: vi.fn().mockImplementation((_source: string, payload: { data: ProjectsData }) => {
         saved.push(payload.data)
         current = payload.data
         return Promise.resolve({ ok: true, revision: ++revision })
@@ -117,7 +117,7 @@ describe('closing a stream whose tasks have worktrees of their own', () => {
         const result = landResults[taskId] ?? { status: 'landed' }
         if (result.status === 'landed' || result.status === 'nothing') {
           current = { ...current, projects: current.projects.map(p => (p.id === projectId ? removeTaskFromProject(p, taskId) : p)) }
-          broadcast?.({ revision: ++revision, data: current })
+          broadcast?.({ source: 'local', revision: ++revision, data: current })
         }
         return result
       }),

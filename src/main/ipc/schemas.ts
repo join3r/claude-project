@@ -113,6 +113,11 @@ export const projectsData = v.object({
   pinnedItems: v.optional(v.array(v.plainObject()))
 }, 'passthrough') as unknown as Validator<ProjectsData>
 
+/** A server's slice as a desktop saves it: its projects only (shared/projects-sources.ts). */
+export const projectsSlice = v.object({
+  projects: v.array(projectShape)
+}, 'passthrough') as unknown as Validator<Pick<ProjectsData, 'projects'>>
+
 export const notesRecord = v.record(v.array(v.object({
   id: v.string(),
   name: v.string(),

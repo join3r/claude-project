@@ -30,8 +30,9 @@ export class PathNotAllowedError extends Error {
 export function allowedLocalRoots(projects: readonly Project[]): string[] {
   const roots = new Set<string>()
   for (const project of projects) {
-    // Remote projects' paths live on another machine; nothing local is reachable through them.
-    if (project.ssh) continue
+    // SSH and server projects' paths live on another machine; nothing local is
+    // reachable through them (a server allows its own projects, which have no `host` there).
+    if (project.ssh || project.host) continue
     if (typeof project.directory === 'string' && project.directory) roots.add(project.directory)
     const add = (workspace: WorkspaceConfig | undefined): void => {
       if (!workspace || typeof workspace.worktreePath !== 'string' || !workspace.worktreePath) return

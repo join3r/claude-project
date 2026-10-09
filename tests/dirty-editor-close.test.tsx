@@ -180,10 +180,10 @@ beforeEach(() => {
   unhandledRejections = []
   process.on('unhandledRejection', recordRejection)
   ;(window as any).api = {
-    loadProjects: vi.fn().mockResolvedValue({
+    loadProjects: vi.fn().mockResolvedValue({ local: {
       revision: 0,
       data: { projects: buildProjects(), tags: [], projectOrder: ['p1'], pinnedItems: [] }
-    }),
+    } }),
     loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG }),
     loadWindowState: vi.fn().mockResolvedValue(null),
     saveProjects: vi.fn().mockResolvedValue({ ok: true, revision: 1 }),

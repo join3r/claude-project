@@ -120,14 +120,14 @@ describe('the close question in the sidebar', () => {
     saved = []
     projectsFixture = () => [worktreeProject(landingTask())]
     api = {
-      loadProjects: vi.fn().mockImplementation(async () => ({
+      loadProjects: vi.fn().mockImplementation(async () => ({ local: {
         revision: 0,
         data: { projects: projectsFixture(), tags: [], projectOrder: ['p1'], pinnedItems: [] }
-      })),
+      } })),
       loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG, autoCollapseQuietStreams: false }),
       loadWindowState: vi.fn().mockResolvedValue({ expandedProjectIds: ['p1'], sidebarTab: 'projects' }),
       notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
-      saveProjects: vi.fn().mockImplementation((payload: { data: ProjectsData }) => {
+      saveProjects: vi.fn().mockImplementation((_source: string, payload: { data: ProjectsData }) => {
         saved.push(payload.data)
         return Promise.resolve({ ok: true, revision: saved.length })
       }),

@@ -105,9 +105,9 @@ describe.skipIf(process.platform === 'win32')('host link end to end (real relay)
     const s = await server(r.url)
     const d = desktop(r.url)
     await devPair(d, s)
-    const { revision, data } = await d.hub.call(s.id, 'win:1', 'load-projects') as { revision: number; data: ProjectsData }
+    const { local: { revision, data } } = await d.hub.call(s.id, 'win:1', 'load-projects') as { local: { revision: number; data: ProjectsData } }
     await d.hub.call(s.id, 'win:2', 'load-config')
-    const saved = await d.hub.call(s.id, 'win:2', 'save-projects', [{ baseRevision: revision, data: { ...data, tags: [{ id: 'tag-1', name: 'linked', color: '#123456' }] } }]) as { ok: boolean }
+    const saved = await d.hub.call(s.id, 'win:2', 'save-projects', ['local', { baseRevision: revision, data: { ...data, tags: [{ id: 'tag-1', name: 'linked', color: '#123456' }] } }]) as { ok: boolean }
     expect(saved.ok).toBe(true)
     await waitFor(() => d.events.some((e) => e.ch === 'projects-updated'), 'projects-updated')
     await new Promise((resolve) => setTimeout(resolve, 100))

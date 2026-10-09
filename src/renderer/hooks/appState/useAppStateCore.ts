@@ -7,8 +7,11 @@ import {
 import type { AppConfig, NotesRecord, Project, ProjectsData, WindowViewState } from '../../../shared/types'
 import { applyQueuedStateUpdates, type StateUpdater } from '../stateHydration'
 import { RevisionSyncClient } from '../revisionSync'
+import { ProjectsSync } from '../projectsSync'
 import { backfillLifetimeStats } from '../lifetimeStats'
 import { areWindowStatesEqual } from './viewState'
+import { showToast } from '../../toasts'
+import { serverName } from '../../serversState'
 
 /** How long typing has to pause before a note's content is written. */
 const NOTE_CONTENT_SAVE_DEBOUNCE_MS = 500
@@ -41,10 +44,10 @@ export interface AppStateCore {
   projectsLoadedRef: MutableRefObject<boolean>
   configLoadedRef: MutableRefObject<boolean>
   windowStateLoadedRef: MutableRefObject<boolean>
-  lastSavedProjectsJsonRef: MutableRefObject<string | null>
   lastSavedConfigJsonRef: MutableRefObject<string | null>
   lastSavedWindowStateJsonRef: MutableRefObject<string | null>
-  projectsSync: RevisionSyncClient<ProjectsData>
+  /** One compare-and-swap client per projects source (this desktop, each server). */
+  projectsSync: ProjectsSync
 
   mutateProjects: MutateProjects
   mutateNotes: MutateNotes
@@ -67,6 +70,10 @@ export function useAppStateCore(): AppStateCore {
 
   const projectsDataRef = useRef(projectsData)
   projectsDataRef.current = projectsData
+  // Ahead of the state, like `notesRef`: every mutation applied, rendered or not.
+  // The projects sync reads it to see which sources a mutation touches.
+  const latestProjectsRef = useRef(projectsData)
+  latestProjectsRef.current = projectsData
   const projectsRef = useRef(projectsData.projects)
   projectsRef.current = projectsData.projects
   const windowViewStateRef = useRef(windowViewState)
@@ -76,7 +83,6 @@ export function useAppStateCore(): AppStateCore {
   const windowStateLoadedRef = useRef(false)
   const pendingProjectUpdatersRef = useRef<StateUpdater<ProjectsData>[]>([])
   const pendingConfigUpdatersRef = useRef<StateUpdater<AppConfig>[]>([])
-  const lastSavedProjectsJsonRef = useRef<string | null>(null)
   const lastSavedConfigJsonRef = useRef<string | null>(null)
   const lastSavedWindowStateJsonRef = useRef<string | null>(null)
   const [notes, setNotes] = useState<NotesRecord>({})
@@ -93,18 +99,20 @@ export function useAppStateCore(): AppStateCore {
   const [stateSyncError, setStateSyncError] = useState<string | null>(null)
   const dismissStateSyncError = useCallback(() => setStateSyncError(null), [])
 
-  const projectsSyncRef = useRef<RevisionSyncClient<ProjectsData> | null>(null)
+  const projectsSyncRef = useRef<ProjectsSync | null>(null)
   if (!projectsSyncRef.current) {
-    projectsSyncRef.current = new RevisionSyncClient<ProjectsData>({
-      save: (payload) => window.api.saveProjects(payload),
-      onRebase: (data) => {
-        // The client is already re-sending this exact payload, so mark it saved to
-        // keep the save effect from queueing a redundant trailing write.
-        lastSavedProjectsJsonRef.current = JSON.stringify(data)
-        projectsDataRef.current = data
-        setProjectsData(data)
+    projectsSyncRef.current = new ProjectsSync({
+      save: (source, payload) => window.api.saveProjects(source, payload),
+      getData: () => latestProjectsRef.current,
+      apply: (change) => {
+        const next = change(latestProjectsRef.current)
+        latestProjectsRef.current = next
+        projectsDataRef.current = next
+        setProjectsData(prev => change(prev))
       },
-      onError: setStateSyncError
+      onError: setStateSyncError,
+      onOffline: (source) => showToast(`${serverName(source)} is offline`),
+      transform: (data) => ({ ...data, projects: data.projects.map(p => backfillLifetimeStats(p, notesRef.current)) })
     })
   }
   const projectsSync = projectsSyncRef.current
@@ -135,8 +143,14 @@ export function useAppStateCore(): AppStateCore {
       // No revision to quote yet; these are rebased onto the loaded snapshot instead.
       pendingProjectUpdatersRef.current.push(wrapped)
     } else {
-      projectsSync.enqueue(wrapped)
+      // A server that is offline can't take changes: nothing happens, and the user is told.
+      const { refused } = projectsSync.record(wrapped)
+      if (refused) {
+        for (const source of refused) showToast(`${serverName(source)} is offline`)
+        return
+      }
     }
+    latestProjectsRef.current = wrapped(latestProjectsRef.current)
     setProjectsData(prev => wrapped(prev))
   }, [projectsSync])
 
@@ -194,17 +208,15 @@ export function useAppStateCore(): AppStateCore {
     ]).then(([loadedProjects, loadedConfig, loadedWindowViewState, loadedNotesEnvelope]) => {
       if (cancelled) return
 
-      projectsSync.hydrate(loadedProjects.revision)
       notesSync.hydrate(loadedNotesEnvelope.revision)
       const loadedNotes = notesSync.replay(loadedNotesEnvelope.data)
+      notesRef.current = loadedNotes
 
-      const hydratedProjectsData = applyQueuedStateUpdates(loadedProjects.data, pendingProjectUpdatersRef.current)
-      const hydratedConfig = applyQueuedStateUpdates(loadedConfig, pendingConfigUpdatersRef.current)
-
-      const projectsWithLifetime = hydratedProjectsData.projects.map(p =>
-        backfillLifetimeStats(p, loadedNotes)
-      )
+      // Every source's revision; the lifetime backfill reads the notes just loaded.
+      const hydratedProjectsData = applyQueuedStateUpdates(projectsSync.hydrate(loadedProjects), pendingProjectUpdatersRef.current)
+      const projectsWithLifetime = hydratedProjectsData.projects.map(p => backfillLifetimeStats(p, loadedNotes))
       const finalProjectsData = { ...hydratedProjectsData, projects: projectsWithLifetime }
+      const hydratedConfig = applyQueuedStateUpdates(loadedConfig, pendingConfigUpdatersRef.current)
 
       const hydratedWindowViewState = buildWindowViewState(
         projectsWithLifetime,
@@ -214,7 +226,7 @@ export function useAppStateCore(): AppStateCore {
 
       pendingProjectUpdatersRef.current = []
       pendingConfigUpdatersRef.current = []
-      lastSavedProjectsJsonRef.current = JSON.stringify(finalProjectsData)
+      projectsSync.markSaved(finalProjectsData)
       lastSavedConfigJsonRef.current = JSON.stringify(loadedConfig)
       lastSavedWindowStateJsonRef.current = JSON.stringify(hydratedWindowViewState)
       projectsLoadedRef.current = true
@@ -222,7 +234,7 @@ export function useAppStateCore(): AppStateCore {
       windowStateLoadedRef.current = true
 
       projectsDataRef.current = finalProjectsData
-      notesRef.current = loadedNotes
+      latestProjectsRef.current = finalProjectsData
       setProjectsData(finalProjectsData)
       setConfig(hydratedConfig)
       setWindowViewState(hydratedWindowViewState)
@@ -234,29 +246,11 @@ export function useAppStateCore(): AppStateCore {
 
     // Canonical state, not a mutation: it is adopted rather than pushed through
     // `mutateProjects`. Anything of ours that main has not acknowledged yet is
-    // replayed on top so another window's save cannot swallow it.
-    const cleanupProjects = window.api.onProjectsUpdated((envelope) => {
+    // replayed on top so another window's save cannot swallow it. Each source
+    // (this desktop, each server) has its own revision and its own replays.
+    const cleanupProjects = window.api.onProjectsUpdated((update) => {
       if (cancelled) return
-      const projectsWithLifetime = envelope.data.projects.map(p =>
-        backfillLifetimeStats(p, notesRef.current)
-      )
-      const canonical = { ...envelope.data, projects: projectsWithLifetime }
-      // Compare the inner data: the revision alone would make every broadcast — our
-      // own save echoing back included — look like news.
-      if (JSON.stringify(canonical) === lastSavedProjectsJsonRef.current) {
-        // Mid-save the acknowledgement carries the authoritative revision; adopting
-        // one from an echo would let a stale base slip past the compare-and-swap.
-        if (!projectsSync.isSaving()) projectsSync.hydrate(envelope.revision)
-        return
-      }
-      const next = projectsSync.applyBroadcast(envelope.revision, canonical)
-      if (next === null) return
-      // Marking it saved keeps the save effect from re-sending state we were just
-      // handed — so anything replayed on top has to be sent explicitly here.
-      lastSavedProjectsJsonRef.current = JSON.stringify(next)
-      projectsDataRef.current = next
-      setProjectsData(next)
-      if (projectsSync.hasPending()) projectsSync.requestSave(next)
+      projectsSync.receive(update)
     })
 
     const cleanupNotes = window.api.onNotesUpdated((envelope) => {
@@ -296,7 +290,6 @@ export function useAppStateCore(): AppStateCore {
     projectsLoadedRef,
     configLoadedRef,
     windowStateLoadedRef,
-    lastSavedProjectsJsonRef,
     lastSavedConfigJsonRef,
     lastSavedWindowStateJsonRef,
     projectsSync,
@@ -314,17 +307,13 @@ export function usePersistence(core: AppStateCore): void {
   const {
     projectsData, config, windowViewState, projectsSync,
     projectsLoadedRef, configLoadedRef, windowStateLoadedRef,
-    lastSavedProjectsJsonRef, lastSavedConfigJsonRef, lastSavedWindowStateJsonRef
+    lastSavedConfigJsonRef, lastSavedWindowStateJsonRef
   } = core
 
   useEffect(() => {
     if (!projectsLoadedRef.current) return
-
-    const serialized = JSON.stringify(projectsData)
-    if (serialized === lastSavedProjectsJsonRef.current) return
-
-    lastSavedProjectsJsonRef.current = serialized
-    projectsSync.requestSave(projectsData)
+    // Each source whose slice changed since it was last saved or adopted.
+    projectsSync.saveChanged(projectsData)
   }, [projectsData, projectsSync])
 
   useEffect(() => {
