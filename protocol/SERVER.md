@@ -98,6 +98,8 @@ A few channels are the server's own rather than a host channel. A desktop calls 
 | `server-pair-code` | none | `{code, expiresAt}`: a device ticket (§7.4) for another desktop, `expiresAt` in epoch ms |
 | `server-info` | none | `{update}`: `null`, or `{state: "staged" \| "restarting", version, commit, builtAt}` (§10) |
 | `server-restart` | none | `{restarting: true}`: switch to a staged bundle if there is one, and restart now, working tabs or not |
+| `server-uninstall` | `{deleteData?: boolean}` | `{ok: true}`, then the server stops, removes its service and files (`data/` too with `deleteData`, after revoking every desktop at the relay) |
+| `server-bootstrap-done` | `{uploaded: boolean}` | `{ok: true}`: only a bootstrap serves it (§11) |
 
 The server pushes the event `server-status` with the same payload as `server-info` to `*` whenever its update state changes. The desktop keeps it for itself and doesn't hand it to windows.
 
@@ -219,6 +221,8 @@ The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phon
 | `src/server/server-config.ts` | `<data>/server.json` |
 | `src/main/host/link/bundle-archive.ts`, `update-policy.ts` | §10: the archive, when to upload |
 | `src/server/updater.ts`, `node-install.ts`, `restart.ts` | §10: staging, Node, switching, restarting |
+| `src/server/bootstrap.ts` | §11 (`site/server/bootstrap.mjs`); `site/install` comes from `scripts/server-install.sh` |
+| `src/server/service.ts`, `control.ts`, `cli.ts` | the service, the CLI's control socket, `devtool-server` |
 
 Tests: `tests/host-link-wire.test.ts` and `tests/host-link-session.test.ts` (loopback), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay) and `tests/server-updates.test.ts` (archive, policy, uploads through a relay).
 
@@ -257,3 +261,13 @@ A desktop whose link version is below the server's `min` gets `incompatible` wit
 4. Restart: under systemd and launchd the process exits with code 75 and the service manager starts `current/main.js` again. Under the nohup fallback, or when run by hand, it starts the new `current` itself, detached, after letting go of the instance lock, then exits.
 
 The desktop shows `updating` from `restarting` until the server's next handshake, or for at most 2 minutes.
+
+## 11. Bootstrap
+
+`site/server/bootstrap.mjs` (`src/server/bootstrap.ts`, built by `npm run build:installer`) is what `site/install` runs once it has Node. It installs a server: it pairs, receives the bundle, installs the service, and waits until the desktop's link to the new service is up. It is served by the site and the desktop is released apart from it, so it speaks a small part of this protocol that desktops keep serving: bootstrap protocol 1.
+
+- Pairing (§7) with `bootstrap: 1` in its pairing hello, using a new or the existing identity in `data/`.
+- The link handshake (§2) as the server, with `features: ["bootstrap"]` and the build of the bundle already installed (`current/manifest.json`), or an empty build.
+- The `bundle` stream (§10.1) and the link calls `server-info` (`{update: null}`) and `server-bootstrap-done`.
+
+A desktop that connects to a server with the `bootstrap` feature runs its update check (§10.2; an empty build always uploads), then calls `server-bootstrap-done {uploaded}`. The bootstrap then checks that `current/main.js --check` runs, gives up its relay socket and installs the service, which connects with the same identity. Any future desktop must keep accepting bootstrap protocol 1 like this, or bump `BOOTSTRAP_PROTOCOL` together with a new `site/server/bootstrap.mjs`.

@@ -7,8 +7,8 @@ import globals from 'globals'
 export default tseslint.config(
   {
     ignores: ['out/**', 'dist/**', 'node_modules/**', '.claude/**', 'coverage/**',
-      // Committed esbuild bundle at the repo root, not source.
-      'index.js',
+      // Committed esbuild bundles, not source (site/server is npm run build:installer's).
+      'index.js', 'site/server/**',
       // The relay and the iOS app have their own tooling and lint configs.
       'relay/**', 'ios/**']
   },

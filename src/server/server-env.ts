@@ -127,22 +127,61 @@ export const passThroughImageCodec: ImageCodec = {
   decode: () => null
 }
 
-/** A log line on stdout, timestamped; the service manager (journald, launchd, nohup) keeps it. */
+/** Where log lines go: stdout/stderr (journald keeps them), or a file ({@link logToFile}). */
+let logSink: ((line: string, error: boolean) => void) | null = null
+
+/** A log line on stdout, timestamped; the service manager (journald) or {@link logToFile} keeps it. */
 export function consoleLog(message: string): void {
-  try {
-    process.stdout.write(`[${new Date().toISOString()}] ${message}\n`)
-  } catch {
-    // stdout closed: nowhere left to log.
-  }
+  writeLog(`[${new Date().toISOString()}] ${message}\n`, false)
 }
 
 /** The same on stderr, for what stops the server. */
 export function consoleError(message: string): void {
+  writeLog(`[${new Date().toISOString()}] ${message}\n`, true)
+}
+
+function writeLog(line: string, error: boolean): void {
   try {
-    process.stderr.write(`[${new Date().toISOString()}] ${message}\n`)
+    if (logSink) logSink(line, error)
+    else (error ? process.stderr : process.stdout).write(line)
   } catch {
-    // stderr closed: nowhere left to log.
+    // Nowhere left to log.
   }
+}
+
+/** Bytes `server.log` may reach before it is renamed to `server.log.1` (the one before is dropped). */
+export const LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
+
+/**
+ * Under launchd and the nohup fallback the server writes its own log,
+ * `<logs>/server.log`, capped at {@link LOG_FILE_MAX_BYTES} with one older file kept.
+ * (Under systemd it logs to stdout and journald keeps it.)
+ */
+export function logToFile(file: string, maxBytes = LOG_FILE_MAX_BYTES): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+  let size = 0
+  try {
+    size = fs.statSync(file).size
+  } catch {
+    size = 0
+  }
+  logSink = (line) => {
+    if (size + line.length > maxBytes && size > 0) {
+      try {
+        fs.renameSync(file, `${file}.1`)
+      } catch {
+        // Keep appending to the one we have.
+      }
+      size = 0
+    }
+    fs.appendFileSync(file, line, { mode: 0o600 })
+    size += Buffer.byteLength(line)
+  }
+}
+
+/** Back to stdout/stderr (tests). */
+export function logToConsole(): void {
+  logSink = null
 }
 
 /** The server's {@link HostEnv}, plus what it knows about its own build. */

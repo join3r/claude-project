@@ -12,8 +12,13 @@ import { BUNDLE_STREAM_KIND, ServerUpdater } from './updater'
 import { exitForRestart } from './restart'
 import { diagnosticStreamKinds } from '../main/host/link/diagnostic-streams'
 import { LinkChannel, LinkEvent } from '../main/host/link/link-channels'
-import { consoleError, consoleLog, ensureServerDirs, loadServerManifest, loginShell, passwdShell, serverPaths } from './server-env'
-import { loadServerConfig, saveServerConfig } from './server-config'
+import { consoleError, consoleLog, ensureServerDirs, loadServerManifest, loginShell, passwdShell, serverPaths, logToFile, type ServerPaths } from './server-env'
+import { ControlServer, controlSocketPath, type ControlRequest } from './control'
+import { currentSupervisor } from './restart'
+import { pidFile, readServiceRecord, removeService, serviceContext, stopSelf, unlinkCliOnPath } from './service'
+import { removeServerFiles, type DaemonStatus } from './cli'
+import fs from 'fs'
+import { loadServerConfig, saveServerConfig, serverDisplayName } from './server-config'
 
 /**
  * The server bundle's second entry (`server.js`), loaded by the launcher
@@ -51,6 +56,8 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
   process.on('unhandledRejection', (reason) => consoleError(`unhandledRejection ${describe(reason)}`))
 
   const paths = serverPaths()
+  // launchd and the nohup fallback keep no log of their own.
+  if (process.env.DEVTOOL_SERVER_LOG === 'file') logToFile(path.join(paths.logsDir, 'server.log'))
   const manifest = loadServerManifest(bundleDir)
   log(`starting devtool-server ${manifest.version} (${manifest.commit}) node=${process.version} pid=${process.pid}`)
 
@@ -58,7 +65,9 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
   const lock = await acquireInstanceLock(paths.dataDir, () => log('another devtool-server tried to start on this data dir'))
   if (!lock.acquired) {
     consoleError(`devtool-server is already running on ${paths.dataDir}${lock.ownerPid ? ` (pid ${lock.ownerPid})` : ''}`)
-    process.exitCode = 1
+    // launchd may load the agent into both the gui and the user domain; a clean exit
+    // keeps the second copy from being started again and again.
+    process.exitCode = currentSupervisor() === 'launchd' ? 0 : 1
     return
   }
   // A bundle an earlier run staged but never switched to (it was killed): switch now, before anything runs.
@@ -90,6 +99,8 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
 
   let link: ServerLink | null = null
   let stopping = false
+  /** After an uninstall the service manager's SIGTERM ends the process at once. */
+  let exitOnSignal = false
   const updater = new ServerUpdater({
     paths,
     running: manifest.sha256 && manifest.sha256 !== 'dev' ? manifest : null,
@@ -100,18 +111,41 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
     restart: (reason) => stop(reason, true),
     onStatus: (info) => link?.broadcast(LinkEvent.Status, [info])
   })
+  const uninstall = (deleteData: boolean, why: string): void => {
+    log(`uninstall ${why} deleteData=${deleteData}`)
+    // Its identity goes with the data, so the pairs are useless: unpair first, while the relay still hears it.
+    if (deleteData) for (const desktop of link?.desktops.list() ?? []) link?.unpair(desktop.id)
+    setTimeout(() => stop(`uninstall (${why})`, false, async () => {
+      const ctx = serviceContext(paths, log)
+      const record = readServiceRecord(paths)
+      if (record) await removeService(ctx, record, { stop: false })
+      unlinkCliOnPath(paths, os.homedir())
+      removeServerFiles(paths, deleteData)
+      exitOnSignal = true
+      stopSelf(ctx, record)
+    }), 300)
+  }
   link = createServerLink(server, {
     streams: new Map([...diagnosticStreamKinds(), [BUNDLE_STREAM_KIND, updater.streamHandler()]]),
-    linkCall: (call) => daemonLinkCall(call, { link: link!, updater })
+    linkCall: (call) => daemonLinkCall(call, { link: link!, updater, uninstall })
   })
   link.start()
-  log(`ready version=${manifest.version} commit=${manifest.commit} data=${paths.dataDir}`)
+  const control = new ControlServer(controlSocketPath(paths), (request) => controlCommand(request, { link: link!, updater, server, paths, manifest }), log)
+  try {
+    await control.start()
+  } catch (err) {
+    consoleError(`control socket failed: ${describe(err)}; the CLI can't reach this server`)
+  }
+  fs.mkdirSync(paths.runDir, { recursive: true, mode: 0o700 })
+  fs.writeFileSync(pidFile(paths), `${process.pid}\n`, { mode: 0o600 })
+  log(`ready version=${manifest.version} commit=${manifest.commit} data=${paths.dataDir} supervisor=${currentSupervisor()}`)
   log(`link server=${server.host.identity.get().id} relay=${loadServerConfig(paths.dataDir).relayUrl} desktops=${link.desktops.list().length}`)
 
   /** Stops like quitting the desktop; a staged update is switched to on the way out. */
-  const stop = (why: string, restart = false): void => {
+  const stop = (why: string, restart = false, after?: () => Promise<void>): void => {
     if (stopping) return
     stopping = true
+    control.close()
     log(`stopping ${why}`)
     const timer = setTimeout(() => {
       consoleError(`shutdown took over ${SHUTDOWN_TIMEOUT_MS} ms; exiting anyway`)
@@ -122,25 +156,96 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
     link?.stop()
     server.shutdown()
       .catch((err: unknown) => consoleError(`shutdown error ${describe(err)}`))
-      .finally(() => {
-        try {
-          updater.applyStaged()
-        } catch (err) {
-          consoleError(`could not switch to the staged update: ${describe(err)}`)
+      .finally(async () => {
+        if (!after) {
+          try {
+            updater.applyStaged()
+          } catch (err) {
+            consoleError(`could not switch to the staged update: ${describe(err)}`)
+          }
         }
+        fs.rmSync(pidFile(paths), { force: true })
         lock.release()
         log('stopped')
+        if (after) {
+          try {
+            await after()
+          } catch (err) {
+            consoleError(`uninstall failed: ${describe(err)}`)
+          }
+          // systemd and launchd stop us now; under nohup nothing will.
+          if (currentSupervisor() === 'systemd' || currentSupervisor() === 'launchd') {
+            setTimeout(() => process.exit(0), 10_000).unref()
+            return
+          }
+        }
         if (restart) exitForRestart(paths, log)
         process.exit(0)
       })
   }
+  const onSignal = (signal: string) => {
+    if (exitOnSignal) process.exit(0)
+    stop(`signal=${signal}`)
+  }
   // Not SIGHUP: under nohup (the fallback service) it is ignored, and a handler would undo that.
-  process.on('SIGTERM', () => stop('signal=SIGTERM'))
-  process.on('SIGINT', () => stop('signal=SIGINT'))
+  process.on('SIGTERM', () => onSignal('SIGTERM'))
+  process.on('SIGINT', () => onSignal('SIGINT'))
+}
+
+interface DaemonParts {
+  link: ServerLink
+  updater: ServerUpdater
+  server: ServerHost
+  paths: ServerPaths
+  manifest: ReturnType<typeof loadServerManifest>
+}
+
+/** The CLI's requests over the control socket. */
+async function controlCommand(request: ControlRequest, { link, updater, server, paths, manifest }: DaemonParts): Promise<unknown> {
+  switch (request.cmd) {
+    case 'status': {
+      const relay = link.relayState()
+      const connected = new Set(link.connectedDesktops())
+      const status: DaemonStatus = {
+        pid: process.pid,
+        serverId: server.host.identity.get().id,
+        name: serverDisplayName(loadServerConfig(paths.dataDir)),
+        version: manifest.version,
+        commit: manifest.commit,
+        builtAt: manifest.builtAt,
+        node: process.versions.node,
+        home: paths.home,
+        supervisor: currentSupervisor(),
+        relay: { url: loadServerConfig(paths.dataDir).relayUrl, state: relay.kind, ...(relay.kind === 'offline' && relay.error ? { error: relay.error } : {}) },
+        desktops: link.desktops.list().map((d) => ({ id: d.id, name: d.name, online: connected.has(d.id), pairedAt: d.pairedAt, lastSeen: d.lastSeen, ...(d.build?.version ? { version: d.build.version } : {}) })),
+        phones: [],
+        update: updater.info().update
+      }
+      return status
+    }
+    case 'pair':
+      return link.createPairingCode()
+    case 'pair-status':
+      return link.codeState()
+    case 'pair-cancel':
+      link.cancelPairingCode()
+      return null
+    case 'unpair':
+      return { removed: link.unpair(String(request.id ?? '')) }
+    case 'revoke-all': {
+      const desktops = link.desktops.list()
+      for (const desktop of desktops) link.unpair(desktop.id)
+      // Let the revokes reach the relay before the caller stops us.
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return { count: desktops.length }
+    }
+    default:
+      throw new Error(`unknown command ${request.cmd}`)
+  }
 }
 
 /** The daemon's link-level calls (protocol/SERVER.md §5.1). */
-function daemonLinkCall(call: LinkCall, { link, updater }: { link: ServerLink; updater: ServerUpdater }): Promise<unknown> | undefined {
+function daemonLinkCall(call: LinkCall, { link, updater, uninstall }: { link: ServerLink; updater: ServerUpdater; uninstall: (deleteData: boolean, why: string) => void }): Promise<unknown> | undefined {
   switch (call.ch) {
     case LinkChannel.PairCode:
       return pairCodeForDesktop(link)
@@ -150,6 +255,11 @@ function daemonLinkCall(call: LinkCall, { link, updater }: { link: ServerLink; u
       // After the answer is out.
       setTimeout(() => updater.restartNow(`server-restart from ${call.desktopId}`), 200)
       return Promise.resolve({ restarting: true })
+    case LinkChannel.Uninstall: {
+      const options = (call.args[0] ?? {}) as { deleteData?: unknown }
+      uninstall(options.deleteData === true, `server-uninstall from ${call.desktopId}`)
+      return Promise.resolve({ ok: true })
+    }
     default:
       return undefined
   }

@@ -1,0 +1,201 @@
+#!/bin/sh
+# DevTool server installer.
+#
+#   curl -fsSL https://devtool.awantech.sk/install | sh -s -- [<token>] [--allow-root] [--name NAME] [--relay URL]
+#
+# With the token DevTool shows under Add server, it pairs with that DevTool at once.
+# Without one it prints a pairing code to paste into DevTool. It installs Node (from
+# nodejs.org, checked against SHASUMS256.txt) into ~/.devtool-server/node/ and runs
+# the bootstrap, which pairs, receives the server from DevTool and installs the
+# service. Running it again on a machine with a server updates and re-pairs it.
+#
+# Environment: DEVTOOL_INSTALL_URL (where this script and the bootstrap live),
+# DEVTOOL_SERVER_HOME (default ~/.devtool-server), DEVTOOL_NODE_MIRROR (default
+# https://nodejs.org/dist), DEVTOOL_SERVER_SERVICE_SUFFIX (a test install's own
+# service name).
+#
+# site/install is generated from scripts/server-install.sh by
+# scripts/build-installer.mjs (npm run build:installer); edit the template.
+
+# Everything runs from main, so sh has read the whole script before the bootstrap
+# (which inherits stdin) could swallow the rest of it from the pipe.
+main() {
+  set -eu
+
+  NODE_DEFAULT='@@NODE_VERSION@@'
+  BOOTSTRAP_SHA256='@@BOOTSTRAP_SHA256@@'
+
+  BASE="${DEVTOOL_INSTALL_URL:-https://devtool.awantech.sk}"
+  BASE="${BASE%/}"
+  HOME_DIR="${DEVTOOL_SERVER_HOME:-$HOME/.devtool-server}"
+  NODE_MIRROR="${DEVTOOL_NODE_MIRROR:-https://nodejs.org/dist}"
+  NODE_MIRROR="${NODE_MIRROR%/}"
+
+  TOKEN=''
+  NAME=''
+  RELAY=''
+  ALLOW_ROOT=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --allow-root) ALLOW_ROOT=1 ;;
+      --name) [ $# -ge 2 ] || die "--name needs a value"; NAME="$2"; shift ;;
+      --name=*) NAME="${1#--name=}" ;;
+      --relay) [ $# -ge 2 ] || die "--relay needs a value"; RELAY="$2"; shift ;;
+      --relay=*) RELAY="${1#--relay=}" ;;
+      -h|--help) usage; return 0 ;;
+      -*) die "unknown option: $1" ;;
+      *) [ -z "$TOKEN" ] || die "unexpected argument: $1"; TOKEN="$1" ;;
+    esac
+    shift
+  done
+
+  detect_platform
+  if [ "$(id -u)" = 0 ] && [ "$ALLOW_ROOT" != 1 ]; then
+    die "refusing to install as root. Run it as the user who will work on this server, or add --allow-root."
+  fi
+  need curl
+  need tar
+  need gzip
+  pick_sha256
+
+  NODE_VERSION="$NODE_DEFAULT"
+  if [ -n "$TOKEN" ]; then
+    case "$TOKEN" in
+      *.*) NODE_VERSION="${TOKEN#*.}" ;;
+      *) die "this looks like a pairing code for DevTool, not an install token. Paste it into DevTool (Add server, I have a code), or run the installer without it." ;;
+    esac
+  fi
+  case "$NODE_VERSION" in
+    *[!0-9.]*|.*|*.|*..*|'') die "this install token is damaged. Copy the whole command from DevTool (Add server) again." ;;
+  esac
+
+  if [ ! -d "$HOME_DIR" ]; then
+    mkdir -p "$HOME_DIR" || die "cannot create $HOME_DIR"
+    chmod 700 "$HOME_DIR"
+  fi
+  check_disk
+
+  TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/devtool-install.XXXXXX") || die "cannot create a temporary directory"
+  trap 'rm -rf "$TMP_DIR"' EXIT
+  trap 'rm -rf "$TMP_DIR"; exit 130' INT TERM
+
+  install_node
+
+  say "Downloading the installer from $BASE..."
+  fetch "$BASE/server/bootstrap.mjs" "$TMP_DIR/bootstrap.mjs"
+  got=$(sha256_of "$TMP_DIR/bootstrap.mjs")
+  [ "$got" = "$BOOTSTRAP_SHA256" ] || die "the bootstrap does not match this install script (sha256 $got). The site may be mid-update: try again in a minute."
+
+  set --
+  if [ -n "$TOKEN" ]; then set -- "$@" --token "$TOKEN"; fi
+  if [ -n "$NAME" ]; then set -- "$@" --name "$NAME"; fi
+  if [ -n "$RELAY" ]; then set -- "$@" --relay "$RELAY"; fi
+  if [ "$ALLOW_ROOT" = 1 ]; then set -- "$@" --allow-root; fi
+  status=0
+  DEVTOOL_SERVER_HOME="$HOME_DIR" "$NODE" "$TMP_DIR/bootstrap.mjs" "$@" </dev/null || status=$?
+  return "$status"
+}
+
+say() { printf '%s\n' "$*"; }
+
+die() {
+  printf 'devtool-server install: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  say "usage: curl -fsSL <base>/install | sh -s -- [<token>] [--allow-root] [--name NAME] [--relay URL]"
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "$1 is needed; install it and run this again"
+}
+
+detect_platform() {
+  os=$(uname -s)
+  arch=$(uname -m)
+  case "$os" in
+    Linux) OS=linux ;;
+    Darwin) OS=darwin ;;
+    *) die "unsupported system: $os. DevTool servers run on Linux and macOS." ;;
+  esac
+  case "$arch" in
+    x86_64|amd64) ARCH=x64 ;;
+    aarch64|arm64) ARCH=arm64 ;;
+    *) die "unsupported CPU: $arch. DevTool servers run on x64 and arm64." ;;
+  esac
+  if [ "$OS" = linux ]; then
+    glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+    glibc=${glibc#glibc }
+    case "$glibc" in
+      [0-9]*.[0-9]*) ;;
+      *) die "this Linux has no glibc (Alpine and other musl systems are not supported). The server needs glibc 2.28 or newer." ;;
+    esac
+    major=${glibc%%.*}
+    minor=${glibc#*.}
+    minor=${minor%%.*}
+    if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 28 ]; }; then
+      die "glibc $glibc is too old. The server needs glibc 2.28 or newer."
+    fi
+  fi
+}
+
+pick_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    SHA256_TOOL=sha256sum
+  elif command -v shasum >/dev/null 2>&1; then
+    SHA256_TOOL=shasum
+  else
+    die "sha256sum or shasum is needed"
+  fi
+}
+
+sha256_of() {
+  if [ "$SHA256_TOOL" = sha256sum ]; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+check_disk() {
+  avail_kb=$(df -Pk "$HOME_DIR" 2>/dev/null | awk 'NR == 2 {print $4}')
+  case "$avail_kb" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  if [ "$avail_kb" -lt 307200 ]; then
+    die "not enough disk space in $HOME_DIR: $((avail_kb / 1024)) MB free, Node and the server need about 300 MB."
+  fi
+}
+
+fetch() {
+  curl -fsSL --retry 2 --connect-timeout 20 -o "$2" "$1" || die "cannot download $1 (no network, or the disk is full?)"
+}
+
+install_node() {
+  NODE_HOME="$HOME_DIR/node/$NODE_VERSION"
+  NODE="$NODE_HOME/bin/node"
+  if [ -x "$NODE" ] && "$NODE" -e 'process.exit(0)' >/dev/null 2>&1; then
+    say "Node $NODE_VERSION is already installed."
+  else
+    dist="node-v$NODE_VERSION-$OS-$ARCH"
+    say "Downloading Node $NODE_VERSION for $OS-$ARCH..."
+    fetch "$NODE_MIRROR/v$NODE_VERSION/SHASUMS256.txt" "$TMP_DIR/SHASUMS256.txt"
+    fetch "$NODE_MIRROR/v$NODE_VERSION/$dist.tar.gz" "$TMP_DIR/$dist.tar.gz"
+    want=$(awk -v f="$dist.tar.gz" '$2 == f {print $1}' "$TMP_DIR/SHASUMS256.txt")
+    [ -n "$want" ] || die "SHASUMS256.txt for Node $NODE_VERSION does not list $dist.tar.gz"
+    got=$(sha256_of "$TMP_DIR/$dist.tar.gz")
+    [ "$got" = "$want" ] || die "the Node download is corrupt (sha256 $got, expected $want)"
+    mkdir -p "$TMP_DIR/node" "$HOME_DIR/node"
+    tar -xzf "$TMP_DIR/$dist.tar.gz" -C "$TMP_DIR/node" || die "cannot unpack Node (is the disk full?)"
+    rm -rf "$NODE_HOME"
+    mv "$TMP_DIR/node/$dist" "$NODE_HOME" || die "cannot install Node into $NODE_HOME"
+    "$NODE" -e 'process.exit(0)' >/dev/null 2>&1 || die "Node $NODE_VERSION does not run on this machine"
+    say "Node $NODE_VERSION checked against SHASUMS256.txt and installed."
+  fi
+  if [ ! -e "$HOME_DIR/node/current" ]; then
+    ln -s "$NODE_VERSION" "$HOME_DIR/node/current"
+  fi
+}
+
+main "$@"

@@ -1,3 +1,9 @@
 # Test vectors are compared byte for byte (protocol/ts/vectors.test.ts, the Swift
 # tests); keep them LF on Windows checkouts too.
 protocol/vectors/** text eol=lf
+
+# The site serves these byte for byte: site/install pins the bootstrap's sha256,
+# and tests/server-installer.test.ts compares both with a fresh build.
+site/install text eol=lf
+site/server/bootstrap.mjs text eol=lf
+scripts/server-install.sh text eol=lf

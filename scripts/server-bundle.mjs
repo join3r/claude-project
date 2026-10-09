@@ -9,7 +9,14 @@ import path from 'node:path'
 /** The bundle's own manifest; it carries the hash, so the hash leaves it out. */
 export const MANIFEST_FILE = 'manifest.json'
 
+/**
+ * The Node the server runs on (nodejs.org, checked against SHASUMS256.txt). It goes
+ * into each bundle's manifest, install tokens and site/install's default.
+ */
+export const SERVER_NODE_VERSION = '24.21.0'
+
 const ELECTRON_IMPORT = /^electron(-updater)?(\/.*)?$/
+const NATIVE_IMPORT = /^node-pty(\/.*)?$/
 
 /**
  * An esbuild plugin that fails the build when anything resolves `electron` or
@@ -38,6 +45,26 @@ export function electronGuardPlugin(root = process.cwd()) {
           }]
         }
       })
+    }
+  }
+}
+
+/**
+ * An esbuild plugin for the bootstrap (site/server/bootstrap.mjs): it runs before
+ * any bundle is installed, so it may not load node-pty either.
+ *
+ * @param {string} [root]
+ * @returns {import('esbuild').Plugin}
+ */
+export function noNativeGuardPlugin(root = process.cwd()) {
+  let base = root
+  try { base = fs.realpathSync(root) } catch { /* keep it as given */ }
+  return {
+    name: 'devtool-bootstrap-no-native',
+    setup(build) {
+      build.onResolve({ filter: NATIVE_IMPORT }, (args) => ({
+        errors: [{ text: `"${args.path}" is imported by ${args.importer ? path.relative(base, args.importer) : '(entry point)'}, but the bootstrap runs before any bundle is installed` }]
+      }))
     }
   }
 }

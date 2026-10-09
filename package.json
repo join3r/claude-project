@@ -15,6 +15,7 @@
     "build:win": "npm run build && electron-builder --win --dir",
     "build:win:setup": "npm run build && electron-builder --win nsis zip --publish never",
     "build:server": "node scripts/build-server.mjs",
+    "build:installer": "node scripts/build-installer.mjs",
     "release:win": "node scripts/release-win.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "lint": "eslint .",

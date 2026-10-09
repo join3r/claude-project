@@ -19,10 +19,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { MANIFEST_FILE, bundleSha256, electronGuardPlugin } from './server-bundle.mjs'
-
-/** The Node the installer fetches for the server (nodejs.org, checked against SHASUMS256.txt). */
-const SERVER_NODE_VERSION = '24.21.0'
+import { MANIFEST_FILE, SERVER_NODE_VERSION, bundleSha256, electronGuardPlugin } from './server-bundle.mjs'
 /** node-pty's prebuilt platforms the server supports; Windows is the desktop's alone. */
 const PTY_PREBUILDS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64']
 
