@@ -3785,7 +3785,8 @@ function serviceContext(paths, log = () => {
     user: info.username,
     userHome: os4.homedir(),
     run: runCommand,
-    log
+    log,
+    launchdDomain: env.DEVTOOL_SERVER_LAUNCHD_DOMAIN === "user" ? "user" : "gui"
   };
 }
 function serviceSuffix(env = process.env) {
@@ -3842,7 +3843,7 @@ function renderSystemdUnit(paths) {
 function xml(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function renderLaunchdPlist(paths, label, userHome) {
+function renderLaunchdPlist(paths, label, userHome, options = {}) {
   const string = (value) => `<string>${xml(value)}</string>`;
   const launchdLog = path10.join(paths.logsDir, "launchd.log");
   return [
@@ -3860,6 +3861,7 @@ function renderLaunchdPlist(paths, label, userHome) {
     `    <key>DEVTOOL_SERVER_LOG</key>${string("file")}`,
     "  </dict>",
     `  <key>WorkingDirectory</key>${string(userHome)}`,
+    ...options.background ? ["  <key>LimitLoadToSessionType</key><string>Background</string>"] : [],
     "  <key>RunAtLoad</key><true/>",
     // Restart after a crash or an update (exit 75), not after a clean stop.
     "  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>",
@@ -3975,17 +3977,21 @@ async function installLaunchd(ctx) {
   const dir = path10.join(ctx.userHome, "Library", "LaunchAgents");
   const file = path10.join(dir, `${label}.plist`);
   fs10.mkdirSync(dir, { recursive: true });
-  atomicWriteFileSync(file, renderLaunchdPlist(ctx.paths, label, ctx.userHome), 420);
   for (const domain2 of [`gui/${ctx.uid}`, `user/${ctx.uid}`]) await ctx.run("launchctl", ["bootout", `${domain2}/${label}`]);
   const notes = [];
   let domain = `gui/${ctx.uid}`;
-  let loaded = await ctx.run("launchctl", ["bootstrap", domain, file]);
+  let loaded = { code: 1, stdout: "", stderr: "skipped (DEVTOOL_SERVER_LAUNCHD_DOMAIN=user)" };
+  if (ctx.launchdDomain !== "user") {
+    atomicWriteFileSync(file, renderLaunchdPlist(ctx.paths, label, ctx.userHome), 420);
+    loaded = await ctx.run("launchctl", ["bootstrap", domain, file]);
+  }
   if (loaded.code !== 0) {
     ctx.log(`service launchd ${domain} refused: ${(loaded.stderr || loaded.stdout).trim()}`);
     domain = `user/${ctx.uid}`;
+    atomicWriteFileSync(file, renderLaunchdPlist(ctx.paths, label, ctx.userHome, { background: true }), 420);
     loaded = await ctx.run("launchctl", ["bootstrap", domain, file]);
     if (loaded.code !== 0) throw new Error(`launchctl bootstrap failed: ${(loaded.stderr || loaded.stdout).trim()}`);
-    notes.push("Nobody is logged in on this Mac's screen, so the server runs in the background user session. It starts again when you next log in.");
+    notes.push(`The server runs in launchd's background user domain (user/${ctx.uid}), not a GUI login session. After a reboot, log in (by SSH or at the screen) and run: devtool-server start`);
   }
   ctx.log(`service launchd label=${label} domain=${domain}`);
   return { record: { kind: "launchd", name: label, file, domain, suffix: ctx.suffix, installedAt: (/* @__PURE__ */ new Date()).toISOString() }, notes };

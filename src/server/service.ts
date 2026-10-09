@@ -69,6 +69,8 @@ export interface ServiceContext {
   userHome: string
   run: CommandRunner
   log: (message: string) => void
+  /** macOS: `DEVTOOL_SERVER_LAUNCHD_DOMAIN=user` skips the GUI session. */
+  launchdDomain?: 'gui' | 'user'
 }
 
 export function serviceContext(paths: ServerPaths, log: (message: string) => void = () => {}, env: NodeJS.ProcessEnv = process.env): ServiceContext {
@@ -81,7 +83,8 @@ export function serviceContext(paths: ServerPaths, log: (message: string) => voi
     user: info.username,
     userHome: os.homedir(),
     run: runCommand,
-    log
+    log,
+    launchdDomain: env.DEVTOOL_SERVER_LAUNCHD_DOMAIN === 'user' ? 'user' : 'gui'
   }
 }
 
@@ -150,7 +153,13 @@ function xml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export function renderLaunchdPlist(paths: ServerPaths, label: string, userHome: string): string {
+/**
+ * `background`: for the `user/<uid>` domain, which only takes jobs limited to the
+ * `Background` session type (a plain LaunchAgent is `Aqua`, the GUI session's, and
+ * bootstrapping it there fails with EIO). Such a plist is not loaded into the GUI
+ * session at login, so the two never run side by side.
+ */
+export function renderLaunchdPlist(paths: ServerPaths, label: string, userHome: string, options: { background?: boolean } = {}): string {
   const string = (value: string) => `<string>${xml(value)}</string>`
   const launchdLog = path.join(paths.logsDir, 'launchd.log')
   return [
@@ -168,6 +177,7 @@ export function renderLaunchdPlist(paths: ServerPaths, label: string, userHome: 
     `    <key>DEVTOOL_SERVER_LOG</key>${string('file')}`,
     '  </dict>',
     `  <key>WorkingDirectory</key>${string(userHome)}`,
+    ...(options.background ? ['  <key>LimitLoadToSessionType</key><string>Background</string>'] : []),
     '  <key>RunAtLoad</key><true/>',
     // Restart after a crash or an update (exit 75), not after a clean stop.
     '  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>',
@@ -311,19 +321,24 @@ async function installLaunchd(ctx: ServiceContext): Promise<InstallResult> {
   const dir = path.join(ctx.userHome, 'Library', 'LaunchAgents')
   const file = path.join(dir, `${label}.plist`)
   fs.mkdirSync(dir, { recursive: true })
-  atomicWriteFileSync(file, renderLaunchdPlist(ctx.paths, label, ctx.userHome), 0o644)
   // Whatever was loaded before goes first, in either domain.
   for (const domain of [`gui/${ctx.uid}`, `user/${ctx.uid}`]) await ctx.run('launchctl', ['bootout', `${domain}/${label}`])
   const notes: string[] = []
   let domain = `gui/${ctx.uid}`
-  let loaded = await ctx.run('launchctl', ['bootstrap', domain, file])
+  let loaded: CommandResult = { code: 1, stdout: '', stderr: 'skipped (DEVTOOL_SERVER_LAUNCHD_DOMAIN=user)' }
+  if (ctx.launchdDomain !== 'user') {
+    atomicWriteFileSync(file, renderLaunchdPlist(ctx.paths, label, ctx.userHome), 0o644)
+    loaded = await ctx.run('launchctl', ['bootstrap', domain, file])
+  }
   if (loaded.code !== 0) {
-    // No GUI session (installed over SSH with nobody logged in on the Mac).
+    // No GUI session (installed over SSH with nobody logged in on the Mac): the
+    // background user domain, which takes only Background-session jobs.
     ctx.log(`service launchd ${domain} refused: ${(loaded.stderr || loaded.stdout).trim()}`)
     domain = `user/${ctx.uid}`
+    atomicWriteFileSync(file, renderLaunchdPlist(ctx.paths, label, ctx.userHome, { background: true }), 0o644)
     loaded = await ctx.run('launchctl', ['bootstrap', domain, file])
     if (loaded.code !== 0) throw new Error(`launchctl bootstrap failed: ${(loaded.stderr || loaded.stdout).trim()}`)
-    notes.push('Nobody is logged in on this Mac\'s screen, so the server runs in the background user session. It starts again when you next log in.')
+    notes.push(`The server runs in launchd's background user domain (user/${ctx.uid}), not a GUI login session. After a reboot, log in (by SSH or at the screen) and run: devtool-server start`)
   }
   ctx.log(`service launchd label=${label} domain=${domain}`)
   return { record: { kind: 'launchd', name: label, file, domain, suffix: ctx.suffix, installedAt: new Date().toISOString() }, notes }

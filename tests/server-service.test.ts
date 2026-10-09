@@ -162,7 +162,15 @@ describe('installing the service', () => {
     const ssh = fakeContext('darwin', (command, args) => (command === 'launchctl' && args[0] === 'bootstrap' && args[1] === 'gui/501' ? { code: 5, stderr: 'Bootstrap failed: 125: Domain does not support specified action' } : {}))
     const fallback = await installService(ssh.ctx)
     expect(fallback.record.domain).toBe('user/501')
-    expect(fallback.notes.join('\n')).toMatch(/background user session/)
+    expect(fallback.notes.join('\n')).toMatch(/background user domain \(user\/501\)/)
+    // The user domain only takes Background-session jobs.
+    expect(fs.readFileSync(fallback.record.file!, 'utf8')).toContain('<key>LimitLoadToSessionType</key><string>Background</string>')
+    expect(fs.readFileSync(result.record.file!, 'utf8')).not.toContain('LimitLoadToSessionType')
+
+    const chosen = fakeContext('darwin', () => ({}))
+    chosen.ctx.launchdDomain = 'user'
+    expect((await installService(chosen.ctx)).record.domain).toBe('user/501')
+    expect(chosen.calls.filter((c) => c.startsWith('launchctl bootstrap'))).toEqual([`launchctl bootstrap user/501 ${path.join(chosen.ctx.userHome, 'Library/LaunchAgents/sk.awantech.devtool-server.test.plist')}`])
   })
 
   it('Linux without systemd: an @reboot crontab line next to the user\'s own, and a background process', async () => {
