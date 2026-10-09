@@ -90,7 +90,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-move-prepare': projectAt(4),
   'chat-attach': { by: [{ projectField: [1, 'projectId'] }, { tab: 0 }], pin: 'set' },
   'chat-detach': tab0,
-  'chat-send': tab0,
+  // A server chat's images are scaled down here first (desktop-routing.ts).
+  'chat-send': { by: [{ tab: 0 }], remote: 'custom' },
   'chat-bash': tab0,
   'chat-login': tab0,
   'chat-login-code': tab0,

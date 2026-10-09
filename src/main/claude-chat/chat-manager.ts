@@ -54,6 +54,12 @@ export interface ChatManagerDeps {
   /** The process started or ended (liveness, status). */
   onProcessChange: (tabId: string, running: boolean, error?: string) => void
   log: (message: string) => void
+  /**
+   * Every chat here signs in from another machine: this host is a DevTool
+   * server, whose windows are on a desktop. `/login` then asks for the pasted
+   * code, as for an SSH project (the CLI's browser would open on the server).
+   */
+  loginRemote?: boolean
 }
 
 /** `claude auth login` turning down a pasted code (it then waits for another). */
@@ -240,7 +246,7 @@ export class ClaudeChatManager {
     await runtime.ready
     this.endLogin(runtime)
     const { config } = runtime
-    const remote = !!(config.sshConfig && config.projectId)
+    const remote = this.deps.loginRemote === true || !!(config.sshConfig && config.projectId)
     const login: ChatLogin = { status: 'running', method, ...(remote ? { remote: true } : {}) }
     this.emit(runtime, { t: 'login', login })
     if (config.sshConfig && config.projectId) {

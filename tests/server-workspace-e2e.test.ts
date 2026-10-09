@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process'
+import { randomUUID } from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -6,12 +7,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RelayServer } from '../relay/src/server.ts'
 import { DesktopRouting } from '../src/main/servers/desktop-routing'
 import type { IpcContext, IpcRegistrar } from '../src/main/ipc/registrar'
+import type { DecodedImage, ImageCodec } from '../src/main/mobile/chat-image'
+import type { ChatEvent } from '../src/shared/claude-chat'
 import type { CommitHistoryResult, GitOperationResult, GitPostureResult, GitStatusResult, ProjectsData } from '../src/shared/types'
+import type { PermissionSettingsSource } from '../src/shared/chat-permissions'
 import { fixtureProject } from './helpers/streams-fixtures'
 import { pairByCode, startTestDesktop, startTestRelay, startTestServer, waitFor, type TestDesktop, type TestServer } from './helpers/host-link'
 
 /**
- * Step 7 end to end: a server project's files and Git panel
+ * Step 7 end to end: a server project's files, Git panel and chat
  * through the desktop's real router (DesktopRouting: ServerProjects, RouteIndex,
  * HostRouter), its ServerHub, a real relay on an ephemeral port and the server's
  * host. Every call below is what a window's preload sends; none may run here.
@@ -28,6 +32,20 @@ function git(cwd: string, ...args: string[]): string {
     encoding: 'utf8',
     env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' }
   })
+}
+
+/** Decodes anything as a 4000x3000 image whose re-encodings are small. */
+const bigImageCodec: ImageCodec = {
+  decode: () => {
+    const image = (width: number, height: number): DecodedImage => ({
+      width,
+      height,
+      resize: (w, h) => image(w, h),
+      png: () => Buffer.alloc(Math.min(200_000, width * height), 1),
+      jpeg: () => Buffer.alloc(50_000, 2)
+    })
+    return image(4000, 3000)
+  }
 }
 
 describe.skipIf(process.platform === 'win32')('a server project through the desktop\'s router (real relay)', () => {
@@ -47,6 +65,10 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
     if (!handler) throw new Error(`no handler for ${channel}`)
     return Promise.resolve(handler(ctx, ...args))
   }
+
+  const chatEvents = (tabId: string): ChatEvent[] => sent
+    .filter(([clientId, ch, id]) => clientId === 'win:1' && ch === 'chat-event' && id === tabId)
+    .map(entry => entry[4] as ChatEvent)
 
   beforeAll(async () => {
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-step7-')))
@@ -74,7 +96,8 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
         send: (clientId, channel, ...args) => { sent.push([clientId, channel, ...args]) },
         broadcast: (channel, ...args) => { broadcast.push([channel, ...args]) }
       },
-      log: () => {}
+      log: () => {},
+      images: bigImageCodec
     })
     const local: ProjectsData = { projects: [], tags: [], projectOrder: [], pinnedItems: [] }
     routing.attachHost({ getProjectsData: () => local, onProjectsChanged: () => () => {} })
@@ -87,11 +110,13 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
     const channels = [
       'save-projects', 'fb-read-directory', 'fb-read-file', 'fb-write-file', 'fb-create-file', 'fb-create-directory', 'fb-rename', 'fb-delete',
       'fb-git-status', 'fb-git-diff', 'fb-git-stage', 'fb-git-unstage', 'fb-git-discard', 'fb-git-commit', 'fb-git-push', 'fb-git-pull',
-      'git-project-posture', 'git-commit-history'
+      'git-project-posture', 'git-commit-history',
+      'chat-attach', 'chat-send', 'chat-login', 'chat-login-dismiss', 'chat-list-files', 'chat-permissions-read', 'chat-permissions-update'
     ]
     for (const channel of channels) {
       wrapped.handle(channel, [], (() => { throw new Error(`${channel} ran on the desktop`) }) as never)
     }
+    wrapped.on('chat-close', [], (() => { throw new Error('chat-close ran on the desktop') }) as never)
     routing.attachHub(desktop.hub)
     desktop.hub.onEvent(() => {})
 
@@ -163,4 +188,37 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
     expect(await invoke('fb-git-discard', repo, '', ['README.md'], PROJECT_ID)).toMatchObject({ success: true })
     expect(fs.readFileSync(path.join(repo, 'README.md'), 'utf8')).toBe('hello from the editor\n')
   })
+
+  it('runs a chat on the server\'s claude, with images scaled to fit the link, /permissions and the pasted-code /login', async () => {
+    await desktop.hub.call(server.id, 'win:1', 'save-config', [{ claudeCommand: path.resolve('tests/helpers/fake-claude.mjs') }])
+    const tabId = 'srv-chat-tab'
+    const snapshot = await invoke('chat-attach', tabId, { cwd: repo, sessionId: randomUUID(), projectId: PROJECT_ID }) as { seq: number }
+    expect(snapshot.seq).toBeGreaterThanOrEqual(0)
+    expect(routing.index.pinnedHost(tabId)).toBe(server.id)
+
+    // A 5 MB screenshot doesn't fit one link message as it is; the desktop scales it first.
+    const huge = { mediaType: 'image/png', data: Buffer.alloc(4_000_000, 7).toString('base64') }
+    await expect(desktop.hub.call(server.id, 'win:1', 'chat-send', [tabId, 'too big', [huge]])).rejects.toThrow()
+    await invoke('chat-send', tabId, 'ping through the router', [huge])
+    await waitFor(() => chatEvents(tabId).some(e => e.t === 'sent' && e.images === 1), 'the sent message with its image', 20_000)
+    await waitFor(() => chatEvents(tabId).some(e => e.t === 'sdk' && JSON.stringify(e.m).includes('echo: ping through the router')), 'the reply', 20_000)
+
+    expect(await invoke('chat-list-files', repo, PROJECT_ID)).toEqual(expect.arrayContaining(['README.md']))
+
+    await invoke('chat-permissions-update', repo, 'localSettings', 'allow', 'Bash(ls:*)', 'add', PROJECT_ID)
+    const settings = JSON.parse(fs.readFileSync(path.join(repo, '.claude/settings.local.json'), 'utf8')) as { permissions?: { allow?: string[] } }
+    expect(settings.permissions?.allow).toContain('Bash(ls:*)')
+    const sources = await invoke('chat-permissions-read', repo, PROJECT_ID) as PermissionSettingsSource[]
+    expect(sources.find(s => s.kind === 'localSettings')?.allow).toContain('Bash(ls:*)')
+
+    // The server's browser isn't where the user is: /login asks for the pasted code.
+    await invoke('chat-login', tabId, 'claudeai')
+    await waitFor(() => chatEvents(tabId).some(e => e.t === 'login' && e.login?.status === 'running'), 'the login card', 10_000)
+    const login = chatEvents(tabId).find(e => e.t === 'login' && e.login)
+    expect(login).toMatchObject({ t: 'login', login: { status: 'running', method: 'claudeai', remote: true } })
+    await invoke('chat-login-dismiss', tabId)
+
+    await invoke('chat-close', tabId)
+    expect(routing.index.pinnedHost(tabId)).toBeUndefined()
+  }, 60_000)
 })

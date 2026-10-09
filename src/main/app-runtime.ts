@@ -67,7 +67,7 @@ export class AppRuntime {
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
     this.env = createDesktopHostEnv()
-    this.routing = new DesktopRouting({ configDir: this.env.configDir, windows: this.clients, log: (message) => this.logDebug(message) })
+    this.routing = new DesktopRouting({ configDir: this.env.configDir, windows: this.clients, log: (message) => this.logDebug(message), images: this.env.images })
     this.host = new HostServices({
       env: this.env,
       clients: this.clients,

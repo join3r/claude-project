@@ -440,7 +440,9 @@ export class ChatSession {
       if (limits) {
         const plan = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }).catch(() => null)
         if (plan) {
-          if (!this.sawResultCost && plan.session.total_cost_usd > 0) usage.costUsd = plan.session.total_cost_usd
+          // An experimental answer: one without `session` (an older or newer CLI) is no cost.
+          const cost = (plan.session as { total_cost_usd?: number } | undefined)?.total_cost_usd
+          if (!this.sawResultCost && typeof cost === 'number' && cost > 0) usage.costUsd = cost
           usage.fiveHour = limitWindow(plan.rate_limits?.five_hour)
           usage.sevenDay = limitWindow(plan.rate_limits?.seven_day)
         }

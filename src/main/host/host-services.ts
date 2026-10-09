@@ -141,6 +141,11 @@ export interface HostServicesOptions {
    * PTY output (a server, so it has statuses with no window attached).
    */
   terminalStatus?: 'windows' | 'host'
+  /**
+   * This host's clients are all on other machines (a DevTool server): a chat's
+   * `/login` can't finish in a browser here, so it asks for the pasted code.
+   */
+  remoteClients?: boolean
 }
 
 /**
@@ -199,10 +204,12 @@ export class HostServices {
   private readonly env: HostEnv
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
+  private readonly remoteClients: boolean
 
-  constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus }: HostServicesOptions) {
+  constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus, remoteClients }: HostServicesOptions) {
     this.env = env
     this.clients = clients
+    this.remoteClients = remoteClients === true
     this.onTaskArchived = onTaskArchived ?? (() => {})
     const configDir = env.configDir
     const identity = new IdentityStore(path.join(configDir, 'mobile'), env.secrets, (message) => this.logDebug(message))
@@ -802,7 +809,8 @@ export class HostServices {
         else this.activityRegistry.exited(tabId)
         this.broadcastAgentActivity(tabId)
       },
-      log: (message) => this.logDebug(message)
+      log: (message) => this.logDebug(message),
+      loginRemote: this.remoteClients
     })
   }
 

@@ -2,8 +2,8 @@ import type { Project } from './types'
 
 /**
  * What a DevTool server's project can do yet (plan steps 6 to 9). Terminals and
- * agent tabs run on the server from step 6; files, the editor and the Git
- * panel from step 7. The rest still reach this desktop's
+ * agent tabs run on the server from step 6; files, the editor, the Git panel
+ * and chat from step 7. The rest still reach this desktop's
  * own files and processes, so they stay off for server projects until the step
  * that routes them flips its entry here. SSH and shell-command projects keep
  * their own guards (`isRemoteProject`, `isShellCommandProject`).
@@ -32,7 +32,7 @@ const SERVER_FEATURES: Record<ProjectFeature, boolean> = {
   notebooks: false, // step 7, with conda
   'project-settings-local': false, // step 7 (conda, server folder picker)
   'task-worktrees': false, // step 8
-  chat: false, // step 7
+  chat: true,
   'git-posture': true,
   'local-folder': false // step 9 (Open in IDE over SSH)
 }

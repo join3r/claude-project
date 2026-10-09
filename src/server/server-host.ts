@@ -56,7 +56,9 @@ export async function startServerHost(options: ServerHostOptions): Promise<Serve
     // Desktops own the tags; a restart never reuses a revision a desktop quoted.
     projects: { keepUnknownTagIds: true, initialRevision: Date.now() },
     // No window may be attached: shells' and Codex's status comes from their output here.
-    terminalStatus: 'host'
+    terminalStatus: 'host',
+    // Every window is on a desktop: a chat's /login asks for the pasted code.
+    remoteClients: true
   })
   await host.start()
   host.registerIpcHandlers(clients.createRegistrar(env.log))
