@@ -222,6 +222,50 @@ describe('host link session (loopback)', () => {
     expect(wire.sent.server.filter((m) => m.type === 'credit').length).toBeGreaterThan(10)
   })
 
+  it('keeps granting credit to a reader that finds the whole window buffered when it reads', async () => {
+    // Node calls _read() from inside read() before it takes the data out of the buffer:
+    // a stream that only granted from _read() saw a full window there, granted nothing,
+    // and never heard from Node again (the bundle upload stalled at 256 KiB).
+    let arrived: (() => void) | null = null
+    const serverStreams = new Map([['late-reader', async (stream: import('../src/main/host/link/stream').LinkStream) => {
+      // Wait until the whole first window sits in the buffer, then read it all at once.
+      await new Promise<void>((resolve) => { arrived = resolve })
+      const hash = createHash('sha256')
+      let bytes = 0
+      // read() with no size takes the whole buffer, as Node 24's async iterator does.
+      for (;;) {
+        const chunk = stream.read() as Buffer | null
+        if (chunk) {
+          hash.update(chunk)
+          bytes += chunk.length
+          await new Promise((resolve) => setTimeout(resolve, 1))
+          continue
+        }
+        if (stream.readableEnded) break
+        const more = await Promise.race([once(stream, 'readable').then(() => true), once(stream, 'end').then(() => false), new Promise((resolve) => setTimeout(() => resolve('stalled'), 2000))])
+        if (more === 'stalled') throw new Error(`stalled after ${bytes} bytes`)
+        if (!more) break
+      }
+      stream.end(JSON.stringify({ bytes, sha256: hash.digest('hex') }))
+    }]])
+    const { desktop } = loopback({ serverStreams })
+    const stream = desktop.openStream('late-reader')
+    const total = 1024 * 1024
+    const payload = sourceBytes(0, total, 5)
+    const writing = (async () => {
+      for (let offset = 0; offset < total; offset += 64 * 1024) {
+        if (!stream.write(payload.subarray(offset, offset + 64 * 1024))) await once(stream, 'drain')
+      }
+      stream.end()
+    })()
+    for (let i = 0; i < 50 && !arrived; i++) await tick()
+    for (let i = 0; i < 20; i++) await tick()
+    ;(arrived as unknown as () => void)()
+    await writing
+    const reply = JSON.parse((await readAll(stream)).toString()) as { bytes: number; sha256: string }
+    expect(reply).toEqual({ bytes: total, sha256: createHash('sha256').update(payload).digest('hex') })
+  }, 10_000)
+
   it('reads a source stream and stops writing while the socket is congested', async () => {
     const { desktop, wire } = loopback()
     wire.congested = true

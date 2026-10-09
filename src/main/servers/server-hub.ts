@@ -79,6 +79,10 @@ export const FALLBACK_SERVER_NODE = '24.21.0'
 const RESTART_GRACE_MS = 120_000
 /** How often an upload's progress reaches the windows. */
 const PROGRESS_STEP_BYTES = 256 * 1024
+/** An upload that makes no progress for this long is given up (and tried again on the next connect). */
+const UPLOAD_STALL_MS = 60_000
+/** After the last byte: the server verifies, maybe fetches a Node, then answers. */
+const UPLOAD_ANSWER_MS = 10 * 60_000
 /** How long `pairWithCode` waits for the relay, then for the server's answer. */
 const RELAY_WAIT_MS = 15_000
 const PAIRING_ANSWER_MS = 20_000
@@ -466,7 +470,7 @@ export class ServerHub {
       let reported = 0
       for await (const chunk of archive.chunks()) {
         if (stream.destroyed) break
-        if (!stream.write(chunk)) await Promise.race([once(stream, 'drain'), done])
+        if (!stream.write(chunk)) await this.within(Promise.race([once(stream, 'drain'), done]), UPLOAD_STALL_MS, 'The upload to the server stalled')
         progress.sent += chunk.length
         if (progress.sent - reported >= PROGRESS_STEP_BYTES) {
           reported = progress.sent
@@ -474,7 +478,7 @@ export class ServerHub {
         }
       }
       stream.end()
-      await done
+      await this.within(done, UPLOAD_ANSWER_MS, 'The server did not confirm the upload')
       const result = JSON.parse(Buffer.concat(replyChunks).toString('utf8')) as { ok?: boolean; state?: string }
       this.deps.log(`servers server=${serverId} uploaded ${archive.total} bytes in ${this.timers.now() - started} ms state=${result.state}`)
       if (result.state === 'restarting') this.startRestarting(serverId)
@@ -482,14 +486,24 @@ export class ServerHub {
       return true
     } catch (err) {
       stream?.destroy()
-      const offline = err instanceof LinkError && err.code === LinkErrorCode.ServerOffline
-      if (!offline) this.failedUploads.set(serverId, bundle.manifest.sha256)
+      // Offline or stalled: worth another try on the next connect. Anything else (the server refused it): not this bundle again.
+      const transient = err instanceof LinkError && (err.code === LinkErrorCode.ServerOffline || err.code === LinkErrorCode.Aborted)
+      if (!transient) this.failedUploads.set(serverId, bundle.manifest.sha256)
       this.deps.log(`servers server=${serverId} upload failed: ${errorMessage(err)}`)
       return false
     } finally {
       this.uploads.delete(serverId)
       this.emitState()
     }
+  }
+
+  /** `promise`, or a LinkError `aborted` after `ms`. */
+  private within<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+    let timer: unknown = null
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) => { timer = this.timers.setTimeout(() => reject(new LinkError(LinkErrorCode.Aborted, message)), ms) })
+    ]).finally(() => this.timers.clearTimeout(timer))
   }
 
   private startRestarting(serverId: string): void {

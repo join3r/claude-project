@@ -79,6 +79,18 @@ export class LinkStream extends Duplex {
     this.grant()
   }
 
+  /**
+   * Node (24, at least) calls `_read()` from inside `read()` before it takes the data
+   * it returns out of the buffer, so {@link grant} there can see a full window and
+   * grant nothing. Node then waits for a push that never comes (the peer has no
+   * credit), and the stream stalls. So grant again once the data is out.
+   */
+  override read(size?: number): ReturnType<Duplex['read']> {
+    const chunk: ReturnType<Duplex['read']> = super.read(size)
+    this.grant()
+    return chunk
+  }
+
   override _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
     if (!this.silenced && !(this.endSent && this.remoteEnded)) {
       this.session.sendClose(this.sid, 'error', error?.message ?? 'closed')

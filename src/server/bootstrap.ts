@@ -212,7 +212,8 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
     linkCall: (call) => {
       if (call.ch === LinkChannel.BootstrapDone) {
         const uploaded = (call.args[0] as { uploaded?: unknown } | undefined)?.uploaded === true
-        finish({ desktopId: call.desktopId, uploaded })
+        // Let the answer reach the desktop before this link goes away.
+        setTimeout(() => finish({ desktopId: call.desktopId, uploaded }), 300)
         return Promise.resolve({ ok: true })
       }
       if (call.ch === LinkChannel.Info) return Promise.resolve({ update: null })
