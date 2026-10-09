@@ -37,8 +37,18 @@ const api = {
   serversUpdate: vi.fn(),
   mobileGetState: vi.fn(),
   onMobileStateChanged: vi.fn(() => () => {}),
-  mobileSetRelayUrl: vi.fn()
+  mobileSetRelayUrl: vi.fn(),
+  serverMobileGetState: vi.fn(),
+  serverMobileStartPairing: vi.fn(),
+  serverMobileCancelPairing: vi.fn(),
+  serverMobileAccept: vi.fn(),
+  serverMobileReject: vi.fn(),
+  serverMobileRevoke: vi.fn(),
+  onServerMobileStateChanged: vi.fn((_listener: (serverId: string, state: MobileState) => void) => () => {})
 }
+
+/** What the row hears from main: a server's phone state, as `server-mobile-state-changed` delivers it. */
+let pushServerPhones: (serverId: string, state: MobileState) => void = () => {}
 
 function servers(list: ServerStatus[], relay: ServersState['relay'] = { kind: 'online' }): void {
   act(() => resetServersStateForTests({ relay, servers: list, invite: null }))
@@ -55,6 +65,13 @@ beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset()
   api.onMobileStateChanged.mockImplementation(() => () => {})
   api.mobileGetState.mockResolvedValue(mobile())
+  api.serverMobileGetState.mockResolvedValue(mobile({ enabled: true, connection: { kind: 'online' } }))
+  const phoneListeners = new Set<(serverId: string, state: MobileState) => void>()
+  api.onServerMobileStateChanged.mockImplementation((listener: (serverId: string, state: MobileState) => void) => {
+    phoneListeners.add(listener)
+    return () => { phoneListeners.delete(listener) }
+  })
+  pushServerPhones = (serverId, state) => act(() => { for (const listener of phoneListeners) listener(serverId, state) })
   api.serversRemove.mockResolvedValue({ uninstalled: true })
   api.serversRename.mockImplementation(async (_id: string, name: string) => server({ name }))
   api.serversRestart.mockResolvedValue(undefined)
@@ -173,6 +190,85 @@ describe('Settings › Servers', () => {
     expect(offline.textContent).toContain('devtool-server uninstall')
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Remove' })) })
     expect(api.serversRemove).toHaveBeenCalledWith(id('a'), {})
+  })
+
+  it('Pair a phone: the server\'s QR with expiry and Copy link, the request with Accept, then the phone with Revoke', async () => {
+    const live = (over: Partial<MobileState> = {}) => mobile({ enabled: true, connection: { kind: 'online' }, ...over })
+    const uri = 'devtool://pair?d=eyJ2IjoxfQ'
+    const exp = Math.floor(Date.now() / 1000) + 300
+    api.serverMobileStartPairing.mockResolvedValue({ uri, exp })
+    api.serverMobileGetState.mockResolvedValueOnce(live()).mockResolvedValue(live({ invite: { uri, exp } }))
+    render(<ServersSettings onOpenRelay={() => {}} />)
+    servers([server(), server({ id: id('b'), name: 'other box' })])
+    await flush()
+    expect(api.serverMobileGetState).toHaveBeenCalledWith(id('a'))
+
+    const row = within(screen.getAllByTestId('server-row')[0])
+    fireEvent.click(row.getByRole('button', { name: 'Pair a phone' }))
+    await flush()
+    await flush()
+    expect(api.serverMobileStartPairing).toHaveBeenCalledWith(id('a'))
+    const panel = within(screen.getByTestId('phone-pairing'))
+    expect(panel.getByText(/pairs with box/)).toBeTruthy()
+    expect(screen.getByTestId('phone-pairing').textContent).toContain('Expires in 5:00 · works once')
+    fireEvent.click(panel.getByRole('button', { name: 'Copy link' }))
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(uri)
+
+    // Another server's state goes to its own row only.
+    pushServerPhones(id('b'), live({ pending: { phoneId: id('f'), name: 'Not mine', receivedAt: T0, online: true } }))
+    expect(screen.getAllByTestId('server-row')[0].textContent).not.toContain('Not mine')
+    expect(screen.getAllByTestId('server-row')[1].textContent).toContain('Not mine wants to pair with other box')
+    pushServerPhones(id('b'), live())
+
+    // The phone scans the code: the server's push brings its request.
+    pushServerPhones(id('a'), live({ pending: { phoneId: id('e'), name: 'Vladimir’s iPhone', receivedAt: T0, online: true } }))
+    expect(screen.getByRole('alert').textContent).toContain('Vladimir’s iPhone wants to pair with box')
+    expect(within(screen.getAllByTestId('server-row')[1]).getByTestId('phone-message').textContent).toBe('Not mine did not pair.')
+    const paired = live({ devices: [{ id: id('e'), name: 'Vladimir’s iPhone', pairedAt: T0, lastSeen: T0, online: true, push: false }] })
+    api.serverMobileAccept.mockResolvedValue(paired)
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Accept' }))
+    await flush()
+    expect(api.serverMobileAccept).toHaveBeenCalledWith(id('a'), id('e'))
+    expect(screen.queryByTestId('phone-pairing')).toBeNull()
+    expect(row.getByTestId('phone-message').textContent).toBe('Paired with Vladimir’s iPhone.')
+    expect(screen.getByTestId('server-phone').textContent).toContain('Vladimir’s iPhone')
+    expect(screen.getByTestId('server-phone').textContent).toContain('Online')
+
+    api.serverMobileRevoke.mockResolvedValue(live())
+    fireEvent.click(within(screen.getByTestId('server-phone')).getByRole('button', { name: 'Revoke' }))
+    fireEvent.click(within(screen.getByTestId('server-phone')).getByRole('button', { name: 'Revoke' }))
+    await flush()
+    expect(api.serverMobileRevoke).toHaveBeenCalledWith(id('a'), id('e'))
+    expect(screen.queryByTestId('server-phone')).toBeNull()
+  })
+
+  it('Pair a phone: a code another offer replaced, Reject, and nothing to do while offline', async () => {
+    const live = (over: Partial<MobileState> = {}) => mobile({ enabled: true, connection: { kind: 'online' }, ...over })
+    const uri = 'devtool://pair?d=eyJ2IjoyfQ'
+    const exp = Math.floor(Date.now() / 1000) + 300
+    api.serverMobileStartPairing.mockResolvedValue({ uri, exp })
+    api.serverMobileGetState.mockResolvedValue(live({ invite: { uri, exp } }))
+    render(<ServersSettings onOpenRelay={() => {}} />)
+    servers([server()])
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: 'Pair a phone' }))
+    await flush()
+    await flush()
+    // `devtool-server pair` on the server took the relay's one offer slot.
+    pushServerPhones(id('a'), live())
+    expect(screen.getByTestId('phone-pairing').textContent).toContain('another pairing code on the server took its place')
+
+    pushServerPhones(id('a'), live({ pending: { phoneId: id('e'), name: 'iPad', receivedAt: T0, online: false } }))
+    expect(screen.getByRole('alert').textContent).toContain('The phone is offline right now.')
+    api.serverMobileReject.mockResolvedValue(live())
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Reject' }))
+    await flush()
+    expect(api.serverMobileReject).toHaveBeenCalledWith(id('a'), id('e'))
+    expect(screen.getByTestId('phone-message').textContent).toBe('Rejected iPad.')
+
+    servers([server({ state: 'offline' })])
+    await flush()
+    expect((screen.getByRole('button', { name: 'Pair a phone' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('has an empty state that opens Add server', async () => {
