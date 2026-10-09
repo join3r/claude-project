@@ -10,7 +10,9 @@ export default tseslint.config(
       // Committed esbuild bundle at the repo root, not source.
       'index.js',
       // The relay and the iOS app have their own tooling and lint configs.
-      'relay/**', 'ios/**']
+      'relay/**', 'ios/**',
+      // Task worktrees: full checkouts of other branches, linted in their own right.
+      '.worktrees/**']
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
