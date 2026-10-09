@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  InstallerMessages,
   MarkerFilter,
   SSH_INSTALL_DATA,
   SSH_INSTALL_EXIT,
@@ -59,6 +60,38 @@ describe('ssh install arguments', () => {
     const args = buildSshInstallArgs({ host: 'dev.example.com', user: 'deploy', port: 2222, keyFile: '/k/id_ed25519' }, script)
     expect(args).toEqual(['-tt', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4', '-p', '2222', '-i', '/k/id_ed25519', '-l', 'deploy', 'dev.example.com', script])
     expect(buildSshInstallArgs({ host: 'orb', user: 'devtool-srv-test', port: 22 }, script)).toEqual(['-tt', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4', '-l', 'devtool-srv-test', 'orb', script])
+  })
+
+  it('uses an SSH project\'s ControlMaster when given one, so nothing asks again', () => {
+    const script = remoteInstallScript('https://devtool.awantech.sk', NONCE)
+    const args = buildSshInstallArgs({ host: 'orb', user: 'devtool-srv-test' }, script, '/cfg/ssh/p-1.sock')
+    expect(args).toEqual(['-tt', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4', '-S', '/cfg/ssh/p-1.sock', '-o', 'ControlMaster=no', '-l', 'devtool-srv-test', 'orb', script])
+    const { sessions, ptys } = setup()
+    sessions.start('win:1', { host: 'orb' }, { cols: 80, rows: 24 }, { controlPath: '/cfg/ssh/p-1.sock' })
+    expect(ptys[0].args.slice(5, 9)).toEqual(['-S', '/cfg/ssh/p-1.sock', '-o', 'ControlMaster=no'])
+  })
+
+  it('reports the installer\'s own refusal (musl, root) when it stops', () => {
+    const { sessions, ptys, sent } = setup()
+    sessions.start('win:1', { host: 'box' }, { cols: 80, rows: 24 })
+    const { pty } = ptys[0]
+    pty.emit(`DEVTOOL-SSH-READY-${NONCE}\r\n`)
+    pty.emit('Checking this machine...\r\n\x1b[31mdevtool-server install: this Linux has no glibc (Alpine and other musl ')
+    pty.emit('systems are not supported). The server needs glibc 2.28 or newer.\x1b[0m\r\n')
+    pty.exit(1)
+    expect(sent.at(-1)).toMatchObject({ channel: SSH_INSTALL_EXIT, args: ['ssh-install-1', {
+      exitCode: 1,
+      tokenSent: true,
+      message: 'this Linux has no glibc (Alpine and other musl systems are not supported). The server needs glibc 2.28 or newer.'
+    }] })
+  })
+
+  it('leaves the installer message out when it went through, or never started', () => {
+    const { sessions, ptys, sent } = setup()
+    sessions.start('win:1', { host: 'box' }, { cols: 80, rows: 24 })
+    ptys[0].pty.emit('devtool-server install: odd but harmless\r\n')
+    ptys[0].pty.exit(255)
+    expect(sent.at(-1)?.args[1]).not.toHaveProperty('message')
   })
 
   it('never puts the token in the local or remote command line', () => {
@@ -156,7 +189,10 @@ describe('ssh install sessions', () => {
   it('goes through the registrar with checked arguments', async () => {
     const calls: unknown[][] = []
     const control: SshInstallControl = {
-      start: (clientId, target, size) => { calls.push(['start', clientId, target, size]); return { sessionId: 'ssh-install-1', target: target.host } },
+      start: (clientId, target, size, options) => {
+        calls.push(options.projectId ? ['start', clientId, target, size, options] : ['start', clientId, target, size])
+        return { sessionId: 'ssh-install-1', target: target.host }
+      },
       write: (clientId, id, data) => { calls.push(['write', clientId, id, data]) },
       resize: (clientId, id, cols, rows) => { calls.push(['resize', clientId, id, cols, rows]) },
       stop: (clientId, id) => { calls.push(['stop', clientId, id]) }
@@ -171,12 +207,25 @@ describe('ssh install sessions', () => {
     await call('servers-ssh-install-stop', 'ssh-install-1')
     await expect(call('servers-ssh-install-start', { host: 'box', port: 0 }, { cols: 80, rows: 24 })).rejects.toThrow()
     await expect(call('servers-ssh-install-stop', '../x')).rejects.toThrow()
+    await call('servers-ssh-install-start', { host: 'orb' }, { cols: 80, rows: 24 }, { projectId: 'p-1' })
+    await expect(call('servers-ssh-install-start', { host: 'orb' }, { cols: 80, rows: 24 }, { projectId: '../p' })).rejects.toThrow()
     expect(calls).toEqual([
       ['start', 'win:1', { host: 'box', user: 'me', port: 22 }, { cols: 80, rows: 24 }],
       ['write', 'win:1', 'ssh-install-1', 'y\r'],
       ['resize', 'win:1', 'ssh-install-1', 100, 30],
-      ['stop', 'win:1', 'ssh-install-1']
+      ['stop', 'win:1', 'ssh-install-1'],
+      ['start', 'win:1', { host: 'orb' }, { cols: 80, rows: 24 }, { projectId: 'p-1' }]
     ])
+  })
+})
+
+describe('InstallerMessages', () => {
+  it('keeps the last error line of the installer or its bootstrap, colors and carriage returns gone', () => {
+    const messages = new InstallerMessages()
+    messages.push('devtool-server install: first\r\n')
+    messages.push('noise\r\n\x1b[1mdevtool-server install: refusing to install as root. Run it as the user')
+    expect(messages.message()).toBe('refusing to install as root. Run it as the user')
+    expect(new InstallerMessages().message()).toBeNull()
   })
 })
 

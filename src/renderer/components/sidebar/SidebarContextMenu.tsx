@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { isEphemeralProject, isRemoteProject, isShellCommandProject } from '../../../shared/types'
 import { featureAvailable, revealAvailable } from '../../../shared/project-features'
+import { canMoveToServer } from '../../../shared/project-move'
 import type { PinnedItem, Project, Task } from '../../../shared/types'
 import { useMenuPosition } from '../../hooks/useMenuPosition'
 import { isSettled, isSnoozed, isUnread, snoozePresets } from '../inbox'
@@ -68,7 +69,8 @@ export default function SidebarContextMenu({
   setDuplicateProjectId,
   setProjectSettingsId,
   onAddTask,
-  onNewStream
+  onNewStream,
+  onMoveToServer
 }: {
   contextMenu: SidebarContextMenuState | null
   snoozeSubmenu: boolean
@@ -88,6 +90,8 @@ export default function SidebarContextMenu({
   /** A new task in `streamId`, or in the project's current stream. */
   onAddTask: (projectId: string, streamId?: string) => void
   onNewStream: (projectId: string) => void
+  /** Move to a DevTool server… (SSH projects only). */
+  onMoveToServer?: (projectId: string) => void
 }): React.ReactElement {
   const {
     projects, togglePinnedItem, updateProject, setProjectExpanded, connectSsh, removeProject,
@@ -282,6 +286,16 @@ export default function SidebarContextMenu({
                     connectSsh(project.id, project.ssh!).catch(() => {})
                     setContextMenu(null)
                   }}>Reconnect SSH</button>
+                )
+              })()}
+              {contextMenu.type === 'project' && onMoveToServer && (() => {
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                if (!project || !canMoveToServer(project)) return null
+                return (
+                  <button className={menuItemCls} onClick={() => {
+                    setContextMenu(null)
+                    onMoveToServer(project.id)
+                  }}>Move to a DevTool server…</button>
                 )
               })()}
               {(() => {

@@ -7,8 +7,14 @@ import { ServerHub } from './servers/server-hub'
 import { desktopBundle, desktopBundleDir } from './servers/desktop-bundle'
 import { DEFAULT_INSTALL_URL } from '../shared/servers'
 import { DesktopRouting } from './servers/desktop-routing'
-import { registerServerHandlers, registerSshInstallHandlers } from './ipc/servers'
+import { registerProjectMoveHandlers, registerServerHandlers, registerSshInstallHandlers, type ProjectMoveControl, type SshInstallControl } from './ipc/servers'
 import { SshInstallSessions } from './servers/ssh-install'
+import { ProjectMover } from './servers/project-move'
+import { probeSshHost } from './servers/ssh-probe'
+import { MAIN_CLIENT_ID } from './servers/server-projects'
+import { sshInstallTargetOf } from '../shared/project-move'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import * as nodePty from 'node-pty'
 import { getShellEnv } from './shell-env'
 import { sshExecutable } from './resolve-agent-command'
@@ -24,7 +30,6 @@ import { registerServerIdeHandlers } from './ipc/server-ide'
 import { ServerBrowserProxies } from './servers/server-browser-proxy'
 import { ServerIde } from './servers/server-ide'
 import { LOCAL_HOST } from './servers/host-router'
-import { MAIN_CLIENT_ID } from './servers/server-projects'
 import { TCP_STREAM_KIND, connectTcpStream, type TcpTarget } from './host/link/tcp-stream'
 import type { LinkStream } from './host/link/stream'
 import { openRemoteFolderInEditor } from './external-ide'
@@ -34,6 +39,8 @@ import { probeRedirect } from './release-redirect'
 import { decideUpdateMode } from '../shared/updates'
 import type {
   PersistedWindowState,
+  Project,
+  SshConfig,
   WindowGeometry,
   WindowViewState
 } from '../shared/types'
@@ -43,6 +50,8 @@ import {
   cloneWindowGeometry,
   cloneWindowViewState
 } from '../shared/types'
+
+const execFileAsync = promisify(execFile)
 
 function getWindowGeometry(window: BrowserWindow): WindowGeometry {
   const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds()
@@ -69,6 +78,8 @@ export class AppRuntime {
   private servers!: ServerHub
   /** Add server › Install over SSH: the ssh ptys, one per dialog that started one. */
   private sshInstalls!: SshInstallSessions
+  /** Move to a DevTool server: an SSH project becomes a server's. */
+  private mover!: ProjectMover
   /** Server projects and the router that sends a server project's calls to its server. */
   private readonly routing: DesktopRouting
   private readonly windowStates = new Map<number, PersistedWindowState>()
@@ -106,6 +117,7 @@ export class AppRuntime {
     await this.host.start()
     this.servers = this.createServerHub()
     this.sshInstalls = this.createSshInstalls()
+    this.mover = this.createProjectMover()
     this.updates = this.createUpdates()
     this.createServerTools()
     this.registerEventForwarders()
@@ -132,6 +144,77 @@ export class AppRuntime {
       env: () => getShellEnv(),
       log: (message) => this.logDebug(message)
     })
+  }
+
+  private createProjectMover(): ProjectMover {
+    return new ProjectMover({
+      local: {
+        peek: () => this.host.getProjectsData(),
+        commit: (data) => { this.host.commitProjects(data) },
+        archive: (projectId) => this.host.archiveOf(projectId),
+        liveTabs: (tabIds) => this.host.liveTabs(tabIds),
+        endTabs: (project) => this.host.endProjectTabs(project)
+      },
+      servers: this.routing.projects,
+      call: (serverId, ch, args) => this.servers.call(serverId, MAIN_CLIENT_ID, ch, args),
+      unpin: (tabId) => this.routing.index.unpin(tabId),
+      tabsMoved: (event) => this.clients.broadcast('tabs-moved', event),
+      closeSsh: (projectId, ssh) => this.closeSshProject(projectId, ssh),
+      log: (message) => this.logDebug(message)
+    })
+  }
+
+  /** One of this desktop's SSH projects, or a readable refusal. */
+  private sshProject(projectId: string): Project & { ssh: SshConfig } {
+    const project = this.host.getProjectsData().projects.find(p => p.id === projectId)
+    if (!project?.ssh || project.host) throw new Error('That is not an SSH project on this computer.')
+    return project as Project & { ssh: SshConfig }
+  }
+
+  /** The SSH project's ControlMaster socket while it is connected. */
+  private sshControlPath(projectId: string): string | null {
+    const ssh = this.host.sshManager
+    return ssh.getStatus(projectId) === 'connected' ? ssh.getSocketPath(projectId) : null
+  }
+
+  /** As `ssh-disconnect` does: browser tabs back on a direct connection first, then the master, tunnel and SOCKS go. */
+  private async closeSshProject(projectId: string, ssh: SshConfig): Promise<void> {
+    if (this.socksProxyEnabled.get(projectId)) {
+      await routeBrowserDirectQuietly(projectId)
+      this.clients.broadcast('socks-proxy-status-changed', projectId, false)
+    }
+    this.socksProxyEnabled.delete(projectId)
+    this.socksProxyStarting.delete(projectId)
+    await this.host.sshManager.disconnect(projectId, ssh)
+  }
+
+  private projectMoveControl(): ProjectMoveControl {
+    return {
+      probe: async (projectId) => {
+        const project = this.sshProject(projectId)
+        return probeSshHost(project.ssh, {
+          controlPath: this.sshControlPath(projectId),
+          sshCommand: sshExecutable(),
+          run: (file, args, options) => execFileAsync(file, args, { ...options, env: getShellEnv() })
+        })
+      },
+      move: (projectId, serverId) => this.mover.move(projectId, serverId)
+    }
+  }
+
+  private sshInstallControl(): SshInstallControl {
+    const sessions = this.sshInstalls
+    return {
+      start: (clientId, target, size, options) => {
+        if (!options.projectId) return sessions.start(clientId, target, size)
+        // An SSH project's machine: its own target, and its ControlMaster when up.
+        const project = this.sshProject(options.projectId)
+        return sessions.start(clientId, sshInstallTargetOf(project.ssh), size, { controlPath: this.sshControlPath(project.id) ?? undefined })
+      },
+      write: (clientId, sessionId, data) => sessions.write(clientId, sessionId, data),
+      resize: (clientId, sessionId, cols, rows) => sessions.resize(clientId, sessionId, cols, rows),
+      stop: (clientId, sessionId) => sessions.stop(clientId, sessionId)
+    }
   }
 
   private createServerHub(): ServerHub {
@@ -440,7 +523,8 @@ export class AppRuntime {
 
     registerUpdateHandlers(ipc, { updates: () => this.updates })
     registerServerHandlers(ipc, { servers: () => this.servers })
-    registerSshInstallHandlers(ipc, { sshInstalls: () => this.sshInstalls })
+    registerSshInstallHandlers(ipc, { sshInstalls: () => this.sshInstallControl() })
+    registerProjectMoveHandlers(ipc, { moves: () => this.projectMoveControl() })
   }
 
   /** This desktop's projects plus every server's, as the windows list them. */

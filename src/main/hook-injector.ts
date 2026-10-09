@@ -232,6 +232,21 @@ export class HookInjector {
   }
 
   /**
+   * Release every remote injection of a project at once (it moves to a DevTool
+   * server): the directories that had owners, whose hooks the caller removes.
+   */
+  remoteReleaseAll(projectId: string): string[] {
+    const prefix = `${projectId}:`
+    const dirs: string[] = []
+    for (const key of [...this.remoteOwners.keys()]) {
+      if (!key.startsWith(prefix)) continue
+      this.remoteOwners.delete(key)
+      dirs.push(key.slice(prefix.length))
+    }
+    return dirs
+  }
+
+  /**
    * Build a shell script that merges devtool hooks into remote settings.local.json.
    * Preserves existing user settings and hooks.
    */

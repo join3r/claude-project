@@ -179,8 +179,10 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   // Closing (or converting) the tab ends its process and forgets this window's copy.
   useEffect(() => {
     const handler = (e: Event): void => {
-      if ((e as CustomEvent).detail?.tabId !== tabId) return
-      window.api.chatClose(tabId)
+      const detail = (e as CustomEvent<{ tabId: string; keepRuntime?: boolean }>).detail
+      if (detail?.tabId !== tabId) return
+      // `keepRuntime`: main already closed the chat (the project moved to a server).
+      if (!detail.keepRuntime) window.api.chatClose(tabId)
       forgetChat(tabId)
       hookStatusCallbacks.delete(tabId)
       statusStore.removeTab(tabId)

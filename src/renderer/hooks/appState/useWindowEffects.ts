@@ -13,6 +13,7 @@ import { forgetRemovedTaskView, sidebarForTask } from './viewState'
 import { ensureRemoteConnected, type ConnectSsh } from './remote'
 import { buildWindowTitle } from './windowTitle'
 import { findStreamOfTask, findTaskInProject } from '../../../shared/streams'
+import { markClaudeHandoff } from '../../components/claudeTabHandoff'
 
 export function useNativeTheme(): 'dark' | 'light' {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
@@ -69,6 +70,24 @@ export function useTabsRestartListener(): void {
     return window.api.onTabsRestart(({ tabIds }) => {
       for (const tabId of tabIds) {
         window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+      }
+    })
+  }, [])
+}
+
+/**
+ * A project moved to a DevTool server (Move to a DevTool server). Main already
+ * ended these tabs' processes here, so this window only drops its copies (no
+ * kill, no hook cleanup, nothing saved); the tab bodies, keyed by their host,
+ * mount again on the server once the projects broadcast arrives. Agent tabs
+ * that were running resume there at once instead of waiting for a click.
+ */
+export function useTabsMovedListener(): void {
+  useEffect(() => {
+    return window.api.onTabsMoved(({ tabIds, resume }) => {
+      for (const tabId of resume) markClaudeHandoff(tabId)
+      for (const tabId of tabIds) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId, keepRuntime: true } }))
       }
     })
   }, [])

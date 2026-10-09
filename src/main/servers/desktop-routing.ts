@@ -89,7 +89,9 @@ export class DesktopRouting {
 
   /** The local data plus every server's projects: what the windows list. */
   mergedProjects(local: ProjectsData): ProjectsData {
-    return { ...local, projects: [...local.projects, ...this.projects.foreignProjects()] }
+    // A project moving to a server is foreign and local for a moment: listed once.
+    const localIds = new Set(local.projects.map(p => p.id))
+    return { ...local, projects: [...local.projects, ...this.projects.foreignProjects().filter(p => !localIds.has(p.id))] }
   }
 
   /** A server's project (known now, or seen before). */

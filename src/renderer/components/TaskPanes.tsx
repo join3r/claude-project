@@ -32,10 +32,18 @@ interface Props {
   projectDir: string
 }
 
-/** A tab body's React key: its id, plus the directory its process runs in, if any. */
-function bodyKey(tab: Tab, projectDir: string): string {
+/**
+ * A tab body's React key: its id, plus where its process runs, if it has one:
+ * the host (this desktop or a DevTool server) and the directory. A tab mounts
+ * again, and spawns there, when either changes (a task moved to another
+ * worktree, a project moved to a server). A browser tab follows its host too,
+ * since its network session does.
+ */
+export function bodyKey(tab: Tab, projectDir: string, host: string | undefined): string {
   const dir = tabSpawnDir(tab, projectDir)
-  return dir === null ? tab.id : `${tab.id}@${dir}`
+  const where = host ?? 'local'
+  if (dir !== null) return `${tab.id}@${where}:${dir}`
+  return tab.type === 'browser' ? `${tab.id}@${where}` : tab.id
 }
 
 /** Grid column of pane `index`: panes sit on odd columns, the dividers between them on even ones. */
@@ -246,7 +254,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
         <div
           // A session tab mounts again (and spawns in the new folder) when the
           // task moves to another worktree; see `useTasks.moveTask`.
-          key={bodyKey(tab, projectDir)}
+          key={bodyKey(tab, projectDir, project.host)}
           className="relative min-w-0 min-h-0 overflow-hidden"
           style={{ gridColumn: paneColumn(paneIndex), gridRow: bodyRow, display: active ? 'block' : 'none' }}
           data-tab-body={tab.id}

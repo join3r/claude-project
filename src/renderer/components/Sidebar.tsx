@@ -8,6 +8,7 @@ import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
 import AddServerProject, { type AddServerProjectMode } from './servers/AddServerProject'
 import AddServerDialog from './servers/AddServerDialog'
+import MoveToServerDialog from './servers/MoveToServerDialog'
 import ServerNotices from './servers/ServerNotices'
 import { knownSshTargets } from './servers/sshTargets'
 import { useServersState } from '../serversState'
@@ -178,6 +179,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     new Set(projects.filter(p => p.host === serverId).map(p => p.directory)), [projects])
   const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
   const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null)
+  /** The SSH project being moved to a server, as it was when the dialog opened (once moved it has no `ssh`). */
+  const [moveProject, setMoveProject] = useState<Project | null>(null)
   const [iconMetadata, setIconMetadata] = useState<DashboardIconsMetadata | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -1102,6 +1105,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         setProjectSettingsId={setProjectSettingsId}
         onAddTask={handleAddTask}
         onNewStream={handleNewStream}
+        onMoveToServer={(projectId) => setMoveProject(projects.find(p => p.id === projectId) ?? null)}
       />
 
       <ServerNotices onOpenSettings={(tab) => { setSettingsTab(tab); setSettingsOpen(true) }} />
@@ -1159,6 +1163,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         />
       )}
 
+      {moveProject && (
+        <MoveToServerDialog key={moveProject.id} project={moveProject} onClose={() => setMoveProject(null)} />
+      )}
+
       {shellCommandModalOpen && (
         <AddShellCommandProject
           allTags={tags}
@@ -1179,6 +1187,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             project={project}
             onSave={(payload) => updateProject(projectSettingsId, payload)}
             onClose={() => setProjectSettingsId(null)}
+            onMoveToServer={() => {
+              setProjectSettingsId(null)
+              setMoveProject(project)
+            }}
           />
         )
       })()}

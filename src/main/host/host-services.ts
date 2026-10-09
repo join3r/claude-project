@@ -48,7 +48,7 @@ import { registerHostAgentHandlers } from '../ipc/host-agents'
 import { registerHostSshHandlers } from '../ipc/host-ssh'
 import { detectAgentClis } from '../agent-clis'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
-import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../../shared/archive'
+import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks, type ProjectArchive } from '../../shared/archive'
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
@@ -642,6 +642,45 @@ export class HostServices {
   private async stopTaskTabs(project: Project, task: Task): Promise<void> {
     const tabIds = await tearDownTaskTabs(project, task, { ...this.teardownTargets(), deleteScrollback: () => {} })
     if (process.platform === 'win32' && tabIds.length > 0) await new Promise(resolve => setTimeout(resolve, 500))
+  }
+
+  /** A project's archive on this host (Move to a DevTool server copies it to the server's). */
+  archiveOf(projectId: string): ProjectArchive {
+    return this.archiveStorage.load(projectId)
+  }
+
+  /** Of these tabs, the ones whose process (a PTY or a chat) runs here. */
+  liveTabs(tabIds: readonly string[]): string[] {
+    const live = new Set([...this.ptySessions.liveTabIds(), ...this.chatManager.liveTabIds()])
+    return tabIds.filter(tabId => live.has(tabId))
+  }
+
+  /**
+   * An SSH project leaves for a DevTool server: every tab's process ends here
+   * without a word to the windows (they dropped their copies already), its
+   * scrollback and activity go, and Claude's hooks leave the remote settings
+   * while the project's SSH connection is still up. The server injects its own.
+   */
+  async endProjectTabs(project: Project): Promise<void> {
+    const targets = this.teardownTargets()
+    for (const stream of project.streams) {
+      for (const task of stream.tasks) await tearDownTaskTabs(project, task, targets)
+    }
+    const ssh = project.ssh
+    if (!ssh) return
+    // Injections a tab's directory no longer names (it moved, or the dir was computed differently).
+    for (const dir of this.hookInjector.remoteReleaseAll(project.id)) {
+      if (this.sshManager.getStatus(project.id) !== 'connected') break
+      try {
+        await execFileAsync(this.sshManager.getSshCommand(), [
+          '-S', this.sshManager.getSocketPath(project.id),
+          `${ssh.username}@${ssh.host}`,
+          this.hookInjector.buildRemoteCleanupScript(dir)
+        ], { timeout: 5000 })
+      } catch {
+        // Best effort, as for one tab: the server's own injection replaces stale hooks.
+      }
+    }
   }
 
   /** What a window does for the tabs it closes, done by main for tabs no window may be showing. */

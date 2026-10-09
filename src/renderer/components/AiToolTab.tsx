@@ -875,9 +875,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
   // Cleanup on tab removal
   useEffect(() => {
     const handler = (e: Event) => {
-      const { tabId: removedId } = (e as CustomEvent).detail
+      const { tabId: removedId, keepRuntime } = (e as CustomEvent<{ tabId: string; keepRuntime?: boolean }>).detail
       if (removedId === tabId) {
-        disposeAiToolTerminal(tabId)
+        // `keepRuntime`: main already ended the process and released its hooks (the project moved to a server).
+        disposeAiToolTerminal(tabId, keepRuntime ? { killRuntime: false, persistScrollback: false } : undefined)
         exitCallbacks.delete(tabId)
         activityCallbacks.delete(tabId)
         hookStatusCallbacks.delete(tabId)
@@ -887,7 +888,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
 
         // Release this tab's hook injection. Main tracks owners per directory, so
         // this is a no-op for a lazy tab that never spawned and never injected.
-        if (isClaudeTab) {
+        if (isClaudeTab && !keepRuntime) {
           if (sshConfig) {
             window.api.hooksCleanupRemote(projectId, sshConfig, projectDir, tabId)
           } else {

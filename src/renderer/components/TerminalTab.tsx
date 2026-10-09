@@ -534,8 +534,10 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
   // Listen for tab removal to dispose
   useEffect(() => {
     const handler = (e: Event) => {
-      const { tabId: removedId } = (e as CustomEvent).detail
-      if (removedId === tabId) disposeTerminal(tabId)
+      const { tabId: removedId, keepRuntime } = (e as CustomEvent<{ tabId: string; keepRuntime?: boolean }>).detail
+      if (removedId !== tabId) return
+      // `keepRuntime`: main already ended the process (the project moved to a server); only this copy goes.
+      disposeTerminal(tabId, keepRuntime ? { killRuntime: false, persistScrollback: false } : undefined)
     }
     window.addEventListener('tab-removed', handler)
     return () => window.removeEventListener('tab-removed', handler)

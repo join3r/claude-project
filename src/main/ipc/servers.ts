@@ -1,5 +1,6 @@
-import type { ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult, SshInstallTarget } from '../../shared/servers'
+import type { ProjectMoveResult, ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult, SshHostProbeResult, SshInstallOptions, SshInstallTarget } from '../../shared/servers'
 import type { IpcRegistrar } from './registrar'
+import { safeId } from './schemas'
 import { v } from './validate'
 
 /** The part of ServerHub the windows drive (5b builds Add server and Settings → Servers on it). */
@@ -40,7 +41,8 @@ export function registerServerHandlers(ipc: IpcRegistrar, deps: { servers: () =>
 
 /** The part of SshInstallSessions the windows drive. */
 export interface SshInstallControl {
-  start(clientId: string, target: SshInstallTarget, size: { cols: number; rows: number }): { sessionId: string; target: string }
+  /** `options.projectId`: an SSH project's machine; main takes the target and its connection from that project. */
+  start(clientId: string, target: SshInstallTarget, size: { cols: number; rows: number }, options: SshInstallOptions): { sessionId: string; target: string }
   write(clientId: string, sessionId: string, data: string): void
   resize(clientId: string, sessionId: string, cols: number, rows: number): void
   stop(clientId: string, sessionId: string): void
@@ -62,8 +64,25 @@ const termSize = v.object({ cols: v.number({ int: true, min: 1, max: 1000 }), ro
  * it never crosses this IPC.
  */
 export function registerSshInstallHandlers(ipc: IpcRegistrar, deps: { sshInstalls: () => SshInstallControl }): void {
-  ipc.handle('servers-ssh-install-start', [sshTarget, termSize], (ctx, target, size) => deps.sshInstalls().start(ctx.clientId, target, size))
+  ipc.handle('servers-ssh-install-start', [sshTarget, termSize, v.optional(v.object({ projectId: v.optional(safeId) }))], (ctx, target, size, options) =>
+    deps.sshInstalls().start(ctx.clientId, target, size, options ?? {}))
   ipc.on('servers-ssh-install-input', [sessionId, v.string({ max: 65536 })], (ctx, id, data) => deps.sshInstalls().write(ctx.clientId, id, data))
   ipc.on('servers-ssh-install-resize', [sessionId, v.number({ int: true, min: 1, max: 1000 }), v.number({ int: true, min: 1, max: 1000 })], (ctx, id, cols, rows) => deps.sshInstalls().resize(ctx.clientId, id, cols, rows))
   ipc.handle('servers-ssh-install-stop', [sessionId], (ctx, id) => deps.sshInstalls().stop(ctx.clientId, id))
+}
+
+/** Move to a DevTool server (plan step 11): the part main runs. */
+export interface ProjectMoveControl {
+  /** What the SSH project's machine says about itself and its DevTool server. */
+  probe(projectId: string): Promise<SshHostProbeResult>
+  move(projectId: string, serverId: string): Promise<ProjectMoveResult>
+}
+
+/**
+ * Desktop-only, like the rest of `servers-*`: an SSH project and its ssh live on
+ * this computer. Failures reject with a message meant for the user.
+ */
+export function registerProjectMoveHandlers(ipc: IpcRegistrar, deps: { moves: () => ProjectMoveControl }): void {
+  ipc.handle('servers-ssh-probe', [safeId], (_event, projectId) => deps.moves().probe(projectId))
+  ipc.handle('servers-move-project', [safeId, serverId], (_event, projectId, id) => deps.moves().move(projectId, id))
 }

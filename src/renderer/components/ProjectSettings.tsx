@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { featureAvailable } from '../../shared/project-features'
+import { canMoveToServer } from '../../shared/project-move'
 import type { Project, AiTabType } from '../../shared/types'
 import {
   condaEnvFromSelection,
@@ -35,9 +36,11 @@ interface Props {
     hideFromMobile?: true
   }) => void
   onClose: () => void
+  /** An SSH project: Move to a DevTool server… */
+  onMoveToServer?: () => void
 }
 
-export default function ProjectSettings({ project, onSave, onClose }: Props): React.ReactElement {
+export default function ProjectSettings({ project, onSave, onClose, onMoveToServer }: Props): React.ReactElement {
   const { effectiveTheme, tags, addTag } = useApp()
   const [args, setArgs] = useState<Partial<Record<AiTabType, string>>>(
     project.aiToolArgs ?? {}
@@ -198,6 +201,15 @@ export default function ProjectSettings({ project, onSave, onClose }: Props): Re
             </div>
           )}
           <HelperText>Update this when the project folder is moved.</HelperText>
+        </SetBlock>
+      )}
+
+      {onMoveToServer && canMoveToServer(project) && (
+        <SetBlock label="DevTool server">
+          <div className="flex items-center justify-between gap-3">
+            <HelperText>Run this project on a DevTool server on {project.ssh!.host}. Its terminals and agents keep running while this computer sleeps.</HelperText>
+            <LinkBtn onClick={onMoveToServer}>Move to a DevTool server…</LinkBtn>
+          </div>
         </SetBlock>
       )}
 

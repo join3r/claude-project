@@ -124,6 +124,33 @@ describe('Sidebar context menu', () => {
     })
   })
 
+  it('offers Move to a DevTool server on SSH projects only, and opens its dialog', async () => {
+    const server = 'a'.repeat(32)
+    const ssh = { ...fixtureProject({ id: 'p-ssh', name: 'Remote Repo', directory: '' }), ssh: { host: 'box', port: 22, username: 'me', remoteDir: '/home/me/repo' } }
+    const onServer = fixtureProject({ id: 'p-srv', name: 'Server Repo', directory: '/srv/repo' })
+    ;(window as any).api.loadProjects = vi.fn().mockResolvedValue({
+      local: { revision: 0, data: { projects: [...buildProjects(), ssh], tags: [], projectOrder: ['p1', 'p-ssh', 'p-srv'], pinnedItems: [] } },
+      [server]: { revision: 1, data: { projects: [onServer], tags: [], projectOrder: [], pinnedItems: [] } }
+    })
+    renderSidebar()
+    await screen.findByText('Remote Repo')
+    await screen.findByText('Server Repo')
+    const menuFor = async (projectId: string) => {
+      act(() => { window.dispatchEvent(new MouseEvent('mousedown')) })
+      fireEvent.contextMenu(document.querySelector(`[data-drag-type="project"][data-drag-id="${projectId}"]`)!)
+      await screen.findByRole('button', { name: 'Rename' })
+      return screen.queryByRole('button', { name: 'Move to a DevTool server…' })
+    }
+    expect(await menuFor('p1')).toBeNull()
+    expect(await menuFor('p-srv')).toBeNull()
+    const move = await menuFor('p-ssh')
+    expect(move).toBeTruthy()
+    fireEvent.click(move!)
+    expect(await screen.findByText('Move Remote Repo to a DevTool server')).toBeTruthy()
+    expect(window.api.serversSshProbe).toHaveBeenCalledWith('p-ssh')
+    expect(screen.getByTestId('move-summary').textContent).toContain('The SSH project goes away.')
+  })
+
   it('closes an idle task without asking', async () => {
     const confirm = vi.fn(() => false)
     vi.stubGlobal('confirm', confirm)
