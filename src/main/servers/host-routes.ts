@@ -193,6 +193,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-update-from-stream': project0,
   'task-stream-ahead': project0,
   'task-landing-preview': project0,
+  // Project Home's queue (ipc/prompt-queue.ts)
+  'prompt-queue-run': project0,
   'task-worktree-close': project0,
 
   // adding a server project (ipc/host-fs.ts): the first argument names the host

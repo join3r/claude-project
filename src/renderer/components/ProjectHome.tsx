@@ -13,6 +13,7 @@ import { projectTasks, streamDirectory } from '../../shared/streams'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { paletteEvents } from '../palette/paletteEvents'
 import { CommitHeatmap } from './CommitHeatmap'
+import { PromptQueue } from './PromptQueue'
 import { CommitSparkline } from './CommitSparkline'
 import { formatRelativeTime } from './projectStats'
 import { taskStatusChip, type TaskChipTone } from './taskHeaderState'
@@ -242,6 +243,8 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
             New task <span className="text-xs opacity-70">{formatShortcutForApp('CmdOrCtrl+N')}</span>
           </button>
         </div>
+
+        {!isShellCommandProject(project) && <PromptQueue project={project} />}
 
         <GrpHead>Streams</GrpHead>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">

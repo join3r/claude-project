@@ -26,6 +26,7 @@ import {
   togglePinnedItemInData
 } from './projectsData'
 import { removeProjectView } from './viewState'
+import { applyPromptQueueOp, type PromptQueueOp } from '../../../shared/prompt-queue'
 
 export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral' | 'hideFromMobile'>>
 
@@ -48,6 +49,8 @@ export interface ProjectsActions {
   removeProject: (id: string) => Promise<void>
   renameProject: (id: string, name: string) => void
   updateProject: (id: string, updates: ProjectUpdate) => void
+  /** Project Home's queue: add, edit, remove or reorder a prompt, or switch auto-run. */
+  updatePromptQueue: (projectId: string, op: PromptQueueOp) => void
   reorderProjects: (fromIndex: number, toIndex: number) => void
   /** Returns the id of the tag named `name`, minting a pending one when it is new ('' for a blank name). */
   addTag: (name: string) => string
@@ -195,6 +198,10 @@ export function useProjects(
     mutateProjects(prev => mapProject(includePendingTags(prev, updates.tagIds), id, project => ({ ...project, ...updates })))
   }, [includePendingTags, mutateProjects])
 
+  const updatePromptQueue = useCallback((projectId: string, op: PromptQueueOp) => {
+    mutateProjects(prev => mapProject(prev, projectId, project => applyPromptQueueOp(project, op)))
+  }, [mutateProjects])
+
   const addTag = useCallback((name: string): string => {
     const trimmed = name.trim()
     if (!trimmed) return ''
@@ -239,6 +246,7 @@ export function useProjects(
     removeProject,
     renameProject,
     updateProject,
+    updatePromptQueue,
     reorderProjects,
     addTag,
     renameTag,

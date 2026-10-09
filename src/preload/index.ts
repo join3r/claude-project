@@ -44,6 +44,7 @@ import type { ProjectsSources, ProjectsUpdate, SourceSaveResult } from '../share
 import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shared/host-fs'
 import type { AgentClisReport } from '../shared/agent-clis'
 import type { AiStatusEvent } from '../shared/ai-status'
+import type { PromptQueueRunResult } from '../shared/prompt-queue'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
@@ -474,6 +475,10 @@ const api = {
 
   // Landing a task's worktree into its stream (main's TaskLandingManager). A stop is also on `Task.landing`.
   /** Close (default): land, stop the task's tabs, remove the worktree and branch, and archive the task (main does). `keepWorktree`: the Land action. */
+  /** Project Home's queue: start the queued prompt `itemId` as a new Claude chat task (main's PromptQueueRunner). */
+  promptQueueRun: (projectId: string, itemId: string): Promise<PromptQueueRunResult> =>
+    ipcRenderer.invoke('prompt-queue-run', projectId, itemId),
+
   taskLand: (projectId: string, taskId: string, options?: { keepWorktree?: boolean }): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-land', projectId, taskId, options),
   taskLandingRetry: (projectId: string, taskId: string): Promise<TaskLandingResult> =>

@@ -62,7 +62,10 @@ import type { CondaEnvInfo } from '../../shared/conda'
 import { registerHostMobileHandlers, registerMobileHandlers } from '../ipc/mobile'
 import { registerTaskWorktreeHandlers } from '../ipc/task-worktrees'
 import { registerTaskLandingHandlers } from '../ipc/task-landing'
-import { findTaskInProject, removeTaskFromProject } from '../../shared/streams'
+import { registerPromptQueueHandlers } from '../ipc/prompt-queue'
+import { PromptQueueRunner } from '../prompt-queue-runner'
+import { featureUnavailableReason } from '../../shared/project-features'
+import { findTaskInProject, removeTaskFromProject, taskTabs } from '../../shared/streams'
 import { chatTabConfig } from '../../shared/chat-tab-config'
 import { MobileService } from '../mobile/mobile-service'
 import { PairingsStore } from '../mobile/pairings-store'
@@ -216,6 +219,7 @@ export class HostServices {
   private readonly taskWorktrees: TaskWorktreeManager
   /** Tasks' worktrees landing back into their streams. */
   private readonly taskLanding: TaskLandingManager
+  private readonly promptQueue: PromptQueueRunner
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private readonly env: HostEnv
@@ -309,6 +313,39 @@ export class HostServices {
       onState: (taskId, landing) => this.clients.broadcast('task-landing-state', taskId, landing),
       log: (message) => this.logDebug(message)
     })
+    this.promptQueue = new PromptQueueRunner({
+      peek: () => this.projectsStore.peek(),
+      commit: (data) => { this.commitProjects(data) },
+      statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+      subscribe: (listener) => this.activityRegistry.subscribe(listener),
+      blocker: (project) => {
+        if (isShellCommandProject(project)) return 'A shell-command project runs one command, not Claude.'
+        // A server has no Claude switch: its desktops' settings are theirs.
+        if (!this.isServer && !this.config.enableClaude) return 'Claude is turned off in Settings.'
+        return featureUnavailableReason(project, 'chat')
+      },
+      ensureWorktree: async (projectId, taskId) => {
+        const result = await this.taskWorktrees.ensureTaskWorktree(projectId, taskId)
+        return result.status === 'failed' ? { ok: false, error: result.error } : { ok: true }
+      },
+      sendFirstPrompt: async (projectId, taskId, tabId, prompt) => {
+        const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+        const task = findTaskInProject(project, taskId)
+        const tab = task ? taskTabs(task).find(t => t.id === tabId) : undefined
+        if (!project || !task || !tab) throw new Error('The task is gone')
+        // The permission mode the New task composer last used, as a window's first prompt carries it.
+        const mode = this.config.promptBoxMode
+        if (mode && tab.sessionId) {
+          if (!this.chatManager.snapshot(tab.id)) {
+            const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
+            stop()
+          }
+          await this.chatManager.setPermissionMode(tab.id, mode)
+        }
+        await this.sendToAgentTab(project, task, tab, prompt)
+      },
+      log: (message) => this.logDebug(message)
+    })
     this.forgetArchivesOfVanishedProjects()
     this.config = this.storage.loadConfig()
     setPortableNodeDir(this.config.portableNodeDir)
@@ -387,6 +424,7 @@ export class HostServices {
     this.mobileService = this.createMobileService()
     this.registerEventForwarders()
     void this.taskLanding.reconcile()
+    this.promptQueue.start()
     this.mobileService.start()
   }
 
@@ -785,6 +823,7 @@ export class HostServices {
 
   async shutdown(): Promise<void> {
     this.mobileService?.stop()
+    this.promptQueue.dispose()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
@@ -995,6 +1034,7 @@ export class HostServices {
     registerHostMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
     registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
+    registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
     registerHostFsHandlers(ipc, {
       send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       env: () => getShellEnv()

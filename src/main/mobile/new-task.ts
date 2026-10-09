@@ -45,6 +45,21 @@ export function addTaskWithChat(
   if (streamId !== undefined && !project.streams.some((stream) => stream.id === streamId)) {
     return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
   }
+  return { ok: true, ...addChatTaskToProject(data, project, prompt, streamId, ids, now) }
+}
+
+/**
+ * The task itself, in `project` as it is in `data`: the phone's `task.new` and
+ * the Project Home queue (`main/prompt-queue-runner.ts`) both start one this way.
+ */
+export function addChatTaskToProject(
+  data: ProjectsData,
+  project: Project,
+  prompt: string,
+  streamId?: string,
+  ids: () => string = randomUUID,
+  now: number = Date.now()
+): { data: ProjectsData; taskId: string; tabId: string } {
   const tab: Tab = { id: ids(), type: 'claude-chat', title: CLAUDE_CHAT_LABEL, sessionId: ids() }
   const mainTabId = resolveMainTabId([tab])
   const task: Task = {
@@ -68,5 +83,5 @@ export function addTaskWithChat(
       p !== project ? p : { ...withTask, lifetimeStats: { ...stats, tasksCreated: stats.tasksCreated + 1 } }
     )
   }
-  return { ok: true, data: next, taskId: task.id, tabId: tab.id }
+  return { data: next, taskId: task.id, tabId: tab.id }
 }

@@ -418,6 +418,20 @@ export interface Project {
   ephemeral?: true
   /** Left out of the inbox sent to paired phones — filtered before encryption. */
   hideFromMobile?: true
+  /** Prompts planned on Project Home, first to run first (`shared/prompt-queue.ts`). */
+  promptQueue?: QueuedPrompt[]
+  /** When the task the queue started last finishes, the next prompt starts on its own. */
+  promptQueueAutoRun?: true
+  /** The task the queue started last, while main waits for it to finish. */
+  promptQueueWatch?: { taskId: string; tabId: string }
+}
+
+/** A prompt waiting on Project Home to become a task. */
+export interface QueuedPrompt {
+  id: string
+  text: string
+  /** The stream its task goes to; absent (or since closed) means `main`. */
+  streamId?: string
 }
 
 /** An SSH project: DevTool reaches its directory over SSH. */
