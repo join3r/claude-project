@@ -4,13 +4,14 @@ import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import type { SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import { composerCommands, type ChatColdCache, type ChatImage, type ChatLoginMethod, type ChatPromptResponse } from '../../../shared/claude-chat'
+import { chatArtifacts, composerCommands, type ChatColdCache, type ChatImage, type ChatLoginMethod, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
 import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState } from './chatStore'
 import Timeline, { type TimelineFocus } from './Timeline'
 import TaskIndicator from './TaskIndicator'
+import ArtifactIndicator from './ArtifactIndicator'
 import PromptCard from './PromptCards'
 import SideQuestion, { type SideQuestionState } from './SideQuestion'
 import ColdCacheNotice from './ColdCacheNotice'
@@ -317,7 +318,12 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   const [dismissedCache, setDismissedCache] = useState<ChatColdCache | null>(null)
   const coldCache = state.coldCache && state.coldCache !== dismissedCache ? state.coldCache : null
 
-  const hasTasks = Object.keys(tasks).length > 0
+  const artifacts = useMemo(() => chatArtifacts(state.items), [state.items])
+  const openExternal = useCallback((url: string) => {
+    void window.api.openExternal(url).catch(reportError)
+  }, [reportError])
+
+  const hasPills = Object.keys(tasks).length > 0 || artifacts.length > 0
   const empty = state.items.length === 0 && !state.busy
   const starting = state.process === 'starting' && state.items.length === 0
 
@@ -330,12 +336,13 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       onContextMenu={openContextMenu}
     >
       <div className="flex-1 min-h-0 relative">
-        <div className="absolute top-2 right-3 z-(--z-sticky)">
+        <div className="absolute top-2 right-3 z-(--z-sticky) flex items-start gap-1.5">
+          <ArtifactIndicator artifacts={artifacts} onOpen={openLink} onOpenExternal={openExternal} />
           <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
         </div>
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto relative">
-          {/* Room for the task pill so it never covers the first message. */}
-          <div className={`max-w-[860px] mx-auto px-5 pb-3 ${hasTasks ? 'pt-11' : 'pt-4'}`}>
+          {/* Room for the pills so they never cover the first message. */}
+          <div className={`max-w-[860px] mx-auto px-5 pb-3 ${hasPills ? 'pt-11' : 'pt-4'}`}>
             {empty ? (
               <div className="pt-[18vh] text-center select-none">
                 <div className="text-2xl text-accent mb-2">&#10022;</div>

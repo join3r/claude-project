@@ -85,7 +85,7 @@ function OutcomeIcon({ status }: { status: ChatTask['status'] }): React.ReactEle
   }
 }
 
-function ActionButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }): React.ReactElement {
+export function ActionButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }): React.ReactElement {
   return (
     <button
       type="button"
@@ -205,6 +205,30 @@ function TaskRow({ task, now, onStop, onBackground, onJump, canJump }: { task: C
   )
 }
 
+/** Closes a pill's list on a click outside it, or on Escape. */
+export function usePillDismiss(open: boolean, setOpen: (open: boolean) => void, rootRef: React.RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      // Escape here closes the list; it must not also stop the turn.
+      e.stopPropagation()
+      setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [open, setOpen, rootRef])
+}
+
+export const pillCls = 'h-6 px-2.5 inline-flex items-center gap-1.5 rounded-full border-[0.5px] border-border bg-surface-2 text-xs text-text-muted shadow-pop cursor-pointer hover:text-text transition-colors duration-(--motion-fast)'
+
 /**
  * The pill in the chat pane's top-right corner: what Claude has running beside
  * the turn (subagents, shells, workflows), and for a minute what just finished.
@@ -229,24 +253,7 @@ export default function TaskIndicator({ tasks, onStop, onBackground, onJump, can
     if (shown.length === 0) setOpen(false)
   }, [shown.length])
 
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      // Escape here closes the list; it must not also stop the turn.
-      e.stopPropagation()
-      setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey, true)
-    }
-  }, [open])
+  usePillDismiss(open, setOpen, rootRef)
 
   if (shown.length === 0) return null
   const running = shown.filter((task) => task.status === 'running')
@@ -262,7 +269,7 @@ export default function TaskIndicator({ tasks, onStop, onBackground, onJump, can
         aria-label={`${running.length > 0 ? 'Running' : 'Finished'}: ${label}`}
         title="Tasks Claude is running"
         onClick={() => setOpen(!open)}
-        className="h-6 px-2.5 inline-flex items-center gap-1.5 rounded-full border-[0.5px] border-border bg-surface-2 text-xs text-text-muted shadow-pop cursor-pointer hover:text-text transition-colors duration-(--motion-fast)"
+        className={pillCls}
       >
         {running.length > 0
           ? <RunningDot />
