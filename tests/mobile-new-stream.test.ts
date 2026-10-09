@@ -48,6 +48,7 @@ describe('createStream (SPEC.md §8.12)', () => {
       id: 's-new',
       name: '0.6.0',
       workspace: { worktreePath: '/src/api/.worktrees/release-0.6', branchName: 'release-0.6', baseBranch: 'dev', relativeProjectPath: '' },
+      taskWorktrees: true,
       tasks: []
     })
     // The dialog doesn't make the new stream the current one.

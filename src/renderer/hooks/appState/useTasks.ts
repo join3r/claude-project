@@ -3,7 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { isEphemeralProject } from '../../../shared/types'
 import type { Project, Stream, Tab, Task, WorkspaceConfig } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
-import { findStreamOfTask, findTaskInProject, planTaskMove, projectTasks, streamDirectory, taskTabIds, taskTabs } from '../../../shared/streams'
+import { findTaskInProject, planTaskMove, projectTasks, streamDirectory, taskDirectory, taskTabIds, taskTabs } from '../../../shared/streams'
 import {
   archiveStreamInData,
   archiveTasksInData,
@@ -183,7 +183,7 @@ export function useTasks(
     let cwds: { tabId: string; cwd: string | undefined }[] = []
     if (options.restart) {
       if (await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
-      const fromDir = streamDirectory(project, findStreamOfTask(project, taskId))
+      const fromDir = taskDirectory(project, task)
       const toDir = streamDirectory(project, to)
       const plan = planTaskMove(task, fromDir, toDir)
       // Claude and Pi keep sessions per directory: copy them over first, so the

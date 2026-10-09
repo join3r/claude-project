@@ -174,6 +174,25 @@ describe('reopening', () => {
     expect(folder.workspace).toBeUndefined()
     expect(folder.name).toBe('w')
   })
+
+  it('a stream archived before task worktrees comes back with its tasks still sharing its worktree', () => {
+    const before = data()
+    const streamEntry = archivedStreamEntry(before.projects[0], 'stream-w', 1)!
+    expect(streamEntry.stream.taskWorktrees).toBeUndefined()
+    const archived = archiveStreamInData(before, 'p', 'stream-w')
+    const back = reopenStreamInData(archived, 'p', streamEntry, WORKTREE).projects[0].streams[1]
+    expect(back.taskWorktrees).toBe(true)
+    expect(back.tasks.map(t => t.sharesStreamWorktree)).toEqual([true])
+    // A stream archived since keeps its tasks as they were.
+    const marked = { ...streamEntry, stream: { ...streamEntry.stream, taskWorktrees: true as const } }
+    expect(reopenStreamInData(archived, 'p', marked, WORKTREE).projects[0].streams[1].tasks[0]).not.toHaveProperty('sharesStreamWorktree')
+  })
+
+  it('a task with a worktree of its own is archived with that directory', () => {
+    const own: WorkspaceConfig = { worktreePath: '/tmp/p/.worktrees/rel--fix', branchName: 'rel--fix', baseBranch: 'rel', relativeProjectPath: 'app' }
+    const project = fixtureProject({ id: 'p', directory: '/tmp/p/app', tasks: [{ id: 'w', workspace: WORKTREE, ownWorkspace: own }] })
+    expect(archivedTaskEntry(project, 'w', 1)!.dir).toBe('/tmp/p/.worktrees/rel--fix/app')
+  })
 })
 
 describe('Done counts', () => {

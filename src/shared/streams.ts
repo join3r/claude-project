@@ -32,9 +32,17 @@ export function findMainStream(project: Project): Stream | undefined {
   return (project.streams ?? []).find(stream => stream.isMain)
 }
 
-/** The worktree a task works in: its stream's. */
+/**
+ * The worktree a task works in: its own, else its stream's (a task sharing the
+ * stream's worktree, or one whose own is not made yet).
+ */
 export function taskWorkspace(project: Project | undefined | null, taskId: string | null | undefined): WorkspaceConfig | undefined {
-  return findStreamOfTask(project, taskId)?.workspace
+  if (!project || !taskId) return undefined
+  for (const stream of project.streams ?? []) {
+    const task = stream.tasks.find(candidate => candidate.id === taskId)
+    if (task) return task.workspace ?? stream.workspace
+  }
+  return undefined
 }
 
 /**
@@ -44,6 +52,30 @@ export function taskWorkspace(project: Project | undefined | null, taskId: strin
 export function streamDirectory(project: Project, stream: Stream | undefined): string {
   if (stream?.workspace) return joinWorkspaceDir(stream.workspace.worktreePath, stream.workspace.relativeProjectPath)
   return project.ssh ? project.ssh.remoteDir : project.directory
+}
+
+/**
+ * The directory a task's tabs run in: its own worktree (plus the project's place
+ * inside the repository), else its stream's directory. A task not in `project`
+ * (an archived one) gets the project's own directory.
+ */
+export function taskDirectory(project: Project, task: Task): string {
+  if (task.workspace) return joinWorkspaceDir(task.workspace.worktreePath, task.workspace.relativeProjectPath)
+  return streamDirectory(project, findStreamOfTask(project, task.id))
+}
+
+/**
+ * Whether `task` is still to get a worktree of its own before its first tab
+ * spawns: its stream is a migrated worktree stream (`taskWorktrees`), the project
+ * is local (SSH projects keep sharing the stream's worktree), and the task has no
+ * worktree yet and does not share the stream's.
+ */
+export function needsTaskWorktree(project: Project, stream: Stream, task: Task): boolean {
+  return !!stream.workspace
+    && !!stream.taskWorktrees
+    && !project.ssh
+    && !task.workspace
+    && !task.sharesStreamWorktree
 }
 
 /** `fn` applied to every task; untouched streams and projects keep their identity. */
@@ -112,7 +144,7 @@ export function addTaskToStream(project: Project, streamId: string | null, task:
  * or the project folder when `workspace` is absent.
  */
 export function makeStreamWithId(id: string, name: string, workspace?: WorkspaceConfig): Stream {
-  return { id, name, ...(workspace ? { workspace } : {}), tasks: [] }
+  return { id, name, ...(workspace ? { workspace, taskWorktrees: true as const } : {}), tasks: [] }
 }
 
 /** Add `stream` at the end of the project's list. One already there is left alone. */

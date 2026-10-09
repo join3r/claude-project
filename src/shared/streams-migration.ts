@@ -22,6 +22,10 @@
  *
  * The Home task goes from new-shape data too (`dropHomeTasks`): builds between the
  * streams migration and the Home page kept it as a `system: 'home'` task in `main`.
+ *
+ * Task worktrees (docs/plans/2026-10-09-task-worktrees.md) add one more pass,
+ * `adoptTaskWorktrees`: the tasks of a worktree stream from before them keep
+ * working in the stream's worktree.
  */
 import { createMainStream, isAgentTabType, mainStreamId } from './types'
 import type {
@@ -266,6 +270,43 @@ export function dropHomeTasks(project: Project): Project {
 }
 
 /**
+ * A worktree stream from before task worktrees, in their terms: every task it
+ * holds is stamped `sharesStreamWorktree` (it keeps working in the stream's
+ * worktree and closes as before), and the stream is marked `taskWorktrees`, so
+ * tasks added from now on get worktrees of their own.
+ *
+ * The mark is what makes this run once per stream. Data is normalised on every
+ * load and save, so stamping "every task without a worktree" each time would also
+ * stamp a new task whose worktree is not made yet. New worktree streams are born
+ * marked (`makeStreamWithId`); an unmarked one can only come from an older build:
+ * `projects.json` or a backup written before, or an archived stream reopened
+ * (`reopenStreamInData` runs this too, so a window sees the stamps at once). A
+ * stream without a worktree needs neither. Returns `stream` itself when there is
+ * nothing to do.
+ */
+export function adoptTaskWorktreesInStream(stream: Stream): Stream {
+  if (!stream.workspace || stream.taskWorktrees) return stream
+  return {
+    ...stream,
+    taskWorktrees: true,
+    tasks: stream.tasks.map(task => (
+      task.workspace || task.sharesStreamWorktree ? task : { ...task, sharesStreamWorktree: true }
+    ))
+  }
+}
+
+/** {@link adoptTaskWorktreesInStream} over a project; `project` itself when no stream changes. */
+export function adoptTaskWorktrees(project: Project): Project {
+  let changed = false
+  const streams = project.streams.map(stream => {
+    const next = adoptTaskWorktreesInStream(stream)
+    if (next !== stream) changed = true
+    return next
+  })
+  return changed ? { ...project, streams } : project
+}
+
+/**
  * Every project in the new shape; `migrated` says whether any was legacy. `migratedStreamIds` is the set of streams cut
  * from legacy tasks — the only ids an old task pin can point at.
  */
@@ -277,7 +318,7 @@ export function migrateProjects(raw: unknown[]): { projects: Project[]; migrated
     if (!isRecord(value)) continue
     if (isLegacyProject(value)) {
       migrated = true
-      const project = migrateLegacyProject(value as unknown as LegacyProject)
+      const project = adoptTaskWorktrees(migrateLegacyProject(value as unknown as LegacyProject))
       for (const stream of project.streams) if (!stream.isMain) migratedStreamIds.add(`${project.id}:${stream.id}`)
       projects.push(project)
       continue
@@ -292,7 +333,7 @@ export function migrateProjects(raw: unknown[]): { projects: Project[]; migrated
     // Pane rows are rewritten in place by the UI; repair any that a crash, an
     // older build or a hand edit left inconsistent (empty panes, widths, active
     // and main tabs). Same objects back when nothing is wrong.
-    projects.push(mapProjectTasks(project, normalizeTaskLayout))
+    projects.push(adoptTaskWorktrees(mapProjectTasks(project, normalizeTaskLayout)))
   }
   return { projects, migrated, migratedStreamIds }
 }

@@ -23,7 +23,7 @@ export function paletteAliasesForEditor(name: string): string[] {
   return aliases
 }
 
-/** Folder the Files panel uses: worktree when the task has one, else the project directory. */
+/** Folder the Files panel uses: the task's worktree (its own, else its stream's), else the project directory. */
 export function localProjectFolder(project: Project | null | undefined, task: Task | null | undefined): string | null {
   if (!project) return null
   if (isRemoteProject(project) || isShellCommandProject(project)) return null

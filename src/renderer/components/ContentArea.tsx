@@ -18,10 +18,9 @@ import { focusedPaneOf, paneIndexOfElement, setFocusedPane, useFocusedPane } fro
 import { zoomTargetForTabType } from './zoom'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
 
-import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { paletteEvents } from '../palette/paletteEvents'
-import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from '../../shared/streams'
+import { findStreamOfTask, findTaskInProject, projectTasks, taskDirectory } from '../../shared/streams'
 import { showsTabBars } from '../../shared/panes'
 import type { Task } from '../../shared/types'
 
@@ -66,7 +65,6 @@ export default function ContentArea(): React.ReactElement {
     selectedProjectId,
     selectedTaskId,
     splitTabRight,
-    getProjectDir,
     setActiveTab,
     addTab,
     removeTab,
@@ -477,10 +475,7 @@ export default function ContentArea(): React.ReactElement {
       {projects.flatMap((project) =>
         projectTasks(project).map((task) => {
           const isVisible = project.id === selectedProjectId && task.id === selectedTaskId
-          const workspace = taskWorkspace(project, task.id)
-          const effectiveDir = workspace
-            ? joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
-            : getProjectDir(project)
+          const effectiveDir = taskDirectory(project, task)
           return (
             <div
               key={`${project.id}-${task.id}`}

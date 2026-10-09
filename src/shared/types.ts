@@ -99,8 +99,26 @@ export interface TaskPane {
 }
 
 /**
+ * Where a task's landing (squash, rebase onto its stream, fast-forward the stream)
+ * stopped. Persisted, so a conflict survives a restart; absent while nothing is
+ * landing or after a landing went through.
+ */
+export interface TaskLanding {
+  /**
+   * `landing`: running. `conflict`: the rebase stopped in the task's worktree.
+   * `blocked`: the stream's worktree refused the fast-forward (local changes).
+   * `fixing`: the task's agent was asked to resolve the conflict.
+   */
+  state: 'landing' | 'conflict' | 'blocked' | 'fixing'
+  /** The conflicted files (`conflict`), or the stream's files in the way (`blocked`). */
+  files?: string[]
+  message?: string
+}
+
+/**
  * One agent session (or one terminal) and the tabs that came with it. Lives in a
- * stream; the stream owns the worktree.
+ * stream. In a worktree stream it gets a worktree of its own, on a branch off the
+ * stream's, and closing it lands that branch back into the stream.
  */
 export interface Task {
   id: string
@@ -114,11 +132,25 @@ export interface Task {
   panes: TaskPane[]
   lastInteractedAt?: number
   inbox?: TaskInboxState
+  /**
+   * The task's own worktree (`baseBranch` = the stream's branch). Absent in the
+   * project folder, before its first tab spawns, and for a task that shares its
+   * stream's worktree.
+   */
+  workspace?: WorkspaceConfig
+  /**
+   * The task works in its stream's worktree, as every task did before task
+   * worktrees: no worktree of its own, nothing to land. Stamped once on the tasks
+   * of older worktree streams (`adoptTaskWorktrees` in streams-migration.ts).
+   */
+  sharesStreamWorktree?: true
+  landing?: TaskLanding
 }
 
 /**
- * A line of work: a release (`0.5.0`) or anything else (`bugfixes`). Owns the
- * worktree, or works in the project folder when `workspace` is absent.
+ * A line of work: a release (`0.5.0`) or anything else (`bugfixes`). Owns a
+ * worktree, which its tasks land into, or works in the project folder when
+ * `workspace` is absent.
  */
 export interface Stream {
   id: string
@@ -127,6 +159,14 @@ export interface Stream {
   /** The project's default project-folder stream; every project has exactly one. */
   isMain?: true
   workspace?: WorkspaceConfig
+  /**
+   * New tasks of this worktree stream get worktrees of their own. Set on every
+   * worktree stream made since task worktrees (`makeStreamWithId`); an older one
+   * gets it from migration, which first stamps its tasks `sharesStreamWorktree`.
+   * A worktree stream without it has not been migrated yet, so none of its tasks
+   * may get a worktree (`needsTaskWorktree`).
+   */
+  taskWorktrees?: true
   tasks: Task[]
   lastTaskId?: string
   /**

@@ -1,6 +1,5 @@
 import type { Project, Tab, Task } from '../shared/types'
-import { taskTabs, taskWorkspace } from '../shared/streams'
-import { joinWorkspaceDir } from '../shared/workspace-path'
+import { taskDirectory, taskTabs } from '../shared/streams'
 
 /** The per-tab teardown a window would normally do, as main has to do it. */
 export interface TaskTeardownTargets {
@@ -10,14 +9,6 @@ export interface TaskTeardownTargets {
   forgetActivity(tabId: string): void
   /** Release this tab's Claude hook injection in `dir` (local or remote). */
   releaseHooks(project: Project, dir: string, tabId: string): Promise<void> | void
-}
-
-/** Where a task's tools run: the worktree for a workspace task, else the project dir. */
-export function taskDir(project: Project, task: Task): string {
-  const base = project.ssh ? project.ssh.remoteDir : project.directory
-  const workspace = taskWorkspace(project, task.id)
-  if (!workspace) return base
-  return joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath)
 }
 
 /**
@@ -44,7 +35,7 @@ export async function tearDownTabs(
   tabs: Tab[],
   targets: TaskTeardownTargets
 ): Promise<string[]> {
-  const dir = taskDir(project, task)
+  const dir = taskDirectory(project, task)
 
   for (const tab of tabs) {
     targets.killPty(tab.id)

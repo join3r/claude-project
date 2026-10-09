@@ -23,6 +23,15 @@ describe('notebookAllowedCwdRoots', () => {
       })
     ).toEqual(['C:\\proj', 'C:\\proj\\.worktrees\\t1'])
   })
+
+  it('includes a task’s own worktree', () => {
+    expect(
+      notebookAllowedCwdRoots({
+        directory: '/proj',
+        streams: [{ workspace: { worktreePath: '/proj/.worktrees/s' }, tasks: [{ workspace: { worktreePath: '/proj/.worktrees/s--t' } }, {}] }]
+      })
+    ).toEqual(['/proj', '/proj/.worktrees/s', '/proj/.worktrees/s--t'])
+  })
 })
 
 describe('pathIsInsideRoot', () => {

@@ -16,7 +16,8 @@
  */
 import { createMainStream, isSpentEphemeralProject } from './types'
 import type { PinnedItem, Project, ProjectsData, Stream, Task, WorkspaceConfig } from './types'
-import { findMainStream, findStreamOfTask, findTaskInProject, removeTaskFromProject, streamDirectory } from './streams'
+import { findMainStream, findStreamOfTask, findTaskInProject, removeTaskFromProject, streamDirectory, taskDirectory } from './streams'
+import { adoptTaskWorktreesInStream } from './streams-migration'
 
 export const ARCHIVE_VERSION = 1
 
@@ -37,7 +38,10 @@ export interface ArchivedStream {
   stream: Stream
   /** Its own `Done` row: tasks it had archived before it closed. */
   doneTasks: ArchivedTask[]
-  /** The directory its tasks ran in. */
+  /**
+   * The directory its tasks ran in: the stream's. A task with a worktree of its
+   * own (`Task.workspace`) ran there instead.
+   */
   dir: string
   archivedAt: number
 }
@@ -165,7 +169,7 @@ export function archivedTaskEntry(project: Project, taskId: string, now: number)
   const stream = findStreamOfTask(project, taskId)
   const task = findTaskInProject(project, taskId)
   if (!stream || !task) return null
-  return { task, streamId: stream.id, streamName: stream.name, dir: streamDirectory(project, stream), archivedAt: now }
+  return { task, streamId: stream.id, streamName: stream.name, dir: taskDirectory(project, task), archivedAt: now }
 }
 
 /** The archive entry for a live stream (never `main`), or null. */
@@ -301,11 +305,12 @@ export function reopenStreamInData(
   const project = data.projects.find(candidate => candidate.id === projectId)
   if (!project || project.streams.some(stream => stream.id === entry.stream.id)) return data
   const { workspace: _old, archivedTaskCount: _count, ...rest } = entry.stream
-  const stream: Stream = {
+  // A stream archived before task worktrees keeps its tasks in its worktree.
+  const stream: Stream = adoptTaskWorktreesInStream({
     ...rest,
     ...(workspace ? { workspace } : {}),
     ...(entry.doneTasks.length > 0 ? { archivedTaskCount: entry.doneTasks.length } : {})
-  }
+  })
   const next = withCount({ ...project, streams: [...project.streams, stream] }, 'archivedStreamCount', decrement(project.archivedStreamCount))
   return { ...data, projects: data.projects.map(candidate => (candidate === project ? next : candidate)) }
 }

@@ -109,4 +109,16 @@ describe('domain schemas', () => {
     expect(() => save({ baseRevision: 1, data: { projects: [{ id: 'p', directory: '/x', tasks: [] }] } }, 's')).toThrow(/streams/)
     expect(() => save({ baseRevision: -1, data }, 's')).toThrow(/baseRevision/)
   })
+
+  it('keeps a task\'s own worktree and landing state, and checks the worktree path', () => {
+    const save = revisionSave(projectsData)
+    const workspace = { worktreePath: '/x/.worktrees/s--t', branchName: 's--t', baseBranch: 's', relativeProjectPath: '' }
+    const task = { id: 't', name: 't', panes: [], workspace, landing: { state: 'conflict', files: ['a.ts'] } }
+    const shared = { id: 'u', name: 'u', panes: [], sharesStreamWorktree: true }
+    const stream = { id: 's', name: 's', workspace: { ...workspace, worktreePath: '/x/.worktrees/s' }, taskWorktrees: true, tasks: [task, shared] }
+    const data = { projects: [{ id: 'p', directory: '/x', streams: [stream] }], tags: [], projectOrder: ['p'], pinnedItems: [] }
+    expect(save({ baseRevision: 1, data }, 's')).toEqual({ baseRevision: 1, data })
+    const bad = { ...data, projects: [{ id: 'p', directory: '/x', streams: [{ ...stream, tasks: [{ ...task, workspace: { worktreePath: 1 } }] }] }] }
+    expect(() => save({ baseRevision: 1, data: bad }, 's')).toThrow(/worktreePath/)
+  })
 })

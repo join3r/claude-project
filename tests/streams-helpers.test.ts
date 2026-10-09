@@ -10,7 +10,12 @@ import {
   currentStreamId,
   planTaskMove,
   streamDirectory,
-  tabSpawnDir
+  tabSpawnDir,
+  taskDirectory,
+  needsTaskWorktree,
+  makeStreamWithId,
+  findStreamOfTask,
+  findTaskInProject
 } from '../src/shared/streams'
 import { retargetPath } from '../src/shared/workspace-path'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
@@ -79,6 +84,55 @@ describe('streams', () => {
     expect(projectLastTaskId(p)).toBe('ws')
     expect(withLastTask(p, 'ws')).toBe(p)
     expect(projectLastTaskId(removeTaskFromProject(p, 'ws'))).toBeUndefined()
+  })
+})
+
+describe('task worktrees', () => {
+  const own = { worktreePath: '/repo/.worktrees/x--fix', branchName: 'x--fix', baseBranch: 'x', relativeProjectPath: '' }
+  const project = (taskExtra: Record<string, unknown> = {}) => {
+    const p = fixtureProject({
+      id: 'p',
+      directory: '/repo',
+      tasks: [{ id: 'plain' }, { id: 'ws', workspace, ...taskExtra }, { id: 'own', workspace, ownWorkspace: own }]
+    })
+    // Fixture worktree streams read as older ones; mark them the way new ones are born.
+    return { ...p, streams: p.streams.map(s => (s.workspace ? { ...s, taskWorktrees: true as const } : s)) }
+  }
+  const needs = (p: ReturnType<typeof project>, taskId: string) =>
+    needsTaskWorktree(p, findStreamOfTask(p, taskId)!, findTaskInProject(p, taskId)!)
+
+  it('finds a task’s own worktree before its stream’s', () => {
+    expect(taskWorkspace(project(), 'own')).toEqual(own)
+    expect(taskWorkspace(project(), 'ws')).toEqual(workspace)
+    expect(taskWorkspace(project(), 'plain')).toBeUndefined()
+    expect(taskWorkspace(project(), 'gone')).toBeUndefined()
+  })
+
+  it('names a task’s directory: its own worktree, else its stream’s directory', () => {
+    const p = { ...project(), directory: '/repo/app' }
+    const sub = { ...p, streams: p.streams.map(s => ({ ...s, tasks: s.tasks.map(t => (t.workspace ? { ...t, workspace: { ...t.workspace, relativeProjectPath: 'app' } } : t)) })) }
+    expect(taskDirectory(sub, findTaskInProject(sub, 'own')!)).toBe('/repo/.worktrees/x--fix/app')
+    expect(taskDirectory(p, findTaskInProject(p, 'own')!)).toBe('/repo/.worktrees/x--fix')
+    expect(taskDirectory(p, findTaskInProject(p, 'ws')!)).toBe('/repo/.worktrees/x')
+    expect(taskDirectory(p, findTaskInProject(p, 'plain')!)).toBe('/repo/app')
+    expect(taskDirectory(p, fixtureTask({ id: 'archived' }))).toBe('/repo/app')
+    const ssh = { ...p, ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } }
+    expect(taskDirectory(ssh, findTaskInProject(ssh, 'plain')!)).toBe('/srv')
+  })
+
+  it('needs a worktree only for a new task of a migrated worktree stream in a local project', () => {
+    expect(needs(project(), 'ws')).toBe(true)
+    expect(needs(project(), 'plain')).toBe(false)
+    expect(needs(project(), 'own')).toBe(false)
+    expect(needs(project({ sharesStreamWorktree: true }), 'ws')).toBe(false)
+    expect(needs({ ...project(), ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } }, 'ws')).toBe(false)
+    const unmarked = fixtureProject({ id: 'p', tasks: [{ id: 'ws', workspace }] })
+    expect(needsTaskWorktree(unmarked, unmarked.streams[1], unmarked.streams[1].tasks[0])).toBe(false)
+  })
+
+  it('marks a new worktree stream, and only a worktree stream', () => {
+    expect(makeStreamWithId('s', 'rel', workspace)).toEqual({ id: 's', name: 'rel', workspace, taskWorktrees: true, tasks: [] })
+    expect(makeStreamWithId('s', 'bugfixes')).toEqual({ id: 's', name: 'bugfixes', tasks: [] })
   })
 })
 

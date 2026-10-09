@@ -77,7 +77,12 @@ const workspaceConfig = v.object({
   relativeProjectPath: v.optional(v.string())
 }, 'passthrough')
 
-const taskShape = v.object({ id: v.string({ nonEmpty: true }) }, 'passthrough')
+const taskShape = v.object({
+  id: v.string({ nonEmpty: true }),
+  workspace: v.optional(workspaceConfig),
+  sharesStreamWorktree: v.optional(v.literal(true)),
+  landing: v.optional(v.plainObject())
+}, 'passthrough')
 
 /**
  * Structural check only: `Storage.normalizeProjectsData` does the semantic
@@ -93,6 +98,7 @@ const projectShape = v.object({
   streams: v.array(v.object({
     id: v.string({ nonEmpty: true }),
     workspace: v.optional(workspaceConfig),
+    taskWorktrees: v.optional(v.literal(true)),
     tasks: v.array(taskShape)
   }, 'passthrough'))
 }, 'passthrough')

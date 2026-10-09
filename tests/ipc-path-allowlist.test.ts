@@ -76,6 +76,22 @@ describe('allowedLocalRoots', () => {
     ])
     expect(roots).toEqual(['/work/app', '/work/.wt/feat', '/work/.wt/feat/apps/web'])
   })
+
+  it('lists a task’s own worktree next to its stream’s', () => {
+    const own = { worktreePath: '/work/.wt/feat--fix', branchName: 'feat--fix', baseBranch: 'feat', relativeProjectPath: 'apps/web' }
+    const roots = allowedLocalRoots([
+      fixtureProject({
+        id: 'local',
+        directory: '/work/apps/web',
+        tasks: [{
+          id: 't',
+          workspace: { worktreePath: '/work/.wt/feat', branchName: 'feat', baseBranch: 'main', relativeProjectPath: 'apps/web' },
+          ownWorkspace: own
+        }]
+      })
+    ])
+    expect(roots).toEqual(['/work/apps/web', '/work/.wt/feat', '/work/.wt/feat/apps/web', '/work/.wt/feat--fix', '/work/.wt/feat--fix/apps/web'])
+  })
 })
 
 describe('isPathInside', () => {

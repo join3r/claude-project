@@ -53,7 +53,7 @@ import {
   sidebarTaskState,
   type SidebarTaskState
 } from './sidebar/streamTree'
-import { currentStreamId, findStreamOfTask, findTaskInProject, projectTasks, runsInTaskDir, taskTabs } from '../../shared/streams'
+import { currentStreamId, findStreamOfTask, findTaskInProject, projectTasks, runsInTaskDir, streamDirectory, taskDirectory, taskTabs } from '../../shared/streams'
 
 /** A pin resolved against the data: its project, and the stream or task it names. */
 type ResolvedPin = { item: PinnedItem; key: string; project: Project; stream?: Stream; task?: Task }
@@ -477,8 +477,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const to = project?.streams.find(stream => stream.id === toStreamId)
     const task = findTaskInProject(project, taskId)
     if (!project || !from || !to || !task) return
-    const folder = (stream: Stream) => stream.workspace?.worktreePath ?? null
-    const restart = from !== to && folder(from) !== folder(to)
+    const restart = from !== to && taskDirectory(project, task) !== streamDirectory(project, to)
     if (restart) {
       const where = to.workspace ? `the ${to.workspace.branchName} worktree` : 'the project folder'
       const lines = [`Move "${task.name}" to ${to.name}?`, `It will work in ${where}.`]

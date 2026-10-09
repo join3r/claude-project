@@ -13,7 +13,8 @@ import { findStreamOfTask, findTaskInProject, projectTasks, taskWorkspace } from
 
 /**
  * The local folder a project, stream or task works in, for "Reveal in Finder":
- * the stream's worktree when it has one, else the project directory. Remote and
+ * the task's worktree (its own, else its stream's) or the stream's when it has
+ * one, else the project directory. Remote and
  * shell-command projects have none on this machine.
  */
 export function revealFolder(

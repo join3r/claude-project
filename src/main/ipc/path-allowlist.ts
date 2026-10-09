@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import type { Project } from '../../shared/types'
+import type { Project, WorkspaceConfig } from '../../shared/types'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { resolveSafeProjectPath } from '../project-fs-path'
 
@@ -9,8 +9,8 @@ import { resolveSafeProjectPath } from '../project-fs-path'
  * renderer. `resolveSafeProjectPath` only confines paths relative to that
  * directory, so on its own it confines to whatever root the caller picked.
  * This module pins the root itself: it must be (inside) a local project's
- * directory or one of its streams' workspace worktrees, compared after symlinks
- * are resolved.
+ * directory or one of its worktrees (a stream's, or a task's own), compared
+ * after symlinks are resolved.
  */
 
 export interface RealpathApi {
@@ -33,11 +33,14 @@ export function allowedLocalRoots(projects: readonly Project[]): string[] {
     // Remote projects' paths live on another machine; nothing local is reachable through them.
     if (project.ssh) continue
     if (typeof project.directory === 'string' && project.directory) roots.add(project.directory)
-    for (const stream of Array.isArray(project.streams) ? project.streams : []) {
-      const workspace = stream.workspace
-      if (!workspace || typeof workspace.worktreePath !== 'string' || !workspace.worktreePath) continue
+    const add = (workspace: WorkspaceConfig | undefined): void => {
+      if (!workspace || typeof workspace.worktreePath !== 'string' || !workspace.worktreePath) return
       roots.add(workspace.worktreePath)
       roots.add(joinWorkspaceDir(workspace.worktreePath, workspace.relativeProjectPath))
+    }
+    for (const stream of Array.isArray(project.streams) ? project.streams : []) {
+      add(stream.workspace)
+      for (const task of Array.isArray(stream.tasks) ? stream.tasks : []) add(task?.workspace)
     }
   }
   return [...roots]

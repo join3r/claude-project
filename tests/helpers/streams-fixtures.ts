@@ -15,14 +15,19 @@ export interface FixtureTask extends Omit<Partial<Task>, 'panes'> {
   tabs?: { left?: Tab[]; right?: Tab[] }
   /** Active tab per side. */
   activeTab?: { left?: string | null; right?: string | null }
-  /** Puts the task in a stream of its own with this worktree. */
+  /**
+   * Puts the task in a stream of its own with this worktree. The stream is not
+   * marked `taskWorktrees`: it reads as one from before task worktrees.
+   */
   workspace?: WorkspaceConfig
+  /** The task's own worktree (`Task.workspace`). */
+  ownWorkspace?: WorkspaceConfig
   panes?: TaskPane[]
 }
 
 /** A task in the new shape, from tabs given per side. */
 export function fixtureTask(spec: FixtureTask): Task {
-  const { tabs, activeTab, workspace: _workspace, panes: explicit, ...rest } = spec
+  const { tabs, activeTab, workspace: _workspace, ownWorkspace, panes: explicit, ...rest } = spec
   const left = tabs?.left ?? []
   const right = tabs?.right ?? []
   const panes: TaskPane[] = explicit ?? []
@@ -42,6 +47,7 @@ export function fixtureTask(spec: FixtureTask): Task {
     name: spec.id,
     ...rest,
     ...(mainTabId ? { mainTabId } : {}),
+    ...(ownWorkspace ? { workspace: ownWorkspace } : {}),
     panes
   }
 }

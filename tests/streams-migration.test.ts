@@ -3,8 +3,8 @@ import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { Storage } from '../src/main/storage'
 import { isAgentTabType, mainStreamId, type Project, type ProjectsData, type Tab } from '../src/shared/types'
-import { projectTasks, taskTabs } from '../src/shared/streams'
-import { isLegacyProject, migratedTaskId, type LegacyProject, type LegacyTask } from '../src/shared/streams-migration'
+import { addTaskToStream, makeStreamWithId, needsTaskWorktree, projectTasks, taskTabs } from '../src/shared/streams'
+import { adoptTaskWorktrees, isLegacyProject, migratedTaskId, type LegacyProject, type LegacyTask } from '../src/shared/streams-migration'
 
 /*
  * The one-time Project › Task › Tab → Project › Stream › Task migration, run where
@@ -401,5 +401,66 @@ describe('streams migration', () => {
       if (!Array.isArray(raw.projects)) continue
       expectLossless(raw)
     }
+  })
+})
+
+describe('task worktrees migration', () => {
+  const wt = { worktreePath: '/repo/.worktrees/rel', branchName: 'rel', baseBranch: 'main', relativeProjectPath: '' }
+  const own = { worktreePath: '/repo/.worktrees/rel--fix', branchName: 'rel--fix', baseBranch: 'rel', relativeProjectPath: '' }
+  const task = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, panes: [], lastInteractedAt: 1, ...extra })
+  const raw = () => ({
+    projects: [{
+      id: 'p',
+      name: 'p',
+      directory: '/repo',
+      streams: [
+        { id: 'main-p', name: 'main', isMain: true, tasks: [task('m')] },
+        { id: 's-wt', name: 'rel', workspace: wt, tasks: [task('a'), task('b'), task('c', { workspace: own })] },
+        { id: 's-folder', name: 'bugfixes', tasks: [task('f')] }
+      ]
+    }]
+  })
+
+  it('stamps every task of an older worktree stream once and marks the stream; other streams stay as they were', () => {
+    const p = project(migrate(raw()), 'p')
+    const [main, rel, folder] = p.streams
+    expect(rel.taskWorktrees).toBe(true)
+    expect(rel.tasks.map(t => t.sharesStreamWorktree)).toEqual([true, true, undefined])
+    expect(rel.tasks[2].workspace).toEqual(own)
+    expect(main).toEqual(raw().projects[0].streams[0])
+    expect(folder).toEqual(raw().projects[0].streams[2])
+    expect(rel.tasks.every(t => !needsTaskWorktree(p, rel, t))).toBe(true)
+  })
+
+  it('is idempotent: a migrated project comes back as the same object', () => {
+    const once = project(migrate(raw()), 'p')
+    expect(adoptTaskWorktrees(once)).toBe(once)
+    expect(project(migrate({ projects: [once] }), 'p')).toEqual(once)
+  })
+
+  it('stamps once: a task added after the migration is not stamped on the next save', () => {
+    const once = project(migrate(raw()), 'p')
+    const added = addTaskToStream(once, 's-wt', task('new'))
+    const again = project(migrate({ projects: [added] }), 'p')
+    const rel = again.streams[1]
+    const fresh = rel.tasks.find(t => t.id === 'new')!
+    expect(fresh).not.toHaveProperty('sharesStreamWorktree')
+    expect(needsTaskWorktree(again, rel, fresh)).toBe(true)
+  })
+
+  it('leaves a worktree stream made since task worktrees alone', () => {
+    const born = { ...makeStreamWithId('s-new', 'next', wt), tasks: [task('n')] }
+    expect(born.taskWorktrees).toBe(true)
+    const p = project(migrate({ projects: [{ id: 'p', name: 'p', directory: '/repo', streams: [born] }] }), 'p')
+    expect(p.streams.find(s => s.id === 's-new')!.tasks[0]).not.toHaveProperty('sharesStreamWorktree')
+  })
+
+  it('stamps the tasks of a legacy worktree task migrated into a stream, and those of an SSH project', () => {
+    const data = migrate(legacyData())
+    const ws = stream(data, 'p-app', 't-ws')
+    expect(ws.taskWorktrees).toBe(true)
+    expect(ws.tasks.every(t => t.sharesStreamWorktree)).toBe(true)
+    const ssh = migrate({ projects: [{ ...raw().projects[0], ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/srv' } }] })
+    expect(project(ssh, 'p').streams[1].tasks[0].sharesStreamWorktree).toBe(true)
   })
 })
