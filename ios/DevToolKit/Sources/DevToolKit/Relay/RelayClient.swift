@@ -152,6 +152,10 @@ public actor RelayClient {
     /// The pairing finished (accepted or not): later hellos don't carry the token.
     public func clearPairToken(_ id: UUID) {
         subscribers[id]?.pairToken = nil
+        // The pairing was just accepted, so the host has authorized us at the
+        // relay. The relay ignored this id in earlier watches (it wasn't paired
+        // yet); watch again so presence arrives without waiting for a reconnect.
+        sendWatch()
     }
 
     /// Ends a running reconnect backoff now (the app came to the foreground,
