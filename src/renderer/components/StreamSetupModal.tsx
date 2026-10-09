@@ -5,6 +5,8 @@ import { LinkBtn, Modal, PrimaryButton } from './ui'
 
 interface Props {
   projectId: string
+  /** The DevTool server the project is on: the setup runs, and is approved, there. */
+  serverId?: string
   streamId: string
   branch: string
   pending: PendingWorktreeSetup
@@ -16,7 +18,7 @@ interface Props {
  * Closing the dialog while they run leaves them running; a failure still
  * shows up.
  */
-export default function StreamSetupModal({ projectId, streamId, branch, pending: initial, onClose }: Props): React.ReactElement {
+export default function StreamSetupModal({ projectId, serverId, streamId, branch, pending: initial, onClose }: Props): React.ReactElement {
   const [pending, setPending] = useState(initial)
   const [running, setRunning] = useState(false)
 
@@ -49,7 +51,7 @@ export default function StreamSetupModal({ projectId, streamId, branch, pending:
       <div className="text-sm text-text-muted">
         The <span className="font-mono">{branch}</span> worktree is ready.
       </div>
-      <SetupCommands commands={pending.commands} />
+      <SetupCommands commands={pending.commands} serverId={serverId} />
     </Modal>
   )
 }

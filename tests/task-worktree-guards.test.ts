@@ -4,6 +4,7 @@ import { featureAvailable } from '../src/shared/project-features'
 import { canLandTask } from '../src/renderer/taskLanding'
 import { TaskLandingManager } from '../src/main/task-landing'
 import { TaskWorktreeManager, type TaskWorktreeGit } from '../src/main/task-worktree'
+import { isWindowClient } from '../src/main/ipc/task-worktrees'
 import type { GitRunner } from '../src/main/git-runner'
 import type { Project, ProjectsData, WorkspaceConfig } from '../src/shared/types'
 import { fixtureProject } from './helpers/streams-fixtures'
@@ -76,5 +77,15 @@ describe('task worktree guards', () => {
     expect(await worktrees.ensureTaskWorktree('p1', 'new')).toEqual({ status: 'not-needed' })
     expect(await worktrees.runStreamSetup('p1', overSsh.streams[1].id, { repoKey: '/r', hash: 'h', commands: [] }))
       .toEqual({ status: 'failed', error: 'No such stream worktree' })
+  })
+
+  it('takes setup approvals only from a window, here or through a server\'s link', () => {
+    expect(isWindowClient('win:1')).toBe(true)
+    expect(isWindowClient('link:AbC-d_9:win:12')).toBe(true)
+    expect(isWindowClient('main')).toBe(false)
+    expect(isWindowClient('link:AbC-d_9:main')).toBe(false)
+    expect(isWindowClient('phone:x')).toBe(false)
+    expect(isWindowClient('win:1:extra')).toBe(false)
+    expect(isWindowClient('link:a:b:win:1')).toBe(false)
   })
 })

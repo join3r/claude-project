@@ -215,6 +215,10 @@ describe.skipIf(process.platform === 'win32')('streams, task worktrees and landi
     const merged = await invoke('task-worktree-states') as Record<string, { phase: string; pending?: { commands: string[] } }>
     expect(merged['t-approve']).toMatchObject({ phase: 'needs-approval', pending: { commands: ['echo "$DEVTOOL_BRANCH" > setup-marker.txt'] } })
 
+    // Desktop main is not a window: the server won't take a yes from it.
+    await expect(desktop.hub.call(server.id, 'main', 'task-worktree-decide', ['t-approve', 'run'])).rejects.toThrow(/approved from a DevTool window/)
+    expect(fs.existsSync(path.join(worktree, 'setup-marker.txt'))).toBe(false)
+
     // The window's Run setup.
     const decided = await invoke('task-worktree-decide', 't-approve', 'run') as TaskWorktreeResult
     expect(decided.status).toBe('ready')
@@ -230,6 +234,7 @@ describe.skipIf(process.platform === 'win32')('streams, task worktrees and landi
     // The stream's own setup runs from the New stream dialog's answer, approved already.
     expect(await invoke('stream-worktree-setup-run', PROJECT_ID, STREAM_ID, made.pending)).toEqual({ status: 'ok' })
     expect(fs.readFileSync(path.join(streamWs.worktreePath, 'setup-marker.txt'), 'utf8')).toBe('rel\n')
+    await expect(desktop.hub.call(server.id, 'main', 'stream-worktree-setup-run', [PROJECT_ID, STREAM_ID, made.pending])).rejects.toThrow(/approved from a DevTool window/)
 
     // Nothing to land: closing just removes it (setup's marker is not the task's work).
     expect(await invoke('task-landing-preview', PROJECT_ID, 't-approve')).toEqual({ commits: 0, uncommitted: 0 })

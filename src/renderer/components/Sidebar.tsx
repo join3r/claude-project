@@ -1222,6 +1222,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         <StreamSetupModal
           key={streamSetup.streamId}
           {...streamSetup}
+          serverId={projectsById.get(streamSetup.projectId)?.host}
           onClose={() => setStreamSetup(null)}
         />
       )}
