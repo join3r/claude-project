@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
 import { NEW_TASK_NAME, isEphemeralProject, isRemoteProject, isShellCommandProject, pinnedItemKey } from '../../shared/types'
-import type { Task, Project, PinnedItem, Stream } from '../../shared/types'
+import type { Task, Project, PinnedItem, PendingWorktreeSetup, Stream } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
@@ -12,6 +12,7 @@ import ProjectSwitcher from './ProjectSwitcher'
 import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
 import NewStreamModal from './NewStreamModal'
+import StreamSetupModal from './StreamSetupModal'
 import { terminalTaskName, type NewTaskSubmission } from './newTask'
 import { setPendingCommand } from './terminalStartup'
 import { createTab } from './newTaskTabs'
@@ -53,7 +54,7 @@ import {
   sidebarTaskState,
   type SidebarTaskState
 } from './sidebar/streamTree'
-import { currentStreamId, findStreamOfTask, findTaskInProject, projectTasks, runsInTaskDir, streamDirectory, taskDirectory, taskTabs } from '../../shared/streams'
+import { currentStreamId, findStreamOfTask, findTaskInProject, needsTaskWorktree, projectTasks, runsInTaskDir, streamDirectory, taskDirectory, taskMoveBlocker, taskTabs } from '../../shared/streams'
 
 /** A pin resolved against the data: its project, and the stream or task it names. */
 type ResolvedPin = { item: PinnedItem; key: string; project: Project; stream?: Stream; task?: Task }
@@ -167,6 +168,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [newTaskWhere, setNewTaskWhere] = useState<{ projectId: string; streamId?: string } | null>(null)
   // The project the New stream dialog is open for.
   const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
+  /** A new stream whose worktree setup commands wait for approval. */
+  const [streamSetup, setStreamSetup] = useState<{ projectId: string; streamId: string; branch: string; pending: PendingWorktreeSetup } | null>(null)
   const worktreeChoice = useWorktreeChoice()
   const closeTaskFlow = useCloseTask()
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
@@ -358,9 +361,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     setNewStreamProjectId(projectId)
   }
 
-  const handleStreamCreated = (projectId: string, name: string, workspace?: Parameters<typeof addStream>[2]) => {
+  const handleStreamCreated = (projectId: string, name: string, workspace?: Parameters<typeof addStream>[2], setupPending?: PendingWorktreeSetup) => {
     const stream = addStream(projectId, name, workspace)
     setNewStreamProjectId(null)
+    if (workspace && setupPending) setStreamSetup({ projectId, streamId: stream.id, branch: workspace.branchName, pending: setupPending })
     setSidebarTab('projects')
     setProjectExpanded(projectId, true)
     setStreamExpanded(stream.id, true)
@@ -469,7 +473,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   /**
    * A task dropped into a place in the tree. Into a stream with another folder,
-   * it asks first: the task's agent and terminals start again over there.
+   * it asks first: the task's agent and terminals start again over there. A
+   * task with its own worktree stays in its stream (it says why).
    */
   const handleMoveTask = useCallback((projectId: string, taskId: string, toStreamId: string, toIndex: number) => {
     const project = projects.find(p => p.id === projectId)
@@ -477,9 +482,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const to = project?.streams.find(stream => stream.id === toStreamId)
     const task = findTaskInProject(project, taskId)
     if (!project || !from || !to || !task) return
+    const blocked = taskMoveBlocker(task, from, to)
+    if (blocked) {
+      window.alert(blocked)
+      return
+    }
     const restart = from !== to && taskDirectory(project, task) !== streamDirectory(project, to)
     if (restart) {
-      const where = to.workspace ? `the ${to.workspace.branchName} worktree` : 'the project folder'
+      const where = needsTaskWorktree(project, to, task)
+        ? `a worktree of its own, branched from ${to.workspace!.branchName}`
+        : to.workspace ? `the ${to.workspace.branchName} worktree` : 'the project folder'
       const lines = [`Move "${task.name}" to ${to.name}?`, `It will work in ${where}.`]
       if (taskTabs(task).some(runsInTaskDir)) lines.push('Its agent and terminals restart there.')
       if (!window.confirm(lines.join('\n\n'))) return
@@ -1190,11 +1202,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         return (
           <NewStreamModal
             project={project}
-            onCreate={(name, workspace) => handleStreamCreated(project.id, name, workspace)}
+            onCreate={(name, workspace, setupPending) => handleStreamCreated(project.id, name, workspace, setupPending)}
             onClose={() => setNewStreamProjectId(null)}
           />
         )
       })()}
+
+      {streamSetup && (
+        <StreamSetupModal
+          key={streamSetup.streamId}
+          {...streamSetup}
+          onClose={() => setStreamSetup(null)}
+        />
+      )}
 
       {worktreeChoice.dialog}
       {closeTaskFlow.dialog}

@@ -15,7 +15,9 @@ import {
   needsTaskWorktree,
   makeStreamWithId,
   findStreamOfTask,
-  findTaskInProject
+  findTaskInProject,
+  taskMoveBlocker,
+  waitsForTaskWorktree
 } from '../src/shared/streams'
 import { retargetPath } from '../src/shared/workspace-path'
 import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
@@ -133,6 +135,29 @@ describe('task worktrees', () => {
   it('marks a new worktree stream, and only a worktree stream', () => {
     expect(makeStreamWithId('s', 'rel', workspace)).toEqual({ id: 's', name: 'rel', workspace, taskWorktrees: true, tasks: [] })
     expect(makeStreamWithId('s', 'bugfixes')).toEqual({ id: 's', name: 'bugfixes', tasks: [] })
+  })
+
+  it('keeps a task with its own worktree in its stream, with a reason', () => {
+    const p = project()
+    const [main, ownStream, wsStream] = [p.streams[0], findStreamOfTask(p, 'own')!, findStreamOfTask(p, 'ws')!]
+    const own = findTaskInProject(p, 'own')!
+    expect(taskMoveBlocker(own, ownStream, main)).toContain('x--fix')
+    expect(taskMoveBlocker(own, ownStream, wsStream)).not.toBeNull()
+    // Reordering inside its stream is fine, and so is moving a task without one.
+    expect(taskMoveBlocker(own, ownStream, ownStream)).toBeNull()
+    expect(taskMoveBlocker(findTaskInProject(p, 'ws')!, wsStream, main)).toBeNull()
+    expect(taskMoveBlocker(findTaskInProject(p, 'plain')!, main, wsStream)).toBeNull()
+  })
+
+  it('makes the tabs that work in the task\'s folder wait for its worktree', () => {
+    const waits = (tab: Tab) => waitsForTaskWorktree(tab)
+    expect(waits({ id: 'a', type: 'claude-chat', title: 'Claude' })).toBe(true)
+    expect(waits({ id: 'b', type: 'terminal', title: 'Terminal' })).toBe(true)
+    expect(waits({ id: 'c', type: 'terminal', title: 'Terminal', cwd: '/elsewhere' })).toBe(true)
+    expect(waits({ id: 'd', type: 'editor', title: 'a.ts', filePath: 'a.ts' })).toBe(true)
+    expect(waits({ id: 'e', type: 'diff', title: 'a.ts', filePath: 'a.ts' })).toBe(true)
+    expect(waits({ id: 'f', type: 'browser', title: 'Web', url: 'https://example.com' })).toBe(false)
+    expect(waits({ id: 'g', type: 'note', title: 'Note', noteId: 'n' })).toBe(false)
   })
 })
 

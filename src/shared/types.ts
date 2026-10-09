@@ -220,6 +220,53 @@ export interface WorkspaceCreateResult {
   setupPending?: PendingWorktreeSetup
 }
 
+/**
+ * Where a task's own worktree is (main's `TaskWorktreeManager`), pushed to every
+ * window. No entry: nothing going on (made and set up, or not needed).
+ *  - `creating`: `git worktree add` plus links, copies and approved commands.
+ *  - `needs-approval`: made and recorded on the task; its setup commands wait
+ *    for a yes or a skip. The task's tabs wait too.
+ *  - `setup`: approved commands running.
+ *  - `failed`: no worktree (git refused); the tabs can't start. Retry asks again.
+ *  - `setup-failed`: made, but a setup step failed. The tabs start anyway; the
+ *    task shows the error until dismissed.
+ */
+export type TaskWorktreeState =
+  | { phase: 'creating'; branch?: string; log?: string }
+  | { phase: 'needs-approval'; branch: string; pending: PendingWorktreeSetup }
+  | { phase: 'setup'; branch: string; log?: string }
+  | { phase: 'failed'; error: string }
+  | { phase: 'setup-failed'; branch: string; error: string }
+
+/**
+ * What `ensureTaskWorktree` came to. `needs-approval` already has the worktree
+ * (recorded on the task); a caller that can't ask, the phone, starts without
+ * the commands and leaves the question to the desktop.
+ */
+export type TaskWorktreeResult =
+  | { status: 'ready'; workspace: WorkspaceConfig; setupError?: string }
+  | { status: 'needs-approval'; workspace: WorkspaceConfig; pending: PendingWorktreeSetup }
+  /** The task works in its stream's directory: `main`, a shared or SSH worktree. */
+  | { status: 'not-needed' }
+  | { status: 'failed'; error: string }
+
+/** Hints from the asking window, whose latest save may not have reached main yet. */
+export interface EnsureTaskWorktreeOptions {
+  /** The task's name as the asking window has it (a rename may not be saved yet). */
+  name?: string
+  /** The stream the window has the task in; main waits until its own copy agrees. */
+  streamId?: string
+}
+
+/** The answer to a {@link PendingWorktreeSetup}: run the commands (approving this content) or skip them this once. */
+export type WorktreeSetupDecision = 'run' | 'skip'
+
+/** What running a stream worktree's approved setup came to. */
+export type StreamSetupResult =
+  | { status: 'ok' }
+  | { status: 'failed'; error: string }
+  | { status: 'needs-approval'; pending: PendingWorktreeSetup }
+
 /** Bring back an archived stream's worktree from its branch (no new branch). */
 export interface WorkspaceRestoreRequest extends WorkspaceTarget {
   worktreePath: string

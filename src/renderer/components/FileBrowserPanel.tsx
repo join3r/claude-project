@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
-import { taskWorkspace } from '../../shared/streams'
+import { findStreamOfTask, needsTaskWorktree, taskWorkspace } from '../../shared/streams'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
 import FileTree, { type FileTreeHandle } from './FileTree'
@@ -14,6 +14,7 @@ import { useLinkToAgent } from '../agentLink/linkToAgent'
 import { createTab } from './newTaskTabs'
 import { isNotebookFile } from '../../shared/notebook'
 import { dirBasename } from '../../shared/paths'
+import { ensureTaskWorktree } from '../taskWorktrees'
 
 export default function FileBrowserPanel(): React.ReactElement | null {
   const {
@@ -102,12 +103,24 @@ export default function FileBrowserPanel(): React.ReactElement | null {
     [selectedProjectId, selectedTaskId, openOrFocusDiffTab, taskForTab]
   )
 
-  const handleRevealInTerminal = useCallback((relativeDir: string) => {
+  const handleRevealInTerminal = useCallback(async (relativeDir: string) => {
     if (!selectedProjectId) return
-    const cwd = joinWorkspaceDir(effectiveDir, relativeDir || undefined)
+    let dir = effectiveDir
+    // The tree shows the stream's worktree until the task has its own; a
+    // terminal pinned to a folder there would stay there, so make it first.
+    const stream = selectedProject && selectedTask ? findStreamOfTask(selectedProject, selectedTask.id) : undefined
+    if (selectedProject && selectedTask && stream && needsTaskWorktree(selectedProject, stream, selectedTask)) {
+      const result = await ensureTaskWorktree(selectedProject.id, selectedTask.id, { name: selectedTask.name, streamId: stream.id })
+      if (result.status === 'failed') {
+        window.alert(`Couldn't create the task's worktree:\n\n${result.error}`)
+        return
+      }
+      if (result.status !== 'not-needed') dir = joinWorkspaceDir(result.workspace.worktreePath, result.workspace.relativeProjectPath)
+    }
+    const cwd = joinWorkspaceDir(dir, relativeDir || undefined)
     const taskId = taskForTab(selectedProjectId, selectedTaskId, () => createTab('terminal', { cwd }), 'Terminal')
     if (taskId) addTab(selectedProjectId, taskId, focusedPane, 'terminal', { cwd })
-  }, [addTab, effectiveDir, selectedProjectId, selectedTaskId, taskForTab])
+  }, [addTab, effectiveDir, selectedProject, selectedProjectId, selectedTask, selectedTaskId, taskForTab])
 
   if (!fileBrowserOpen || !selectedProject) return null
 

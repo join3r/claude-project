@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import TabBar from './TabBar'
 import TerminalTab from './TerminalTab'
@@ -11,10 +11,12 @@ import NoteTab from './NoteTab'
 import { AI_TAB_TYPES } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
-import { tabSpawnDir } from '../../shared/streams'
+import { findStreamOfTask, needsTaskWorktree, tabSpawnDir, taskTabs, waitsForTaskWorktree } from '../../shared/streams'
 import { isStatusTab } from '../../shared/inbox-state'
 import ClaudeChatTab from './claude-chat/ClaudeChatTab'
 import TaskPromptBox from './TaskPromptBox'
+import TaskWorktreePanel from './TaskWorktreePanel'
+import { ensureTaskWorktree, useTaskSpawnHeld, useTaskWorktreeState } from '../taskWorktrees'
 import type { Tab, AiTabType, Project, Task } from '../../shared/types'
 import { paneIndexOfElement, setFocusedPane, useFocusedPane } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
@@ -27,13 +29,13 @@ interface Props {
   projectDir: string
 }
 
-/** Grid column of pane `index`: panes sit on odd columns, the dividers between them on even ones. */
 /** A tab body's React key: its id, plus the directory its process runs in, if any. */
 function bodyKey(tab: Tab, projectDir: string): string {
   const dir = tabSpawnDir(tab, projectDir)
   return dir === null ? tab.id : `${tab.id}@${dir}`
 }
 
+/** Grid column of pane `index`: panes sit on odd columns, the dividers between them on even ones. */
 function paneColumn(index: number): number {
   return index * 2 + 1
 }
@@ -56,6 +58,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
   const [tabDropTarget, setTabDropTarget] = useState<TabDropTarget | null>(null)
 
   const projectId = project.id
+  const worktree = useTaskWorktreeGate(project, task, visible)
   const showBars = showsTabBars(task)
   const bodyRow = showBars ? 2 : 1
   const widths = dragWidths && dragWidths.length === task.panes.length ? dragWidths : task.panes.map(pane => pane.width)
@@ -201,6 +204,34 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           data-tab-count={pane.tabs.length}
         />
       ))}
+      {worktree.waiting && (
+        // Over every pane: the task's tabs start once its worktree is there.
+        <div className="relative min-w-0 min-h-0 overflow-hidden z-(--z-sticky)" style={{ gridColumn: '1 / -1', gridRow: bodyRow }}>
+          <TaskWorktreePanel
+            state={worktree.state}
+            onDecide={(decision) => window.api.taskWorktreeDecide(task.id, decision)}
+            onRetry={worktree.retry}
+          />
+        </div>
+      )}
+      {worktree.state?.phase === 'setup-failed' && (
+        <div
+          role="alert"
+          className="absolute left-2 right-2 bottom-2 z-(--z-sticky) flex items-start gap-3 rounded-md border-[0.5px] border-border bg-surface-2 shadow-pop px-3 py-2 text-sm"
+        >
+          <div className="flex-1 min-w-0">
+            <div className="text-danger">The worktree setup failed. The task works in the worktree anyway.</div>
+            <pre className="m-0 mt-1 max-h-32 overflow-auto text-xs font-mono text-text-muted whitespace-pre-wrap break-words">{worktree.state.error}</pre>
+          </div>
+          <button
+            type="button"
+            className="bg-transparent border-0 p-0 text-sm text-accent cursor-pointer hover:underline shrink-0"
+            onClick={() => { void window.api.taskWorktreeDismiss(task.id) }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {bodies.map(({ tab, paneIndex, active }) => (
         <div
           // A session tab mounts again (and spawns in the new folder) when the
@@ -213,7 +244,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           data-task-id={task.id}
           data-pane-index={paneIndex}
         >
-          {renderTab(tab, visible && active)}
+          {worktree.waiting && waitsForTaskWorktree(tab) ? null : renderTab(tab, visible && active)}
         </div>
       ))}
       {dropOverlay && (
@@ -235,4 +266,41 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
       )}
     </div>
   )
+}
+
+/**
+ * A task in a worktree stream gets a worktree of its own just before its
+ * first tab spawns. Until then (and while its setup runs or awaits approval,
+ * or a move holds it back) the tabs that work in its folder wait. Asked for
+ * while the task is on screen, so restoring a session doesn't make a
+ * worktree for every task at once.
+ */
+function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
+  waiting: boolean
+  state: ReturnType<typeof useTaskWorktreeState>
+  retry: () => void
+} {
+  const stream = findStreamOfTask(project, task.id)
+  const possible = !!stream?.workspace && !!stream.taskWorktrees && !project.ssh && !task.sharesStreamWorktree
+  const state = useTaskWorktreeState(task.id, possible)
+  const held = useTaskSpawnHeld(task.id)
+  const needed = !!stream && needsTaskWorktree(project, stream, task)
+  const hasWaitingTabs = taskTabs(task).some(waitsForTaskWorktree)
+  const busy = state?.phase === 'creating' || state?.phase === 'needs-approval' || state?.phase === 'setup'
+  const waiting = possible && hasWaitingTabs && (needed || held || busy)
+
+  const projectId = project.id
+  const streamId = stream?.id
+  const ask = useCallback(() => {
+    // The name as this window has it: a prompt box renames the task as it adds the first tab.
+    void ensureTaskWorktree(projectId, task.id, { name: task.name, streamId })
+  }, [projectId, task.id, task.name, streamId])
+
+  useEffect(() => {
+    // An existing state is main at work, or a failure waiting for Retry.
+    if (!visible || !needed || !hasWaitingTabs || state) return
+    ask()
+  }, [visible, needed, hasWaitingTabs, state, ask])
+
+  return { waiting, state, retry: ask }
 }

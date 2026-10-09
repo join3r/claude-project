@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { Project, WorkspaceConfig } from '../../shared/types'
+import type { PendingWorktreeSetup, Project, WorkspaceConfig } from '../../shared/types'
 import { getProjectDir } from '../hooks/appState/projectsData'
 import { defaultBaseBranch } from '../../shared/branch-name'
 import { Field, HelperText, LinkBtn, Modal, PrimaryButton, SegCtl, Select } from './ui'
@@ -7,7 +7,8 @@ import { defaultStreamBranch, streamWorktreeSupported, suggestStreamName } from 
 
 interface Props {
   project: Project
-  onCreate: (name: string, workspace?: WorkspaceConfig) => void
+  /** `setupPending`: the worktree's setup commands wait for the user's yes. */
+  onCreate: (name: string, workspace?: WorkspaceConfig, setupPending?: PendingWorktreeSetup) => void
   onClose: () => void
 }
 
@@ -83,7 +84,7 @@ export default function NewStreamModal({ project, onCreate, onClose }: Props): R
         relativeProjectPath: result.relativeProjectPath
       }
       // Even when the dialog went away while git worked: the stream was asked for.
-      onCreate(name.trim(), workspace)
+      onCreate(name.trim(), workspace, result.setupPending)
       // The worktree is there and the stream works; say what setup didn't do.
       if (result.setupError) window.alert(`The worktree was created, but its setup failed:\n\n${result.setupError}`)
     } catch (err) {

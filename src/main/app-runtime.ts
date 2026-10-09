@@ -18,6 +18,7 @@ import { CodexSessionManager } from './codex-session-manager'
 import { RemoteWorkspaceManager } from './remote-workspace-manager'
 import { WorkspaceManager } from './workspace-manager'
 import { FileSetupApprovals } from './worktree-setup-approvals'
+import { TaskWorktreeManager } from './task-worktree'
 import { NotesStorage } from './notes-storage'
 import { RevisionStore } from './revision-store'
 import { TabActivityRegistry } from './tab-activity-registry'
@@ -57,9 +58,11 @@ import { safeWebContentsSend } from './safe-ipc-send'
 import type { CondaEnvInfo } from '../shared/conda'
 import { registerMobileHandlers } from './ipc/mobile'
 import { registerUpdateHandlers } from './ipc/updates'
+import { registerTaskWorktreeHandlers } from './ipc/task-worktrees'
 import { createUpdates, type Updates } from './updates'
 import { probeRedirect } from './release-redirect'
 import { decideUpdateMode } from '../shared/updates'
+import { removeTaskFromProject } from '../shared/streams'
 import { MobileService } from './mobile/mobile-service'
 import { PairingsStore } from './mobile/pairings-store'
 import { IdentityStore } from './mobile/identity'
@@ -172,6 +175,8 @@ export class AppRuntime {
   private socksProxyEnabled = new Map<string, boolean>()
   private socksProxyStarting = new Map<string, Promise<number>>()
   private readonly projectsStore: RevisionStore<ProjectsData>
+  /** Tasks' own worktrees, made just before their first spawn. */
+  private readonly taskWorktrees: TaskWorktreeManager
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private startupWindowStates: PersistedWindowState[]
@@ -191,6 +196,16 @@ export class AppRuntime {
       initial: this.notesStorage.load(),
       persist: (data) => this.notesStorage.save(data),
       broadcast: (envelope) => this.broadcastToAllWindows('notes-updated', envelope)
+    })
+    this.taskWorktrees = new TaskWorktreeManager({
+      projects: {
+        peek: () => this.projectsStore.peek(),
+        commit: (data) => { this.commitProjects(data) },
+        subscribe: (listener) => this.projectsStore.subscribe(() => listener())
+      },
+      git: this.workspaceManager,
+      onState: (taskId, state) => this.broadcastToAllWindows('task-worktree-state', taskId, state),
+      log: (message) => this.logDebug(message)
     })
     this.forgetArchivesOfVanishedProjects()
     this.config = this.storage.loadConfig()
@@ -328,6 +343,7 @@ export class AppRuntime {
       },
       log,
       onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId),
+      worktrees: { ensure: (projectId, taskId) => this.taskWorktrees.ensureTaskWorktree(projectId, taskId) },
       images: nativeImageCodec,
       // The same folder check as the chat tab's /permissions IPC.
       permissions: {
@@ -371,6 +387,18 @@ export class AppRuntime {
         const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId)
         if (!added.ok) return added
         this.commitProjects(added.data)
+        // In a worktree stream the chat starts in the task's own worktree. Setup
+        // commands awaiting approval don't hold it up: that question is the desktop's.
+        const worktree = await this.taskWorktrees.ensureTaskWorktree(projectId, added.taskId)
+        if (worktree.status === 'failed') {
+          // Nothing ran in it yet and the phone gets the error, so the task goes again.
+          const data = this.projectsStore.peek()
+          this.commitProjects({
+            ...data,
+            projects: data.projects.map(p => (p.id === projectId ? removeTaskFromProject(p, added.taskId) : p))
+          })
+          return { ok: false, code: AppErrorCode.Internal, message: `Couldn't create the task's worktree: ${worktree.error}` }
+        }
         // The task exists from here on, so a failed start is logged rather than
         // reported: the phone opens the chat either way and sees its state there,
         // where a retry of task.new would only make a second task.
@@ -882,6 +910,7 @@ export class AppRuntime {
       listCondaEnvs: () => listCondaEnvs({}, { force: true })
     })
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
+    registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
     registerUpdateHandlers(ipc, { updates: () => this.updates })
   }
 

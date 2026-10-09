@@ -1,9 +1,22 @@
 import { useCallback, useEffect } from 'react'
 import { v4 as uuid } from 'uuid'
 import { isEphemeralProject } from '../../../shared/types'
-import type { Project, Stream, Tab, Task, WorkspaceConfig } from '../../../shared/types'
+import type { Project, ProjectsData, Stream, Tab, Task, WorkspaceConfig } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
-import { findTaskInProject, planTaskMove, projectTasks, streamDirectory, taskDirectory, taskTabIds, taskTabs } from '../../../shared/streams'
+import {
+  findStreamOfTask,
+  findTaskInProject,
+  needsTaskWorktree,
+  planTaskMove,
+  projectTasks,
+  streamDirectory,
+  taskDirectory,
+  taskMoveBlocker,
+  taskTabIds,
+  taskTabs
+} from '../../../shared/streams'
+import { joinWorkspaceDir } from '../../../shared/workspace-path'
+import { ensureTaskWorktree, holdTaskSpawn } from '../../taskWorktrees'
 import {
   archiveStreamInData,
   archiveTasksInData,
@@ -53,8 +66,10 @@ export interface TasksActions {
    * Move a task to `toIndex` of stream `toStreamId` (counted without the task).
    * `restart` is for a move into another directory: its sessions are copied
    * there, its agents and terminals stop (in every window) and start again in
-   * the new one (asks first about unsaved editors). Resolves false when that
-   * question was cancelled.
+   * the new one (asks first about unsaved editors). Into a worktree stream
+   * where the task gets a worktree of its own, that worktree is made first and
+   * the sessions go there. Resolves false when that question was cancelled, or
+   * the task may not leave its stream (`taskMoveBlocker`).
    */
   moveTask: (projectId: string, taskId: string, toStreamId: string, toIndex: number, options?: { restart?: boolean }) => Promise<boolean>
   /**
@@ -178,13 +193,12 @@ export function useTasks(
   ) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     const task = findTaskInProject(project, taskId)
+    const from = findStreamOfTask(project, taskId)
     const to = project?.streams.find(stream => stream.id === toStreamId)
-    if (!project || !task || !to) return false
-    let cwds: { tabId: string; cwd: string | undefined }[] = []
-    if (options.restart) {
-      if (await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
-      const fromDir = taskDirectory(project, task)
-      const toDir = streamDirectory(project, to)
+    if (!project || !task || !from || !to || taskMoveBlocker(task, from, to)) return false
+    const fromDir = taskDirectory(project, task)
+    // Carry the sessions over, then patch terminals that follow a sub-folder.
+    const carry = async (toDir: string): Promise<{ tabId: string; cwd: string | undefined }[]> => {
       const plan = planTaskMove(task, fromDir, toDir)
       // Claude and Pi keep sessions per directory: copy them over first, so the
       // restart there resumes the conversation instead of starting a new one.
@@ -204,23 +218,52 @@ export function useTasks(
       }
       // A terminal on a sub-folder follows it into the new worktree, or starts at
       // the new worktree's top when that folder isn't there.
-      cwds = plan.cwdMoves.map((move, i) => ({ tabId: move.tabId, cwd: dirsExist[i] ? move.cwd : undefined }))
-      // Ending the sessions here is the restart: the tab bodies are keyed on the
-      // directory they run in (TaskPanes), so they mount again and spawn there.
-      // Main ends the processes and tells the other windows to drop their copies.
-      for (const tabId of plan.restartTabIds) {
-        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
-      }
-      if (plan.restartTabIds.length > 0) await window.api.restartTabs(plan.restartTabIds).catch(() => {})
+      return plan.cwdMoves.map((move, i) => ({ tabId: move.tabId, cwd: dirsExist[i] ? move.cwd : undefined }))
     }
-    mutateProjects(prev => {
-      const moved = moveTaskInData(prev, projectId, taskId, toStreamId, toIndex)
-      if (cwds.length === 0) return moved
-      return mapTask(moved, projectId, taskId, candidate => cwds.reduce(
+    const withCwds = (cwds: { tabId: string; cwd: string | undefined }[]) => (data: ProjectsData): ProjectsData => (
+      cwds.length === 0 ? data : mapTask(data, projectId, taskId, candidate => cwds.reduce(
         (next, { tabId, cwd }) => patchTabInTask(next, tabId, { cwd }),
         candidate
       ))
-    })
+    )
+    // Ending the sessions here is the restart: the tab bodies are keyed on the
+    // directory they run in (TaskPanes), so they mount again and spawn there.
+    // Main ends the processes and tells the other windows to drop their copies.
+    const endSessions = async (): Promise<void> => {
+      // Which tabs restart doesn't depend on where they go.
+      const restartTabIds = planTaskMove(task, fromDir, fromDir).restartTabIds
+      for (const tabId of restartTabIds) {
+        window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
+      }
+      if (restartTabIds.length > 0) await window.api.restartTabs(restartTabIds).catch(() => {})
+    }
+
+    if (options.restart && from.id !== to.id && needsTaskWorktree(project, to, task)) {
+      if (await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
+      // Its worktree doesn't exist yet: move, have it made, carry the sessions
+      // there, and only then let the tabs start.
+      const release = holdTaskSpawn(taskId)
+      try {
+        await endSessions()
+        mutateProjects(prev => moveTaskInData(prev, projectId, taskId, toStreamId, toIndex))
+        const made = await ensureTaskWorktree(projectId, taskId, { name: task.name, streamId: toStreamId })
+        if (made.status === 'ready' || made.status === 'needs-approval') {
+          const cwds = await carry(joinWorkspaceDir(made.workspace.worktreePath, made.workspace.relativeProjectPath))
+          if (cwds.length > 0) mutateProjects(withCwds(cwds))
+        }
+      } finally {
+        release()
+      }
+      return true
+    }
+
+    let cwds: { tabId: string; cwd: string | undefined }[] = []
+    if (options.restart) {
+      if (await confirmDiscardDirty(tabIdsOfTask(task)) === 'cancel') return false
+      cwds = await carry(streamDirectory(project, to))
+      await endSessions()
+    }
+    mutateProjects(prev => withCwds(cwds)(moveTaskInData(prev, projectId, taskId, toStreamId, toIndex)))
     return true
   }, [confirmDiscardDirty, mutateProjects])
 

@@ -39,6 +39,8 @@ export interface WorkspaceCreateOptions {
    * passes its stream's worktree.
    */
   setupSource?: string
+  /** Setup's log lines and command output as they come (see `runWorktreeSetup`). */
+  onSetupOutput?: (text: string) => void
 }
 
 export interface CreatedWorktree {
@@ -73,6 +75,11 @@ export class WorkspaceManager {
   private async getRepoRoot(projectDir: string): Promise<string> {
     const stdout = await this.git(projectDir, ['rev-parse', '--show-toplevel'])
     return canonicalFilePath(stdout.trim())
+  }
+
+  /** The top of the checkout `projectDir` is in: where a stream worktree's setup comes from. */
+  repoRoot(projectDir: string): Promise<string> {
+    return this.getRepoRoot(projectDir)
   }
 
   async listBranches(projectDir: string): Promise<string[]> {
@@ -110,7 +117,12 @@ export class WorkspaceManager {
     const rel = path.relative(repoRoot, canonicalFilePath(projectDir))
     const worktreeRoot = canonicalFilePath(worktreePath)
 
-    const setup = await this.runSetup({ sourceRoot: options.setupSource ?? repoRoot, worktreeRoot, branch: name })
+    const setup = await this.runSetup({
+      sourceRoot: options.setupSource ?? repoRoot,
+      worktreeRoot,
+      branch: name,
+      onOutput: options.onSetupOutput
+    })
 
     return {
       worktreePath: worktreeRoot,
@@ -124,7 +136,7 @@ export class WorkspaceManager {
    * The repo's worktree setup on an existing worktree. Idempotent, so after
    * {@link approveSetup} this runs the commands a `needs-approval` result held back.
    */
-  runSetup(request: { sourceRoot: string; worktreeRoot: string; branch: string }): Promise<WorktreeSetupResult> {
+  runSetup(request: { sourceRoot: string; worktreeRoot: string; branch: string; onOutput?: (text: string) => void }): Promise<WorktreeSetupResult> {
     return runWorktreeSetup({ ...request, runner: this.runner, approvals: this.approvals })
   }
 

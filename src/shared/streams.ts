@@ -271,6 +271,16 @@ export interface TaskMovePlan {
   restartTabIds: string[]
 }
 
+/**
+ * Why `task` may not move from stream `from` to `to`, or null when it may. A
+ * task with its own worktree stays in its stream: its branch forks off that
+ * stream's and lands back into it. Reordering within the stream is fine.
+ */
+export function taskMoveBlocker(task: Task, from: Stream, to: Stream): string | null {
+  if (from.id === to.id || !task.workspace) return null
+  return `"${task.name}" has its own worktree (branch ${task.workspace.branchName}), which lands into ${from.name}, so it can't move to another stream.`
+}
+
 export function planTaskMove(task: Task, fromDir: string, toDir: string): TaskMovePlan {
   const sessions: MovableSession[] = []
   const cwdMoves: { tabId: string; cwd: string }[] = []
@@ -299,4 +309,13 @@ export function planTaskMove(task: Task, fromDir: string, toDir: string): TaskMo
 export function tabSpawnDir(tab: Tab, taskDir: string): string | null {
   if (tab.type === 'terminal') return tab.cwd || taskDir
   return isAgentTabType(tab.type) ? taskDir : null
+}
+
+/**
+ * A tab that works in the task's folder: one that spawns there, or an editor,
+ * diff or notebook reading files there. While the task's own worktree is
+ * still to come, such a tab waits for it.
+ */
+export function waitsForTaskWorktree(tab: Tab): boolean {
+  return tabSpawnDir(tab, '') !== null || tab.type === 'editor' || tab.type === 'diff' || tab.type === 'notebook'
 }

@@ -24,7 +24,13 @@ import type {
   WorkspaceListBranchesRequest,
   WorkspaceRestoreRequest,
   WorkspaceRestoreResult,
-  WindowViewState
+  WindowViewState,
+  EnsureTaskWorktreeOptions,
+  PendingWorktreeSetup,
+  StreamSetupResult,
+  TaskWorktreeResult,
+  TaskWorktreeState,
+  WorktreeSetupDecision
 } from '../shared/types'
 import type { ArchivedStream, ArchivedTask, ProjectArchive } from '../shared/archive'
 import type { CondaListResult } from '../shared/conda'
@@ -419,6 +425,23 @@ const api = {
   /** An archived stream's worktree back from its branch (`branch-missing` when it was discarded). */
   workspaceRestore: (request: WorkspaceRestoreRequest): Promise<WorkspaceRestoreResult> =>
     ipcRenderer.invoke('workspace-restore', request),
+
+  // Task worktrees: made in main just before a task's tabs first spawn.
+  taskWorktreeEnsure: (projectId: string, taskId: string, options?: EnsureTaskWorktreeOptions): Promise<TaskWorktreeResult> =>
+    ipcRenderer.invoke('task-worktree-ensure', projectId, taskId, options),
+  /** Answer a task's setup approval: run the commands (approving this config) or skip them. */
+  taskWorktreeDecide: (taskId: string, decision: WorktreeSetupDecision): Promise<TaskWorktreeResult> =>
+    ipcRenderer.invoke('task-worktree-decide', taskId, decision),
+  taskWorktreeDismiss: (taskId: string): Promise<void> => ipcRenderer.invoke('task-worktree-dismiss', taskId),
+  taskWorktreeStates: (): Promise<Record<string, TaskWorktreeState>> => ipcRenderer.invoke('task-worktree-states'),
+  onTaskWorktreeState: (callback: (taskId: string, state: TaskWorktreeState | null) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, taskId: string, state: TaskWorktreeState | null) => callback(taskId, state)
+    ipcRenderer.on('task-worktree-state', handler)
+    return () => ipcRenderer.removeListener('task-worktree-state', handler)
+  },
+  /** A new stream worktree's held setup commands: approve this config and run them. */
+  streamWorktreeSetupRun: (projectId: string, streamId: string, pending: PendingWorktreeSetup): Promise<StreamSetupResult> =>
+    ipcRenderer.invoke('stream-worktree-setup-run', projectId, streamId, pending),
 
   // Archive: `<config dir>/archive/<projectId>.json`. Each change resolves to the archive as it now is.
   archiveLoad: (projectId: string): Promise<ProjectArchive> => ipcRenderer.invoke('archive-load', projectId),

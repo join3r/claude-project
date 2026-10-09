@@ -194,6 +194,8 @@ export interface WorktreeSetupRequest {
   commandTimeoutMs?: number
   /** Base env for setup commands. Defaults to the user's login shell env. */
   env?: Record<string, string>
+  /** Called with each log line and each chunk of command output as it happens, for a progress view. */
+  onOutput?: (text: string) => void
 }
 
 export type WorktreeSetupResult =
@@ -223,8 +225,12 @@ const ERROR_TAIL_LINES = 15
  */
 export async function runWorktreeSetup(request: WorktreeSetupRequest): Promise<WorktreeSetupResult> {
   const log: string[] = []
+  const note = (line: string): void => {
+    log.push(line)
+    request.onOutput?.(`${line}\n`)
+  }
   const fail = (error: string): WorktreeSetupResult => {
-    log.push(`error: ${error}`)
+    note(`error: ${error}`)
     return { status: 'failed', error, log: log.join('\n') }
   }
   const loaded = readWorktreeConfig(request.sourceRoot)
@@ -234,7 +240,7 @@ export async function runWorktreeSetup(request: WorktreeSetupRequest): Promise<W
   try {
     commonDir = await gitCommonDir(request.runner ?? new LocalGitRunner(), request.worktreeRoot)
     const added = await ensureInfoExclude(commonDir, excludeLinesFor(config))
-    if (added.length) log.push(`info/exclude: added ${added.join(', ')}`)
+    if (added.length) note(`info/exclude: added ${added.join(', ')}`)
   } catch (err) {
     return fail(`Could not update .git/info/exclude: ${err instanceof Error ? err.message : String(err)}`)
   }
@@ -245,13 +251,13 @@ export async function runWorktreeSetup(request: WorktreeSetupRequest): Promise<W
     for (const entry of entries) {
       const placed = placeEntry(kind, entry, roots)
       if (placed.error !== undefined) return fail(placed.error)
-      log.push(placed.message)
+      note(placed.message)
     }
   }
 
   if (config.setup.length === 0) return { status: 'ok', log: log.join('\n') }
   if (!loaded.hash || !request.approvals?.isApproved(commonDir, loaded.hash)) {
-    log.push(`setup: ${config.setup.length} command(s) wait for approval`)
+    note(`setup: ${config.setup.length} command(s) wait for approval`)
     return { status: 'needs-approval', pending: { repoKey: commonDir, hash: loaded.hash ?? '', commands: config.setup }, log: log.join('\n') }
   }
   const shell = setupShell()
@@ -263,12 +269,14 @@ export async function runWorktreeSetup(request: WorktreeSetupRequest): Promise<W
     DEVTOOL_BRANCH: request.branch
   }
   for (const command of config.setup) {
-    log.push(`$ ${command}`)
+    note(`$ ${command}`)
     const run = await runShellCommand(shell, command, {
       cwd: request.worktreeRoot,
       env,
-      timeoutMs: request.commandTimeoutMs ?? SETUP_COMMAND_TIMEOUT_MS
+      timeoutMs: request.commandTimeoutMs ?? SETUP_COMMAND_TIMEOUT_MS,
+      onOutput: request.onOutput
     })
+    // Streamed already; the log keeps it for the result.
     if (run.output) log.push(run.output.replace(/\n$/, ''))
     if (run.error) {
       const tail = run.output.trimEnd().split('\n').slice(-ERROR_TAIL_LINES).join('\n')
@@ -402,12 +410,18 @@ interface ShellRun {
   error?: string
 }
 
-function runShellCommand(shell: string, command: string, opts: { cwd: string; env: Record<string, string>; timeoutMs: number }): Promise<ShellRun> {
+function runShellCommand(
+  shell: string,
+  command: string,
+  opts: { cwd: string; env: Record<string, string>; timeoutMs: number; onOutput?: (text: string) => void }
+): Promise<ShellRun> {
   return new Promise(resolve => {
     let output = ''
     let timedOut = false
     const append = (chunk: Buffer) => {
-      output += chunk.toString('utf8')
+      const text = chunk.toString('utf8')
+      opts.onOutput?.(text)
+      output += text
       if (output.length > MAX_COMMAND_OUTPUT) output = output.slice(-MAX_COMMAND_OUTPUT)
     }
     const child = spawn(shell, ['-c', command], {

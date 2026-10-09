@@ -21,8 +21,8 @@ import {
   canAlwaysAllow
 } from '../../shared/chat-prompts'
 import { chatTabConfig, type ChatTabConfigShape } from '../../shared/chat-tab-config'
-import type { Project, ProjectsData, Tab, Task } from '../../shared/types'
-import { projectTasks, taskTabs } from '../../shared/streams'
+import type { Project, ProjectsData, Tab, Task, TaskWorktreeResult } from '../../shared/types'
+import { findStreamOfTask, needsTaskWorktree, projectTasks, taskTabs } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 import {
   chatDetail,
@@ -111,6 +111,11 @@ export interface ChatBridgeDeps {
   log(message: string): void
   /** A phone is about to send into a chat: the turn it starts is that phone's (push "done", §7.6). */
   onPhoneSend?(phoneId: string, tabId: string): void
+  /**
+   * Makes a task's own worktree before its chat starts there (`task-worktree.ts`).
+   * Without it a task still to get one starts in its stream's worktree.
+   */
+  worktrees?: { ensure(projectId: string, taskId: string): Promise<TaskWorktreeResult> }
   /** Decodes and resizes `chat.image` images (§8.9). Without it that op answers `unsupported`. */
   images?: ImageCodec
   /**
@@ -200,7 +205,7 @@ export class ChatBridge {
    * prompt, in `mode` when given, as a send from this phone (so its `done` push follows).
    */
   async startTask(phoneId: string, tabId: string, prompt: string, mode?: string): Promise<void> {
-    const resolved = this.resolve(tabId)
+    const resolved = await this.resolveReady(tabId)
     if (!resolved) throw new OpError(AppErrorCode.NotFound, 'No such tab')
     await this.ensureRuntime(resolved)
     if (mode) await this.deps.chats.setPermissionMode?.(tabId, mode)
@@ -244,7 +249,8 @@ export class ChatBridge {
   // ---- ops -------------------------------------------------------------------------
 
   private async run(state: PhoneState, op: string, params: ChatParams): Promise<unknown> {
-    const resolved = this.resolve(params.tabId)
+    // Every op but close may start the chat's process, so its folder must exist first.
+    const resolved = op === ChatOp.Close ? this.resolve(params.tabId) : await this.resolveReady(params.tabId)
     if (!resolved) throw new OpError(AppErrorCode.NotFound, 'No such chat')
     switch (op) {
       case ChatOp.Open:
@@ -427,6 +433,22 @@ export class ChatBridge {
       }
     }
     return null
+  }
+
+  /**
+   * {@link resolve}, once the task's own worktree is there: a phone can open a
+   * desktop-made task whose tabs never mounted. Commands still waiting for the
+   * desktop's approval don't hold the chat up.
+   */
+  private async resolveReady(tabId: string): Promise<ResolvedTab | null> {
+    const resolved = this.resolve(tabId)
+    const worktrees = this.deps.worktrees
+    if (!resolved || !worktrees) return resolved
+    const stream = findStreamOfTask(resolved.project, resolved.task.id)
+    if (!stream || !needsTaskWorktree(resolved.project, stream, resolved.task)) return resolved
+    const result = await worktrees.ensure(resolved.project.id, resolved.task.id)
+    if (result.status === 'failed') throw new OpError(AppErrorCode.Internal, `Couldn't create the task's worktree: ${result.error}`)
+    return this.resolve(tabId)
   }
 
   // ---- events ----------------------------------------------------------------------

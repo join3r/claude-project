@@ -303,6 +303,28 @@ describe('concurrent windows — projects and tasks (finding #5)', () => {
   })
 })
 
+describe('a task worktree recorded by main', () => {
+  it('keeps the window\'s unsaved rename and tab under main\'s Task.workspace', async () => {
+    const main = new FakeMain<ProjectsData>(baselineProjects(), normalizeProjects)
+    const w1 = new FakeRenderer(main)
+    w1.deaf = true
+    // The prompt box: first tab plus rename, not saved yet when main writes.
+    w1.mutate(renameTask('p1', 't-base', 'Fix login'))
+    const workspace = { worktreePath: '/wt/rel--fix-login', branchName: 'rel--fix-login', baseBranch: 'rel', relativeProjectPath: '' }
+    main.store.commit({
+      ...main.store.peek(),
+      projects: main.store.peek().projects.map(p => mapTaskInProject(p, 't-base', t => ({ ...t, workspace })))
+    })
+
+    await w1.flush()
+
+    const saved = findTaskInProject(main.store.peek().projects[0], 't-base')
+    expect(saved?.name).toBe('Fix login')
+    expect(saved?.workspace).toEqual(workspace)
+    expect(findTaskInProject(w1.state.projects[0], 't-base')?.workspace).toEqual(workspace)
+  })
+})
+
 describe('concurrent windows — notes (finding #6)', () => {
   const baselineNotes = (): NotesRecord => ({ p1: [note('n-a', 'a0'), note('n-b', 'b0')] })
 

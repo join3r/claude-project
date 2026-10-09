@@ -309,6 +309,39 @@ describe('ChatBridge', () => {
     await expect(bridge.startTask('phone-1', 'nope', 'x')).rejects.toMatchObject({ code: 'not-found' })
   })
 
+  it('makes a task\'s own worktree before its chat starts, and stops on a git failure', async () => {
+    // t1's stream as a new worktree stream: t1 is still to get a worktree of its own.
+    data = { ...data, projects: data.projects.map(p => ({ ...p, streams: p.streams.map(s => (s.workspace ? { ...s, taskWorktrees: true as const } : s)) })) }
+    const own: WorkspaceConfig = { worktreePath: '/wt/fix--task', branchName: 'fix--task', baseBranch: 'fix', relativeProjectPath: 'pkg' }
+    const asked: string[] = []
+    let fail = false
+    bridge = new ChatBridge({
+      chats,
+      projects: { peek: () => data },
+      timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+      log: () => {},
+      worktrees: {
+        ensure: async (projectId, taskId) => {
+          asked.push(`${projectId}:${taskId}`)
+          if (fail) return { status: 'failed', error: 'git said no' }
+          data = { ...data, projects: data.projects.map(p => ({ ...p, streams: p.streams.map(s => ({ ...s, tasks: s.tasks.map(t => (t.id === taskId ? { ...t, workspace: own } : t)) })) })) }
+          return { status: 'ready', workspace: own }
+        }
+      }
+    })
+
+    fail = true
+    await expect(bridge.startTask('phone-1', 'tab-chat', 'Go')).rejects.toMatchObject({ code: 'internal' })
+    expect(chats.runtimes.has('tab-chat')).toBe(false)
+
+    fail = false
+    await bridge.startTask('phone-1', 'tab-chat', 'Go')
+    expect(chats.runtimes.get('tab-chat')?.config.cwd).toBe('/wt/fix--task/pkg')
+    // Made once: the task has its worktree from then on.
+    await req('chat.open', { tabId: 'tab-chat' })
+    expect(asked).toEqual(['p1:t1', 'p1:t1'])
+  })
+
   it('sends the pickers and meter the composer shows, labelled the same way', async () => {
     const models = [
       { value: 'default', displayName: 'Default (recommended)' },
