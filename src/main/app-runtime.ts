@@ -15,7 +15,7 @@ import { WindowClientHub, windowClientId } from './window-client-hub'
 import { createIpcRegistrar } from './ipc/registrar'
 import { createAppUrlMatcher } from './ipc/sender'
 import { registerWindowHandlers, type WindowIpcContext } from './ipc/window'
-import { registerServerBrowserHandlers, registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/socks-proxy'
+import { answerServerProxyLogins, registerServerBrowserHandlers, registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughServerProxy, routeBrowserThroughSocks } from './ipc/socks-proxy'
 import { registerServerIdeHandlers } from './ipc/server-ide'
 import { ServerBrowserProxies } from './servers/server-browser-proxy'
 import { ServerIde } from './servers/server-ide'
@@ -71,7 +71,7 @@ export class AppRuntime {
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
   private socksProxyStarting = new Map<string, Promise<number>>()
-  /** Browser tabs of server projects: a SOCKS5 listener per server (plan step 9). */
+  /** Browser tabs of server projects: an authenticated HTTP proxy per server (plan step 9). */
   private serverBrowser: ServerBrowserProxies | null = null
   /** Open in IDE for server projects: DevTool's ssh config and a socket per server (plan step 9). */
   private serverIde: ServerIde | null = null
@@ -142,7 +142,7 @@ export class AppRuntime {
     const log = (message: string) => this.logDebug(message)
     const serverBrowser = new ServerBrowserProxies({
       openTcp: (serverId, target) => this.openTcp(serverId, target),
-      route: (projectId, port) => routeBrowserThroughSocks(projectId, port),
+      route: (projectId, port) => routeBrowserThroughServerProxy(projectId, port),
       log
     })
     const serverIde = new ServerIde({
@@ -161,6 +161,7 @@ export class AppRuntime {
     })
     this.serverBrowser = serverBrowser
     this.serverIde = serverIde
+    answerServerProxyLogins(() => this.serverBrowser)
     let paired = new Set(this.servers.getState().servers.map((s) => s.id))
     this.servers.onStateChange((state) => {
       const now = new Set(state.servers.map((s) => s.id))

@@ -1,6 +1,6 @@
-import { session } from 'electron'
+import { app, session } from 'electron'
 import type { SshConnectionManager } from '../ssh-connection-manager'
-import type { ServerBrowserProxies } from '../servers/server-browser-proxy'
+import { proxyLoginHandler, type ServerBrowserProxies } from '../servers/server-browser-proxy'
 import type { IpcRegistrar } from './registrar'
 import { safeId, sshConfig } from './schemas'
 
@@ -17,6 +17,25 @@ export async function routeBrowserThroughSocks(projectId: string, port: number):
     proxyBypassRules: '<-loopback>'
   })
   await ses.closeAllConnections()
+}
+
+/**
+ * Route a server project's browser tabs through its server's authenticated HTTP
+ * proxy (plan step 9). Loopback isn't bypassed: `localhost` is the server's.
+ */
+export async function routeBrowserThroughServerProxy(projectId: string, port: number): Promise<void> {
+  const ses = projectBrowserSession(projectId)
+  await ses.setProxy({
+    proxyRules: `http://127.0.0.1:${port}`,
+    proxyBypassRules: '<-loopback>'
+  })
+  await ses.closeAllConnections()
+}
+
+/** Answers the server proxies' auth challenges (and no one else's) for every webContents. */
+export function answerServerProxyLogins(proxies: () => ServerBrowserProxies | null): void {
+  const handle = proxyLoginHandler(proxies)
+  app.on('login', (event, webContents, details, authInfo, callback) => handle(event, webContents, details, authInfo, callback))
 }
 
 /** Put a project's browser tabs back on a direct connection, ignoring failures. */
@@ -120,8 +139,8 @@ export interface ServerBrowserDeps {
 /**
  * Browser tabs of DevTool server projects (plan step 9): the tab asks before it
  * loads anything, main points `persist:browser-<projectId>` at that server's
- * SOCKS5 listener (`servers/server-browser-proxy.ts`) and holds it for the tab.
- * There is no direct fallback: `localhost` in such a tab is the server.
+ * authenticated proxy (`servers/server-browser-proxy.ts`) and holds it for the
+ * tab. There is no direct fallback: `localhost` in such a tab is the server.
  */
 export function registerServerBrowserHandlers(ipc: IpcRegistrar, deps: ServerBrowserDeps): void {
   ipc.handle('server-browser-proxy', [safeId, safeId], async (ctx, projectId, tabId) => {

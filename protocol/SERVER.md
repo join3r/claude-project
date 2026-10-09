@@ -133,7 +133,7 @@ A side serves the kinds in its registry (`StreamKinds`). Version 1 has three dia
   - Connected: the server writes one byte `0x00`, then pipes both ways. The desktop writes nothing before that byte.
   - Not connected: the server aborts with `close {reason: "error", message: "<CODE>: <text>"}`, CODE being Node's (`ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EHOSTUNREACH`...; `EINVAL` for bad params).
   - `close {end}` from either side is a TCP half-close of that direction. A reset of the target, or an abort from the desktop, aborts the other side (the target's socket is reset).
-  - Users (step 9): the desktop's SOCKS5 listener for the browser tabs of a server's projects (one CONNECT, one stream), and the Unix socket ssh's ProxyCommand reaches for Open in IDE (one connection, one stream to `127.0.0.1:22`).
+  - Users (step 9): the desktop's authenticated HTTP proxy for the browser tabs of a server's projects (one client connection, one stream), and the Unix socket ssh's ProxyCommand reaches for Open in IDE (one connection, one stream to `127.0.0.1:22`).
 
 ## 7. Pairing
 

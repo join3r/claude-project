@@ -168,7 +168,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   }, [isRemote, activated, projectId])
 
   // A server project's tab: main points the project's session at that server's
-  // SOCKS listener (each connection dialled from the server) and holds it for
+  // authenticated proxy (each connection dialled from the server) and holds it for
   // this tab. No direct fallback: `localhost` here must never be this computer.
   useEffect(() => {
     if (!serverId || !activated) return

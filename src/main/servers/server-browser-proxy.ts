@@ -1,4 +1,6 @@
-import { Socks5Server, type Socks5Target } from './socks5-server'
+import { randomBytes } from 'crypto'
+import { AuthProxyServer } from './auth-proxy'
+import { serverAlias } from './ssh-config'
 import { spliceTcp, type TcpTarget } from '../host/link/tcp-stream'
 import type { LinkStream } from '../host/link/stream'
 
@@ -8,7 +10,7 @@ export const BROWSER_PROXY_IDLE_MS = 60_000
 export interface ServerBrowserProxiesDeps {
   /** A connected `tcp` stream on the server (connectTcpStream); rejects with a TcpConnectError. */
   openTcp: (serverId: string, target: TcpTarget) => Promise<LinkStream>
-  /** Points the project's browser session (`persist:browser-<projectId>`) at the SOCKS port. */
+  /** Points the project's browser session (`persist:browser-<projectId>`) at the proxy's port. */
   route: (projectId: string, port: number) => Promise<void>
   log: (message: string) => void
   idleMs?: number
@@ -16,7 +18,10 @@ export interface ServerBrowserProxiesDeps {
 }
 
 interface Proxy {
-  socks: Socks5Server
+  server: AuthProxyServer
+  /** Its Basic credentials: `devtool-<id12>` and 32 random bytes, new for every listener. */
+  username: string
+  password: string
   /** Resolves to the port once listening. */
   ready: Promise<number>
   /** `<clientId>\0<tabId>` of the browser tabs using it. */
@@ -33,14 +38,24 @@ function holdKey(clientId: string, tabId: string): string {
   return `${clientId}\u0000${tabId}`
 }
 
+/** What Electron's `login` event says about a proxy's challenge. */
+export interface ProxyAuthInfo {
+  isProxy: boolean
+  host: string
+  port: number
+  realm?: string
+}
+
 /**
- * The browser tabs of server projects (plan step 9): one SOCKS5 listener per
- * server on 127.0.0.1 and an ephemeral port, started when a tab of one of its
- * projects first needs it and stopped a while after the last one lets go. Each
- * CONNECT becomes a `tcp` stream the server dials, so `localhost` in such a tab
- * is the server. A project's browser session is routed through its server's
- * port before the tab may load anything, and stays routed: with the listener
- * gone, its pages fail rather than reach this computer's localhost.
+ * The browser tabs of server projects (plan step 9): one authenticated HTTP
+ * proxy per server ({@link AuthProxyServer}) on 127.0.0.1 and an ephemeral
+ * port, started when a tab of one of its projects first needs it and stopped a
+ * while after the last one lets go. Each request becomes a `tcp` stream the
+ * server dials, so `localhost` in such a tab is the server. A project's browser
+ * session is routed through its server's port before the tab may load
+ * anything, and stays routed: with the listener gone, its pages fail rather
+ * than reach this computer's localhost. Only DevTool knows the credentials,
+ * and it hands them to Chromium's challenge for exactly that host and port.
  */
 export class ServerBrowserProxies {
   private readonly proxies = new Map<string, Proxy>()
@@ -100,10 +115,25 @@ export class ServerBrowserProxies {
     }
   }
 
+  /**
+   * Credentials for a proxy challenge, only when it comes from one of these
+   * listeners: a proxy, at 127.0.0.1 and that port, with our realm. Null for
+   * every other challenge, which DevTool leaves alone.
+   */
+  credentialsFor(info: ProxyAuthInfo): { username: string; password: string } | null {
+    if (!info.isProxy || info.host !== '127.0.0.1') return null
+    for (const proxy of this.proxies.values()) {
+      if (proxy.server.port === 0 || proxy.server.port !== info.port) continue
+      if (info.realm !== undefined && info.realm !== proxy.username) return null
+      return { username: proxy.username, password: proxy.password }
+    }
+    return null
+  }
+
   /** The listener's port, while there is one. */
   port(serverId: string): number | undefined {
     const proxy = this.proxies.get(serverId)
-    return proxy && proxy.socks.port > 0 ? proxy.socks.port : undefined
+    return proxy && proxy.server.port > 0 ? proxy.server.port : undefined
   }
 
   /** The server was removed: its listener stops now. */
@@ -112,7 +142,7 @@ export class ServerBrowserProxies {
     if (!proxy) return
     this.proxies.delete(serverId)
     this.clearIdle(proxy)
-    await proxy.socks.close()
+    await proxy.server.close()
   }
 
   async stop(): Promise<void> {
@@ -122,12 +152,17 @@ export class ServerBrowserProxies {
   private proxyFor(serverId: string): Proxy {
     const existing = this.proxies.get(serverId)
     if (existing) return existing
-    const socks = new Socks5Server({
-      connect: (target: Socks5Target) => this.deps.openTcp(serverId, { host: target.host, port: target.port }),
+    const username = serverAlias(serverId)
+    const password = randomBytes(32).toString('base64url')
+    const server = new AuthProxyServer({
+      username,
+      password,
+      realm: username,
+      connect: (target) => this.deps.openTcp(serverId, target),
       splice: (client, upstream) => spliceTcp(client, upstream as LinkStream),
       log: (message) => this.deps.log(`serverBrowser server=${serverId} ${message}`)
     })
-    const proxy: Proxy = { socks, ready: socks.listen(0), holds: new Set(), idleTimer: null }
+    const proxy: Proxy = { server, username, password, ready: server.listen(0), holds: new Set(), idleTimer: null }
     proxy.ready.then(
       (port) => this.deps.log(`serverBrowser listening server=${serverId} port=${port}`),
       (err: unknown) => this.deps.log(`serverBrowser listen failed server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)
@@ -153,3 +188,27 @@ export class ServerBrowserProxies {
   }
 }
 
+
+/** Electron's `login` event, as far as {@link proxyLoginHandler} reads it. */
+export type LoginHandler = (
+  event: { preventDefault(): void },
+  webContents: unknown,
+  details: unknown,
+  authInfo: ProxyAuthInfo,
+  callback: (username?: string, password?: string) => void
+) => void
+
+/**
+ * The handler for Electron's app `login` event (emitted for every webContents,
+ * webview guests included): it answers a proxy challenge only when it comes from
+ * one of DevTool's server proxies, and leaves every other challenge alone (no
+ * preventDefault, so Electron cancels it as it would without DevTool).
+ */
+export function proxyLoginHandler(proxies: () => Pick<ServerBrowserProxies, 'credentialsFor'> | null): LoginHandler {
+  return (event, _webContents, _details, authInfo, callback) => {
+    const credentials = proxies()?.credentialsFor(authInfo)
+    if (!credentials) return
+    event.preventDefault()
+    callback(credentials.username, credentials.password)
+  }
+}

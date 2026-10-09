@@ -6,7 +6,7 @@ import type { LinkStream, StreamHandler } from './stream'
  * The `tcp` stream kind (protocol/SERVER.md §6.3): the desktop names
  * `{host, port}` and the server dials it from its own network view, so
  * `localhost` is the server and names resolve there. Browser tabs of server
- * projects (through the desktop's SOCKS5 listener) and Open in IDE (through the
+ * projects (through the desktop's authenticated HTTP proxy) and Open in IDE (through the
  * desktop's ssh socket) both ride on it.
  *
  * Once connected the server writes one byte, {@link TCP_CONNECTED}, then pipes
