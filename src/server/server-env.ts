@@ -236,6 +236,15 @@ export function passwdShell(): string | null {
 }
 
 /** What a server says about its machine in its handshake and pairing hello. */
+/** The login name the server runs as; empty when the passwd entry can't be read. */
+function serverUser(): string {
+  try {
+    return os.userInfo().username
+  } catch {
+    return process.env.USER ?? ''
+  }
+}
+
 export function serverHostInfo(): ServerHostInfo {
-  return { os: process.platform, arch: process.arch, hostname: os.hostname().replace(/\.local$/, ''), node: process.versions.node }
+  return { os: process.platform, arch: process.arch, hostname: os.hostname().replace(/\.local$/, ''), node: process.versions.node, user: serverUser() }
 }

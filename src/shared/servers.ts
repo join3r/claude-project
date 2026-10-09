@@ -28,6 +28,8 @@ export interface ServerHostInfo {
   hostname: string
   /** The Node version the server runs on. */
   node: string
+  /** The user the server runs as (Open in IDE logs in as them); absent from servers before step 9. */
+  user?: string
 }
 
 /** A newer bundle the server holds but hasn't switched to, because a tab is working. */

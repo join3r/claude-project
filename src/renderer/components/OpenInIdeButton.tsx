@@ -11,12 +11,14 @@ interface Props {
   editors: ExternalEditor[]
   defaultId: string | null
   folder: string | null
-  /** The folder's project (the desktop refuses a DevTool server's). */
+  /** The folder's project. */
   projectId?: string
+  /** The project's DevTool server: its folder opens over SSH (first use asks). */
+  serverId?: string
   onError: (message: string | null) => void
 }
 
-export default function OpenInIdeButton({ editors, defaultId, folder, projectId, onError }: Props): React.ReactElement {
+export default function OpenInIdeButton({ editors, defaultId, folder, projectId, serverId, onError }: Props): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false)
   const defaultEditor = resolveDefaultExternalEditor({ editors, defaultId })
   const empty = editors.length === 0
@@ -31,7 +33,7 @@ export default function OpenInIdeButton({ editors, defaultId, folder, projectId,
   const launch = (editorId: string): void => {
     setMenuOpen(false)
     if (!folder) return
-    void openWorkspaceInIde(editorId, folder, projectId).then((message) => onError(message))
+    void openWorkspaceInIde(editorId, folder, projectId, serverId).then((message) => onError(message))
   }
 
   return (

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { localProjectFolder, paletteAliasesForEditor, resolveDefaultExternalEditor } from '../src/shared/external-editors'
+import { featureAvailable, openInIdeAvailable, revealAvailable } from '../src/shared/project-features'
 import { createMainStream, type Project } from '../src/shared/types'
 import { fixtureProject } from './helpers/streams-fixtures'
 
@@ -53,5 +54,17 @@ describe('external editor helpers', () => {
 
   it('returns null for remote projects', () => {
     expect(localProjectFolder(project({ ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/x' } }), null)).toBeNull()
+  })
+
+  it('opens a DevTool server project\'s folder (over SSH) on macOS and Linux, never on Windows (plan step 9)', () => {
+    const onServer = project({ host: 'ab'.repeat(16), directory: '/home/dev/app' })
+    expect(featureAvailable(onServer, 'local-folder')).toBe(true)
+    expect(localProjectFolder(onServer, null, 'darwin')).toBe('/home/dev/app')
+    expect(localProjectFolder(onServer, null, 'linux')).toBe('/home/dev/app')
+    expect(localProjectFolder(onServer, null, 'win32')).toBeNull()
+    expect(openInIdeAvailable(onServer, 'win32')).toBe(false)
+    expect(openInIdeAvailable(project(), 'win32')).toBe(true)
+    // Reveal in Finder stays this computer's only.
+    expect(revealAvailable(onServer)).toBe(false)
   })
 })

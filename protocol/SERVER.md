@@ -29,7 +29,7 @@ Message 1 (desktop):
   "build": { "version": "0.6.0", "commit": "", "builtAt": "", "bundleSha": "" },
   "features": [], "name": "join3r-mbp" }
 ```
-The desktop's `build` is the server bundle it carries (§10): its commit, build time and content hash. Message 2 (server) is the same shape with `app: "devtool-server"`, its own `build` from `manifest.json` (all empty in a server that has no bundle yet), its display name, `host: {os, arch, hostname, node}` and `result`:
+The desktop's `build` is the server bundle it carries (§10): its commit, build time and content hash. Message 2 (server) is the same shape with `app: "devtool-server"`, its own `build` from `manifest.json` (all empty in a server that has no bundle yet), its display name, `host: {os, arch, hostname, node, user?}` (`user`, the login the server runs as, since step 9) and `result`:
 - `ok`: the session is up.
 - `incompatible`: no common version (§2.3). No session.
 - `unknown-device`: the server has no pairing whose Noise key matches. No session.
@@ -124,12 +124,17 @@ The server pushes the event `server-status` with the same payload as `server-inf
 
 ### 6.3 Kinds
 
-A side serves the kinds in its registry (`StreamKinds`). Later steps add `file` and `tcp`. Version 1 has three diagnostic kinds that every server serves. They only move bytes the desktop sends or asks for, so they double as a speed test, and `bundle` (§10).
+A side serves the kinds in its registry (`StreamKinds`). Version 1 has three diagnostic kinds that every server serves. They only move bytes the desktop sends or asks for, so they double as a speed test. Then `bundle` (§10) and `tcp`. A server without a kind answers its `open` with `refused`.
 
 - `echo`: writes back everything it reads, then ends.
 - `sink {delayMs?}`: reads to the end, pausing `delayMs` (at most 1000) after each chunk to play a slow reader. Then it writes `{"bytes":N,"sha256":"<hex>"}` and ends.
 - `source {bytes, seed?}`: writes `bytes` bytes (at most 4 GiB) of `sourceByte(i, seed) = (i*31 + seed + (i >>> 8)) & 0xff`, then ends.
 - `bundle {version, commit, builtAt, sha256, bytes}`: the desktop writes a server bundle archive (§10.1) of exactly `bytes` bytes (at most 256 MiB) and ends. On success the server writes `{"ok":true,"state":...}` and ends; on any failure it aborts the stream with `close {reason: "error", message}`.
+- `tcp {host, port}` (`src/main/host/link/tcp-stream.ts`): the server dials `host:port` from its own network view, so `localhost` is the server and names resolve on the server. `host` is a hostname or an IP literal (at most 255 characters, brackets around IPv6 allowed), `port` 1 to 65535. The server gives the target 10 s to accept.
+  - Connected: the server writes one byte `0x00`, then pipes both ways. The desktop writes nothing before that byte.
+  - Not connected: the server aborts with `close {reason: "error", message: "<CODE>: <text>"}`, CODE being Node's (`ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EHOSTUNREACH`...; `EINVAL` for bad params).
+  - `close {end}` from either side is a TCP half-close of that direction. A reset of the target, or an abort from the desktop, aborts the other side (the target's socket is reset).
+  - Users (step 9): the desktop's authenticated HTTP proxy for the browser tabs of a server's projects (one client connection, one stream), and the Unix socket ssh's ProxyCommand reaches for Open in IDE (one connection, one stream to `127.0.0.1:22`).
 
 ## 7. Pairing
 
@@ -214,6 +219,7 @@ The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phon
 | `src/main/host/link/session.ts` | `LinkSession`: calls, events, batching, streams |
 | `src/main/host/link/stream.ts` | `LinkStream` (a Node Duplex with credit), `StreamKinds` |
 | `src/main/host/link/diagnostic-streams.ts` | `echo`, `sink`, `source` |
+| `src/main/host/link/tcp-stream.ts` | `tcp`: the server's dialler, the desktop's `connectTcpStream` and `spliceTcp` |
 | `src/main/host/link/relay-mux.ts`, `relay-transport.ts` | the shared relay socket, and a session's transport over it |
 | `src/main/host/link/peer-store.ts` | `servers.json` and `desktops.json` |
 | `src/main/host/link/pairing.ts` | §7: tickets, the pairing handshake, offers |
@@ -226,7 +232,7 @@ The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phon
 | `src/server/bootstrap.ts` | §11 (`site/server/bootstrap.mjs`); `site/install` comes from `scripts/server-install.sh` |
 | `src/server/service.ts`, `control.ts`, `cli.ts` | the service, the CLI's control socket, `devtool-server` |
 
-Tests: `tests/host-link-wire.test.ts` and `tests/host-link-session.test.ts` (loopback), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay) and `tests/server-updates.test.ts` (archive, policy, uploads through a relay).
+Tests: `tests/host-link-wire.test.ts`, `tests/host-link-session.test.ts` and `tests/host-link-tcp.test.ts` (loopback), `tests/server-tcp-e2e.test.ts` (`tcp` through a relay), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay) and `tests/server-updates.test.ts` (archive, policy, uploads through a relay).
 
 ## 10. Updates
 

@@ -76,7 +76,8 @@ export function parseHostInfo(value: unknown): ServerHostInfo | undefined {
   const h = value as Obj
   const os = text(h, 'os', 32)
   if (!os) return undefined
-  return { os, arch: text(h, 'arch', 32), hostname: text(h, 'hostname', 255), node: text(h, 'node', 32) }
+  const user = text(h, 'user', 64)
+  return { os, arch: text(h, 'arch', 32), hostname: text(h, 'hostname', 255), node: text(h, 'node', 32), ...(user ? { user } : {}) }
 }
 
 /**

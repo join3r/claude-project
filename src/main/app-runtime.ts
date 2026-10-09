@@ -19,7 +19,15 @@ import { WindowClientHub, windowClientId } from './window-client-hub'
 import { createIpcRegistrar } from './ipc/registrar'
 import { createAppUrlMatcher } from './ipc/sender'
 import { registerWindowHandlers, type WindowIpcContext } from './ipc/window'
-import { registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/socks-proxy'
+import { answerServerProxyLogins, registerServerBrowserHandlers, registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughServerProxy, routeBrowserThroughSocks } from './ipc/socks-proxy'
+import { registerServerIdeHandlers } from './ipc/server-ide'
+import { ServerBrowserProxies } from './servers/server-browser-proxy'
+import { ServerIde } from './servers/server-ide'
+import { LOCAL_HOST } from './servers/host-router'
+import { MAIN_CLIENT_ID } from './servers/server-projects'
+import { TCP_STREAM_KIND, connectTcpStream, type TcpTarget } from './host/link/tcp-stream'
+import type { LinkStream } from './host/link/stream'
+import { openRemoteFolderInEditor } from './external-ide'
 import { registerUpdateHandlers } from './ipc/updates'
 import { createUpdates, type Updates } from './updates'
 import { probeRedirect } from './release-redirect'
@@ -69,6 +77,10 @@ export class AppRuntime {
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
   private socksProxyStarting = new Map<string, Promise<number>>()
+  /** Browser tabs of server projects: an authenticated HTTP proxy per server (plan step 9). */
+  private serverBrowser: ServerBrowserProxies | null = null
+  /** Open in IDE for server projects: DevTool's ssh config and a socket per server (plan step 9). */
+  private serverIde: ServerIde | null = null
   private startupWindowStates: PersistedWindowState[]
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
@@ -95,6 +107,7 @@ export class AppRuntime {
     this.servers = this.createServerHub()
     this.sshInstalls = this.createSshInstalls()
     this.updates = this.createUpdates()
+    this.createServerTools()
     this.registerEventForwarders()
     this.registerIpcHandlers()
     this.updates.start()
@@ -139,6 +152,53 @@ export class AppRuntime {
     this.host.onConfigChanged(() => servers.relayUrlChanged())
     servers.start()
     return servers
+  }
+
+  /** A connected `tcp` stream the server dials (protocol/SERVER.md §6.3). */
+  private openTcp(serverId: string, target: TcpTarget): Promise<LinkStream> {
+    return connectTcpStream(() => this.servers.openStream(serverId, TCP_STREAM_KIND, target))
+  }
+
+  /** The DevTool server a project lives on; null for this desktop's own. */
+  private serverOf(projectId: string): string | null {
+    const host = this.routing.index.hostOfProject(projectId)
+    return host && host !== LOCAL_HOST ? host : null
+  }
+
+  /** Browser tabs on server ports and Open in IDE over SSH, both through `tcp` streams. */
+  private createServerTools(): void {
+    const log = (message: string) => this.logDebug(message)
+    const serverBrowser = new ServerBrowserProxies({
+      openTcp: (serverId, target) => this.openTcp(serverId, target),
+      route: (projectId, port) => routeBrowserThroughServerProxy(projectId, port),
+      log
+    })
+    const serverIde = new ServerIde({
+      configDir: this.env.configDir,
+      // Tests and live checks point this at a scratch file, never the user's own.
+      userSshConfig: process.env.DEVTOOL_USER_SSH_CONFIG?.trim() || path.join(os.homedir(), '.ssh', 'config'),
+      home: os.homedir(),
+      platform: process.platform,
+      servers: () => this.servers.getState(),
+      call: (serverId, ch, args) => this.servers.call(serverId, MAIN_CLIENT_ID, ch, args),
+      openTcp: (serverId, target) => this.openTcp(serverId, target),
+      desktopName: () => normalizeMobileConfig(this.host.getConfig().mobile).desktopName?.trim() || os.hostname().replace(/\.local$/, ''),
+      execPath: process.execPath,
+      launch: (editor, alias, folder) => openRemoteFolderInEditor(editor, alias, folder),
+      log
+    })
+    this.serverBrowser = serverBrowser
+    this.serverIde = serverIde
+    answerServerProxyLogins(() => this.serverBrowser)
+    let paired = new Set(this.servers.getState().servers.map((s) => s.id))
+    this.servers.onStateChange((state) => {
+      const now = new Set(state.servers.map((s) => s.id))
+      for (const serverId of paired) if (!now.has(serverId)) void serverBrowser.forget(serverId)
+      paired = now
+      serverIde.serversChanged(state)
+    })
+    this.servers.onBeforeRemove((serverId) => serverIde.revoke(serverId))
+    void serverIde.start().catch((err: unknown) => log(`serverIde start error=${err instanceof Error ? err.message : String(err)}`))
   }
 
   /** The updater, for the app menu's "Check for Updates…". */
@@ -201,6 +261,7 @@ export class AppRuntime {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
       }
+      this.serverBrowser?.releaseClient(clientId)
       this.host.detachClient(clientId)
       this.servers?.detachClient(clientId)
       this.sshInstalls?.detachClient(clientId)
@@ -243,6 +304,7 @@ export class AppRuntime {
     this.updates?.close()
     this.sshInstalls?.stopAll()
     this.servers?.stop()
+    await Promise.all([this.serverBrowser?.stop(), this.serverIde?.stop()]).catch(() => {})
     await this.host.shutdown()
   }
 
@@ -351,7 +413,12 @@ export class AppRuntime {
       },
       getConfig: () => this.host.getConfig(),
       assertAllowedDirectory: resolveRoot,
-      isServerProject: (projectId) => this.routing.isServerProject(projectId)
+      isServerProject: (projectId) => this.routing.isServerProject(projectId),
+      openOnServer: async (editor, projectId, folder) => {
+        const serverId = this.serverOf(projectId)
+        if (!serverId || !this.serverIde) throw new Error('This project is not on a DevTool server')
+        await this.serverIde.open(editor, serverId, folder)
+      }
     })
 
     registerSocksProxyHandlers(ipc, {
@@ -360,6 +427,15 @@ export class AppRuntime {
       socksProxyStarting: this.socksProxyStarting,
       broadcast: (channel, ...args) => this.clients.broadcast(channel, ...args),
       log
+    })
+    registerServerBrowserHandlers(ipc, {
+      proxies: () => this.serverBrowser!,
+      serverOf: (projectId) => this.serverOf(projectId)
+    })
+    registerServerIdeHandlers(ipc, {
+      state: (serverId) => this.serverIde!.state(serverId),
+      setup: (serverId, consent) => this.serverIde!.setup(serverId, consent),
+      serverOf: (projectId) => this.serverOf(projectId)
     })
 
     registerUpdateHandlers(ipc, { updates: () => this.updates })

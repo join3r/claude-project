@@ -139,6 +139,8 @@ export class ServerHub {
   private pendingRevokes: Set<string>
   /** Servers the relay reported on since the socket came up; the others get re-watched after a handshake. */
   private readonly reported = new Set<string>()
+  /** Run before a server is removed, while its link may still be up (Open in IDE drops its key). */
+  private readonly removeHooks = new Set<(serverId: string) => Promise<unknown>>()
   private started = false
   private lastStateKey = ''
 
@@ -254,6 +256,12 @@ export class ServerHub {
   onEvent(listener: (event: ServerEvent) => void): () => void {
     this.eventListeners.add(listener)
     return () => { this.eventListeners.delete(listener) }
+  }
+
+  /** `hook` runs (awaited, errors logged) at the start of every {@link remove}. */
+  onBeforeRemove(hook: (serverId: string) => Promise<unknown>): () => void {
+    this.removeHooks.add(hook)
+    return () => { this.removeHooks.delete(hook) }
   }
 
   onStateChange(listener: (state: ServersState) => void): () => void {
@@ -550,6 +558,9 @@ export class ServerHub {
    */
   async remove(serverId: string, options: ServerRemoveOptions = {}): Promise<{ uninstalled: boolean }> {
     if (!this.store.has(serverId)) throw new Error('No such server')
+    for (const hook of [...this.removeHooks]) {
+      await hook(serverId).catch((err: unknown) => this.deps.log(`servers server=${serverId} before-remove hook failed: ${errorMessage(err)}`))
+    }
     let uninstalled = false
     if (options.uninstall) {
       try {

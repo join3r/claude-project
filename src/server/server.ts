@@ -11,6 +11,7 @@ import type { LinkCall, ServerLink } from './server-link'
 import { BUNDLE_STREAM_KIND, ServerUpdater } from './updater'
 import { exitForRestart } from './restart'
 import { diagnosticStreamKinds } from '../main/host/link/diagnostic-streams'
+import { TCP_STREAM_KIND, tcpStreamHandler } from '../main/host/link/tcp-stream'
 import { LinkChannel, LinkEvent } from '../main/host/link/link-channels'
 import { consoleError, consoleLog, ensureServerDirs, loadServerManifest, loginShell, passwdShell, serverPaths, logToFile, type ServerPaths } from './server-env'
 import { ControlServer, type ControlRequest } from './control'
@@ -133,7 +134,12 @@ export async function runDaemon({ bundleDir, relayUrl }: DaemonOptions): Promise
     }, 300)
   }
   link = createServerLink(server, {
-    streams: new Map([...diagnosticStreamKinds(), [BUNDLE_STREAM_KIND, updater.streamHandler()]]),
+    streams: new Map([
+      ...diagnosticStreamKinds(),
+      [BUNDLE_STREAM_KIND, updater.streamHandler()],
+      // Browser tabs on the server's ports and Open in IDE's ssh (plan step 9).
+      [TCP_STREAM_KIND, tcpStreamHandler()]
+    ]),
     linkCall: (call) => daemonLinkCall(call, { link: link!, updater, uninstall })
   })
   link.start()

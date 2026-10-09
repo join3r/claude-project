@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useGitStatus } from '../hooks/useGitStatus'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
-import { featureAvailable, revealAvailable } from '../../shared/project-features'
+import { featureAvailable, openInIdeAvailable, revealAvailable } from '../../shared/project-features'
 import { findStreamOfTask, needsTaskWorktree, taskWorkspace } from '../../shared/streams'
 import { joinWorkspaceDir } from '../../shared/workspace-path'
 import { openWorkspaceInIde } from '../openWorkspaceInIde'
@@ -16,7 +16,7 @@ import { createTab } from './newTaskTabs'
 import { isNotebookFile } from '../../shared/notebook'
 import { dirBasename } from '../../shared/paths'
 import { ensureTaskWorktree } from '../taskWorktrees'
-import { useHostPlatform } from '../hostPlatform'
+import { desktopPlatform, useHostPlatform } from '../hostPlatform'
 
 export default function FileBrowserPanel(): React.ReactElement | null {
   const {
@@ -52,10 +52,10 @@ export default function FileBrowserPanel(): React.ReactElement | null {
   const gitStatus = useGitStatus(effectiveDir, fileBrowserOpen && isLocalProject, selectedProjectId ?? undefined)
   const linkToAgent = useLinkToAgent(selectedProjectId ?? '', selectedTaskId ?? '')
   const platform = useHostPlatform(selectedProject?.host)
-  // A DevTool server's folder isn't on this computer: no Reveal in Finder, and no
-  // Open in IDE until it goes over SSH (plan step 9).
+  // A DevTool server's folder isn't on this computer: no Reveal in Finder; Open in
+  // IDE goes over SSH (plan step 9), except on a Windows desktop.
   const canReveal = revealAvailable(selectedProject)
-  const canOpenInIde = featureAvailable(selectedProject, 'local-folder')
+  const canOpenInIde = openInIdeAvailable(selectedProject, desktopPlatform())
 
   useEffect(() => {
     setFilterQuery('')
@@ -186,7 +186,7 @@ export default function FileBrowserPanel(): React.ReactElement | null {
                   filterQuery={filterQuery}
                   onRevealInTerminal={handleRevealInTerminal}
                   ideEditors={config?.externalEditors?.editors ?? []}
-                  onOpenInIde={canOpenInIde ? (editorId) => openWorkspaceInIde(editorId, effectiveDir, selectedProjectId ?? undefined) : undefined}
+                  onOpenInIde={canOpenInIde ? (editorId) => openWorkspaceInIde(editorId, effectiveDir, selectedProjectId ?? undefined, selectedProject?.host) : undefined}
                   canReveal={canReveal}
                   hostPlatform={platform}
                   onLinkToAgent={selectedTaskId

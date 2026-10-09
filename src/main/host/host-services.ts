@@ -45,6 +45,7 @@ import { registerGitHandlers } from '../ipc/git'
 import { registerNotebookHandlers } from '../ipc/notebooks'
 import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
+import { registerHostSshHandlers } from '../ipc/host-ssh'
 import { detectAgentClis } from '../agent-clis'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../../shared/archive'
@@ -220,6 +221,7 @@ export class HostServices {
   private readonly clients: ClientHub
   private readonly onTaskArchived: (taskId: string) => void
   private readonly remoteClients: boolean
+  /** A DevTool server's host (relay role `server`), not a desktop's own. */
   private readonly isServer: boolean
   private readonly phones: HostServicesOptions['phones']
 
@@ -961,6 +963,7 @@ export class HostServices {
       detect: () => detectAgentClis({ env: getShellEnv(), config: this.config }),
       refreshEnv: () => this.refreshLoginEnv()
     })
+    registerHostSshHandlers(ipc, { isServer: this.isServer })
   }
 
   /**
