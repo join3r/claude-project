@@ -39,7 +39,7 @@ import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared
 import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
-import type { ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult } from '../shared/servers'
+import type { ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult, SshInstallExit, SshInstallTarget } from '../shared/servers'
 import type { ProjectsSources, ProjectsUpdate, SourceSaveResult } from '../shared/projects-sources'
 import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shared/host-fs'
 import type { AiStatusEvent } from '../shared/ai-status'
@@ -581,6 +581,22 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, state: ServersState) => callback(state)
     ipcRenderer.on('servers-state-changed', handler)
     return () => ipcRenderer.removeListener('servers-state-changed', handler)
+  },
+  /** Add server › Install over SSH: runs the installer through the system ssh in a pty here. Main supplies the token. */
+  serversSshInstallStart: (target: SshInstallTarget, size: { cols: number; rows: number }): Promise<{ sessionId: string; target: string }> =>
+    ipcRenderer.invoke('servers-ssh-install-start', target, size),
+  serversSshInstallInput: (sessionId: string, data: string): void => ipcRenderer.send('servers-ssh-install-input', sessionId, data),
+  serversSshInstallResize: (sessionId: string, cols: number, rows: number): void => ipcRenderer.send('servers-ssh-install-resize', sessionId, cols, rows),
+  serversSshInstallStop: (sessionId: string): Promise<void> => ipcRenderer.invoke('servers-ssh-install-stop', sessionId),
+  onServersSshInstallData: (callback: (sessionId: string, data: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, sessionId: string, data: string) => callback(sessionId, data)
+    ipcRenderer.on('servers-ssh-install-data', handler)
+    return () => ipcRenderer.removeListener('servers-ssh-install-data', handler)
+  },
+  onServersSshInstallExit: (callback: (sessionId: string, exit: SshInstallExit) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, sessionId: string, exit: SshInstallExit) => callback(sessionId, exit)
+    ipcRenderer.on('servers-ssh-install-exit', handler)
+    return () => ipcRenderer.removeListener('servers-ssh-install-exit', handler)
   },
   // Updates (Settings → Updates). Main owns the state; every change is also broadcast.
   updatesGetStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-get-status'),

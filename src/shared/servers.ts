@@ -112,6 +112,24 @@ export interface ServerUpdateResult {
   reason: 'server-empty' | 'same' | 'desktop-newer' | 'server-newer' | 'no-bundle' | 'source' | 'unknown-age'
 }
 
+/** Add server › Install over SSH: where to run the installer (`-l user -p port -i keyFile host`). */
+export interface SshInstallTarget {
+  host: string
+  /** Empty: ssh's default (its config, else the local user). */
+  user?: string
+  port?: number
+  keyFile?: string
+}
+
+/** How an SSH install's ssh ended. */
+export interface SshInstallExit {
+  exitCode: number
+  /** `no-curl`: the server has no curl; `no-token`: no invite could be made; `stopped`: the user stopped it. */
+  reason: 'no-curl' | 'no-token' | 'stopped' | null
+  /** Whether the remote got as far as reading the token. */
+  tokenSent: boolean
+}
+
 export const RELAY_TOO_OLD_FOR_SERVERS = 'This relay is too old for servers'
 
 /** Where the install script and the bootstrap are served from; `DEVTOOL_INSTALL_URL` overrides it. */

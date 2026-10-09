@@ -8,6 +8,7 @@ import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
 import AddServerProject, { type AddServerProjectMode } from './servers/AddServerProject'
 import AddServerDialog from './servers/AddServerDialog'
+import { knownSshTargets } from './servers/sshTargets'
 import { useServersState } from '../serversState'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
@@ -1137,6 +1138,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       {addServerOpen && (
         <AddServerDialog
+          sshTargets={knownSshTargets(orderedProjects)}
           existingDirectories={serverDirectories}
           onAddProjects={(serverId, items) => {
             const created = addServerProjects(serverId, items)

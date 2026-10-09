@@ -4,12 +4,16 @@ import { useServersState } from '../../serversState'
 import { formatCountdown, useMobileState, useNow } from '../../hooks/useMobileState'
 import { HelperText, LinkBtn, Modal, PrimaryButton } from '../ui'
 import InstallStatus from './InstallStatus'
+import SshInstallPanel from './SshInstallPanel'
 import ServerRepoDiscovery from './ServerRepoDiscovery'
 import { STALL_MS, canStall, installProgress, pairedServerId, phaseText } from './addServerFlow'
+import type { KnownSshTarget } from './sshTargets'
 
-type View = 'command' | 'code'
+type View = 'command' | 'code' | 'ssh'
 
 export interface AddServerDialogProps {
+  /** SSH machines from the SSH projects, for Install over SSH. */
+  sshTargets: KnownSshTarget[]
   /** Folders that already are projects on a server. */
   existingDirectories: (serverId: string) => ReadonlySet<string>
   onAddProjects: (serverId: string, projects: Array<{ name: string; directory: string }>) => void
@@ -26,10 +30,10 @@ function errorText(err: unknown): string {
 /**
  * Add server: one command to paste on the server, then a live status line until
  * the new server is connected, then a short "Set up" step that adds its
- * repositories as projects. Also pairs with a code from `devtool-server pair`.
- * Closing it cancels the invite.
+ * repositories as projects. Also pairs with a code from `devtool-server pair`,
+ * or installs over ssh from here. Closing it cancels the invite.
  */
-export default function AddServerDialog({ existingDirectories, onAddProjects, onChooseFolder, onClose }: AddServerDialogProps): React.ReactElement {
+export default function AddServerDialog({ sshTargets, existingDirectories, onAddProjects, onChooseFolder, onClose }: AddServerDialogProps): React.ReactElement {
   const state = useServersState()
   const [mobile] = useMobileState()
   const [view, setView] = useState<View>('command')
@@ -38,6 +42,8 @@ export default function AddServerDialog({ existingDirectories, onAddProjects, on
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [added, setAdded] = useState(0)
+  /** Install over SSH stays on screen once connected, until "Set up" (the installer may still be printing). */
+  const [setupNow, setSetupNow] = useState(false)
   const now = useNow(true)
 
   const newInvite = (): void => {
@@ -74,6 +80,7 @@ export default function AddServerDialog({ existingDirectories, onAddProjects, on
   const connected = progress.phase === 'connected' && !!progress.server
   const text = phaseText(progress, { url: mobile?.relayUrl, error: state.relay.error })
   let detail: React.ReactNode = text.detail
+  if (progress.phase === 'waiting' && view === 'ssh') detail = 'Answer any ssh questions in the terminal above.'
   if (stalled) {
     detail = progress.phase === 'waiting'
       ? "Nothing has connected yet. If the command ran, check the server's terminal for details."
@@ -96,7 +103,7 @@ export default function AddServerDialog({ existingDirectories, onAddProjects, on
     [connectedId, existingDirectories]
   )
 
-  if (connected && progress.server) {
+  if (connected && progress.server && (view !== 'ssh' || setupNow)) {
     const server = progress.server
     return (
       <Modal title={`Set up ${server.name}`} onClose={onClose} width="w-[560px]" footer={<PrimaryButton onClick={onClose}>Done</PrimaryButton>}>
@@ -122,14 +129,19 @@ export default function AddServerDialog({ existingDirectories, onAddProjects, on
       <span className="mr-auto flex items-center gap-3">
         {view !== 'command' && <LinkBtn onClick={() => setView('command')}>Back to the command</LinkBtn>}
         {view !== 'code' && !paired && <LinkBtn onClick={() => setView('code')}>I have a code</LinkBtn>}
+        {view !== 'ssh' && !paired && <LinkBtn onClick={() => setView('ssh')}>Install over SSH…</LinkBtn>}
       </span>
-      <LinkBtn onClick={onClose}>Cancel</LinkBtn>
+      {connected && progress.server
+        ? <PrimaryButton onClick={() => setSetupNow(true)}>Set up {progress.server.name}</PrimaryButton>
+        : <LinkBtn onClick={onClose}>Cancel</LinkBtn>}
     </>
   )
 
   return (
     <Modal title="Add server" onClose={onClose} width="w-[560px]" footer={footer}>
-      {view === 'code' && !paired ? (
+      {view === 'ssh' ? (
+        <SshInstallPanel known={sshTargets} connected={connected} status={status} />
+      ) : view === 'code' && !paired ? (
         <CodeForm onPaired={(id) => { setServerId(id); setView('command') }} />
       ) : (
         <>

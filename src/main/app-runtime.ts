@@ -7,7 +7,11 @@ import { ServerHub } from './servers/server-hub'
 import { desktopBundle, desktopBundleDir } from './servers/desktop-bundle'
 import { DEFAULT_INSTALL_URL } from '../shared/servers'
 import { DesktopRouting } from './servers/desktop-routing'
-import { registerServerHandlers } from './ipc/servers'
+import { registerServerHandlers, registerSshInstallHandlers } from './ipc/servers'
+import { SshInstallSessions } from './servers/ssh-install'
+import * as nodePty from 'node-pty'
+import { getShellEnv } from './shell-env'
+import { sshExecutable } from './resolve-agent-command'
 import { normalizeMobileConfig } from '../shared/mobile'
 import type { HostEnv } from './host/host-env'
 import { createDesktopHostEnv, logDebug } from './desktop-host-env'
@@ -55,6 +59,8 @@ export class AppRuntime {
   private readonly env: HostEnv
   /** The DevTool servers this desktop paired with, on the relay socket the phones use. */
   private servers!: ServerHub
+  /** Add server › Install over SSH: the ssh ptys, one per dialog that started one. */
+  private sshInstalls!: SshInstallSessions
   /** Server projects and the router that sends a server project's calls to its server. */
   private readonly routing: DesktopRouting
   private readonly windowStates = new Map<number, PersistedWindowState>()
@@ -87,10 +93,32 @@ export class AppRuntime {
 
     await this.host.start()
     this.servers = this.createServerHub()
+    this.sshInstalls = this.createSshInstalls()
     this.updates = this.createUpdates()
     this.registerEventForwarders()
     this.registerIpcHandlers()
     this.updates.start()
+  }
+
+  private installUrl(): string {
+    return process.env.DEVTOOL_INSTALL_URL?.trim() || DEFAULT_INSTALL_URL
+  }
+
+  private createSshInstalls(): SshInstallSessions {
+    return new SshInstallSessions({
+      spawn: (file, args, options) => nodePty.spawn(file, args, options),
+      send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
+      token: () => {
+        // The invite on screen, unless it is about to lapse or a server already used it.
+        const invite = this.servers.getState().invite
+        if (invite?.status === 'waiting' && invite.expiresAt - Date.now() > 60_000) return invite.token
+        return this.servers.createInvite().token
+      },
+      installUrl: () => this.installUrl(),
+      ssh: () => sshExecutable(),
+      env: () => getShellEnv(),
+      log: (message) => this.logDebug(message)
+    })
   }
 
   private createServerHub(): ServerHub {
@@ -102,7 +130,7 @@ export class AppRuntime {
       relayUrl: () => mobile().relayUrl,
       build: { version: app.getVersion(), commit: '', builtAt: '', bundleSha: '' },
       bundle: desktopBundle(desktopBundleDir({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() })),
-      installUrl: () => process.env.DEVTOOL_INSTALL_URL?.trim() || DEFAULT_INSTALL_URL,
+      installUrl: () => this.installUrl(),
       desktopName: () => mobile().desktopName?.trim() || os.hostname().replace(/\.local$/, ''),
       log: (message) => this.logDebug(message)
     })
@@ -175,6 +203,7 @@ export class AppRuntime {
       }
       this.host.detachClient(clientId)
       this.servers?.detachClient(clientId)
+      this.sshInstalls?.detachClient(clientId)
     })
   }
 
@@ -212,6 +241,7 @@ export class AppRuntime {
   async shutdown(): Promise<void> {
     this.persistWindowSession()
     this.updates?.close()
+    this.sshInstalls?.stopAll()
     this.servers?.stop()
     await this.host.shutdown()
   }
@@ -334,6 +364,7 @@ export class AppRuntime {
 
     registerUpdateHandlers(ipc, { updates: () => this.updates })
     registerServerHandlers(ipc, { servers: () => this.servers })
+    registerSshInstallHandlers(ipc, { sshInstalls: () => this.sshInstalls })
   }
 
   /** This desktop's projects plus every server's, as the windows list them. */

@@ -7,6 +7,11 @@ import { resetServersStateForTests } from '../src/renderer/serversState'
 
 void React
 
+// The SSH panel brings xterm; here it only shows the shared status block.
+vi.mock('../src/renderer/components/servers/SshInstallPanel', () => ({
+  default: ({ status }: { status: React.ReactNode }) => <div data-testid="ssh-panel">{status}</div>
+}))
+
 import AddServerDialog from '../src/renderer/components/servers/AddServerDialog'
 import AddServerProject from '../src/renderer/components/servers/AddServerProject'
 
@@ -45,6 +50,7 @@ const onClose = vi.fn()
 function mount() {
   return render(
     <AddServerDialog
+      sshTargets={[]}
       existingDirectories={() => new Set()}
       onAddProjects={onAddProjects}
       onChooseFolder={onChooseFolder}
@@ -196,6 +202,19 @@ describe('Add server dialog', () => {
     await flush()
     expect(title()).toBe('Connecting to box…')
     push(waiting({ servers: [server({ state: 'online' })] }))
+    expect(screen.getByRole('heading', { name: 'Set up box' })).toBeTruthy()
+  })
+
+  it('Install over SSH keeps the status in its own view until the user moves on', async () => {
+    mount()
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: 'Install over SSH…' }))
+    expect(screen.getByTestId('ssh-panel')).toBeTruthy()
+    expect(screen.getByText('Answer any ssh questions in the terminal above.')).toBeTruthy()
+    push(waiting({ invite: { ...waiting().invite!, status: 'paired', serverId: ID }, servers: [server({ state: 'online' })] }))
+    // Connected, but the installer may still be printing: stay until "Set up".
+    expect(screen.getByTestId('ssh-panel')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Set up box' }))
     expect(screen.getByRole('heading', { name: 'Set up box' })).toBeTruthy()
   })
 })

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ServerStatus, ServersState } from '../src/shared/servers'
 import { canStall, installProgress, pairedServerId, phaseText } from '../src/renderer/components/servers/addServerFlow'
+import { formatSshTarget, knownSshTargets, parseSshTarget } from '../src/renderer/components/servers/sshTargets'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 const ID = 'a'.repeat(32)
 const NOW = 1_000_000
@@ -73,5 +75,36 @@ describe('Add server progress', () => {
   it('only the quiet phases can stall', () => {
     expect(['waiting', 'connecting', 'starting'].every(p => canStall(p as never))).toBe(true)
     expect(['installing', 'connected', 'expired', 'relay-offline'].some(p => canStall(p as never))).toBe(false)
+  })
+})
+
+describe('SSH targets', () => {
+  it('reads user@host[:port], brackets, ssh:// and bare hosts', () => {
+    expect(parseSshTarget('deploy@dev.example.com')).toEqual({ target: { host: 'dev.example.com', user: 'deploy' } })
+    expect(parseSshTarget(' ssh://me@box:2222/ ')).toEqual({ target: { host: 'box', user: 'me', port: 2222 } })
+    expect(parseSshTarget('devtool-srv-test@orb:22')).toEqual({ target: { host: 'orb', user: 'devtool-srv-test' } })
+    expect(parseSshTarget('[fe80::1]:2200')).toEqual({ target: { host: 'fe80::1', port: 2200 } })
+    expect(parseSshTarget('fe80::1')).toEqual({ target: { host: 'fe80::1' } })
+    expect(parseSshTarget('me@corp.example@box')).toEqual({ target: { host: 'box', user: 'me@corp.example' } })
+    expect(parseSshTarget('')).toHaveProperty('error')
+    expect(parseSshTarget('box:abc')).toHaveProperty('error')
+    expect(parseSshTarget('-oProxyCommand=x')).toHaveProperty('error')
+    expect(parseSshTarget('me@box:70000')).toHaveProperty('error')
+    expect(parseSshTarget('me box')).toHaveProperty('error')
+  })
+
+  it('lists the SSH projects\' machines once each, with their keys', () => {
+    const ssh = (host: string, username: string, port = 22, keyFile?: string) => fixtureProject({ id: `${host}-${username}-${port}`, ssh: { host, username, port, keyFile, remoteDir: '/srv' } })
+    const known = knownSshTargets([
+      ssh('dev.example.com', 'deploy', 22, '~/.ssh/deploy'),
+      fixtureProject({ id: 'local' }),
+      ssh('dev.example.com', 'deploy'),
+      ssh('box', 'me', 2222)
+    ])
+    expect(known).toEqual([
+      { label: 'deploy@dev.example.com', target: { host: 'dev.example.com', user: 'deploy', keyFile: '~/.ssh/deploy' } },
+      { label: 'me@box:2222', target: { host: 'box', user: 'me', port: 2222 } }
+    ])
+    expect(formatSshTarget({ host: 'fe80::1', port: 2200 })).toBe('[fe80::1]:2200')
   })
 })

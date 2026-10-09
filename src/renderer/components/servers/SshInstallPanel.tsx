@@ -1,0 +1,243 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
+import type { SshInstallExit, SshInstallTarget } from '../../../shared/servers'
+import { useApp } from '../../context/AppContext'
+import { buildXtermTheme } from '../terminalThemes'
+import { disarmXtermDocMouseListeners } from '../xtermDisposal'
+import { Field, HelperText, LinkBtn, PrimaryButton, SetBlock } from '../ui'
+import { formatSshTarget, parseSshTarget, type KnownSshTarget } from './sshTargets'
+
+function errorText(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  return raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '')
+}
+
+/** What to say once ssh has ended; null when the status line says enough. */
+export function sshExitNote(exit: SshInstallExit, target: string, connected: boolean): string | null {
+  if (connected) return null
+  if (exit.reason === 'stopped') return 'Stopped.'
+  if (exit.reason === 'no-curl') return `curl is missing on ${target}. Install it there (for example sudo apt-get install -y curl), then try again.`
+  if (exit.reason === 'no-token') return 'DevTool could not make an install command. Check the relay in Settings, Relay.'
+  if (!exit.tokenSent) return exit.exitCode === 255 ? `ssh could not connect to ${target}. The terminal shows why.` : `ssh ended (exit code ${exit.exitCode}) before the installer started.`
+  if (exit.exitCode !== 0) return 'The installer stopped with an error. The terminal shows why.'
+  return null
+}
+
+interface Props {
+  known: KnownSshTarget[]
+  /** The server connected: the install is done. */
+  connected: boolean
+  /** Shown under the terminal while ssh runs or after: the dialog's status block. */
+  status: React.ReactNode
+}
+
+/**
+ * Add server › Install over SSH: `user@host[:port]` and an optional key, then
+ * the system ssh in a small terminal, where host key questions, passwords and
+ * 2FA codes get answered as usual. Main runs ssh and slips the install token in
+ * once the server is ready for it; it never shows up here or on a command line.
+ */
+export default function SshInstallPanel({ known, connected, status }: Props): React.ReactElement {
+  const { config, effectiveTerminalTheme } = useApp()
+  const first = known[0]
+  const [text, setText] = useState(first?.label ?? '')
+  const [keyFile, setKeyFile] = useState(first?.target.keyFile ?? '')
+  const [error, setError] = useState<string | null>(null)
+  /** Asked to start: the terminal mounts first so its size is known. */
+  const [request, setRequest] = useState<{ target: SshInstallTarget } | null>(null)
+  const [session, setSession] = useState<{ id: string; target: string } | null>(null)
+  const [ended, setEnded] = useState<{ exit: SshInstallExit; target: string } | null>(null)
+  const [shown, setShown] = useState(false)
+  const hostRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null)
+  const sessionRef = useRef<string | null>(null)
+  const targetRef = useRef('')
+
+  const scheme = config?.terminalColorScheme ?? 'auto'
+  const theme = useMemo(() => buildXtermTheme(effectiveTerminalTheme, scheme), [effectiveTerminalTheme, scheme])
+  // The terminal is made once; these are what it starts with.
+  const initial = useRef({ theme, fontFamily: config?.fontFamily })
+
+  // Output and the end of ssh, for this panel's session only.
+  useEffect(() => {
+    const offData = window.api.onServersSshInstallData((id, data) => {
+      if (id === sessionRef.current) termRef.current?.term.write(data)
+    })
+    const offExit = window.api.onServersSshInstallExit((id, exit) => {
+      if (id !== sessionRef.current) return
+      sessionRef.current = null
+      setSession(null)
+      setEnded({ exit, target: targetRef.current })
+    })
+    return () => { offData(); offExit() }
+  }, [])
+
+  // The terminal, made the first time an install starts.
+  useEffect(() => {
+    if (!shown || termRef.current || !hostRef.current) return
+    const term = new Terminal({
+      fontFamily: initial.current.fontFamily,
+      fontSize: 12,
+      theme: initial.current.theme,
+      cursorBlink: true,
+      scrollback: 2000,
+      convertEol: false
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(hostRef.current)
+    try { fit.fit() } catch { /* not laid out yet */ }
+    term.onData((data) => {
+      if (sessionRef.current) window.api.serversSshInstallInput(sessionRef.current, data)
+    })
+    termRef.current = { term, fit }
+    const observer = new ResizeObserver(() => {
+      try { fit.fit() } catch { return }
+      if (sessionRef.current) window.api.serversSshInstallResize(sessionRef.current, term.cols, term.rows)
+    })
+    observer.observe(hostRef.current)
+    return () => {
+      observer.disconnect()
+    }
+  }, [shown])
+
+  // Tear down: stop ssh and drop the terminal.
+  useEffect(() => () => {
+    if (sessionRef.current) void window.api.serversSshInstallStop(sessionRef.current).catch(() => {})
+    sessionRef.current = null
+    const current = termRef.current
+    termRef.current = null
+    if (current) {
+      disarmXtermDocMouseListeners()
+      current.term.dispose()
+    }
+  }, [])
+
+  // Follow the theme.
+  useEffect(() => {
+    if (termRef.current) termRef.current.term.options.theme = theme
+  }, [theme])
+
+  // Start once the terminal is there.
+  useEffect(() => {
+    const current = termRef.current
+    if (!request || !current) return
+    const { target } = request
+    current.term.reset()
+    current.term.write(`\x1b[2m$ ssh ${formatSshTarget(target)}\x1b[0m\r\n`)
+    let cancelled = false
+    window.api.serversSshInstallStart(target, { cols: current.term.cols, rows: current.term.rows })
+      .then((started) => {
+        if (cancelled) { void window.api.serversSshInstallStop(started.sessionId).catch(() => {}); return }
+        sessionRef.current = started.sessionId
+        targetRef.current = started.target
+        setSession({ id: started.sessionId, target: started.target })
+        current.term.focus()
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(errorText(err))
+      })
+    return () => { cancelled = true }
+  }, [request])
+
+  const start = (): void => {
+    const parsed = parseSshTarget(text)
+    if ('error' in parsed) { setError(parsed.error); return }
+    setError(null)
+    setEnded(null)
+    setShown(true)
+    setRequest({ target: { ...parsed.target, ...(keyFile.trim() ? { keyFile: keyFile.trim() } : {}) } })
+  }
+
+  const stop = (): void => {
+    if (sessionRef.current) void window.api.serversSshInstallStop(sessionRef.current).catch(() => {})
+  }
+
+  const pickKey = async (): Promise<void> => {
+    const picked = await window.api.pickFile('Select SSH key')
+    if (picked) setKeyFile(picked)
+  }
+
+  const running = !!session
+  const note = ended ? sshExitNote(ended.exit, ended.target, connected) : null
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="ssh-install">
+      <div className="text-base text-text">Install on a machine this computer can reach with ssh.</div>
+      <div className="grid grid-cols-[1fr_minmax(0,0.8fr)] gap-3">
+        <SetBlock label="Server">
+          <Field
+            value={text}
+            onChange={(e) => { setText(e.target.value); setError(null) }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !running) start() }}
+            placeholder="user@host or user@host:port"
+            spellCheck={false}
+            autoFocus
+            disabled={running}
+            aria-label="SSH server"
+          />
+        </SetBlock>
+        <SetBlock label="Key file (optional)">
+          <div className="flex gap-2">
+            <Field
+              className="flex-1 min-w-0"
+              value={keyFile}
+              onChange={(e) => setKeyFile(e.target.value)}
+              placeholder="~/.ssh/id_ed25519"
+              spellCheck={false}
+              disabled={running}
+              aria-label="Key file"
+            />
+            <button
+              type="button"
+              onClick={() => { void pickKey() }}
+              disabled={running}
+              title="Choose a key file"
+              className="h-(--ctl-h) px-2.5 rounded-md bg-field text-text-muted hover:text-text border border-border cursor-pointer text-base disabled:opacity-50"
+            >…</button>
+          </div>
+        </SetBlock>
+      </div>
+      {known.length > 1 && !running && (
+        <div className="flex flex-wrap items-center gap-1.5 -mt-1">
+          <span className="text-sm text-text-muted">From your SSH projects:</span>
+          {known.map(item => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => { setText(item.label); setKeyFile(item.target.keyFile ?? ''); setError(null) }}
+              className={`px-2 h-5 rounded-sm border text-xs font-mono cursor-pointer transition-colors duration-(--motion-fast) ${item.label === text ? 'border-border-focus bg-sel text-text' : 'border-border bg-field text-text-muted hover:text-text'}`}
+            >{item.label}</button>
+          ))}
+        </div>
+      )}
+      {error && <HelperText><span className="text-danger">{error}</span></HelperText>}
+      <div className="flex items-center gap-3">
+        {running ? (
+          <>
+            <span className="text-sm text-text-muted mr-auto">Answer ssh's questions in the terminal. DevTool fills in the install token.</span>
+            <LinkBtn onClick={stop}>Stop</LinkBtn>
+          </>
+        ) : (
+          <>
+            <span className="text-sm text-text-muted mr-auto">Uses this computer's ssh and its config, keys and agent.</span>
+            {!connected && <PrimaryButton onClick={start} disabled={!text.trim()}>{ended ? 'Try again' : 'Install'}</PrimaryButton>}
+          </>
+        )}
+      </div>
+      {shown && (
+        <div
+          className="h-[200px] rounded-md border border-border overflow-hidden px-2 py-1.5"
+          style={{ background: theme.background }}
+          data-testid="ssh-install-terminal"
+        >
+          <div ref={hostRef} className="w-full h-full" />
+        </div>
+      )}
+      {note && <HelperText><span className={ended?.exit.reason === 'stopped' ? '' : 'text-danger'}>{note}</span></HelperText>}
+      {shown && status}
+    </div>
+  )
+}
