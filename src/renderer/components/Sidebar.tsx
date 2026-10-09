@@ -8,6 +8,7 @@ import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
 import AddServerProject, { type AddServerProjectMode } from './servers/AddServerProject'
 import AddServerDialog from './servers/AddServerDialog'
+import ServerNotices from './servers/ServerNotices'
 import { knownSshTargets } from './servers/sshTargets'
 import { useServersState } from '../serversState'
 import ProjectSettings from './ProjectSettings'
@@ -160,6 +161,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     setSnoozeSubmenu(false)
   }, [])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** The Settings page to open on (a notice's "Update" opens Updates). */
+  const [settingsTab, setSettingsTab] = useState<string | null>(null)
   const [addServerOpen, setAddServerOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
@@ -1101,11 +1104,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         onNewStream={handleNewStream}
       />
 
+      <ServerNotices onOpenSettings={(tab) => { setSettingsTab(tab); setSettingsOpen(true) }} />
+
       <div className="px-2 py-1 border-t border-hair [-webkit-app-region:no-drag]">
-        <button className={headerIconCls} onClick={() => setSettingsOpen(true)} title="Settings"><SettingsIcon size={14} /></button>
+        <button className={headerIconCls} onClick={() => { setSettingsTab(null); setSettingsOpen(true) }} title="Settings"><SettingsIcon size={14} /></button>
       </div>
 
-      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <Settings key={settingsTab ?? 'default'} initialTab={settingsTab ?? undefined} onClose={() => { setSettingsOpen(false); setSettingsTab(null) }} />}
 
       {remoteModalOpen && (
         <AddRemoteProject

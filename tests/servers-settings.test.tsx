@@ -7,6 +7,7 @@ import type { MobileState } from '../src/shared/mobile'
 import { resetServersStateForTests } from '../src/renderer/serversState'
 import ServersSettings, { serverStateText } from '../src/renderer/components/settings/ServersSettings'
 import RelaySettings from '../src/renderer/components/settings/RelaySettings'
+import ServerNotices, { serverNotices } from '../src/renderer/components/servers/ServerNotices'
 import { paletteEvents } from '../src/renderer/palette/paletteEvents'
 
 void React
@@ -233,5 +234,26 @@ describe('Settings › Relay', () => {
     fireEvent.keyDown(field, { key: 'Enter' })
     expect(screen.getByText('Use a ws:// or wss:// address.')).toBeTruthy()
     expect(api.mobileSetRelayUrl).not.toHaveBeenCalled()
+  })
+})
+
+describe('Server notices', () => {
+  it('says when an update waits or the versions do not match, and acts on it', async () => {
+    const ready = server({ updateReady: { version: '0.6.1', commit: 'def', builtAt: '' } })
+    const newer = server({ id: id('b'), name: 'new box', state: 'incompatible', update: 'desktop' })
+    expect(serverNotices({ relay: { kind: 'online' }, servers: [ready, newer, server({ id: id('c') })], invite: null }).map(n => n.text))
+      .toEqual(['box has an update ready', 'new box needs a newer DevTool'])
+
+    const openSettings = vi.fn()
+    render(<ServerNotices onOpenSettings={openSettings} />)
+    servers([ready, newer])
+    const notices = screen.getByTestId('server-notices')
+    fireEvent.click(within(notices).getByRole('button', { name: 'Restart now' }))
+    await flush()
+    expect(api.serversRestart).toHaveBeenCalledWith(id('a'))
+    fireEvent.click(within(notices).getByRole('button', { name: 'Update' }))
+    expect(openSettings).toHaveBeenCalledWith('updates')
+    fireEvent.click(within(notices).getAllByRole('button', { name: 'Not now' })[0])
+    expect(screen.getByTestId('server-notices').textContent).not.toContain('update ready')
   })
 })
