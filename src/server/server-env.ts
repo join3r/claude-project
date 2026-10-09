@@ -237,5 +237,12 @@ export function passwdShell(): string | null {
 
 /** What a server says about its machine in its handshake and pairing hello. */
 export function serverHostInfo(): ServerHostInfo {
-  return { os: process.platform, arch: process.arch, hostname: os.hostname().replace(/\.local$/, ''), node: process.versions.node }
+  const info: ServerHostInfo = { os: process.platform, arch: process.arch, hostname: os.hostname().replace(/\.local$/, ''), node: process.versions.node }
+  // The user, so a desktop can tell this server from its SSH project on the same machine (Move to a DevTool server).
+  try {
+    info.user = os.userInfo().username
+  } catch {
+    // No passwd entry (a container's random uid): the host name alone has to do.
+  }
+  return info
 }

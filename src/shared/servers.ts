@@ -28,6 +28,8 @@ export interface ServerHostInfo {
   hostname: string
   /** The Node version the server runs on. */
   node: string
+  /** The user the server runs as; absent from servers older than step 11. */
+  user?: string
 }
 
 /** A newer bundle the server holds but hasn't switched to, because a tab is working. */
@@ -128,6 +130,41 @@ export interface SshInstallExit {
   reason: 'no-curl' | 'no-token' | 'stopped' | null
   /** Whether the remote got as far as reading the token. */
   tokenSent: boolean
+  /** The installer's own last `devtool-server install: …` line, when it refused or failed (musl, root, disk). */
+  message?: string
+}
+
+/** Install over SSH for an SSH project: main takes the target and its connection from the project. */
+export interface SshInstallOptions {
+  projectId?: string
+}
+
+/**
+ * What an SSH project's machine says about itself (Move to a DevTool server):
+ * its host name and user, and the DevTool server installed in the default home there, if any.
+ */
+export interface SshHostProbe {
+  hostname: string
+  user: string
+  /** `~/.devtool-server` exists there. */
+  installed: boolean
+  /** The id `devtool-server status` printed: the server runs. */
+  serverId?: string
+  /** The relay its `data/server.json` names. */
+  relayUrl?: string
+}
+
+/** `servers-ssh-probe`'s answer: the probe, or why ssh could not run it. */
+export type SshHostProbeResult = { ok: true; probe: SshHostProbe } | { ok: false; error: string }
+
+/** `servers-move-project`'s answer. */
+export interface ProjectMoveResult {
+  projectId: string
+  serverId: string
+  /** The project's folder on the server. */
+  directory: string
+  /** Its tabs that were running here, now restarting on the server. */
+  restarted: string[]
 }
 
 export const RELAY_TOO_OLD_FOR_SERVERS = 'This relay is too old for servers'

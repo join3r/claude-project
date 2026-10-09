@@ -165,6 +165,24 @@ export class ServerProjects {
   private view: Map<string, Project[]> | null = null
   /** The drops last logged, per server. */
   private readonly loggedDrops = new Map<string, string>()
+  /**
+   * Projects moving onto a server from this desktop (Move to a DevTool server),
+   * by id, with their server. While this desktop still has its own copy, the
+   * server's stays out of every window and out of routing (no collision drop),
+   * yet counts as foreign, so the local store keeps its place in the order, its
+   * pins and its tags when the local copy goes.
+   */
+  private readonly incoming = new Map<string, string>()
+  /** The server copies of incoming projects, sanitized; part of {@link sanitized}. */
+  private handover: Project[] = []
+  /**
+   * A moved project just showed up in a server's view without the server's
+   * revision changing, so a window's save computed before it saw the project
+   * would pass the compare-and-swap and drop it. Until this write bumps the
+   * revision, window saves to that server wait; after it, such a save is stale
+   * and the window replays onto the slice that has the project.
+   */
+  private readonly barriers = new Map<string, Promise<void>>()
 
   constructor(private readonly deps: ServerProjectsDeps) {
     this.loadCaches()
@@ -184,12 +202,13 @@ export class ServerProjects {
     return sources
   }
 
-  /** Every server project there is (with `host`), the ones being saved included. */
+  /** Every server project there is (with `host`), the ones being saved and moved here included. */
   foreignProjects(): Project[] {
     const byId = new Map<string, Project>()
     for (const projects of this.sanitized().values()) {
       for (const project of projects) byId.set(project.id, project)
     }
+    for (const project of this.handover) if (!byId.has(project.id)) byId.set(project.id, project)
     const local = new Set((this.deps.localProjects?.() ?? []).map(p => p.id))
     for (const [serverId, projects] of this.pending) {
       for (const project of withHost(projects, serverId)) {
@@ -232,6 +251,8 @@ export class ServerProjects {
    * the server has it on a refusal; an offline server answers `offline` at once.
    */
   async save(serverId: string, clientId: string, payload: { baseRevision: number; data: ProjectsData }, focused = false): Promise<SourceSaveResult> {
+    const barrier = this.barriers.get(serverId)
+    if (barrier) await barrier
     const hub = this.hub
     if (!hub || !this.online.has(serverId)) return this.offlineRefusal(serverId)
     // A slice holds this server's projects only: a local project (no `host`) or
@@ -258,6 +279,66 @@ export class ServerProjects {
       this.pending.delete(serverId)
       this.notify()
     }
+  }
+
+  /**
+   * `projectId` is moving from this desktop to `serverId`: until {@link endIncoming},
+   * the server's copy is hidden while this desktop still has the project (see `incoming`).
+   */
+  reserveIncoming(serverId: string, projectId: string): void {
+    this.incoming.set(projectId, serverId)
+    this.view = null
+  }
+
+  /** The move is over (done, or rolled back): the project is an ordinary one of whichever side has it. */
+  endIncoming(projectId: string): void {
+    const serverId = this.incoming.get(projectId)
+    if (!serverId || !this.incoming.delete(projectId)) return
+    this.localChanged()
+    this.notify()
+    const revealed = (this.sanitized().get(serverId) ?? []).some(p => p.id === projectId)
+    if (!revealed || !this.online.has(serverId)) return
+    const barrier = this.writeProjects(serverId, {})
+      .catch((err) => this.deps.log(`serverProjects revealBump server=${serverId} error=${err instanceof Error ? err.message : String(err)}`))
+      .finally(() => { if (this.barriers.get(serverId) === barrier) this.barriers.delete(serverId) })
+    this.barriers.set(serverId, barrier)
+  }
+
+  /**
+   * Adds projects to a server's own data (whole, replacing any with the same id)
+   * and removes others, with the server's compare-and-swap: a refusal (another
+   * desktop or a phone saved first) is retried on the data the server answers
+   * with. Resolves once the server has the change; throws when it is offline or
+   * keeps refusing, and then nothing changed there.
+   */
+  async writeProjects(serverId: string, change: { add?: Project[]; remove?: string[] }, attempts = 5): Promise<void> {
+    const hub = this.hub
+    if (!hub || !this.online.has(serverId)) throw new LinkError(LinkErrorCode.ServerOffline, 'The server is offline')
+    const add = withoutHost(change.add ?? [])
+    const drop = new Set([...(change.remove ?? []), ...add.map(p => p.id)])
+    if (!this.entries.has(serverId)) {
+      const sources = await hub.call(serverId, MAIN_CLIENT_ID, 'load-projects') as ProjectsSources
+      const own = sources?.[LOCAL_SOURCE]
+      if (!own || typeof own.revision !== 'number' || !own.data) throw new Error('The server sent no projects')
+      this.update(serverId, own.revision, own.data)
+    }
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const entry = this.entries.get(serverId)!
+      const projects = [...entry.data.projects.filter(p => !drop.has(p?.id)), ...add]
+      const result = await hub.call(serverId, MAIN_CLIENT_ID, 'save-projects-slice', [{
+        baseRevision: entry.revision,
+        data: { projects }
+      }]) as ProjectsSaveResult
+      if (result.ok) {
+        // Its `projects-updated` usually came first (one link, in order); else this is the news.
+        if ((this.entries.get(serverId)?.revision ?? -Infinity) < result.revision) {
+          this.update(serverId, result.revision, { ...entry.data, projects })
+        }
+        return
+      }
+      this.update(serverId, result.revision, result.data)
+    }
+    throw new Error('The server kept refusing the change. Try again.')
   }
 
   /** A server pushed `projects-updated` (its own source, `local` there). */
@@ -359,14 +440,23 @@ export class ServerProjects {
    */
   private sanitized(): Map<string, Project[]> {
     if (this.view) return this.view
-    const claimed = claimedBy(this.deps.localProjects?.() ?? [])
+    const local = this.deps.localProjects?.() ?? []
+    const localIds = new Set(local.map(p => p.id))
+    const claimed = claimedBy(local)
     const known = this.order.filter(id => this.entries.has(id))
     const rest = [...this.entries.keys()].filter(id => !known.includes(id)).sort()
     const view = new Map<string, Project[]>()
+    const handover: Project[] = []
     for (const serverId of [...known, ...rest]) {
       const dropped: string[] = []
       const projects: Project[] = []
       for (const raw of this.entries.get(serverId)!.data.projects) {
+        if (raw && isId(raw.id) && this.incoming.get(raw.id) === serverId && localIds.has(raw.id)) {
+          // Moving here, and this desktop still has it: not a collision, just not yet.
+          const copy = sanitizeProject(raw, serverId, claimedBy([]), [])
+          if (copy) handover.push(copy)
+          continue
+        }
         const project = sanitizeProject(raw, serverId, claimed, dropped)
         if (project) projects.push(project)
       }
@@ -378,6 +468,7 @@ export class ServerProjects {
       }
     }
     this.view = view
+    this.handover = handover
     return view
   }
 

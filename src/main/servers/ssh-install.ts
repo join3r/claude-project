@@ -55,11 +55,16 @@ export function remoteInstallScript(installUrl: string, nonce: string): string {
   return `sh -c '${script}'`
 }
 
-/** ssh's arguments: a forced tty (the prompts and the hidden read need one), then the target and the script. */
-export function buildSshInstallArgs(target: SshInstallTarget, script: string): string[] {
+/**
+ * ssh's arguments: a forced tty (the prompts and the hidden read need one), then
+ * the target and the script. `controlPath`: an SSH project's ControlMaster, used
+ * when it is up (ssh connects on its own when it isn't), so nothing asks again.
+ */
+export function buildSshInstallArgs(target: SshInstallTarget, script: string, controlPath?: string): string[] {
   const problem = sshTargetProblem(target)
   if (problem) throw new Error(problem)
   const args = ['-tt', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4']
+  if (controlPath) args.push('-S', controlPath, '-o', 'ControlMaster=no')
   if (target.port !== undefined && target.port !== 22) args.push('-p', String(target.port))
   if (target.keyFile) args.push('-i', expandHome(target.keyFile))
   if (target.user) args.push('-l', target.user)
@@ -114,6 +119,45 @@ interface Session {
   token: string | null
   reason: SshInstallExit['reason']
   stopped: boolean
+  /** The installer's last refusal or failure line. */
+  installer: InstallerMessages
+}
+
+/** The prefix of every line the installer and its bootstrap fail with. */
+const INSTALLER_PREFIX = 'devtool-server install: '
+
+/**
+ * Watches terminal output for the installer's own error lines (`devtool-server
+ * install: <why>`), so the dialog can show why it stopped: a musl system, root,
+ * a full disk. Colors and carriage returns don't count.
+ */
+export class InstallerMessages {
+  private partial = ''
+  private last: string | null = null
+
+  push(text: string): void {
+    const lines = (this.partial + text).split('\n')
+    this.partial = lines.pop() ?? ''
+    if (this.partial.length > 4096) this.partial = this.partial.slice(-4096)
+    for (const line of lines) this.take(line)
+  }
+
+  /** The last error line, the unfinished one included. */
+  message(): string | null {
+    if (this.partial) {
+      this.take(this.partial)
+      this.partial = ''
+    }
+    return this.last
+  }
+
+  private take(raw: string): void {
+    const line = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '').trim()
+    const at = line.indexOf(INSTALLER_PREFIX)
+    if (at < 0) return
+    const message = line.slice(at + INSTALLER_PREFIX.length).trim()
+    if (message) this.last = message.slice(0, 500)
+  }
 }
 
 /** The running SSH installs, one pty each, owned by the window that started it. */
@@ -123,9 +167,9 @@ export class SshInstallSessions {
 
   constructor(private readonly deps: SshInstallDeps) {}
 
-  start(clientId: string, target: SshInstallTarget, size: { cols: number; rows: number }): { sessionId: string; target: string } {
+  start(clientId: string, target: SshInstallTarget, size: { cols: number; rows: number }, options: { controlPath?: string } = {}): { sessionId: string; target: string } {
     const nonce = this.deps.nonce?.() ?? randomBytes(8).toString('hex')
-    const args = buildSshInstallArgs(target, remoteInstallScript(this.deps.installUrl(), nonce))
+    const args = buildSshInstallArgs(target, remoteInstallScript(this.deps.installUrl(), nonce), options.controlPath)
     const id = `ssh-install-${this.nextId++}`
     const pty = this.deps.spawn(this.deps.ssh(), args, {
       name: 'xterm-256color',
@@ -141,6 +185,7 @@ export class SshInstallSessions {
       token: null,
       reason: null,
       stopped: false,
+      installer: new InstallerMessages(),
       filter: new MarkerFilter([`${SSH_INSTALL_MARKERS.ready}-${nonce}`, `${SSH_INSTALL_MARKERS.noCurl}-${nonce}`])
     }
     this.sessions.set(id, session)
@@ -150,8 +195,17 @@ export class SshInstallSessions {
       if (this.sessions.get(id) !== session) return
       this.sessions.delete(id)
       const tail = session.filter.flush()
-      if (tail) this.deps.send(clientId, SSH_INSTALL_DATA, id, this.redact(session, tail))
-      const exit: SshInstallExit = { exitCode, reason: session.stopped ? 'stopped' : session.reason, tokenSent: session.token !== null }
+      if (tail) {
+        session.installer.push(tail)
+        this.deps.send(clientId, SSH_INSTALL_DATA, id, this.redact(session, tail))
+      }
+      const message = exitCode !== 0 && session.token !== null ? session.installer.message() : null
+      const exit: SshInstallExit = {
+        exitCode,
+        reason: session.stopped ? 'stopped' : session.reason,
+        tokenSent: session.token !== null,
+        ...(message ? { message: this.redact(session, message) } : {})
+      }
       this.deps.log(`servers ssh-install exit id=${id} code=${exitCode} reason=${exit.reason ?? '-'} tokenSent=${exit.tokenSent}`)
       this.deps.send(clientId, SSH_INSTALL_EXIT, id, exit)
     })
@@ -219,7 +273,10 @@ export class SshInstallSessions {
       session.pty.write(`${session.token}\n`)
       this.deps.log(`servers ssh-install id=${session.id} remote ready, token sent`)
     })
-    if (out) this.deps.send(session.clientId, SSH_INSTALL_DATA, session.id, this.redact(session, out))
+    if (out) {
+      session.installer.push(out)
+      this.deps.send(session.clientId, SSH_INSTALL_DATA, session.id, this.redact(session, out))
+    }
   }
 
   /** Should a remote echo the token after all (no stty there), it still never reaches the window. */

@@ -39,7 +39,7 @@ import type { NotebookKernelCondaOverride, NotebookKernelEvent } from '../shared
 import type { AgentActivity } from '../shared/agent-activity'
 import type { MobilePairingInvite, MobileState } from '../shared/mobile'
 import type { UpdateStatus } from '../shared/updates'
-import type { ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult, SshInstallExit, SshInstallTarget } from '../shared/servers'
+import type { ProjectMoveResult, ServerDeviceCode, ServerInvite, ServerRemoveOptions, ServerStatus, ServersState, ServerUpdateResult, SshHostProbeResult, SshInstallExit, SshInstallOptions, SshInstallTarget } from '../shared/servers'
 import type { ProjectsSources, ProjectsUpdate, SourceSaveResult } from '../shared/projects-sources'
 import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shared/host-fs'
 import type { AgentClisReport } from '../shared/agent-clis'
@@ -74,6 +74,12 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, payload: { tabIds: string[] }) => callback(payload)
     ipcRenderer.on('tabs-restart', handler)
     return () => ipcRenderer.removeListener('tabs-restart', handler)
+  },
+  /** A project moved to a DevTool server: drop these tabs (main ended them); they mount again there. */
+  onTabsMoved: (callback: (event: { tabIds: string[]; resume: string[] }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: { tabIds: string[]; resume: string[] }) => callback(payload)
+    ipcRenderer.on('tabs-moved', handler)
+    return () => ipcRenderer.removeListener('tabs-moved', handler)
   },
   onTasksRemoved: (callback: (removal: TaskRemoval) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, removal: TaskRemoval) => callback(removal)
@@ -587,8 +593,8 @@ const api = {
     return () => ipcRenderer.removeListener('servers-state-changed', handler)
   },
   /** Add server › Install over SSH: runs the installer through the system ssh in a pty here. Main supplies the token. */
-  serversSshInstallStart: (target: SshInstallTarget, size: { cols: number; rows: number }): Promise<{ sessionId: string; target: string }> =>
-    ipcRenderer.invoke('servers-ssh-install-start', target, size),
+  serversSshInstallStart: (target: SshInstallTarget, size: { cols: number; rows: number }, options?: SshInstallOptions): Promise<{ sessionId: string; target: string }> =>
+    ipcRenderer.invoke('servers-ssh-install-start', target, size, options),
   serversSshInstallInput: (sessionId: string, data: string): void => ipcRenderer.send('servers-ssh-install-input', sessionId, data),
   serversSshInstallResize: (sessionId: string, cols: number, rows: number): void => ipcRenderer.send('servers-ssh-install-resize', sessionId, cols, rows),
   serversSshInstallStop: (sessionId: string): Promise<void> => ipcRenderer.invoke('servers-ssh-install-stop', sessionId),
@@ -602,6 +608,10 @@ const api = {
     ipcRenderer.on('servers-ssh-install-exit', handler)
     return () => ipcRenderer.removeListener('servers-ssh-install-exit', handler)
   },
+  /** Move to a DevTool server: what the SSH project's machine says about itself and its DevTool server. */
+  serversSshProbe: (projectId: string): Promise<SshHostProbeResult> => ipcRenderer.invoke('servers-ssh-probe', projectId),
+  /** Move the SSH project to that server, keeping its ids. Rejects with a readable message; nothing changed then. */
+  serversMoveProject: (projectId: string, serverId: string): Promise<ProjectMoveResult> => ipcRenderer.invoke('servers-move-project', projectId, serverId),
   // Updates (Settings → Updates). Main owns the state; every change is also broadcast.
   updatesGetStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-get-status'),
   updatesCheck: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates-check'),

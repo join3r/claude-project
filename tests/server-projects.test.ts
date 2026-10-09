@@ -104,6 +104,52 @@ describe('ServerProjects (the desktop\'s copy of each server\'s projects)', () =
     expect((stale as { data: ProjectsData }).data.projects.map(p => [p.id, p.host])).toEqual([['s2', 'srvA']])
   })
 
+  it('keeps a project moving here out of sight while this desktop has it, without calling it a collision', async () => {
+    const configDir = tempDir()
+    const logs: string[] = []
+    const updates: ProjectsUpdate[] = []
+    let local: Project[] = [fixtureProject({ id: 'moving', directory: '' })]
+    const fake = fakeHub(state([{ id: 'srvA', online: true }]), { projects: [fixtureProject({ id: 's1', directory: '/s1' })], tags: [], projectOrder: [], pinnedItems: [] })
+    const projects = new ServerProjects({ configDir, localProjects: () => local, broadcast: (u) => updates.push(u), log: (m) => logs.push(m) })
+    projects.attach(fake.hub)
+    await flush()
+
+    projects.reserveIncoming('srvA', 'moving')
+    await projects.writeProjects('srvA', { add: [{ ...fixtureProject({ id: 'moving', directory: '/srv/moving' }), host: 'srvA' }] })
+    expect(fake.store.data.projects.map(p => p.id)).toEqual(['s1', 'moving'])
+    expect(fake.store.data.projects[1]).not.toHaveProperty('host')
+    // Windows don't see it yet; the local store counts it as foreign (its order and pins stay).
+    expect(projects.sources().srvA.data.projects.map(p => p.id)).toEqual(['s1'])
+    expect(projects.foreignProjects().map(p => [p.id, p.host])).toEqual([['s1', 'srvA'], ['moving', 'srvA']])
+    // A window's save of this server's slice keeps it on the server.
+    await projects.save('srvA', 'win:1', { baseRevision: fake.store.revision, data: { projects: projects.sources().srvA.data.projects, tags: [], projectOrder: [], pinnedItems: [] } })
+    expect(fake.store.data.projects.map(p => p.id)).toEqual(['s1', 'moving'])
+
+    // The local copy goes: the server's shows up.
+    local = []
+    projects.localChanged()
+    expect(updates.at(-1)!.data.projects.map(p => p.id)).toEqual(['s1', 'moving'])
+    projects.endIncoming('moving')
+    expect(projects.foreignProjects().map(p => p.id)).toEqual(['s1', 'moving'])
+    expect(logs.filter(line => line.includes('id-collision'))).toEqual([])
+  })
+
+  it('retries its own write on the server\'s answer, and refuses one while the server is offline', async () => {
+    const configDir = tempDir()
+    const fake = fakeHub(state([{ id: 'srvA', online: true }]), { projects: [], tags: [], projectOrder: [], pinnedItems: [] })
+    const projects = new ServerProjects({ configDir, broadcast: () => {}, log: () => {} })
+    projects.attach(fake.hub)
+    await flush()
+    fake.store.revision += 3
+    fake.store.data = { ...fake.store.data, projects: [fixtureProject({ id: 'other', directory: '/o' })] }
+    await projects.writeProjects('srvA', { add: [fixtureProject({ id: 'new', directory: '/n' })] })
+    expect(fake.store.data.projects.map(p => p.id)).toEqual(['other', 'new'])
+    await projects.writeProjects('srvA', { remove: ['new'] })
+    expect(fake.store.data.projects.map(p => p.id)).toEqual(['other'])
+    fake.setState(state([{ id: 'srvA', online: false }]))
+    await expect(projects.writeProjects('srvA', { add: [fixtureProject({ id: 'x', directory: '/x' })] })).rejects.toThrow(/offline/)
+  })
+
   it('refuses a save to an offline server without sending it, and when the link drops mid-call', async () => {
     const configDir = tempDir()
     const fake = fakeHub(state([{ id: 'srvA', online: false }]), { projects: [], tags: [], projectOrder: [], pinnedItems: [] })
