@@ -39,7 +39,7 @@ targets:
         # URLSession TLS). The Noise protocol is built on CryptoKit primitives.
         ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
-        NSCameraUsageDescription: DevTool uses the camera to scan the pairing QR code shown on your desktop and to take pictures for a new task.
+        NSCameraUsageDescription: DevTool uses the camera to scan the pairing QR code shown on your desktop.
         NSFaceIDUsageDescription: DevTool can ask for Face ID before you answer an agent's permission request, question or plan.
         UILaunchScreen: {}
         UIApplicationSceneManifest:

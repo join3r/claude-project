@@ -105,7 +105,7 @@ struct NewTaskSheet: View {
     @State private var mode = ""
     @State private var sending = false
     @State private var error: String?
-    @FocusState private var focused: Bool
+    @State private var focused = false
 
     init(target: NewTaskTarget) {
         self.target = target
@@ -157,18 +157,23 @@ struct NewTaskSheet: View {
                         .disabled(sending)
                     }
                     Section {
-                        TextField("What should Claude work on?", text: $prompt, axis: .vertical)
-                            .lineLimit(5...12)
-                            .focused($focused)
-                            .disabled(sending)
+                        PromptTextView(text: $prompt, focused: $focused, placeholder: "What should Claude work on?",
+                                       disabled: sending, onPasteImages: pasteImages)
                             .id(Self.promptId)
+                        if !images.isEmpty {
+                            TaskImagesStrip(images: $images, disabled: sending)
+                                .id(Self.imagesId)
+                        }
                     } header: {
                         Text("What should it do?")
                     } footer: {
-                        Text("The task is named from this prompt.")
-                    }
-                    if imagesSupported || !images.isEmpty {
-                        TaskImagesSection(images: $images, disabled: sending, unsupported: imagesUnsupported)
+                        if let imagesUnsupported, !images.isEmpty {
+                            Text(imagesUnsupported)
+                        } else if imagesSupported {
+                            Text("The task is named from this prompt. Paste up to \(TaskNewImage.maxCount) pictures into it to send them along.")
+                        } else {
+                            Text("The task is named from this prompt.")
+                        }
                     }
                     if let error {
                         Section {
@@ -176,11 +181,13 @@ struct NewTaskSheet: View {
                         }
                     }
                 }
-                // Dragging down puts the keyboard away, uncovering the pictures under the prompt.
-                .scrollDismissesKeyboard(.interactively)
                 // The field sits low and grows as it fills: keep its bottom edge,
                 // where the caret usually is, above the keyboard.
                 .onChange(of: prompt) { revealPrompt(scroller) }
+                // A paste lands under the prompt, where the keyboard would hide it.
+                .onChange(of: images.count) { old, new in
+                    if new > old { withAnimation { scroller.scrollTo(Self.imagesId, anchor: .bottom) } }
+                }
                 .onChange(of: focused) { if focused { revealPrompt(scroller) } }
                 .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
                     if focused { revealPrompt(scroller) }
@@ -216,6 +223,7 @@ struct NewTaskSheet: View {
     }
 
     private static let promptId = "prompt"
+    private static let imagesId = "images"
 
     private func revealPrompt(_ scroller: ScrollViewProxy) {
         withAnimation { scroller.scrollTo(Self.promptId, anchor: .bottom) }
@@ -275,7 +283,19 @@ struct NewTaskSheet: View {
     private var imagesSupported: Bool {
         selection.map { model.supports(DesktopFeature.taskImages, on: $0.desktopId) } ?? false
     }
-    /// Pictures picked for a desktop that can't take them, after switching project.
+    /// The prompt's Paste for pictures, for a desktop that takes them.
+    private var pasteImages: (([UIImage]) -> Void)? {
+        guard imagesSupported else { return nil }
+        return { addPasted($0) }
+    }
+
+    /// Pasted pictures, past the first `TaskNewImage.maxCount` dropped.
+    private func addPasted(_ pasted: [UIImage]) {
+        let room = TaskNewImage.maxCount - images.count
+        images += pasted.prefix(max(room, 0)).map { PickedImage(pasted: $0) }
+    }
+
+    /// Pictures pasted for a desktop that can't take them, after switching project.
     private var imagesUnsupported: String? {
         guard let selection, !imagesSupported else { return nil }
         let name = model.desktop(selection.desktopId)?.name ?? "This desktop"

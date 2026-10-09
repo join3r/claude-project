@@ -36,7 +36,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>DevTool uses the camera to scan the pairing QR code shown on your desktop and to take pictures for a new task.</string>
+	<string>DevTool uses the camera to scan the pairing QR code shown on your desktop.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>DevTool can ask for Face ID before you answer an agent's permission request, question or plan.</string>
 	<key>UIApplicationSceneManifest</key>

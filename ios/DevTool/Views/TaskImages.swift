@@ -1,10 +1,9 @@
 import DevToolKit
-import PhotosUI
 import SwiftUI
 import UIKit
 
-/// A picture picked for a new task: kept scaled down to what could be sent,
-/// encoded only when the task starts, once the share of each is known.
+/// A picture pasted into a new task's prompt: kept scaled down to what could
+/// be sent, encoded only when the task starts, once the share of each is known.
 struct PickedImage: Identifiable {
     let id = UUID()
     let image: UIImage
@@ -12,21 +11,8 @@ struct PickedImage: Identifiable {
     /// The longest side, in pixels, a picture is kept and sent at.
     static let maxSide: CGFloat = 2048
 
-    /// From the photo library; nil when it can't be read as an image.
-    static func load(_ item: PhotosPickerItem) async -> PickedImage? {
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data)
-        else { return nil }
-        return PickedImage(image: scaled(image, maxSide: maxSide))
-    }
-
-    /// From the camera.
-    init(captured image: UIImage) {
+    init(pasted image: UIImage) {
         self.image = Self.scaled(image, maxSide: Self.maxSide)
-    }
-
-    private init(image: UIImage) {
-        self.image = image
     }
 
     /// Drawn upright at no more than `maxSide` pixels on its longest side.
@@ -61,79 +47,21 @@ struct PickedImage: Identifiable {
     }
 }
 
-/// The New task sheet's pictures: thumbnails with a remove button each, and
-/// Add from the photo library or the camera while there is room.
-struct TaskImagesSection: View {
+/// The pictures pasted into the prompt, each with a remove button.
+struct TaskImagesStrip: View {
     @Binding var images: [PickedImage]
     let disabled: Bool
-    /// Why pictures can't go to the picked desktop, if they can't.
-    let unsupported: String?
-
-    @State private var libraryItems: [PhotosPickerItem] = []
-    @State private var showLibrary = false
-    @State private var showCamera = false
-    @State private var loading = false
-
-    private var room: Int { TaskNewImage.maxCount - images.count }
 
     var body: some View {
-        Section {
-            if !images.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(images) { picked in
-                            thumbnail(picked)
-                        }
-                    }
-                    .padding(.vertical, 4)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(images) { picked in
+                    thumbnail(picked)
                 }
-                .scrollClipDisabled()
             }
-            if room > 0 && unsupported == nil {
-                Menu {
-                    Button("Photo Library", systemImage: "photo.on.rectangle") { showLibrary = true }
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo", systemImage: "camera") { showCamera = true }
-                    }
-                } label: {
-                    HStack {
-                        Label(images.isEmpty ? "Add pictures" : "Add more", systemImage: "photo.badge.plus")
-                        if loading {
-                            Spacer()
-                            ProgressView()
-                        }
-                    }
-                }
-                .disabled(disabled || loading)
-            }
-        } footer: {
-            if let unsupported {
-                Text(unsupported)
-            } else if !images.isEmpty {
-                Text("Up to \(TaskNewImage.maxCount). They go with the prompt, scaled down to fit.")
-            }
+            .padding(.vertical, 4)
         }
-        .photosPicker(isPresented: $showLibrary, selection: $libraryItems, maxSelectionCount: max(room, 1),
-                      selectionBehavior: .ordered, matching: .images, preferredItemEncoding: .compatible)
-        .onChange(of: libraryItems) {
-            let items = libraryItems
-            guard !items.isEmpty else { return }
-            libraryItems = []
-            loading = true
-            Task {
-                for item in items {
-                    guard images.count < TaskNewImage.maxCount else { break }
-                    if let picked = await PickedImage.load(item) { images.append(picked) }
-                }
-                loading = false
-            }
-        }
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker { image in
-                if images.count < TaskNewImage.maxCount { images.append(PickedImage(captured: image)) }
-            }
-            .ignoresSafeArea()
-        }
+        .scrollClipDisabled()
     }
 
     private func thumbnail(_ picked: PickedImage) -> some View {
@@ -165,34 +93,112 @@ struct TaskImagesSection: View {
     }
 }
 
-/// The system camera, for one photo.
-struct CameraPicker: UIViewControllerRepresentable {
-    let onCapture: (UIImage) -> Void
-    @Environment(\.dismiss) private var dismiss
+/// The New task prompt: a growing text field whose Paste also takes
+/// pictures (`onPasteImages`; nil pastes text only, as a plain field does).
+/// SwiftUI's TextField offers no Paste for an image on the pasteboard.
+struct PromptTextView: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var focused: Bool
+    let placeholder: String
+    let disabled: Bool
+    var minLines = 5
+    var maxLines = 12
+    let onPasteImages: (([UIImage]) -> Void)?
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        return picker
+    func makeUIView(context: Context) -> PastingTextView {
+        let view = PastingTextView()
+        view.delegate = context.coordinator
+        view.font = .preferredFont(forTextStyle: .body)
+        view.adjustsFontForContentSizeCategory = true
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.placeholder.text = placeholder
+        view.accessibilityLabel = placeholder
+        return view
     }
 
-    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+    func updateUIView(_ view: PastingTextView, context: Context) {
+        context.coordinator.parent = self
+        if view.text != text { view.text = text }
+        view.updatePlaceholder()
+        view.isEditable = !disabled
+        view.onPasteImages = disabled ? nil : onPasteImages
+        if focused, !view.isFirstResponder {
+            DispatchQueue.main.async { if view.window != nil { view.becomeFirstResponder() } }
+        } else if !focused, view.isFirstResponder {
+            DispatchQueue.main.async { view.resignFirstResponder() }
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView view: PastingTextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? 320
+        let line = view.font?.lineHeight ?? 22
+        let fitted = view.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+        let height = min(max(fitted, line * CGFloat(minLines)), line * CGFloat(maxLines))
+        view.isScrollEnabled = fitted > height
+        return CGSize(width: width, height: height.rounded(.up))
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraPicker
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: PromptTextView
 
-        init(_ parent: CameraPicker) { self.parent = parent }
+        init(_ parent: PromptTextView) { self.parent = parent }
 
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            if let image = info[.originalImage] as? UIImage { parent.onCapture(image) }
-            parent.dismiss()
+        func textViewDidChange(_ view: UITextView) {
+            parent.text = view.text
+            (view as? PastingTextView)?.updatePlaceholder()
         }
 
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.dismiss()
+        func textViewDidBeginEditing(_ view: UITextView) {
+            if !parent.focused { parent.focused = true }
         }
+
+        func textViewDidEndEditing(_ view: UITextView) {
+            if parent.focused { parent.focused = false }
+        }
+    }
+}
+
+final class PastingTextView: UITextView {
+    var onPasteImages: (([UIImage]) -> Void)?
+    let placeholder = UILabel()
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        placeholder.font = .preferredFont(forTextStyle: .body)
+        placeholder.adjustsFontForContentSizeCategory = true
+        placeholder.textColor = .placeholderText
+        placeholder.numberOfLines = 0
+        placeholder.isAccessibilityElement = false
+        placeholder.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(placeholder)
+        NSLayoutConstraint.activate([
+            placeholder.topAnchor.constraint(equalTo: topAnchor),
+            placeholder.leadingAnchor.constraint(equalTo: leadingAnchor),
+            placeholder.widthAnchor.constraint(equalTo: widthAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func updatePlaceholder() { placeholder.isHidden = !text.isEmpty }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)), onPasteImages != nil, UIPasteboard.general.hasImages { return true }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    /// Pictures on the pasteboard become the task's pictures; anything else
+    /// pastes as text.
+    override func paste(_ sender: Any?) {
+        if let onPasteImages, UIPasteboard.general.hasImages, let images = UIPasteboard.general.images, !images.isEmpty {
+            onPasteImages(images)
+            return
+        }
+        super.paste(sender)
     }
 }
