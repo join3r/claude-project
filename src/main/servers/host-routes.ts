@@ -191,7 +191,11 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   // adding a server project (ipc/host-fs.ts): the first argument names the host
   'server-list-dirs': { by: [{ host: 0 }] },
   'server-discover-repos': { by: [{ host: 0 }] },
-  'server-clone-repo': { by: [{ host: 0 }] }
+  'server-clone-repo': { by: [{ host: 0 }] },
+
+  // agent CLIs on a host, and its login env after an install (ipc/host-agents.ts): the first argument names the host
+  'host-agent-clis': { by: [{ host: 0 }] },
+  'host-refresh-env': { by: [{ host: 0 }] }
 }
 
 /**

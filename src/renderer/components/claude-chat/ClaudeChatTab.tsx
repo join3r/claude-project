@@ -23,6 +23,8 @@ import LinkContextMenu, { type LinkMenuState } from '../LinkContextMenu'
 import { chatContextMenuAt } from './chatContextMenu'
 import { handleCodeCopyClick, handleCodeRunClick } from './markdown'
 import ServerOfflineOverlay, { useServerOnline } from '../ServerOfflineOverlay'
+import AgentCliMissing from '../AgentCliMissing'
+import { useAgentCliGate } from '../../agentClis'
 
 interface Props {
   tabId: string
@@ -70,6 +72,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   const serverOnline = useServerOnline(serverId)
   const prevServerOnlineRef = useRef(serverOnline)
   const [attachEpoch, setAttachEpoch] = useState(0)
+  // The server's own `claude` runs the chat: without one, "isn't installed · Install".
+  const { gate: cliGate, entry: cliEntry } = useAgentCliGate(serverId, 'claude')
+  const cliReady = cliGate.state === 'ready'
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind, backgroundTasks?: number): AiStatusDecision => {
     const current = statusStore.getStatus(tabId)
@@ -132,6 +137,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   useEffect(() => {
     if (!visible || attachedRef.current || !sessionId) return
     if (!serverOnline) return // wait for the DevTool server
+    if (!cliReady) return // wait for the server's `claude` (checked, or installed)
     attachedRef.current = true
     setAttachError(null)
     attachChat(tabId, {
@@ -164,7 +170,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       attachedRef.current = false
       setAttachError(err instanceof Error ? err.message : String(err))
     })
-  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, taskId, serverOnline, attachEpoch])
+  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, taskId, serverOnline, attachEpoch, cliReady])
 
   useEffect(() => {
     if (visible) applyStatus('visit')
@@ -431,6 +437,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       </div>
       <LinkContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} onOpenInApp={openLink} />
       {serverId && <ServerOfflineOverlay serverId={serverId} />}
+      {serverId && cliEntry && cliGate.state === 'missing' && (
+        <AgentCliMissing serverId={serverId} agent="claude" entry={cliEntry} projectId={projectId} taskId={taskId} tabId={tabId} />
+      )}
       {permissionsOpen && (
         <PermissionsDialog
           cwd={sshConfig ? null : projectDir}

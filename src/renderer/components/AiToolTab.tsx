@@ -33,6 +33,8 @@ import { noteAgentTabTyped } from '../agentLink/agentTabRecency'
 import { agentTerminalReady, onAgentInsert, showAgentLinkNotice } from '../agentLink/linkToAgent'
 import { initialPromptArgs, takePendingPrompt } from './promptBox'
 import ServerOfflineOverlay, { useServerOnline } from './ServerOfflineOverlay'
+import AgentCliMissing from './AgentCliMissing'
+import { useAgentCliGate } from '../agentClis'
 import { useHostPlatform } from '../hostPlatform'
 
 const ENABLE_XTERM_WEBGL = false
@@ -179,6 +181,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
   const serverOnline = useServerOnline(serverId)
   const prevServerOnlineRef = useRef(serverOnline)
   const [attachEpoch, setAttachEpoch] = useState(0)
+  // A server that doesn't have this agent's CLI gets "isn't installed · Install"
+  // instead of a spawn that fails; the tab starts once the server has it.
+  const { gate: cliGate, entry: cliEntry } = useAgentCliGate(serverId, toolType)
+  const cliReady = cliGate.state === 'ready'
   const platform = useHostPlatform(serverId)
   const platformRef = useRef(platform)
   platformRef.current = platform
@@ -653,6 +659,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
         if (!spawnedRef.current && entry.term.cols > 1 && entry.term.rows > 1) {
           if (sshConfig && !sshReady) return // wait for SSH connection
           if (!serverOnline) return // wait for the DevTool server
+          if (!cliReady) return // wait for the server's CLI (checked, or installed)
           if (activationDecisionPending) return // wait until we've checked disk for prior scrollback
           if (requiresActivation && !userActivatedRef.current) return // wait for explicit user activation
           spawnedRef.current = true
@@ -771,7 +778,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
     })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible, serverOnline, attachEpoch])
+  }, [tabId, toolType, config, sessionId, projectDir, sshReady, userActivated, activationDecisionPending, visible, serverOnline, attachEpoch, cliReady])
 
   // Agent links (Ctrl+L from an editor/notebook): paste into the TUI's input as a
   // bracketed paste, never with a newline, and focus. Held until the PTY is
@@ -924,7 +931,10 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
     >
       <div ref={hostRef} className="w-full h-full" />
       {serverId && <ServerOfflineOverlay serverId={serverId} />}
-      {requiresActivation && !userActivated && visible && (
+      {serverId && cliEntry && cliGate.state === 'missing' && (
+        <AgentCliMissing serverId={serverId} agent={toolType} entry={cliEntry} projectId={projectId} taskId={taskId} tabId={tabId} />
+      )}
+      {requiresActivation && !userActivated && visible && cliReady && (
         <div
           className="absolute inset-x-0 bottom-0 flex items-center justify-center cursor-pointer z-10 py-3 bg-gradient-to-t from-bg/95 via-bg/70 to-transparent"
           onMouseDown={() => setUserActivated(true)}

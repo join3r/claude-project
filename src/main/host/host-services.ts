@@ -28,7 +28,7 @@ import type { ActivityUpdate } from '../../shared/agent-activity'
 import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from '../task-teardown'
 import { PaletteFrecencyStorage } from '../palette-frecency-storage'
 import { agentCommandOverride, resolveAgentCommand } from '../resolve-agent-command'
-import { findGitBashExe, getShellEnv, setPortableNodeDir } from '../shell-env'
+import { findGitBashExe, getShellEnv, resolveShellEnv, setPortableNodeDir } from '../shell-env'
 import { PI_EXTENSION_RESOURCE } from '../pi-extension-injector'
 import type { IpcRegistrar } from '../ipc/registrar'
 import { allowedLocalRoots, resolveAllowedDirectory } from '../ipc/path-allowlist'
@@ -44,6 +44,8 @@ import { registerFileBrowserHandlers } from '../ipc/file-browser'
 import { registerGitHandlers } from '../ipc/git'
 import { registerNotebookHandlers } from '../ipc/notebooks'
 import { registerHostFsHandlers } from '../ipc/host-fs'
+import { registerHostAgentHandlers } from '../ipc/host-agents'
+import { detectAgentClis } from '../agent-clis'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks } from '../../shared/archive'
 import {
@@ -904,6 +906,22 @@ export class HostServices {
       send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       env: () => getShellEnv()
     })
+    registerHostAgentHandlers(ipc, {
+      detect: () => detectAgentClis({ env: getShellEnv(), config: this.config }),
+      refreshEnv: () => this.refreshLoginEnv()
+    })
+  }
+
+  /**
+   * Run the login shell again and take its env, as at startup: an installer that
+   * added to the PATH (`~/.local/bin` exists now, a profile line) is seen by new
+   * tabs, chats and the agent detection from here on. Running tabs keep theirs.
+   */
+  async refreshLoginEnv(): Promise<{ path: string }> {
+    await resolveShellEnv()
+    const path = getShellEnv().PATH ?? ''
+    this.logDebug(`loginEnv refreshed path=${path}`)
+    return { path }
   }
 
   /**

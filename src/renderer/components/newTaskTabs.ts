@@ -16,13 +16,17 @@ export type CreateTabOptions = {
   noteId?: string
   noteName?: string
   cwd?: string
+  /** The tab's title, instead of the one its type and options give. */
+  title?: string
 }
 
 export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
   const { filePath, url, noteId, noteName, cwd } = options
   const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
   let title: string
-  if (noteId) {
+  if (options.title?.trim()) {
+    title = options.title.trim()
+  } else if (noteId) {
     title = noteName ?? 'Note'
   } else if (filePath) {
     const fileName = filePath.split('/').pop() ?? filePath

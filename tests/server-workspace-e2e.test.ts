@@ -9,13 +9,14 @@ import { DesktopRouting } from '../src/main/servers/desktop-routing'
 import type { IpcContext, IpcRegistrar } from '../src/main/ipc/registrar'
 import type { DecodedImage, ImageCodec } from '../src/main/mobile/chat-image'
 import type { ChatEvent } from '../src/shared/claude-chat'
+import type { AgentClisReport } from '../src/shared/agent-clis'
 import type { CommitHistoryResult, GitOperationResult, GitPostureResult, GitStatusResult, ProjectsData } from '../src/shared/types'
 import type { PermissionSettingsSource } from '../src/shared/chat-permissions'
 import { fixtureProject } from './helpers/streams-fixtures'
 import { pairByCode, startTestDesktop, startTestRelay, startTestServer, waitFor, type TestDesktop, type TestServer } from './helpers/host-link'
 
 /**
- * Step 7 end to end: a server project's files, Git panel, chat and conda
+ * Step 7 end to end: a server project's files, Git panel, chat and agent CLIs
  * through the desktop's real router (DesktopRouting: ServerProjects, RouteIndex,
  * HostRouter), its ServerHub, a real relay on an ephemeral port and the server's
  * host. Every call below is what a window's preload sends; none may run here.
@@ -111,7 +112,8 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
       'save-projects', 'fb-read-directory', 'fb-read-file', 'fb-write-file', 'fb-create-file', 'fb-create-directory', 'fb-rename', 'fb-delete',
       'fb-git-status', 'fb-git-diff', 'fb-git-stage', 'fb-git-unstage', 'fb-git-discard', 'fb-git-commit', 'fb-git-push', 'fb-git-pull',
       'git-project-posture', 'git-commit-history', 'conda-list-envs',
-      'chat-attach', 'chat-send', 'chat-login', 'chat-login-dismiss', 'chat-list-files', 'chat-permissions-read', 'chat-permissions-update'
+      'chat-attach', 'chat-send', 'chat-login', 'chat-login-dismiss', 'chat-list-files', 'chat-permissions-read', 'chat-permissions-update',
+      'host-agent-clis', 'host-refresh-env'
     ]
     for (const channel of channels) {
       wrapped.handle(channel, [], (() => { throw new Error(`${channel} ran on the desktop`) }) as never)
@@ -228,4 +230,36 @@ describe.skipIf(process.platform === 'win32')('a server project through the desk
     await invoke('chat-close', tabId)
     expect(routing.index.pinnedHost(tabId)).toBeUndefined()
   }, 60_000)
+
+  it('reports the server\'s agent CLIs, and sees an installed one after its login env is read again', async () => {
+    // The server's login shell: a fixed PATH, plus ~/.local/bin once it exists (as Ubuntu's ~/.profile does).
+    const home = path.join(root, 'home')
+    const shell = path.join(root, 'login-shell')
+    fs.mkdirSync(home)
+    fs.writeFileSync(shell, [
+      '#!/bin/sh',
+      `PATH='${path.dirname(process.execPath)}:/usr/bin:/bin'`,
+      `if [ -d '${home}/.local/bin' ]; then PATH='${home}/.local/bin':"$PATH"; fi`,
+      'export PATH',
+      'exec env -0',
+      ''
+    ].join('\n'), { mode: 0o755 })
+    process.env.SHELL = shell
+    // `claude` on the PATH, not the chat test's fake.
+    await desktop.hub.call(server.id, 'win:1', 'save-config', [{ claudeCommand: '' }])
+
+    expect(await invoke('host-refresh-env', server.id)).toMatchObject({ path: `${path.dirname(process.execPath)}:/usr/bin:/bin` })
+    const before = await invoke('host-agent-clis', server.id) as AgentClisReport
+    expect(before.clis.claude).toEqual({ found: false })
+    expect(before.platform).toBe(process.platform)
+
+    // What the installer does: a binary in ~/.local/bin, which the running server's PATH doesn't have yet.
+    fs.mkdirSync(path.join(home, '.local/bin'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.local/bin/claude'), '#!/bin/sh\necho "9.9.9 (Claude Code)"\n', { mode: 0o755 })
+    expect((await invoke('host-agent-clis', server.id) as AgentClisReport).clis.claude.found).toBe(false)
+
+    expect(await invoke('host-refresh-env', server.id)).toMatchObject({ path: expect.stringContaining(path.join(home, '.local/bin')) })
+    const after = await invoke('host-agent-clis', server.id) as AgentClisReport
+    expect(after.clis.claude).toEqual({ found: true, path: path.join(home, '.local/bin/claude'), version: '9.9.9' })
+  }, 30_000)
 })
