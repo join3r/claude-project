@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevTool servers</title>
+  <meta name="description" content="What the DevTool server installer does, where it puts things, and how to remove it.">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <h1>DevTool servers</h1>
+  <p class="meta">Run DevTool projects on another Linux or macOS machine</p>
+
+  <p>A DevTool server is DevTool without a window. Install it on a machine you work on, and its projects show up in DevTool on your desktop next to your local ones. Terminals, coding agents, chats, files and git run on that machine, so they keep going while your laptop sleeps. The desktop and the server talk through the DevTool relay, end to end encrypted, so the server needs no open ports.</p>
+
+  <h2>Install</h2>
+  <p>In DevTool, choose <strong>+ › Add server…</strong> and paste the command it shows into a shell on the machine:</p>
+  <p><code>curl -fsSL https://devtool.awantech.sk/install | DEVTOOL_TOKEN=&lt;token&gt; sh</code></p>
+  <p>The token pairs the server with your DevTool. It works once and expires after 15 minutes; DevTool makes a new one each time you open the dialog. The command passes it in the environment rather than on the command line, where other users of the machine could read it with <code>ps</code>.</p>
+  <p>Without a token, <code>curl -fsSL https://devtool.awantech.sk/install | sh</code> prints a pairing code instead. Paste it into DevTool under <strong>Add server › I have a code</strong>.</p>
+
+  <h2>What the command does</h2>
+  <ol>
+    <li>Checks the machine: Linux x64 or arm64 with glibc 2.28 or newer, or macOS; not root (add <code>sh -s -- --allow-root</code> if you mean it); curl, tar and gzip present; about 300 MB free.</li>
+    <li>Downloads Node 24 from <code>nodejs.org</code> and checks it against Node's published <code>SHASUMS256.txt</code>.</li>
+    <li>Downloads <code>/server/bootstrap.mjs</code> from this site and checks it against the sha256 written into the install script.</li>
+    <li>The bootstrap pairs with your DevTool through the relay, then receives the server itself from your DevTool, not from the internet. The server is always the build that matches your desktop app, and later updates arrive the same way.</li>
+    <li>It installs a service that starts the server again after a crash or a reboot, and prints <code>Connected to &lt;your desktop&gt;</code>.</li>
+  </ol>
+
+  <h2>What it installs, and where</h2>
+  <ul>
+    <li><code>~/.devtool-server/</code> holds everything: <code>node/</code> (Node), <code>app/</code> (the server, current and previous version), <code>data/</code> (keys, pairings, projects and settings, readable only by you), <code>logs/</code>, <code>run/</code> and <code>bin/devtool-server</code>.</li>
+    <li>On Linux, a systemd user service at <code>~/.config/systemd/user/devtool-server.service</code>. Without user systemd, a background process and an <code>@reboot</code> line in your crontab.</li>
+    <li>On macOS, a LaunchAgent at <code>~/Library/LaunchAgents/sk.awantech.devtool-server.plist</code>.</li>
+    <li>A <code>devtool-server</code> link in <code>~/.local/bin</code>, if that directory is on your PATH.</li>
+  </ul>
+  <p>Nothing is installed system-wide and nothing needs sudo. On Linux the installer turns on <code>loginctl enable-linger</code> so the service runs while you're logged out; if that is refused, it prints the <code>sudo</code> command to do it yourself.</p>
+
+  <h2>Uninstall</h2>
+  <p>In DevTool, open Settings › Servers, choose <strong>Remove…</strong> and leave <strong>Also uninstall DevTool from</strong> the server on. Or, on the machine:</p>
+  <p><code>devtool-server uninstall</code></p>
+  <p>Either way the service, its crontab line and <code>~/.devtool-server</code> go away. <code>--keep-data</code> keeps <code>~/.devtool-server/data</code> for a later install; <code>--delete-data</code> also unpairs every desktop and phone first.</p>
+
+  <h2>More</h2>
+  <p>The <a href="https://github.com/join3r/claude-project#devtool-servers">README</a> covers what works on a server, updates, phones and the <code>devtool-server</code> command. The installer's source is <a href="https://github.com/join3r/claude-project/blob/master/scripts/server-install.sh">scripts/server-install.sh</a>.</p>
+
+  <footer>DevTool · Awantech s.r.o. · <a href="/">Home</a> · <a href="/privacy/">Privacy</a></footer>
+</main>
+</body>
+</html>

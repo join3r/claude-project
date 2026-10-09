@@ -1,6 +1,6 @@
 # DevTool mobile protocol
 
-This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.md), §1–§9. If this file and SPEC.md disagree, SPEC.md wins. Fix whichever one is wrong in the same change.
+This is a short map of the protocol. The normative wire spec is [SPEC.md](SPEC.md), §1–§11. If this file and SPEC.md disagree, SPEC.md wins. Fix whichever one is wrong in the same change.
 
 The link between a desktop and a DevTool server (a headless host) has its own spec, [SERVER.md](SERVER.md). It reuses the relay, the envelope, Noise IK and fragmentation from SPEC.md, with its own prologue (`devtool-server-v1`) and binary app messages, and it is TypeScript only.
 
@@ -18,7 +18,7 @@ The link between a desktop and a DevTool server (a headless host) has its own sp
 
 | path | what |
 |---|---|
-| `SPEC.md` | The normative wire spec (§1–§9) |
+| `SPEC.md` | The normative wire spec (§1–§11) |
 | `SERVER.md` | The desktop↔server link (TypeScript only; code in `src/main/host/link/`, `src/main/servers/`, `src/server/`) |
 | `ts/` | Dependency-free TypeScript (`node:crypto` and `node:buffer` only). Import everything from `ts/index.ts`. |
 | `ts/noise.ts` | Noise IK: `CipherState`, `SymmetricState`, `HandshakeState`, `createInitiator`/`createResponder`, and `NoiseTransport` after `split()` |

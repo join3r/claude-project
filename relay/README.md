@@ -1,6 +1,6 @@
 # DevTool relay
 
-The relay connects DevTool desktops, DevTool servers and the iOS app across the internet. Each device keeps a WebSocket open to it, authenticates with its Ed25519 key, and the relay forwards opaque frames between paired devices. Traffic is end-to-end encrypted between the two ends (Noise IK between phone and desktop), so the relay can't read any of it.
+The relay connects DevTool desktops, DevTool servers and the iOS app across the internet. Each device keeps a WebSocket open to it, authenticates with its Ed25519 key, and the relay forwards opaque frames between paired devices. Traffic is end-to-end encrypted between the two ends (Noise IK between phone and desktop or server, and between desktop and server), so the relay can't read any of it.
 
 It also carries push notifications (§7 of the spec): desktops and servers send `push` over the socket, and the relay hands it to the **push gateway**, which only our hosted relay runs because only our APNs key can reach our app. A self-hosted relay forwards pushes to the hosted gateway over HTTPS.
 
@@ -74,7 +74,7 @@ npm run dev                    # same, restarts on file changes, LOG_LEVEL=debug
 curl localhost:8787/healthz    # → ok
 ```
 
-Then point a desktop at it: DevTool Settings → Mobile → relay URL `ws://localhost:8787`, or the stand-in desktop from the repo root:
+Then point a desktop at it: DevTool Settings → Relay → `ws://localhost:8787`, or the stand-in desktop from the repo root:
 
 ```bash
 node protocol/tools/fake-desktop.ts ws://localhost:8787

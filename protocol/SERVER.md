@@ -50,7 +50,7 @@ Rules:
 - The desktop owns the IDs in `servers.json` and the servers it is proving a code to. A `0x05` pairing hello from a peer nobody owns goes to the desktop's hub (§7.3).
 - A server's link owns the desktops in `desktops.json` and the desktop it is pairing with by install token. Every other peer is the phones' (the server's own MobileService, SPEC §2 and §4, on the same socket and identity), with two exceptions for a peer nobody owns: a `0x05` pairing hello goes to the link (a desktop proving the server's code, §7.4), and so does a Noise message 1 (`0x01`) that opens under this link's prologue. Only the prologue tells a link handshake from a phone's, since nothing in message 1 is readable before it, so the server trial-reads an unowned message 1 with `devtool-server-v1` (`isLinkHandshake`, one X25519 and one AES-GCM). A desktop the server has forgotten therefore still hears `unknown-device`, and a phone it has forgotten hears the phone channel's `unknown-device`.
 - Both ends say `binary: true` in hello and send binary frames (SPEC §3.9). A desktop whose `ready` lacks `binary: true` is on a relay from before servers. It reports "This relay is too old for servers", keeps its phones on JSON and sends no `pair`, `watch` or binary frames.
-- The desktop's socket runs while Mobile is on, any server is paired, an invite is live or a code is being proven. It uses the Mobile relay URL setting until step 5 makes it a shared Relay setting. The server's relay URL is in `<data>/server.json`.
+- The desktop's socket runs while Mobile is on, any server is paired, an invite is live or a code is being proven. It uses the shared Relay setting (Settings › Relay, stored as `config.mobile.relayUrl`). The server's relay URL is in `<data>/server.json`.
 - Presence: the desktop sends one `watch` with all its server IDs after every `ready` (SPEC §3.3). It handshakes with each server the relay reports online. A server gets its desktops' presence without asking, and drops a desktop's session on `peer offline`, `peer revoked` or `error offline`.
 - Retries: a handshake has 10 s to get message 2. A failed attempt retries with backoff from 1 s to 30 s while the relay still reports the server online. A session that comes up resets the backoff.
 - Liveness (SPEC §3.10): the client gives up on the relay after 60 s of total silence, or after 180 s while its own sends are still queued (`bufferedAmount > 0`), since a relay that stopped reading a socket also delays its pongs.
@@ -124,7 +124,7 @@ The server pushes the event `server-status` with the same payload as `server-inf
 
 ### 6.3 Kinds
 
-A side serves the kinds in its registry (`StreamKinds`). Version 1 has three diagnostic kinds that every server serves. They only move bytes the desktop sends or asks for, so they double as a speed test. Then `bundle` (§10) and `tcp`. A server without a kind answers its `open` with `refused`.
+A side serves the kinds in its registry (`StreamKinds`). Version 1 has three diagnostic kinds that every installed server serves (a bootstrap serves only `bundle`, §11). They only move bytes the desktop sends or asks for, so they double as a speed test. Then `bundle` (§10) and `tcp`. A server without a kind answers its `open` with `refused`.
 
 - `echo`: writes back everything it reads, then ends.
 - `sink {delayMs?}`: reads to the end, pausing `delayMs` (at most 1000) after each chunk to play a slow reader. Then it writes `{"bytes":N,"sha256":"<hex>"}` and ends.
@@ -141,7 +141,7 @@ A side serves the kinds in its registry (`StreamKinds`). Version 1 has three dia
 A desktop and a server pair with the one-time secret, HKDF and proof of SPEC §2. The side that minted the secret makes the relay `offer` and checks the proof. The side that was handed a ticket joins the offer (`pair`) and proves the secret inside a Noise handshake of its own. The relay only ever sees `SHA-256(relayToken)` and can't compute `pairProof`.
 
 - **Token flow** (the install one-liner): the desktop mints an `install` ticket and the new server, run by the bootstrap, holds it.
-- **Code flow** (`devtool-server pair`, "Add another device"): the server mints a `device` ticket and a desktop holds it.
+- **Code flow** (`devtool-server pair`, "Add another device", or the installer run without a token): the server mints a `device` ticket and a desktop holds it.
 
 Code: `src/main/host/link/pairing.ts`.
 
@@ -170,7 +170,7 @@ nameLength:u8   name (UTF-8, at most 64 bytes, cut on a character boundary)
   { "v": 1, "min": 1, "app": "devtool-server" | "devtool-desktop",
     "proof": "<b64u pairProof>", "ed": "<b64u Ed25519 pub>", "name": "...",
     "build": { "version", "commit", "builtAt", "bundleSha" },
-    "host": { "os", "arch", "hostname", "node" },  // a server's only
+    "host": { "os", "arch", "hostname", "node", "user"? },  // a server's only
     "bootstrap": 1 }                                 // a server being installed only
   ```
 - Message 2 payload: `{ v, min, app, name, build, host?, result: "ok" | "rejected" | "incompatible", reason? }`, with `reason` one of `expired`, `used`, `wrong-secret`, `no-offer`, `bad-key`, `role`.
@@ -274,7 +274,7 @@ The desktop shows `updating` from `restarting` until the server's next handshake
 
 `site/server/bootstrap.mjs` (`src/server/bootstrap.ts`, built by `npm run build:installer`) is what `site/install` runs once it has Node. It installs a server: it pairs, receives the bundle, installs the service, and waits until the desktop's link to the new service is up. It is served by the site and the desktop is released apart from it, so it speaks a small part of this protocol that desktops keep serving: bootstrap protocol 1.
 
-- Pairing (§7) with `bootstrap: 1` in its pairing hello, using a new or the existing identity in `data/`.
+- Pairing (§7): the token flow with `bootstrap: 1` in its pairing hello, or without a token the code flow (it prints a device code), using a new or the existing identity in `data/`.
 - The link handshake (§2) as the server, with `features: ["bootstrap"]` and the build of the bundle already installed (`current/manifest.json`), or an empty build.
 - The `bundle` stream (§10.1) and the link calls `server-info` (`{update: null}`) and `server-bootstrap-done`.
 

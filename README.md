@@ -32,6 +32,8 @@ Windows support (Git Bash terminals, portable Node, `.cmd` agent shims) was cont
 
 **Remote SSH Projects** -- Connect to remote machines via SSH with port forwarding, SOCKS proxy tunneling, key authentication, health checks, and auto-reconnection.
 
+**DevTool Servers** -- Run a project on another Linux or macOS machine as if it were local. Its terminals and agents keep running while your laptop sleeps. See [DevTool servers](#devtool-servers).
+
 **Git Worktree Management** -- Create and delete isolated git worktrees for branch work directly from the UI.
 
 **File Browser** -- Integrated file tree: open, create, rename, and delete files and folders. The Files tab has New file / New folder buttons and a quick filter.
@@ -144,7 +146,11 @@ npm run build:win      # Portable Windows folder (dist/win-unpacked)
 npm run build:win:setup # Per-user Setup.exe + portable zip (dist/)
 npm run build:mac      # Package macOS app
 npm run build:linux    # Package Linux app
+npm run build:server   # DevTool server bundle (out/server/)
+npm run build:installer # Regenerate site/install and site/server/bootstrap.mjs
 ```
+
+`npm run build`, `npm run dev` and `npm run dev:cdp` also run `build:server`, so the app always carries a server bundle that matches it. Packaged builds ship it in `resources/server`. `build:server` fails if anything in the server's import graph reaches `electron`. Run `build:installer` after changing `scripts/server-install.sh` or `src/server/bootstrap.ts` and commit both generated files, since `install` pins the bootstrap's sha256.
 
 ### Install (build + system install)
 
@@ -175,6 +181,80 @@ CI (`.github/workflows/ci.yml`):
 
 - **test (macOS / Linux / Windows)** — typecheck and tests with Node 24, plus lint and `npm run build` on Linux. The Windows job adds the MSVC Spectre-mitigated libs to the runner's Visual Studio if they are missing, since `postinstall` compiles `node-pty`. Live kernel and live SSH (`DEMO_SSH=1`) stay skipped.
 - **notebook-live-windows** — the unit suite plus the live kernel smoke (`NOTEBOOK_LIVE_REQUIRED=1`) after Miniforge + `ipykernel` / `jupyter_client`. Skips the native rebuild (`npm ci --ignore-scripts`).
+
+## DevTool servers
+
+A DevTool server is DevTool without a window, running on another machine. It owns the projects you put on it: their terminals, agents, Claude chats, files and git all live there, and DevTool on your desktop shows them in the sidebar next to your local projects, with a server glyph and the server's name. Close the laptop and the agents keep working. Open it again and the tabs reattach with their scrollback.
+
+Unlike Remote SSH projects, nothing runs over an SSH session from the desktop, and every panel works. All traffic goes through the relay, so the server needs no open ports.
+
+### Install
+
+**+** › **Add server…** (or Settings › Servers › **Add server**) shows a one-liner to paste on the machine:
+
+```bash
+curl -fsSL https://devtool.awantech.sk/install | DEVTOOL_TOKEN=<token> sh
+```
+
+It downloads Node 24 from nodejs.org (checked against `SHASUMS256.txt`) and a small bootstrap, pairs with your DevTool, receives the server from DevTool itself, installs a user service and says `Connected to <desktop>`. The dialog then offers the git repos it found in your home directory. Everything lands in `~/.devtool-server`; nothing needs root, and the installer refuses to run as root unless you add `--allow-root` after `sh -s --`.
+
+- **Install over SSH…** in the same dialog runs the one-liner for you when this computer can already `ssh` to the machine. It fills in targets from your SSH projects.
+- **I have a code** is the other direction. Run the installer without a token (`curl -fsSL https://devtool.awantech.sk/install | sh`) and it prints a pairing code to paste into DevTool. `devtool-server pair` on an installed server prints a new one, which is how a second desktop joins (or Settings › Servers › **Add another device** on the first).
+
+The token in the one-liner works once and expires after 15 minutes. It travels in the environment, never on a command line, so other users of the machine can't read it from `ps`.
+
+### What works on a server project
+
+Terminals, Claude Code, Codex and Pi tabs, Claude chat, the file browser, editor and diff tabs, the Git panel, notebooks, conda envs, streams with task worktrees and landing, and browser tabs. A browser tab resolves and connects from the server, so `localhost:3000` is the server's port 3000. Agent CLIs run on the server with the server's own logins. A missing one gets **Install**, which runs the official installer in a terminal tab, and `/login` in a chat asks for the pasted code. **Open in IDE** opens VS Code or Cursor over Remote-SSH, tunnelled through the relay to the server's own sshd (install `openssh-server` there). The first time, DevTool asks before it adds an `Include` line to `~/.ssh/config` and authorizes its key on the server. Reveal in Finder stays local only, and Windows desktops don't offer Open in IDE yet.
+
+When a server goes offline its projects stay in the sidebar, greyed out, from the last snapshot. Open terminal and agent tabs say "<server> is offline, reconnecting…" and reattach when it's back.
+
+Add more projects with **+** › **Server project…**: pick a folder on the server, clone a repo there, or choose from the repos it found.
+
+### Settings › Servers and Relay
+
+Settings › Servers lists every paired server with its state, version and OS. From there you can rename it, add another device, pair a phone, push an update, restart into a staged update, and remove it. Settings › Relay holds the one relay URL that phones and servers share (default `wss://relay.devtool.awantech.sk`). Changing it with anything paired asks first, because every server and phone has to move with it.
+
+### Updates
+
+The server follows the desktop. DevTool carries the server bundle and sends it when it connects to a server running an older build. If no tab on the server is working, the server switches at once; otherwise the sidebar says "<server> has an update ready" with **Restart now**. It never downgrades: an older DevTool keeps working with a newer server as long as the protocol allows. A restart ends the server's terminals, as quitting DevTool does locally, and agent tabs resume their sessions.
+
+### Phones
+
+A server can pair with the iOS app directly: Settings › Servers › **Pair a phone** shows its QR code, or run `devtool-server pair --phone` on the machine for a QR code in the terminal. The phone lists the server like another desktop, with a server glyph, and keeps working with it while your laptop is closed.
+
+### Move an SSH project to a server
+
+Right-click an SSH project (or open its Project settings) and choose **Move to a DevTool server…**. DevTool checks the machine over the existing SSH connection, installs a server there if there isn't one (or reuses the one already paired), and recreates the project on it with its streams, tasks, notes, tags and archive. Open Claude Code and Pi tabs resume on the server, since their sessions already live on that machine.
+
+### The `devtool-server` command
+
+The installer links `devtool-server` into `~/.local/bin` when that directory is on your PATH; it's always at `~/.devtool-server/bin/devtool-server`.
+
+```
+devtool-server status            # running? version, paired desktops and phones, relay
+devtool-server logs [-f] [-n N]
+devtool-server pair [--phone]    # a code for another desktop, or a QR code for a phone
+devtool-server unpair <id|name>
+devtool-server restart           # also switches to a staged update
+devtool-server start
+devtool-server uninstall [--keep-data | --delete-data] [--yes]
+```
+
+### Platforms
+
+- Linux x64 and arm64 with glibc 2.28 or newer (no musl). It runs as a systemd user service with linger. Without user systemd it falls back to a background process plus an `@reboot` crontab line. If `loginctl enable-linger` is refused, the installer prints the `sudo` line to run.
+- macOS, as a LaunchAgent. If nobody is logged in to the Mac's desktop when you install (over SSH, say), the agent can't start at login, so run `devtool-server start` after a reboot.
+
+The desktop can be macOS, Linux or Windows.
+
+### Security
+
+Desktop and server talk over Noise IK, end to end encrypted through the relay, which sees device IDs, timing and sizes but no content. The server only answers: it never calls the desktop, and the desktop drops any event from a server that isn't about that server's own projects and tabs. Install tokens and pairing codes are single use and expire after 15 minutes. The server keeps its keys in `~/.devtool-server/data`, mode 0700.
+
+### Uninstall
+
+Settings › Servers › **Remove…** unpairs the server. With **Also uninstall DevTool from <server>** on (the default while it's online), it also stops the service and deletes `~/.devtool-server`, its unit or LaunchAgent and its crontab line. That ends its terminals and agents for every desktop paired with it. **Keep its data** (off by default) keeps the projects, settings and pairings in `~/.devtool-server/data` for a later install. If the server is offline, remove it in DevTool and run `devtool-server uninstall` on the machine.
 
 ## License
 

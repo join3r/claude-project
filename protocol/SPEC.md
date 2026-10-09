@@ -84,9 +84,9 @@ There are three roles. A **phone** is the iOS app. A **desktop** is DevTool. A *
 - Per IP: 20 new connections/min and 64 open connections at once (HTTP 429 at the upgrade beyond either). All connections from one IP, any role, share 16 MiB/s of payload bytes (burst 64 MiB), throttled like a host's.
 - Per device: at most 16 pending pairs at once (`forbidden` "too many pending pairs") and 256 authorized pairs (`forbidden` "too many pairs" on `authorize`). Per IP, at most 60 new pairs an hour (`rate` on `authorize`). Repeating `authorize` for a stored pair costs nothing.
 - A `watch` from a desktop costs one message token per ID it names.
-- Relay-wide, the send queues together may hold 512 MiB. Past that the relay drops the connections with the largest queues first.
+- Relay-wide, the send queues together may hold 512 MiB (the relay's own default, `RELAY_MAX_QUEUED_BYTES`). Past that the relay drops the connections with the largest queues first.
 - A second connection with the same device ID replaces the first (the old one is closed with 4409).
-- The numbers are constants in `protocol/ts/relay-messages.ts`: `RELAY_MAX_FRAME_BYTES`, `RELAY_RATE_PER_SECOND`/`_BURST` (phones), `RELAY_HOST_RATE_PER_SECOND`/`_BURST`, `RELAY_HOST_BYTES_PER_SECOND`/`_BURST`, `RELAY_IP_BYTES_PER_SECOND`/`_BURST`, `RELAY_PUSH_RATE_PER_SECOND`/`_BURST`, `RELAY_BUFFER_HIGH_WATER_BYTES`/`LOW_WATER_BYTES`, `RELAY_STALL_TIMEOUT_MS`, `RELAY_PHONE_BUFFER_CAP_BYTES`, `RELAY_HOST_BUFFER_CAP_BYTES`, `RELAY_MAX_CONNECTIONS_PER_IP`, `RELAY_MAX_PENDING_PER_DEVICE`, `RELAY_MAX_PAIRS_PER_DEVICE`, `RELAY_NEW_PAIRS_PER_IP_PER_HOUR`. These are defaults: an operator may change some of them (relay/README.md, Environment), so clients must not depend on exact values.
+- The numbers are constants in `protocol/ts/relay-messages.ts`: `RELAY_MAX_FRAME_BYTES`, `RELAY_RATE_PER_SECOND`/`_BURST` (phones), `RELAY_HOST_RATE_PER_SECOND`/`_BURST`, `RELAY_HOST_BYTES_PER_SECOND`/`_BURST`, `RELAY_IP_BYTES_PER_SECOND`/`_BURST`, `RELAY_PUSH_RATE_PER_SECOND`/`_BURST`, `RELAY_BUFFER_HIGH_WATER_BYTES`/`LOW_WATER_BYTES`, `RELAY_STALL_TIMEOUT_MS`, `RELAY_PHONE_BUFFER_CAP_BYTES`, `RELAY_HOST_BUFFER_CAP_BYTES`, `RELAY_CONNECTIONS_PER_IP_PER_MINUTE`, `RELAY_MAX_CONNECTIONS_PER_IP`, `RELAY_MAX_PENDING_PER_DEVICE`, `RELAY_MAX_PAIRS_PER_DEVICE`, `RELAY_NEW_PAIRS_PER_IP_PER_HOUR`. These are defaults: an operator may change some of them (relay/README.md, Environment), so clients must not depend on exact values.
 
 ### 3.6 Persistence
 `node:sqlite` at `$RELAY_DATA/relay.db`. The pairs table is `pairs(owner_id, owner_role, owner_pub, peer_id, kind, peer_pub, created_at, PRIMARY KEY(owner_id, peer_id))`, indexed on `peer_id`, with `PRAGMA user_version = 2`. The owner made the offer and sent `authorize`, and `kind` is the peer's role. Two devices have at most one row, in one direction. `lastSeen` is kept in memory. A push gateway also keeps `push_devices` (§7.1).
@@ -136,7 +136,7 @@ The rules above left these open. `relay/` implements them, and clients may rely 
 ### 3.11 Relays from before servers
 A client from this version can tell an old relay apart:
 - **Desktops** send `binary: true` in hello. An old relay ignores the field, so its `ready` has no `binary`. A desktop that gets `ready` without `binary: true` treats the relay as too old for servers ("This relay is too old for servers"). It sends no `pair`, `watch` or binary frames there, and keeps its phones working.
-- **Servers.** An old relay can't parse role `server`. It answers `{ "t":"error", "code":"auth", "message":"malformed hello" }` and closes with 4401. A server's hello is always signed correctly, so a server that gets `auth` treats the relay as too old.
+- **Servers.** An old relay can't parse role `server`. It answers `{ "t":"error", "code":"auth", "message":"malformed hello" }` and closes with 4401. A server's hello is always signed correctly, so for a server `auth` ("malformed hello") means the relay is too old. The server keeps retrying with backoff.
 - On an old relay, `pair`, `authorize { peer }` and `revoke { peer }` get `bad-request`. A desktop's `watch` gets `forbidden`, and binary messages get `bad-request` ("text frames only").
 - From this version on, an unknown message type gets `unsupported`, and so does a hello with an unknown role (then 4401). A newer client that gets `unsupported` knows the relay is older than it is.
 
@@ -374,7 +374,7 @@ A phone gets a notification when a Claude chat asks for a permission, asks a que
 
 Three parties are involved, and none of them reads the notification's content except the phone:
 - The **gateway** is an HTTP API that only our hosted relay runs (`relay.devtool.awantech.sk`), because only our APNs key can push to our app. It turns an APNs device token into a sealed **push capability** (`cap`) and later turns `{cap, data}` into an APNs request.
-- The **relay** (ours or self-hosted) accepts `push` from desktops over the socket and hands it to the gateway: in-process when it is the gateway, otherwise by one HTTPS call to its upstream gateway. No relay ever sees an APNs token.
+- The **relay** (ours or self-hosted) accepts `push` from desktops and servers over the socket and hands it to the gateway: in-process when it is the gateway, otherwise by one HTTPS call to its upstream gateway. No relay ever sees an APNs token.
 - The **desktop** decides what is worth a push and encrypts it with a key only the phone has.
 
 ### 7.1 Registration (phone → gateway, HTTPS)
@@ -394,7 +394,7 @@ Three parties are involved, and none of them reads the notification's content ex
 ### 7.2 Relay socket messages (extends §3)
 
 - Desktop or server → relay: `{ "t":"push", "id":<int ≥ 0>, "cap":"<string, 1–1024 chars>", "data":"<b64u, 1–3072 chars>" }`. From a phone it is `forbidden`.
-- Relay → desktop: `{ "t":"pushed", "id":<int>, "result":"ok"|"gone"|"rate"|"unavailable"|"bad-request"|"error" }`, one per `push`, in any order.
+- Relay → desktop or server: `{ "t":"pushed", "id":<int>, "result":"ok"|"gone"|"rate"|"unavailable"|"bad-request"|"error" }`, one per `push`, in any order.
   - `gone`: the `cap` is stale (a newer registration, or APNs said the token is dead). The desktop forgets that phone's registration.
   - `rate`: the device is over its budget. `unavailable`: this relay has no gateway. `error`: the gateway or APNs failed; nothing is retried.
 - A relay that is not the gateway forwards as `POST <upstream>/v1/push/send` with body `{"cap","data"}`, and the gateway answers `200 {"result":…}` with the same values. A transport failure or timeout (10 s) is `error`. The upstream defaults to `https://relay.devtool.awantech.sk`, and an empty setting turns push off (`unavailable`).
