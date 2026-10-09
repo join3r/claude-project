@@ -169,6 +169,11 @@ const api = {
     ipcRenderer.on('socks-proxy-status-changed', handler)
     return () => ipcRenderer.removeListener('socks-proxy-status-changed', handler)
   },
+  /** A browser tab of a server project: route its session through the server (until released). */
+  serverBrowserProxy: (projectId: string, tabId: string): Promise<{ port: number }> =>
+    ipcRenderer.invoke('server-browser-proxy', projectId, tabId),
+  serverBrowserProxyRelease: (projectId: string, tabId: string): Promise<void> =>
+    ipcRenderer.invoke('server-browser-proxy-release', projectId, tabId),
 
   // Theme
   getNativeTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('get-native-theme'),

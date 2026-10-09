@@ -4,6 +4,7 @@ import type { SshConfig } from '../../shared/types'
 import { BLANK_BROWSER_URL, normalizeBrowserUrl } from '../browserUrl'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
+import { useServerStatus } from '../serversState'
 
 interface Props {
   tabId: string
@@ -12,16 +13,23 @@ interface Props {
   projectId: string
   taskId: string
   sshConfig?: SshConfig
+  /** A DevTool server's project: pages load through that server, so `localhost` is the server. */
+  serverId?: string
 }
 
-export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, sshConfig }: Props): React.ReactElement {
+export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, sshConfig, serverId }: Props): React.ReactElement {
   const { updateTabUrl, browserZoomFactor, markTaskInteracted, addTab } = useApp()
   const [url, setUrl] = useState(initialUrl || BLANK_BROWSER_URL)
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
   const [proxyEnabled, setProxyEnabled] = useState(!!sshConfig)
   const [proxyLoading, setProxyLoading] = useState(false)
-  const [proxyReady, setProxyReady] = useState(!sshConfig)
+  // A server project's tab never loads before its session goes through the server.
+  const [proxyReady, setProxyReady] = useState(!sshConfig && !serverId)
+  const [serverProxyError, setServerProxyError] = useState<string | null>(null)
+  const [serverProxyAttempt, setServerProxyAttempt] = useState(0)
+  const server = useServerStatus(serverId)
+  const serverName = server?.name ?? 'the server'
   const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null)
   const webviewRef = useRef<Electron.WebviewTag>(null)
   // Lazy like terminals: hidden tabs (e.g. restored at startup) don't load their page
@@ -34,7 +42,8 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
   }, [addTab, projectId, taskId, tabId])
 
   const isRemote = !!sshConfig
-  const partition = isRemote ? `persist:browser-${projectId}` : undefined
+  const isServer = !!serverId
+  const partition = isRemote || isServer ? `persist:browser-${projectId}` : undefined
 
   // The webview mounts late (first view, or once a remote proxy is ready), so
   // effects that bind to it re-run on `webviewMounted`.
@@ -158,6 +167,27 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     return () => { cancelled = true }
   }, [isRemote, activated, projectId])
 
+  // A server project's tab: main points the project's session at that server's
+  // SOCKS listener (each connection dialled from the server) and holds it for
+  // this tab. No direct fallback: `localhost` here must never be this computer.
+  useEffect(() => {
+    if (!serverId || !activated) return
+    let cancelled = false
+    setServerProxyError(null)
+    window.api.serverBrowserProxy(projectId, tabId).then(
+      () => { if (!cancelled) setProxyReady(true) },
+      (err: unknown) => {
+        if (cancelled) return
+        const raw = err instanceof Error ? err.message : String(err)
+        setServerProxyError(raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, ''))
+      }
+    )
+    return () => {
+      cancelled = true
+      void window.api.serverBrowserProxyRelease(projectId, tabId).catch(() => {})
+    }
+  }, [serverId, activated, projectId, tabId, serverProxyAttempt])
+
   // Listen for proxy status changes (cross-tab sync)
   useEffect(() => {
     if (!isRemote) return
@@ -209,6 +239,14 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
         <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.reload()} title={`Reload (${formatShortcutForApp('CmdOrCtrl+R')})`}>&#8635;</button>
         <div className="flex-1 flex items-center relative">
           {isRemote && proxyEnabled && <span className="absolute right-2 bg-accent text-accent-ink text-2xs font-semibold px-1.5 py-px rounded-sm uppercase tracking-wider pointer-events-none z-(--z-sticky)">Remote</span>}
+          {isServer && proxyReady && (
+            <span
+              className="absolute right-2 bg-accent text-accent-ink text-2xs font-semibold px-1.5 py-px rounded-sm tracking-wider pointer-events-none z-(--z-sticky) max-w-[40%] truncate"
+              title={`Pages load through ${serverName}: localhost is ${serverName}`}
+            >
+              via {serverName}
+            </span>
+          )}
           <input
             className="flex-1 bg-field text-text border border-border px-2 h-(--ctl-h-sm) rounded-md text-sm outline-none focus:border-border-focus focus:shadow-focus"
             value={inputUrl}
@@ -252,8 +290,18 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
             webpreferences="contextIsolation=yes, nodeIntegration=no, sandbox=yes, webSecurity=yes"
             {...(partition ? { partition } : {})}
           />
+        ) : serverProxyError ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted text-base" role="alert">
+            <div>Can&apos;t route this tab through {serverName}: {serverProxyError}</div>
+            <button
+              className="bg-transparent border border-border text-text cursor-pointer px-2 py-1 rounded-md text-sm hover:bg-surface-3"
+              onClick={() => setServerProxyAttempt((n) => n + 1)}
+            >
+              Try again
+            </button>
+          </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-text-muted text-base">Connecting to remote host...</div>
+          <div className="flex-1 flex items-center justify-center text-text-muted text-base">{isServer ? `Connecting through ${serverName}...` : 'Connecting to remote host...'}</div>
         )}
       </div>
       <LinkContextMenu

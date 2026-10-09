@@ -1,5 +1,6 @@
 import { session } from 'electron'
 import type { SshConnectionManager } from '../ssh-connection-manager'
+import type { ServerBrowserProxies } from '../servers/server-browser-proxy'
 import type { IpcRegistrar } from './registrar'
 import { safeId, sshConfig } from './schemas'
 
@@ -107,5 +108,30 @@ export function registerSocksProxyHandlers(ipc: IpcRegistrar, deps: SocksProxyDe
     const proxy = deps.sshManager().getSocksProxy(projectId)
     log(`socksProxyStatus projectId=${projectId} hasEntry=${hasEntry} enabled=${enabled} port=${proxy?.port}`)
     return { enabled, port: proxy?.port }
+  })
+}
+
+export interface ServerBrowserDeps {
+  proxies: () => ServerBrowserProxies
+  /** The DevTool server a project lives on; null for this desktop's own projects. */
+  serverOf: (projectId: string) => string | null
+}
+
+/**
+ * Browser tabs of DevTool server projects (plan step 9): the tab asks before it
+ * loads anything, main points `persist:browser-<projectId>` at that server's
+ * SOCKS5 listener (`servers/server-browser-proxy.ts`) and holds it for the tab.
+ * There is no direct fallback: `localhost` in such a tab is the server.
+ */
+export function registerServerBrowserHandlers(ipc: IpcRegistrar, deps: ServerBrowserDeps): void {
+  ipc.handle('server-browser-proxy', [safeId, safeId], async (ctx, projectId, tabId) => {
+    const serverId = deps.serverOf(projectId)
+    if (!serverId) throw new Error('This project is not on a DevTool server')
+    const port = await deps.proxies().acquire(serverId, projectId, ctx.clientId, tabId)
+    return { port }
+  })
+
+  ipc.handle('server-browser-proxy-release', [safeId, safeId], (ctx, _projectId, tabId) => {
+    deps.proxies().release(ctx.clientId, tabId)
   })
 }

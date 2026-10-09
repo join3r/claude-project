@@ -15,7 +15,11 @@ import { WindowClientHub, windowClientId } from './window-client-hub'
 import { createIpcRegistrar } from './ipc/registrar'
 import { createAppUrlMatcher } from './ipc/sender'
 import { registerWindowHandlers, type WindowIpcContext } from './ipc/window'
-import { registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/socks-proxy'
+import { registerServerBrowserHandlers, registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughSocks } from './ipc/socks-proxy'
+import { ServerBrowserProxies } from './servers/server-browser-proxy'
+import { LOCAL_HOST } from './servers/host-router'
+import { TCP_STREAM_KIND, connectTcpStream, type TcpTarget } from './host/link/tcp-stream'
+import type { LinkStream } from './host/link/stream'
 import { registerUpdateHandlers } from './ipc/updates'
 import { createUpdates, type Updates } from './updates'
 import { probeRedirect } from './release-redirect'
@@ -63,6 +67,8 @@ export class AppRuntime {
   private quitting = false
   private socksProxyEnabled = new Map<string, boolean>()
   private socksProxyStarting = new Map<string, Promise<number>>()
+  /** Browser tabs of server projects: a SOCKS5 listener per server (plan step 9). */
+  private serverBrowser: ServerBrowserProxies | null = null
   private startupWindowStates: PersistedWindowState[]
 
   constructor(private readonly createWindow: (viewState?: WindowViewState | null, geometry?: WindowGeometry | null) => BrowserWindow) {
@@ -88,6 +94,7 @@ export class AppRuntime {
     await this.host.start()
     this.servers = this.createServerHub()
     this.updates = this.createUpdates()
+    this.createServerTools()
     this.registerEventForwarders()
     this.registerIpcHandlers()
     this.updates.start()
@@ -111,6 +118,34 @@ export class AppRuntime {
     this.host.onConfigChanged(() => servers.relayUrlChanged())
     servers.start()
     return servers
+  }
+
+  /** A connected `tcp` stream the server dials (protocol/SERVER.md §6.3). */
+  private openTcp(serverId: string, target: TcpTarget): Promise<LinkStream> {
+    return connectTcpStream(() => this.servers.openStream(serverId, TCP_STREAM_KIND, target))
+  }
+
+  /** The DevTool server a project lives on; null for this desktop's own. */
+  private serverOf(projectId: string): string | null {
+    const host = this.routing.index.hostOfProject(projectId)
+    return host && host !== LOCAL_HOST ? host : null
+  }
+
+  /** Browser tabs on server ports, through `tcp` streams. */
+  private createServerTools(): void {
+    const log = (message: string) => this.logDebug(message)
+    const serverBrowser = new ServerBrowserProxies({
+      openTcp: (serverId, target) => this.openTcp(serverId, target),
+      route: (projectId, port) => routeBrowserThroughSocks(projectId, port),
+      log
+    })
+    this.serverBrowser = serverBrowser
+    let paired = new Set(this.servers.getState().servers.map((s) => s.id))
+    this.servers.onStateChange((state) => {
+      const now = new Set(state.servers.map((s) => s.id))
+      for (const serverId of paired) if (!now.has(serverId)) void serverBrowser.forget(serverId)
+      paired = now
+    })
   }
 
   /** The updater, for the app menu's "Check for Updates…". */
@@ -173,6 +208,7 @@ export class AppRuntime {
         this.windowStates.delete(window.id)
         this.persistWindowSession()
       }
+      this.serverBrowser?.releaseClient(clientId)
       this.host.detachClient(clientId)
       this.servers?.detachClient(clientId)
     })
@@ -213,6 +249,7 @@ export class AppRuntime {
     this.persistWindowSession()
     this.updates?.close()
     this.servers?.stop()
+    await this.serverBrowser?.stop().catch(() => {})
     await this.host.shutdown()
   }
 
@@ -330,6 +367,10 @@ export class AppRuntime {
       socksProxyStarting: this.socksProxyStarting,
       broadcast: (channel, ...args) => this.clients.broadcast(channel, ...args),
       log
+    })
+    registerServerBrowserHandlers(ipc, {
+      proxies: () => this.serverBrowser!,
+      serverOf: (projectId) => this.serverOf(projectId)
     })
 
     registerUpdateHandlers(ipc, { updates: () => this.updates })
