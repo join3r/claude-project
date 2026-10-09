@@ -7,11 +7,13 @@ import {
   type Stream,
   type Tab,
   type TabStatusValue,
-  type Task
+  type Task,
+  type TaskLanding
 } from '../../shared/types'
 import { findStreamOfTask, taskTabs } from '../../shared/streams'
-import { INBOX_TAB_TYPES } from '../../../protocol/ts/index.ts'
+import { INBOX_TAB_TYPES, TaskLandingLimits } from '../../../protocol/ts/index.ts'
 import type {
+  TaskLanding as WireLanding,
   Inbox as MobileInbox,
   InboxPin as MobileInboxPin,
   InboxProject as MobileInboxProject,
@@ -104,6 +106,23 @@ function taskStatusFields(task: Task, lookup: InboxTabLookup): Pick<MobileInboxT
   return out
 }
 
+/**
+ * A task's landing as the phone gets it (SPEC.md §4.4 `landing`): the first
+ * files with their count, and git's message cut to fit a row.
+ */
+export function wireLanding(landing: TaskLanding): WireLanding {
+  const out: WireLanding = { state: landing.state }
+  if (landing.intent) out.intent = landing.intent
+  const files = landing.files ?? []
+  if (files.length > 0) {
+    out.files = files.slice(0, TaskLandingLimits.files)
+    out.fileCount = files.length
+  }
+  const message = landing.message?.trim()
+  if (message) out.message = message.length > TaskLandingLimits.message ? `${message.slice(0, TaskLandingLimits.message - 1)}…` : message
+  return out
+}
+
 function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: number): MobileInboxTask {
   const out: Omit<MobileInboxTask, 'tabs'> = {
     id: task.id,
@@ -115,6 +134,9 @@ function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: numb
   if (task.lastInteractedAt !== undefined) out.lastInteractedAt = task.lastInteractedAt
   if (task.inbox?.attentionAt !== undefined) out.attentionAt = task.inbox.attentionAt
   addTriage(out, task, now)
+  // A task with a worktree of its own (version 3): its branch, and where its landing is.
+  if (task.workspace) out.branch = task.workspace.branchName
+  if (task.landing) out.landing = wireLanding(task.landing)
   const tabs = taskTabs(task)
     .filter(isMobileTab)
     .map((tab) => buildTab(tab, lookup))

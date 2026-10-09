@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -237,11 +237,14 @@ function appMessages(): unknown {
           ]
         }, {
           id: 't2', name: 'Fix the login redirect', streamId: 's-050', streamName: '0.5.0', status: 'idle',
-          settledAt: 1789990000000,
+          settledAt: 1789990000000, branch: '0.5.0--fix-the-login-redirect',
+          landing: { state: 'conflict', files: ['src/auth.ts', 'src/login.ts'], fileCount: 2 },
           tabs: [{ id: 'tab3', type: 'claude-chat', title: 'Claude', status: 'idle' }]
         }, {
           id: 't3', name: 'bump-deps', streamId: 's-050', streamName: '0.5.0', status: 'exited', since: 1789990000000,
-          snoozedUntil: 1790003600000, tabs: []
+          snoozedUntil: 1790003600000, branch: '0.5.0--bump-deps',
+          landing: { state: 'blocked', intent: 'land', files: ['package.json'], fileCount: 1, message: 'error: Your local changes to the following files would be overwritten by merge' },
+          tabs: []
         }, {
           id: 't4', name: 'Terminal', streamId: 's-main', streamName: 'main', status: 'attention',
           snoozeUntilAttention: true,
@@ -267,6 +270,8 @@ function appMessages(): unknown {
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'thinking', since: null,
         activity: null, notes: 'x', attentionAt: null, branch: null,
         unread: false, settledAt: null, snoozeUntilAttention: 'yes',
+        // A newer desktop's landing state is kept; an unknown intent is dropped.
+        landing: { state: 'queued', intent: 'squash', files: null, fileCount: null, message: null, eta: 5 },
         tabs: [
           { id: 'tab1', type: 'gemini', title: 'Gemini', status: 'thinking', since: 5, badge: 3 },
           { id: 'tab2', type: 'pi', title: 'Pi', status: 'attention', activity: null }
@@ -283,6 +288,7 @@ function appMessages(): unknown {
       streams: [{ id: 's-main', name: 'main' }],
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'idle',
+        landing: { state: 'queued' },
         tabs: [
           { id: 'tab1', type: 'gemini', title: 'Gemini', status: 'idle', since: 5 },
           { id: 'tab2', type: 'pi', title: 'Pi', status: 'attention' }
@@ -352,7 +358,11 @@ function appMessages(): unknown {
       // Version 2 is a hard cutover: a v1 peer must update, whichever side it is.
       [{ v: 2, min: 2 }, { v: 1, min: 1 }],
       [{ v: 1, min: 1 }, { v: 2, min: 2 }],
-      [{ v: 2, min: 2 }, { v: 2, min: 2 }]
+      [{ v: 2, min: 2 }, { v: 2, min: 2 }],
+      // Version 3 (task worktrees) only adds: a version 2 peer still talks, at 2.
+      [{ v: 3, min: 2 }, { v: 2, min: 2 }],
+      [{ v: 2, min: 2 }, { v: 3, min: 2 }],
+      [{ v: 3, min: 2 }, { v: 3, min: 2 }]
     ].map(([local, remote]) => ({ local, remote, result: negotiateVersion(local, remote) }))
   }
 }
@@ -650,11 +660,45 @@ function chatMessages(): unknown {
         text({ closed: true }),
         text({ closed: true, warning: 'ignored' }),
         text({ closed: false, blocker: 'working' }),
-        text({ closed: false, blocker: 'unsaved', extra: 1 })
+        text({ closed: false, blocker: 'unsaved', extra: 1 }),
+        // Version 3: a task with its own worktree that didn't land stays open.
+        text({ closed: false, landing: { state: 'conflict', intent: 'close', files: ['src/auth.ts'], fileCount: 3 } }),
+        text({ closed: false, landing: { state: 'blocked', files: [], message: 'error: Your local changes would be overwritten' }, blocker: null })
       ].map((json) => ({ json, expected: parseTaskCloseResult(JSON.parse(json)) })),
       invalid: {
         params: [text({}), text({ taskId: 7 }), 'null'],
-        results: [text({}), text({ closed: false }), text({ closed: 'yes' }), text({ closed: false, blocker: 'unmerged' }), '[]']
+        results: [
+          text({}),
+          text({ closed: false }),
+          text({ closed: 'yes' }),
+          text({ closed: false, blocker: 'unmerged' }),
+          text({ closed: false, landing: { files: [] } }),
+          text({ closed: false, landing: { state: 'conflict', files: [7] } }),
+          '[]'
+        ]
+      }
+    },
+    // §8.15: `task.land` answers a stopped landing's buttons.
+    taskLand: {
+      params: [
+        text({ taskId: 't2', action: 'fix-with-agent' }),
+        text({ taskId: 't2', action: 'abort' }),
+        text({ taskId: 't2', action: 'retry', extra: 1 })
+      ].map((json) => ({ json, expected: parseTaskLandParams(JSON.parse(json)) })),
+      results: [
+        text({ status: 'landed', closed: true }),
+        text({ status: 'landed', closed: null }),
+        text({ status: 'updated' }),
+        text({ status: 'nothing', closed: true }),
+        text({ status: 'aborted', landing: null }),
+        text({ status: 'fixing', landing: { state: 'fixing', intent: 'close', files: ['src/auth.ts'], fileCount: 1 } }),
+        text({ status: 'conflict', landing: { state: 'conflict', intent: 'update', files: ['a.ts', 'b.ts'], fileCount: 2 } }),
+        text({ status: 'blocked', landing: { state: 'blocked', files: ['a.ts'], fileCount: 1, message: 'error: …' }, extra: true }),
+        text({ status: 'working', closed: 'yes' })
+      ].map((json) => ({ json, expected: parseTaskLandResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({ action: 'abort' }), text({ taskId: 't2' }), text({ taskId: 't2', action: 'ignore' }), text({ taskId: 7, action: 'abort' }), 'null'],
+        results: [text({}), text({ status: 'merged' }), text({ status: 'conflict', landing: 'conflict' }), '[]']
       }
     },
     // §8.8: `tab.close` names a tab; its result is `{}`.

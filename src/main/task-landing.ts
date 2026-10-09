@@ -309,6 +309,11 @@ export class TaskLandingManager {
     })
   }
 
+  /** A call for the task is queued or running. */
+  isBusy(taskId: string): boolean {
+    return this.busy.has(taskId)
+  }
+
   /** Commits on the stream since the task's branch last took it in ("<stream> +N"); null when unknown. */
   async streamAhead(projectId: string, taskId: string): Promise<number | null> {
     const at = this.locate(projectId, taskId)

@@ -20,7 +20,7 @@
         "t": { "const": "req" },
         "id": { "$ref": "#/$defs/id" },
         "op": { "type": "string", "description": "inbox.get, a chat.* op (SPEC.md §6.3), or a §7.4/§8 op such as task.new or stream.new" },
-        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, branches.list #/$defs/branchesListParams." }
+        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams." }
       }
     },
     "resOk": {
@@ -30,7 +30,7 @@
         "t": { "const": "res" },
         "id": { "$ref": "#/$defs/id" },
         "ok": { "const": true },
-        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list." }
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land." }
       }
     },
     "resErr": {
@@ -91,6 +91,33 @@
       "properties": {
         "branches": { "type": "array", "items": { "type": "string" } },
         "defaultBase": { "type": "string" }
+      }
+    },
+    "taskCloseResult": {
+      "description": "task.close result (SPEC.md §8.7): archived, a blocker to confirm, or (version 3) a task with a worktree of its own that didn't land.",
+      "oneOf": [
+        { "type": "object", "required": ["closed"], "properties": { "closed": { "const": true } } },
+        { "type": "object", "required": ["closed", "blocker"], "properties": { "closed": { "const": false }, "blocker": { "enum": ["working", "unsaved"] } } },
+        { "type": "object", "required": ["closed", "landing"], "properties": { "closed": { "const": false }, "landing": { "$ref": "inbox.schema.json#/$defs/landing" } } }
+      ]
+    },
+    "taskLandParams": {
+      "description": "task.land params (SPEC.md §8.15).",
+      "type": "object",
+      "required": ["taskId", "action"],
+      "properties": {
+        "taskId": { "type": "string" },
+        "action": { "enum": ["fix-with-agent", "abort", "retry"] }
+      }
+    },
+    "taskLandResult": {
+      "description": "task.land result (SPEC.md §8.15). closed: true when the landing finished a close; landing is the task's landing now.",
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["landed", "updated", "nothing", "aborted", "fixing", "conflict", "blocked", "working"] },
+        "closed": { "const": true },
+        "landing": { "$ref": "inbox.schema.json#/$defs/landing" }
       }
     },
     "pairingEvt": {

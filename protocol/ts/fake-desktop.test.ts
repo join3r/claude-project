@@ -262,7 +262,7 @@ describe('fake desktop', () => {
     connect(h)
     const phone = new Phone()
     const x = b64uDecode(decodePairingUri(h.offers[0]).x)
-    h.desktop.handleServerMessage({ t: 'frame', from: phone.id, data: phone.message1(x, utf8Encode('{"v":3,"min":3}')) })
+    h.desktop.handleServerMessage({ t: 'frame', from: phone.id, data: phone.message1(x, utf8Encode('{"v":9,"min":9}')) })
     expect(phone.message2(frames(h, phone.id)[0]).result).toBe('incompatible')
   })
 
@@ -289,6 +289,58 @@ describe('fake desktop', () => {
     expect(h.desktop.pairings[0].lastSeen).toBe(5)
     h.desktop.onDisconnected()
     expect(h.desktop.offer).toBeNull()
+  })
+})
+
+describe('fake desktop task worktree', () => {
+  async function paired(v = PROTOCOL_VERSION) {
+    const h = setup()
+    connect(h)
+    const phone = new Phone()
+    const qr = decodePairingUri(h.offers.at(-1)!)
+    const hello = { ...phone.hello('pair', b64uDecode(qr.s)), v, min: Math.min(v, MIN_PROTOCOL_VERSION) }
+    h.desktop.handleServerMessage({ t: 'frame', from: phone.id, data: phone.message1(b64uDecode(qr.x), hello) })
+    const reply = phone.message2(frames(h, phone.id)[0])
+    await flush()
+    // Message 2 isn't a transport frame; everything after it is decrypted in order.
+    let seen = 1
+    const inbound = (): AppMessage[] => {
+      const out = frames(h, phone.id).slice(seen).map((f) => phone.receive(f)).filter((m): m is AppMessage => m !== null)
+      seen = frames(h, phone.id).length
+      return out
+    }
+    const req = (id: number, op: string, params: unknown): AppMessage[] => {
+      h.desktop.handleServerMessage({ t: 'frame', from: phone.id, data: phone.send({ t: 'req', id, op, params }) })
+      return inbound()
+    }
+    inbound()
+    return { h, reply, req, inbound }
+  }
+  const landTask = (m: AppMessage) => m.t === 'evt' && m.e === 'inbox' ? m.inbox.projects[0].tasks.find((t) => t.id === 'task-login') : undefined
+
+  it('stops a close on a conflict, then lands it through the agent (§8.7, §8.15)', async () => {
+    const { h, reply, req } = await paired()
+    expect(reply.features).toEqual(['task.close', 'task.land'])
+    expect(req(1, 'task.land', { taskId: 'task-login', action: 'retry' }).at(-1)).toMatchObject({ ok: false, error: { code: 'internal' } })
+    const closing = req(2, 'task.close', { taskId: 'task-login' })
+    expect(landTask(closing[0])).toMatchObject({ branch: '0.5.0--login-redirect', landing: { state: 'conflict', fileCount: 2 } })
+    expect(closing.at(-1)).toMatchObject({ t: 'res', id: 2, ok: true, result: { closed: false, landing: { state: 'conflict', files: ['src/auth.ts', 'src/login.ts'] } } })
+    expect(req(3, 'task.land', { taskId: 'task-login', action: 'abort' }).at(-1)).toMatchObject({ ok: true, result: { status: 'aborted' } })
+    req(4, 'task.close', { taskId: 'task-login' })
+    expect(req(5, 'task.land', { taskId: 'task-login', action: 'retry' }).at(-1)).toMatchObject({ ok: true, result: { status: 'conflict' } })
+    const fixing = req(6, 'task.land', { taskId: 'task-login', action: 'fix-with-agent' })
+    expect(landTask(fixing[0])?.landing?.state).toBe('fixing')
+    expect(fixing.at(-1)).toMatchObject({ ok: true, result: { status: 'fixing', landing: { state: 'fixing' } } })
+    await h.advance(3000)
+    const landed = req(7, 'inbox.get', null).at(-1) as { result: { projects: { tasks: { id: string }[] }[] } }
+    expect(landed.result.projects[0].tasks.map((t) => t.id)).not.toContain('task-login')
+    expect(req(8, 'task.land', { taskId: 'task-login', action: 'abort' }).at(-1)).toMatchObject({ ok: false, error: { code: 'unsupported' } })
+    expect(req(9, 'task.land', { taskId: 'task-login', action: 'merge' }).at(-1)).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+  })
+
+  it('answers a conflicting close from a version 2 phone with an error it can show', async () => {
+    const { req } = await paired(2)
+    expect(req(1, 'task.close', { taskId: 'task-login' }).at(-1)).toMatchObject({ ok: false, error: { code: 'internal', message: expect.stringContaining('Conflicts with 0.5.0') } })
   })
 })
 

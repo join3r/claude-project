@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildInbox, inboxContentKey, type InboxTabLookup } from '../src/main/mobile/inbox'
+import { buildInbox, inboxContentKey, wireLanding, type InboxTabLookup } from '../src/main/mobile/inbox'
 import { mainStreamId, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue } from '../src/shared/types'
 import { findTaskInProject } from '../src/shared/streams'
 import { fixtureProject, fixtureTask, type FixtureTask, paneTabsAt } from './helpers/streams-fixtures'
@@ -264,6 +264,32 @@ describe('buildInbox', () => {
       attention: { snoozeUntilAttention: true },
       woken: {}
     })
+  })
+
+  it('sends a task\'s own worktree branch and its landing (version 3, SPEC.md §4.4)', () => {
+    const streamWs = { worktreePath: '/src/p1/.worktrees/rel', branchName: 'rel', baseBranch: 'main', relativeProjectPath: '' }
+    const own = { worktreePath: '/src/p1/.worktrees/rel--fix', branchName: 'rel--fix', baseBranch: 'rel', relativeProjectPath: '' }
+    const p = project('p1', [
+      task('t1', [tab('a', 'claude-chat')], { workspace: streamWs, ownWorkspace: own, landing: { state: 'conflict', intent: 'close', files: ['a.ts', 'b.ts'] } })
+    ])
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW).projects[0].tasks
+    expect(wire.branch).toBe('rel--fix')
+    expect(wire.landing).toEqual({ state: 'conflict', intent: 'close', files: ['a.ts', 'b.ts'], fileCount: 2 })
+    // A task sharing its stream's worktree (or in main) has neither.
+    const shared = project('p2', [task('t2', [tab('b', 'claude-chat')], { workspace: streamWs, sharesStreamWorktree: true })])
+    const [plain] = buildInbox(data([shared]), lookup(), DESKTOP, NOW).projects[0].tasks
+    expect(plain.branch).toBeUndefined()
+    expect(plain.landing).toBeUndefined()
+  })
+
+  it('cuts a landing to the wire caps: 20 files with their count, a 1000-character message', () => {
+    const files = Array.from({ length: 25 }, (_, i) => `f${i}.ts`)
+    const wire = wireLanding({ state: 'blocked', files, message: `  ${'x'.repeat(1500)}\n` })
+    expect(wire.files).toHaveLength(20)
+    expect(wire.fileCount).toBe(25)
+    expect(wire.message).toHaveLength(1000)
+    expect(wire.message?.endsWith('…')).toBe(true)
+    expect(wireLanding({ state: 'landing', files: [], message: ' ' })).toEqual({ state: 'landing' })
   })
 
   it('sends each task of a stream as its own wire task, naming its stream', () => {

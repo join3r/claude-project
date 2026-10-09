@@ -151,6 +151,15 @@ describe('JSON Schema', () => {
     for (const text of chat.branchesList.invalid.results) expect(check('branchesListResult', JSON.parse(text)), text).not.toEqual([])
   })
 
+  it('accepts the task.close and task.land samples and rejects the invalid ones (§8.7, §8.15)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
+    for (const s of chat.taskClose.results) expect(check('taskCloseResult', s.expected), s.json).toEqual([])
+    for (const s of chat.taskLand.params) expect(check('taskLandParams', s.expected), s.json).toEqual([])
+    for (const s of chat.taskLand.results) expect(check('taskLandResult', s.expected), s.json).toEqual([])
+    for (const text of chat.taskLand.invalid.params) expect(check('taskLandParams', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.taskLand.invalid.results) expect(check('taskLandResult', JSON.parse(text)), text).not.toEqual([])
+  })
+
   it('accepts the chat.commands, chat.btw and chat.permissions samples and rejects the invalid ones (§8.14)', () => {
     const check = (def: string, value: unknown) => validate({ $ref: `chat.schema.json#/$defs/${def}` }, value, 'chat.schema.json')
     for (const s of chat.commands.results) expect(check('commandsResult', s.expected), s.json).toEqual([])

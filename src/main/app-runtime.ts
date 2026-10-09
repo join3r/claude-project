@@ -79,7 +79,7 @@ import { nativeImageCodec } from './mobile/image-codec'
 import { PushEmitter } from './mobile/push-emitter'
 import { createStream, listProjectBranches, type StreamGit } from './mobile/new-stream'
 import { addTaskWithChat } from './mobile/new-task'
-import { closeTask, findClosableTab, removeTabFromData } from './mobile/close-task'
+import { closeTask, findClosableTab, landTask, removeTabFromData } from './mobile/close-task'
 import { setPinInData } from './mobile/pin'
 import { triageTaskInData } from './mobile/triage'
 import {
@@ -92,6 +92,7 @@ import {
   STREAM_NEW_FEATURE,
   TAB_CLOSE_FEATURE,
   TASK_CLOSE_FEATURE,
+  TASK_LAND_FEATURE,
   TASK_NEW_FEATURE,
   TASK_TRIAGE_FEATURE
 } from '../../protocol/ts/index.ts'
@@ -214,7 +215,9 @@ export class AppRuntime {
       git: this.workspaceManager,
       onState: (taskId, state) => this.broadcastToAllWindows('task-worktree-state', taskId, state),
       log: (message) => this.logDebug(message),
-      recordSetupArtifacts: (worktreeRoot) => recordSetupArtifacts(gitRunner, worktreeRoot)
+      recordSetupArtifacts: (worktreeRoot) => recordSetupArtifacts(gitRunner, worktreeRoot),
+      // Made just below; only asked once something calls ensure.
+      isLanding: (taskId) => this.taskLanding.isBusy(taskId)
     })
     this.taskLanding = new TaskLandingManager({
       projects: {
@@ -404,7 +407,7 @@ export class AppRuntime {
         staticKey: () => identity.get().x25519,
         app: `devtool/${app.getVersion()}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -440,12 +443,16 @@ export class AppRuntime {
         }
         return { ok: true, taskId: added.taskId, tabId: added.tabId }
       },
-      closeTask: (params) => closeTask({
+      closeTask: (params, phone) => closeTask({
         peek: () => this.projectsStore.peek(),
         dirtyTabIds: () => this.getDirtyTabIds(),
         statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
-        removeTask: (project, task) => this.archiveTaskFromMain(project, task)
-      }, params),
+        removeTask: (project, task) => this.archiveTaskFromMain(project, task),
+        // A task with its own worktree lands, as the sidebar's Close does.
+        landing: this.taskLanding,
+        stopTabs: (project, task) => this.stopTaskTabs(project, task)
+      }, params, phone),
+      landTask: (params) => landTask({ peek: () => this.projectsStore.peek(), landing: this.taskLanding }, params),
       closeTab: async (tabId) => {
         const found = findClosableTab(this.projectsStore.peek(), tabId)
         if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such tab. A task\'s own agent or terminal closes with the task.' }

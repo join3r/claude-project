@@ -70,7 +70,7 @@ Each sample is `{ json, expected }`. Parse the `json` string with the matching p
 | `phoneHello[]` | message 1 payload |
 | `desktopHello[]` | message 2 payload |
 | `appMessages[]` | transport message. `expected: null` means "unknown type, ignore it". A `req` with an unknown `op` still parses, and the receiver answers `unsupported`. `res` keeps `result` as raw JSON (for `inbox.get`, validate it as an `Inbox`). A missing `error.message` becomes `""`. |
-| `inboxWithUnknownFields` | `Inbox` from a newer desktop: extra fields are dropped, `null` optional fields are treated as absent, `unread`, `snoozeUntilAttention` and a stream's `main` other than `true` are absent, an unknown tab `type` is kept as a string, and an unknown `status` (task or tab) becomes `"idle"` |
+| `inboxWithUnknownFields` | `Inbox` from a newer desktop: extra fields are dropped, `null` optional fields are treated as absent, `unread`, `snoozeUntilAttention` and a stream's `main` other than `true` are absent, an unknown tab `type` is kept as a string, an unknown `status` (task or tab) becomes `"idle"`, and a task's `landing` keeps an unknown `state` but drops an unknown `intent` (version 3) |
 | `invalid.phoneHello[]`, `invalid.desktopHello[]`, `invalid.appMessages[]` | JSON strings that must fail to parse (version 1 inboxes, without `streams` or a task's `streamId`, among them) |
 | `versionNegotiation[]` | `{ local, remote, result }`: `negotiateVersion(local, remote)` returns `{ ok: true, version }` or `{ ok: false, update: "local" \| "remote" }`, where `update` names the side that is too old |
 
@@ -97,8 +97,10 @@ Each sample is `{ json, expected }` (plus `op` where the parser needs it). Parse
 | `invalid.events[]` | JSON strings that must fail to parse |
 | `taskNew.params[]`, `taskNew.results[]` | `{ json, expected }` for `task.new` (§8.4): its params `{ projectId, streamId?, prompt, mode? }` and result `{ taskId, tabId }`. Extra fields (version 1's `workspace` among them) are dropped, and `streamId: null` and `mode: null` are absent. |
 | `taskNew.invalid.params[]`, `taskNew.invalid.results[]` | JSON strings that must fail to parse (a blank prompt, an unknown `mode` and a non-string `streamId` among them) |
-| `taskClose.params[]`, `taskClose.results[]` | `{ json, expected }` for `task.close` (§8.7): params `{ taskId, stopWorking?, discardUnsaved? }` (flags kept only when `true`), results `{ closed: true }` or `{ closed: false, blocker: "working" \| "unsaved" }`. |
-| `taskClose.invalid.params[]`, `taskClose.invalid.results[]` | JSON strings that must fail to parse (a result without `closed`, `closed: false` without `blocker`, and an unknown `blocker` among them) |
+| `taskClose.params[]`, `taskClose.results[]` | `{ json, expected }` for `task.close` (§8.7): params `{ taskId, stopWorking?, discardUnsaved? }` (flags kept only when `true`), results `{ closed: true }`, `{ closed: false, blocker: "working" \| "unsaved" }` or (version 3) `{ closed: false, landing }` (an empty `files` is absent). |
+| `taskClose.invalid.params[]`, `taskClose.invalid.results[]` | JSON strings that must fail to parse (a result without `closed`, `closed: false` without `blocker`, an unknown `blocker`, and a `landing` without `state` or with a non-string file among them) |
+| `taskLand.params[]`, `taskLand.results[]` | `{ json, expected }` for `task.land` (§8.15): params `{ taskId, action }` and results `{ status, closed?, landing? }` (`closed` kept only when `true`, `landing: null` absent) |
+| `taskLand.invalid.params[]`, `taskLand.invalid.results[]` | JSON strings that must fail to parse (an unknown `action` or `status`, and a `landing` that isn't an object among them) |
 | `tabClose.params[]`, `tabClose.invalid.params[]` | `{ json, expected }` for `tab.close` (§8.8) params `{ tabId }`, and JSON strings that must fail to parse |
 | `pinSet.params[]`, `pinSet.invalid.params[]` | `{ json, expected }` for `pin.set` (§8.10) params `{ projectId, streamId?, taskId?, pinned }` (`streamId: null` and `taskId: null` are absent), and JSON strings that must fail to parse |
 | `taskTriage.params[]`, `taskTriage.invalid.params[]` | `{ json, expected }` for `task.triage` (§8.11) params `{ taskId, action, until?, untilAttention? }` (`until` and `untilAttention` are kept only on `snooze`, which needs exactly one of them), and JSON strings that must fail to parse |

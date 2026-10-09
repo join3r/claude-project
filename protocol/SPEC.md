@@ -1,8 +1,8 @@
-# DevTool mobile protocol, v2 (normative)
+# DevTool mobile protocol, v3 (normative)
 
 This is the normative wire spec for the DevTool mobile client: identities, the pairing URI, the relay protocol, the encrypted phone ↔ desktop channel, and the test vectors. `protocol/ts`, `relay/`, the desktop (`src/main/mobile/`) and the iOS `DevToolKit` implement exactly what it says. If an implementation has to deviate, change this file in the same change. [PROTOCOL.md](PROTOCOL.md) is the short map.
 
-Section numbers (§1–§9) are the ones code comments cite. §6 (chat) was added in M2 and §7 (push) in M3. Nothing had shipped yet, so both are part of protocol v1 with no version bump or feature flag. Version 2 (§9) moved the channel to the desktop's Project › Stream › Task model in one hard cutover; the relay protocol (§3), Noise (§4.2) and push (§7) did not change.
+Section numbers (§1–§9) are the ones code comments cite. §6 (chat) was added in M2 and §7 (push) in M3. Nothing had shipped yet, so both are part of protocol v1 with no version bump or feature flag. Version 2 (§9) moved the channel to the desktop's Project › Stream › Task model in one hard cutover; the relay protocol (§3), Noise (§4.2) and push (§7) did not change. Version 3 (§11) adds task worktrees and still accepts version 2 peers.
 
 ## 1. Identities and encodings
 
@@ -107,7 +107,7 @@ The rules above left these open. `relay/` implements them, and clients may rely 
 ### 4.3 Handshake payloads (UTF-8 JSON)
 Message 1 payload (phone):
 ```json
-{ "v": 2, "min": 2, "app": "ios/0.2.0", "features": [],
+{ "v": 3, "min": 2, "app": "ios/0.2.0", "features": [],
   "kind": "pair" | "resume",
   "proof": "<b64u pairProof>",          // kind=pair only
   "deviceName": "Vladimir's iPhone",
@@ -115,7 +115,7 @@ Message 1 payload (phone):
 ```
 Message 2 payload (desktop):
 ```json
-{ "v": 2, "min": 2, "app": "devtool/0.3.2", "features": [],
+{ "v": 3, "min": 2, "app": "devtool/0.3.2", "features": [],
   "desktopName": "join3r-mbp",
   "result": "ok" | "pending" | "rejected" | "incompatible" | "unknown-device" }
 ```
@@ -124,7 +124,7 @@ Desktop rules:
 - `pair`: the `proof` must equal (constant-time compare) the live offer's `pairProof`, and the offer must be unexpired. Then the desktop answers `pending` and asks the user to Accept.
   - On Accept, it stores the pairing, sends relay `authorize`, and sends the app message `pairing` with `status: "accepted"`.
   - On Reject, it sends `status: "rejected"`, and the relay disconnects the phone when the offer lapses.
-- Version: `chosen = min(v_phone, v_desktop)`. If `chosen < max(min_phone, min_desktop)`, the answer is `incompatible`. N is 2, and both sides send `min: 2`: version 1 is refused, not translated (§9). The side whose `v` is below the other's `min` is the one to update. The desktop says so in its Mobile settings ("Update DevTool on your iPhone" for a phone below its `min`), and the phone says "Update DevTool" (the desktop is older) or "Update the app".
+- Version: `chosen = min(v_phone, v_desktop)`. If `chosen < max(min_phone, min_desktop)`, the answer is `incompatible`. N is 3, and both sides send `min: 2`: version 1 is refused, not translated (§9), and version 2 is still spoken (§11). The session speaks `chosen`: a desktop answers a version 2 phone the version 2 way where the two differ (§8.7). The side whose `v` is below the other's `min` is the one to update. The desktop says so in its Mobile settings ("Update DevTool on your iPhone" for a phone below its `min`), and the phone says "Update DevTool" (the desktop is older) or "Update the app".
   - The desktop reads only `{ v, min }` first and negotiates on that, so a phone whose payload has a future shape still gets a clean `incompatible`. Both sides must send `min <= v`, with `v >= 1`.
 - The phone's `ed` must be the Ed25519 key the relay authenticated, i.e. `deviceId(ed) == frame.from`. If it isn't, the desktop answers `rejected`.
 - `pair` with a wrong proof, or with no live unexpired offer, is answered `rejected`. A correct proof consumes the offer on the desktop too, so the next phone needs a new QR.
@@ -162,6 +162,10 @@ Desktop rules:
       "attentionAt": 1790000000000,
       "eventAt": 1790000000000, "unread": true,
       "settledAt": 1790000000000, "snoozedUntil": 1790000000000, "snoozeUntilAttention": true,
+      "branch": "0.5.0--fix-auth",
+      "landing": { "state": "landing" | "conflict" | "blocked" | "fixing",
+                   "intent": "close" | "land" | "update",
+                   "files": ["src/auth.ts"], "fileCount": 1, "message": "…" },
       "tabs": [{
         "id": "…", "type": "claude-chat", "title": "Claude",
         "status": "working" | "attention" | "exited" | "idle",
@@ -180,6 +184,11 @@ Desktop rules:
 - `activity` (on a task or a tab) is an optional short label derived from `AgentActivity`.
 - `topic` (on a tab) is an optional line saying what an agent tab's conversation is about: Claude's session title, else the first line of its last prompt. The phone heads the tab's row with it, above the tab type.
 - The triage fields carry the desktop inbox's state for the task (§8.11). `eventAt` is the task's last event: a hook notification or stop, a terminal bell, a process exit. `unread: true` is present while the desktop counts the task unread. `settledAt` is present while the task is settled (an event after the settle un-settles it). `snoozedUntil` is present while a timed snooze hasn't passed at `generatedAt`, and `snoozeUntilAttention: true` while the task is snoozed until it needs the user. A desktop sends at most one of the two snooze fields, and drops `settledAt` from a snoozed task. A receiver treats `unread` and `snoozeUntilAttention` other than `true` as absent.
+- `branch` and `landing` (version 3, §11) belong to a task with a worktree of its own, a new task in a worktree stream once its first tab needs a folder. `branch` is that worktree's branch (`<stream branch>--<task slug>`); it is absent for a task in `main`, in a stream without a worktree, or sharing its stream's worktree (tasks from before version 3). `landing` is present while the task lands into its stream or has stopped doing so:
+  - `state` is `landing` (running), `conflict` (the rebase onto the stream stopped in the task's worktree), `blocked` (the stream's worktree refused the fast-forward: local changes in the files being landed) or `fixing` (the task's agent was asked to resolve the conflict, §8.15). A receiver keeps an unknown `state` as a string and offers no actions for it.
+  - `intent` is what was asked for: `close` (absent means `close`; the task goes to Done once it lands), `land` (it lands and stays open) or `update` (rebase onto the stream only, from the desktop's Update from stream). A receiver drops an unknown `intent`.
+  - `files` lists the conflicted files (`conflict`, `fixing`) or the stream's files in the way (`blocked`), at most the first 20, and `fileCount` is how many there are in all; both are present only when there are files. `message` is git's reason (`blocked`), at most 1000 characters.
+  - A task whose landing is `conflict` or `blocked` is the user's turn on the desktop's Inbox, ahead of a working tab; `landing` and `fixing` are not.
 - Archived streams and tasks are never sent, nor is anything inside an archived stream. Ephemeral-but-spent projects (no open task left) and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.
 - `pinned` is the desktop sidebar's Pinned list in its order: a project, a stream when `streamId` is set, or a task when `taskId` is set (its `streamId` is then the stream holding the task now). A pin whose project, stream or task isn't in `projects` (hidden, spent, archived, gone) is left out, and the field is absent when nothing is left. A phone ignores a pin it can't resolve. A pinned stream shows its tasks under it; its tasks are not pinned by themselves.
@@ -387,7 +396,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"` and §8.14 `"chat.commands"`. (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"` and §8.15 `"task.land"`. (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -406,7 +415,8 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - **New stream:** a "New stream" action on each project (for desktops that list `stream.new`), disabled while the desktop is offline. It asks for a name (prefilled with the next version after the project's last stream when that one is a version) and where the stream works: a new worktree, with a branch (defaulting to the name) and a base branch picked from `branches.list` (§8.13), or the project folder. When `branches.list` answers `unsupported` the project has no worktrees and only the project folder is offered.
 - **New task:** a "New task" action on each project (for desktops that list `task.new`), disabled while the desktop is offline. It asks for the first prompt, a permission mode and, when the project has more than one stream, a stream (defaulting to the project's `lastStreamId`, else `main`), then opens the new chat as soon as the op answers.
 - **Streams:** a project's task list is grouped by stream in `streams` order, each group headed by the stream's name (and `branch`). An Inbox row shows `Project · Stream` under the task's name.
-- **Close task:** a swipe action on a task row and a button in the task's screen (for desktops that list `task.close`), confirmed first ("moves it to Done"). A `blocker` (§8.7) becomes a second confirmation that names it, and its answer resends the op with the matching flag. The phone doesn't browse or reopen archived tasks, and doesn't close streams.
+- **Close task:** a swipe action on a task row and a button in the task's screen (for desktops that list `task.close`), confirmed first ("moves it to Done"; for a task with a `branch`, "lands its branch into <stream>, then moves it to Done"). A `blocker` (§8.7) becomes a second confirmation that names it, and its answer resends the op with the matching flag. A `landing` answer leaves the task open and shows its landing banner instead of leaving the screen. The phone doesn't browse or reopen archived tasks, and doesn't close streams.
+- **Landing:** a task row with a `landing` shows a badge (`landing…`, `fixing…`, `conflict`, `blocked`), and the task's screen a banner with the desktop's line ("Conflicts with 0.5.0 in 2 files", "0.5.0 has local changes in 1 file", the first files, git's message), and for a desktop that lists `task.land` its buttons (§8.15): **Ask agent to fix**, **Abort** and **Retry** for a conflict, **Abort** and **Retry** while the agent fixes it or for a blocked stream, none while it runs. "I'll fix it" (a terminal in the worktree) is the desktop's. The Inbox puts a `conflict` or `blocked` task under Your turn, as the desktop does.
 - **Close tab:** a swipe action on a tab row (for desktops that list `tab.close`), confirmed first for an agent that is working or waiting.
 - **Tool images:** a tool row with `images` (from a desktop that lists `chat.image`) shows a strip of thumbnails under it, fetched with a small `maxSide`. Tapping one opens it full screen, fetched again at the screen's size, with zoom and the share sheet. Against a desktop without the feature the row only says how many images there are. Fetched images are cached in memory for the session, not on disk.
 - **Pinned:** a "Pinned" section above the projects lists the desktop's `pinned` entries in order: a project as a row that opens its tasks, a stream as a row (`Project › Stream`) that opens its tasks, and a task as a task row. For a desktop that lists `pin`, a project's header menu, a stream group's header menu and a task row's swipe and context menu offer Pin or Unpin, disabled while the desktop is offline. Against a desktop without the feature the section is still shown, read-only.
@@ -452,6 +462,10 @@ Removed in version 2. A worktree belongs to a stream (§4.4 `branch`), made on t
   - `working`: an agent tab of the task is working, unless `stopWorking`.
   - `unsaved`: an editor tab in the task has unsaved changes in a desktop window, unless `discardUnsaved`.
 - A desktop sends only these two blockers; a phone treats any other as a malformed answer.
+- **A task with a worktree of its own** (version 3, a task with a `branch`, §4.4) lands instead, as the desktop's Close task does: its changes are committed, squashed into one commit named after the task and rebased onto its stream's branch, the stream's worktree is fast-forwarded to it, then its tabs stop, its worktree and branch are removed and it is archived. With nothing to land it just closes. Either way the answer is `closed: true`. The blockers come first, as above; `stopWorking` stops the task's tabs before it lands, since landing never runs under a working agent.
+  - A landing that stops leaves the task open with its `landing` (§4.4) and answers `{ closed: false, landing }`: the rebase stopped on a conflict (`conflict`, the files listed), or the stream's worktree has local changes in the files being landed (`blocked`). Sending `task.close` again tries again; a stopped rebase answers `conflict` again until it is resolved, aborted or fixed through `task.land` (§8.15). A task already being landed (a desktop window or another phone) answers `internal`.
+  - A version 2 session (§4.3) knows no `landing`: it gets an `internal` error instead, whose `message` says what stopped it ("Conflicts with 0.5.0 in 2 files. Open the task on the desktop to resolve them."), and the task stays open the same way.
+  - The phone has no Keep branch or Discard: those are the desktop's close dialog.
 - The archived task leaves the next `inbox`. A phone can't browse or reopen archived tasks; the desktop's Done row can.
 - Errors: unknown or archived `taskId`, or a task in a project hidden from mobile → `not-found`. Missing `taskId` → `bad-request`.
 
@@ -549,6 +563,22 @@ The desktop chat composer's `/` menu, for the phone's.
 - A desktop that implements these ops lists `"chat.commands"` in its features (§8.1). A phone against a desktop without it treats `/` like any other text.
 - Errors: unknown tab, as §6.3 → `not-found`. A remote (SSH) project, whose settings live on the remote host, or a project with no local folder → `unsupported` for `chat.permissions` and `chat.permissions.update`, with a message to show. Missing or malformed params, a blank or too-long `question` or `rule`, or an unknown `kind`, `behavior` or `action` → `bad-request`. Claude failing to answer, or a settings file that can't be read or written → `internal`, with the reason as the `message`.
 
+### 8.15 `task.land` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `task.land` | `{ taskId, action }` | `{ status, closed?, landing? }` |
+
+The landing banner's buttons for a task with a worktree of its own (§4.4 `branch`, `landing`), as the desktop's banner has them. `action` is one of:
+- `fix-with-agent`: sends the task's agent (its main tab when that is an agent, else its first agent tab) a prompt to resolve the conflict and continue the rebase; the landing becomes `fixing`. When the agent's turn ends with the rebase finished, the landing goes on by itself, ending the way it was asked for (`intent`): a `close` archives the task. With the rebase still stopped it is a `conflict` again. A chat tab is started if it isn't running; a terminal agent must be running (`internal` otherwise, with a message to show). An agent mid-turn answers `working`, and a landing whose conflict was resolved meanwhile goes on at once.
+- `abort`: undoes a stopped rebase and clears the landing (also a `blocked` one). The task stays open, its branch back on its old base.
+- `retry`: picks a stopped landing up again. A conflict resolved on the desktop (all files staged, or the rebase continued) goes on; one still unresolved answers `conflict` again. A `blocked` one tries the fast-forward again. A `close` that lands archives the task.
+
+The result's `status` is what came of it: `landed` (the stream took the task's commit), `updated` (an `update` finished its rebase), `nothing` (nothing was left to land), `aborted`, `fixing`, `conflict` or `blocked` (stopped again), or `working` (the task's agent is mid-turn; nothing happened). `closed: true` is present when a landing finished a close and the task went to Done. `landing` is the task's landing afterwards, present with `fixing`, `conflict` and `blocked`. A desktop sends only these statuses; a phone treats any other as a malformed answer. The task's new state also arrives in the next `inbox` event.
+
+- A desktop that implements this op lists `"task.land"` in its features (§8.1), and sends `branch` and `landing` on tasks (§4.4).
+- Errors: unknown or archived `taskId`, or a task in a project hidden from mobile → `not-found`. A task without a worktree of its own → `unsupported`. Missing `taskId` or an unknown `action` → `bad-request`. Nothing to retry or fix, the task already landing, an agent that can't be reached, or git failing → `internal`, with the reason as the `message`.
+
 ## 9. Version 2: streams
 
 The desktop moved from Project › Task › Tab to **Project › Stream › Task**: a stream is a line of work (`main`, `0.5.0`, `bugfixes`) that owns the worktree, and a task is one agent session or one terminal task with its own tabs. The phone keeps the word "task"; its meaning moved down one level. Version 2 carries that model, with no translation for version 1 peers (§4.3 refuses them):
@@ -567,3 +597,13 @@ Both apps show a project the same way wherever one of its tasks or streams appea
 - **Initials:** split the name into words: runs of Unicode letters and numbers (general categories L* and N*); anything else separates words, and a run also breaks where a lowercase letter (Ll) is followed by an uppercase one (Lu), so `devTool` is two words. Two or more words give the first code point of the first two; one word its first two code points; no word the first code point of the whitespace-trimmed name; an empty name `?`. The result is uppercased with full case mapping (`ß` becomes `SS`, so it can be longer than two characters).
 - **Colour:** FNV-1a 32-bit (offset basis `0x811c9dc5`, prime `0x01000193`) over the UTF-8 bytes of the project `id`, modulo the palette length, indexes the palette in `project-tile.json` (8 swatches, each a light and a dark `bg`/`fg`). The palette's order is part of this spec. The desktop's dashboard `icon`, which the phone never sees, still wins over the tile on the desktop.
 - **Place:** `project › stream` (U+203A between single spaces), or just `project` when the stream is `main` or unknown. Push titles (§7.5) use it before ` / task`.
+
+## 11. Version 3: task worktrees
+
+A new task in a worktree stream gets a worktree and branch of its own (`<stream branch>--<task slug>`), made when its first tab needs a folder, and closing it lands it back into the stream: one squashed commit, rebased onto the stream and fast-forwarded into it. Version 3 carries that, and only adds:
+
+- §4.4: tasks carry `branch` and `landing`.
+- §8.7: `task.close` lands a task with a worktree of its own, and answers `{ closed: false, landing }` when the landing stops.
+- §8.15: `task.land` (feature `"task.land"`) offers the stopped landing's Ask agent to fix, Abort and Retry.
+
+Both sides send `min: 2`, so a version 2 peer still connects and speaks version 2 (§4.3): an older phone ignores the new fields as unknown, and a stopped landing comes back to it as an `internal` error with a message to show (§8.7). A version 3 phone against a version 2 desktop sees no `branch`, `landing` or `"task.land"`, and closes as before.

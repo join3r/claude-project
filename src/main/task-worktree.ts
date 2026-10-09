@@ -57,6 +57,12 @@ export interface TaskWorktreeDeps {
   waitMs?: number
   /** Whether a worktree folder is there (`fs.existsSync`). */
   exists?(path: string): boolean
+  /**
+   * A landing call is queued or running for the task (`TaskLandingManager.isBusy`).
+   * A close removes the worktree before it archives the task, so a folder gone
+   * meanwhile is not one to restore.
+   */
+  isLanding?(taskId: string): boolean
 }
 
 interface Located {
@@ -176,7 +182,10 @@ export class TaskWorktreeManager {
     if (!found) return { status: 'failed', error: 'No such task' }
     const { project, stream, task } = found
     if (task.workspace) {
-      return this.isGone(found, task.workspace) ? this.restore(found, task.workspace, options) : this.current(taskId)
+      if (!this.isGone(found, task.workspace)) return this.current(taskId)
+      // Closing: the archive follows, and a worktree made now would be left behind.
+      if (this.deps.isLanding?.(taskId)) return { status: 'failed', error: 'The task is being closed' }
+      return this.restore(found, task.workspace, options)
     }
     if (!needsTaskWorktree(project, stream, task) || !stream.workspace) return { status: 'not-needed' }
     return this.create(found, stream.workspace, options)

@@ -1,7 +1,7 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent } from './chat-messages.ts'
-import type { ChatViewEvent } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
+import type { ChatViewEvent, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
 /**
@@ -14,9 +14,10 @@ import { PushOp } from './push.ts'
 /**
  * The version this build speaks (N) and the oldest it still accepts. Version 2 (streams,
  * SPEC.md §9) is a hard cutover: neither side accepts 1, so an older peer gets
- * `incompatible` and is told which side to update.
+ * `incompatible` and is told which side to update. Version 3 (task worktrees, §11)
+ * only adds, so 2 is still accepted: a desktop answers a version 2 phone the old way.
  */
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 export const MIN_PROTOCOL_VERSION = 2
 
 export type PairKind = 'pair' | 'resume'
@@ -87,6 +88,10 @@ export interface InboxTask {
   snoozedUntil?: number
   /** Present while the task is snoozed until it needs the user (§4.4). */
   snoozeUntilAttention?: true
+  /** The task's own worktree branch, once it has one (version 3, §4.4). */
+  branch?: string
+  /** Present while the task is landing into its stream or stopped doing so (version 3, §4.4). */
+  landing?: TaskLanding
   tabs: InboxTab[]
 }
 
@@ -188,6 +193,7 @@ export const AppOp = {
   TabClose: TAB_CLOSE_OP,
   PinSet: PIN_SET_OP,
   TaskTriage: TASK_TRIAGE_OP,
+  TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,
   BranchesList: BRANCHES_LIST_OP,
   ChatSettings: CHAT_SETTINGS_OP,
@@ -380,6 +386,9 @@ function parseTask(value: unknown): InboxTask {
   const snoozedUntil = optInt(o, 'snoozedUntil')
   if (snoozedUntil !== undefined) task.snoozedUntil = snoozedUntil
   if (o.snoozeUntilAttention === true) task.snoozeUntilAttention = true
+  const branch = optStr(o, 'branch')
+  if (branch !== undefined) task.branch = branch
+  if (o.landing !== undefined && o.landing !== null) task.landing = parseTaskLanding(o.landing)
   return task
 }
 

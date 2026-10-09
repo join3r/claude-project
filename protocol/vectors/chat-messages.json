@@ -890,6 +890,30 @@
           "closed": false,
           "blocker": "unsaved"
         }
+      },
+      {
+        "json": "{\"closed\":false,\"landing\":{\"state\":\"conflict\",\"intent\":\"close\",\"files\":[\"src/auth.ts\"],\"fileCount\":3}}",
+        "expected": {
+          "closed": false,
+          "landing": {
+            "state": "conflict",
+            "intent": "close",
+            "files": [
+              "src/auth.ts"
+            ],
+            "fileCount": 3
+          }
+        }
+      },
+      {
+        "json": "{\"closed\":false,\"landing\":{\"state\":\"blocked\",\"files\":[],\"message\":\"error: Your local changes would be overwritten\"},\"blocker\":null}",
+        "expected": {
+          "closed": false,
+          "landing": {
+            "state": "blocked",
+            "message": "error: Your local changes would be overwritten"
+          }
+        }
       }
     ],
     "invalid": {
@@ -903,6 +927,131 @@
         "{\"closed\":false}",
         "{\"closed\":\"yes\"}",
         "{\"closed\":false,\"blocker\":\"unmerged\"}",
+        "{\"closed\":false,\"landing\":{\"files\":[]}}",
+        "{\"closed\":false,\"landing\":{\"state\":\"conflict\",\"files\":[7]}}",
+        "[]"
+      ]
+    }
+  },
+  "taskLand": {
+    "params": [
+      {
+        "json": "{\"taskId\":\"t2\",\"action\":\"fix-with-agent\"}",
+        "expected": {
+          "taskId": "t2",
+          "action": "fix-with-agent"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t2\",\"action\":\"abort\"}",
+        "expected": {
+          "taskId": "t2",
+          "action": "abort"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t2\",\"action\":\"retry\",\"extra\":1}",
+        "expected": {
+          "taskId": "t2",
+          "action": "retry"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"status\":\"landed\",\"closed\":true}",
+        "expected": {
+          "status": "landed",
+          "closed": true
+        }
+      },
+      {
+        "json": "{\"status\":\"landed\",\"closed\":null}",
+        "expected": {
+          "status": "landed"
+        }
+      },
+      {
+        "json": "{\"status\":\"updated\"}",
+        "expected": {
+          "status": "updated"
+        }
+      },
+      {
+        "json": "{\"status\":\"nothing\",\"closed\":true}",
+        "expected": {
+          "status": "nothing",
+          "closed": true
+        }
+      },
+      {
+        "json": "{\"status\":\"aborted\",\"landing\":null}",
+        "expected": {
+          "status": "aborted"
+        }
+      },
+      {
+        "json": "{\"status\":\"fixing\",\"landing\":{\"state\":\"fixing\",\"intent\":\"close\",\"files\":[\"src/auth.ts\"],\"fileCount\":1}}",
+        "expected": {
+          "status": "fixing",
+          "landing": {
+            "state": "fixing",
+            "intent": "close",
+            "files": [
+              "src/auth.ts"
+            ],
+            "fileCount": 1
+          }
+        }
+      },
+      {
+        "json": "{\"status\":\"conflict\",\"landing\":{\"state\":\"conflict\",\"intent\":\"update\",\"files\":[\"a.ts\",\"b.ts\"],\"fileCount\":2}}",
+        "expected": {
+          "status": "conflict",
+          "landing": {
+            "state": "conflict",
+            "intent": "update",
+            "files": [
+              "a.ts",
+              "b.ts"
+            ],
+            "fileCount": 2
+          }
+        }
+      },
+      {
+        "json": "{\"status\":\"blocked\",\"landing\":{\"state\":\"blocked\",\"files\":[\"a.ts\"],\"fileCount\":1,\"message\":\"error: …\"},\"extra\":true}",
+        "expected": {
+          "status": "blocked",
+          "landing": {
+            "state": "blocked",
+            "files": [
+              "a.ts"
+            ],
+            "fileCount": 1,
+            "message": "error: …"
+          }
+        }
+      },
+      {
+        "json": "{\"status\":\"working\",\"closed\":\"yes\"}",
+        "expected": {
+          "status": "working"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"action\":\"abort\"}",
+        "{\"taskId\":\"t2\"}",
+        "{\"taskId\":\"t2\",\"action\":\"ignore\"}",
+        "{\"taskId\":7,\"action\":\"abort\"}",
+        "null"
+      ],
+      "results": [
+        "{}",
+        "{\"status\":\"merged\"}",
+        "{\"status\":\"conflict\",\"landing\":\"conflict\"}",
         "[]"
       ]
     }

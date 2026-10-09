@@ -8,6 +8,8 @@ import {
   MIN_PROTOCOL_VERSION,
   PAIRING_TTL_SECONDS,
   PROTOCOL_VERSION,
+  TASK_CLOSE_FEATURE,
+  TASK_LAND_FEATURE,
   ChatOp,
   ProtocolError,
   b64uDecode,
@@ -28,6 +30,8 @@ import {
   parseChatParams,
   parseHelloVersion,
   parsePhoneHello,
+  parseTaskCloseParams,
+  parseTaskLandParams,
   tokenHash,
   toBytes,
   utf8Encode
@@ -47,7 +51,10 @@ import type {
   InboxTabStatus,
   KeyPair,
   PhoneHello,
-  ServerMessage
+  ServerMessage,
+  TaskCloseResult,
+  TaskLandResult,
+  TaskLanding
 } from '../ts/index.ts'
 
 /**
@@ -118,6 +125,17 @@ interface Session {
 const APP_VERSION = 'fake-desktop/0.1.0'
 /** The canned inbox's claude-chat tab: the one tab `chat.open` accepts. */
 export const CHAT_TAB_ID = 'tab-chat'
+/** The canned task with a worktree of its own (§4.4 `branch`), the one `task.close` lands and `task.land` acts on. */
+export const LAND_TASK_ID = 'task-login'
+/** How long the canned agent takes to fix the conflict after `fix-with-agent`. */
+const FIX_MS = 3000
+
+/** Where the canned worktree task is: open (maybe stopped landing), or landed and closed. */
+export interface CannedLanding {
+  closed: boolean
+  landing: TaskLanding | null
+}
+
 const ROTATION: InboxTabStatus[] = ['working', 'attention', 'idle', 'working', 'exited']
 const ACTIVITIES = ['Running Bash', 'Reading files', 'Editing src/auth.ts', 'Thinking', 'Running tests']
 
@@ -125,7 +143,7 @@ const ACTIVITIES = ['Running Bash', 'Reading files', 'Editing src/auth.ts', 'Thi
  * A small fixed inbox whose first tab walks through every status, so a phone watching
  * it sees a visible change on each `tick`.
  */
-export function cannedInbox(desktop: { id: string; name: string }, tick: number, now: number): Inbox {
+export function cannedInbox(desktop: { id: string; name: string }, tick: number, now: number, land: CannedLanding = { closed: false, landing: null }): Inbox {
   const status = ROTATION[tick % ROTATION.length]
   const tickStart = now - (now % 5000)
   return {
@@ -174,7 +192,18 @@ export function cannedInbox(desktop: { id: string; name: string }, tick: number,
             since: 1790000000000,
             lastInteractedAt: 1790000000000,
             tabs: [{ id: 'tab-pi', type: 'pi', title: 'Pi', status: 'exited', since: 1790000000000 }]
-          }
+          },
+          ...(land.closed ? [] : [{
+            id: LAND_TASK_ID,
+            name: 'login-redirect',
+            streamId: 'stream-api-050',
+            streamName: '0.5.0',
+            status: 'idle' as const,
+            lastInteractedAt: 1790000000000,
+            branch: '0.5.0--login-redirect',
+            ...(land.landing ? { landing: land.landing } : {}),
+            tabs: [{ id: 'tab-login', type: 'claude', title: 'Claude', status: 'idle' as const }]
+          }])
         ]
       },
       {
@@ -206,6 +235,8 @@ export class FakeDesktop {
   #offer: LiveOffer | null = null
   #ready = false
   #tick = 0
+  #land: CannedLanding = { closed: false, landing: null }
+  #cancelFix: (() => void) | null = null
   readonly chat: FakeChat
 
   constructor(options: FakeDesktopOptions) {
@@ -319,7 +350,19 @@ export class FakeDesktop {
   }
 
   #inbox(): Inbox {
-    return cannedInbox({ id: this.id, name: this.#o.name }, this.#tick, this.#now())
+    return cannedInbox({ id: this.id, name: this.#o.name }, this.#tick, this.#now(), this.#land)
+  }
+
+  /** Every accepted phone gets the inbox at once (a landing changed). */
+  #broadcastInbox(): void {
+    for (const [phoneId, session] of this.#sessions) {
+      if (session.state === 'accepted') this.#sendInboxEvent(phoneId, session)
+    }
+  }
+
+  #setLanding(landing: TaskLanding | null, closed = false): void {
+    this.#land = { closed, landing }
+    this.#broadcastInbox()
   }
 
   #sendInboxEvent(phoneId: string, session: Session): void {
@@ -398,7 +441,7 @@ export class FakeDesktop {
       v: PROTOCOL_VERSION,
       min: MIN_PROTOCOL_VERSION,
       app: APP_VERSION,
-      features: [],
+      features: [TASK_CLOSE_FEATURE, TASK_LAND_FEATURE],
       desktopName: this.#o.name,
       result
     }
@@ -487,6 +530,10 @@ export class FakeDesktop {
       this.#sendApp(from, { t: 'res', id: message.id, ok: true, result: this.#inbox() })
       return
     }
+    if (message.op === AppOp.TaskClose || message.op === AppOp.TaskLand) {
+      this.#handleLanding(from, session, message.id, message.op, message.params)
+      return
+    }
     let params
     try {
       params = parseChatParams(message.op, message.params)
@@ -545,6 +592,76 @@ export class FakeDesktop {
         const detail = chat.detail((params as ChatDetailParams).itemId)
         if (detail) ok(detail)
         else fail(AppErrorCode.NotFound, 'No such item')
+        return
+      }
+    }
+  }
+
+  /**
+   * `task.close` and `task.land` (§8.7, §8.15) on the canned worktree task: closing it
+   * stops on a conflict; Abort clears that, Retry finds it still there, and
+   * `fix-with-agent` has the "agent" land it a few seconds later, which closes it.
+   * Every other task just closes.
+   */
+  #handleLanding(from: string, session: Session, id: number, op: string, raw: unknown): void {
+    const fail = (code: string, text: string): void => this.#sendApp(from, { t: 'res', id, ok: false, error: { code, message: text } })
+    const ok = (result: TaskCloseResult | TaskLandResult): void => this.#sendApp(from, { t: 'res', id, ok: true, result })
+    let taskId: string
+    let action: string | null = null
+    try {
+      if (op === AppOp.TaskClose) taskId = parseTaskCloseParams(raw).taskId
+      else ({ taskId, action } = parseTaskLandParams(raw))
+    } catch (err) {
+      fail(AppErrorCode.BadRequest, (err as Error).message)
+      return
+    }
+    if (taskId !== LAND_TASK_ID || this.#land.closed) {
+      if (action) fail(AppErrorCode.Unsupported, 'This task has no worktree of its own')
+      else ok({ closed: true })
+      return
+    }
+    const conflict: TaskLanding = { state: 'conflict', intent: 'close', files: ['src/auth.ts', 'src/login.ts'], fileCount: 2 }
+    switch (action) {
+      case null: {
+        const landing = this.#land.landing ?? conflict
+        if (this.#land.landing?.state !== landing.state) this.#setLanding(landing)
+        // A version 2 phone can't show a landing: it gets the reason as an error.
+        if (Math.min(session.hello.v, PROTOCOL_VERSION) < 3) fail(AppErrorCode.Internal, 'Conflicts with 0.5.0 in 2 files. Open the task on the desktop to resolve them.')
+        else ok({ closed: false, landing })
+        return
+      }
+      case 'abort':
+        this.#cancelFix?.()
+        this.#setLanding(null)
+        ok({ status: 'aborted' })
+        return
+      case 'retry':
+        if (!this.#land.landing) {
+          fail(AppErrorCode.Internal, 'Nothing to retry')
+          return
+        }
+        this.#cancelFix?.()
+        this.#setLanding(conflict)
+        ok({ status: 'conflict', landing: conflict })
+        return
+      case 'fix-with-agent': {
+        if (!this.#land.landing) {
+          fail(AppErrorCode.Internal, 'Nothing to fix')
+          return
+        }
+        const fixing: TaskLanding = { ...conflict, state: 'fixing' }
+        this.#setLanding(fixing)
+        ok({ status: 'fixing', landing: fixing })
+        const schedule = this.#o.schedule ?? ((fn: () => void, ms: number) => {
+          const handle = setTimeout(fn, ms)
+          return () => clearTimeout(handle)
+        })
+        this.#cancelFix?.()
+        this.#cancelFix = schedule(() => {
+          this.#cancelFix = null
+          this.#setLanding(null, true)
+          this.#o.log('the agent fixed the conflict; login-redirect landed into 0.5.0')
+        }, FIX_MS)
         return
       }
     }

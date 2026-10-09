@@ -342,6 +342,30 @@ describe('TaskWorktreeManager', () => {
       expect(states.has('t1')).toBe(false)
     })
 
+    it('is not restored while a landing closes the task (a phone\'s chat op in between)', async () => {
+      setProjects([project([fixtureTask({ id: 't1', name: 'Closing', tabs: { left: [tab('a')] } })])])
+      let landing: TaskLandingManager | null = null
+      const guarded = new TaskWorktreeManager({ projects: store, git: git_, waitMs: 300, isLanding: (taskId) => landing?.isBusy(taskId) ?? false })
+      const made = await guarded.ensureTaskWorktree('p1', 't1')
+      if (made.status !== 'ready') throw new Error(`expected ready, got ${made.status}`)
+      fs.writeFileSync(path.join(made.workspace.worktreePath, 'work.txt'), 'x\n')
+      let between: unknown = null
+      landing = new TaskLandingManager({
+        projects: store,
+        runner: new LocalGitRunner(),
+        git: git_,
+        activity: { getStatus: () => null, subscribe: () => () => {} },
+        // The worktree is gone and the task not archived yet: something asks for it.
+        archiveTask: async () => { between = await guarded.ensureTaskWorktree('p1', 't1') }
+      })
+
+      expect(await landing.landTask('p1', 't1')).toEqual({ status: 'landed' })
+
+      expect(between).toEqual({ status: 'failed', error: 'The task is being closed' })
+      expect(branches(repo).filter(branch => branch.startsWith('release--'))).toEqual([])
+      expect(fs.existsSync(made.workspace.worktreePath)).toBe(false)
+    })
+
     it('leaves a worktree that is still there alone', async () => {
       setProjects([project([fixtureTask({ id: 't1', name: 'Here', tabs: { left: [tab('a')] } })])])
       const made = await manager.ensureTaskWorktree('p1', 't1')

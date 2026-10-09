@@ -26,6 +26,9 @@ import {
   type BranchesListResult,
   parseTaskNewParams,
   parseTaskCloseParams,
+  parseTaskLandParams,
+  type TaskLandParams,
+  type TaskLandResult,
   parseTabCloseParams,
   parsePinSetParams,
   type PinSetParams,
@@ -43,6 +46,7 @@ import {
   parseChatPermissionsUpdateParams,
   parsePushParams,
   PushOp,
+  PROTOCOL_VERSION,
   ProtocolError
 } from '../../../protocol/ts/index.ts'
 import type {
@@ -204,8 +208,13 @@ export interface MobileServiceDeps {
   chat?: Pick<ChatBridge, 'request' | 'dropPhone' | 'dropAll' | 'projectsChanged'>
   /** `task.new` (SPEC.md §8.4): a task with a chat started on a prompt. Without it the op answers `unsupported`. */
   newTask?(phoneId: string, params: TaskNewParams): Promise<{ ok: true; taskId: string; tabId: string } | { ok: false; code: string; message: string }>
-  /** `task.close` (SPEC.md §8.7). Without it the op answers `unsupported`. */
-  closeTask?(params: TaskCloseParams): Promise<{ ok: true; result: TaskCloseResult } | { ok: false; code: string; message: string }>
+  /**
+   * `task.close` (SPEC.md §8.7). Without it the op answers `unsupported`. `phone.version`
+   * is the session's protocol version: a version 2 phone knows no `landing` result.
+   */
+  closeTask?(params: TaskCloseParams, phone: { version: number }): Promise<{ ok: true; result: TaskCloseResult } | { ok: false; code: string; message: string }>
+  /** `task.land` (SPEC.md §8.15). Without it the op answers `unsupported`. */
+  landTask?(params: TaskLandParams): Promise<{ ok: true; result: TaskLandResult } | { ok: false; code: string; message: string }>
   /** `tab.close` (SPEC.md §8.8). Without it the op answers `unsupported`. */
   closeTab?(tabId: string): Promise<{ ok: true } | { ok: false; code: string; message: string }>
   /** `pin.set` (SPEC.md §8.10). Without it the op answers `unsupported`. */
@@ -256,6 +265,8 @@ interface Session {
   lastInboxKey: string | null
   /** This session's handle in the chat bridge; replaced by every handshake. */
   chatPhone: ChatPhone
+  /** The protocol version this session speaks (§4.3): the lower of the two hellos' `v`. */
+  version: number
 }
 
 interface PendingRequest extends Omit<MobilePendingRequest, 'online'> {
@@ -707,7 +718,8 @@ export class MobileService {
       role: 'handshaking',
       seq: 0,
       lastInboxKey: null,
-      chatPhone: undefined as unknown as ChatPhone
+      chatPhone: undefined as unknown as ChatPhone,
+      version: PROTOCOL_VERSION
     }
     session.chatPhone = this.chatPhoneFor(session)
     session.channel = this.deps.channels.create(phoneId, {
@@ -727,6 +739,8 @@ export class MobileService {
         // A new handshake on an existing channel starts a new session.
         session.seq = 0
         session.lastInboxKey = null
+        // The channel only gets here once the versions negotiated (§4.3).
+        session.version = Math.min(hello.hello.v, PROTOCOL_VERSION)
         this.resetChat(session)
         const result = this.decideHandshake(phoneId, hello)
         session.role = result === 'ok' ? 'paired' : result === 'pending' ? 'pending' : 'refused'
@@ -867,8 +881,16 @@ export class MobileService {
     if (message.op === AppOp.TaskClose && this.deps.closeTask) {
       const closeTask = this.deps.closeTask
       this.answerLater(session, id, message.op, () => parseTaskCloseParams(message.params), async (params) => {
-        const outcome = await closeTask(params)
+        const outcome = await closeTask(params, { version: session.version })
         return outcome.ok ? { ok: true, result: outcome.result, log: `task=${params.taskId} closed=${outcome.result.closed}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.TaskLand && this.deps.landTask) {
+      const landTask = this.deps.landTask
+      this.answerLater(session, id, message.op, () => parseTaskLandParams(message.params), async (params) => {
+        const outcome = await landTask(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `task=${params.taskId} action=${params.action} status=${outcome.result.status}` } : outcome
       })
       return
     }

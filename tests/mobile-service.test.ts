@@ -141,7 +141,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -193,6 +193,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?
     listBranches: options.listBranches,
     newTask: options.newTask,
     closeTask: options.closeTask,
+    landTask: options.landTask,
     closeTab: options.closeTab,
     setPin: options.setPin,
     triageTask: options.triageTask,
@@ -214,7 +215,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?
   }
 }
 
-function pairedSetup(options: { newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -731,6 +732,62 @@ describe('MobileService task.close and tab.close (SPEC.md §8.7, §8.8)', () => 
     expect(calls).toEqual([{ taskId: 't1' }, { taskId: 't1', stopWorking: true, discardUnsaved: true }])
   })
 
+  it('tells closeTask the version the session speaks (version 3, §8.7)', async () => {
+    const versions: number[] = []
+    const env = pairedSetup({
+      closeTask: async (_params, phone) => {
+        versions.push(phone.version)
+        return { ok: true, result: { closed: false, landing: { state: 'conflict', files: ['a.ts'], fileCount: 1 } } }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.close', params: { taskId: 't1' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { closed: false, landing: { state: 'conflict', files: ['a.ts'], fileCount: 1 } } })
+    // A version 3 phone on the next handshake.
+    env.channel.handshake(hello(env.keys, { v: 3 }))
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'task.close', params: { taskId: 't1' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(versions).toEqual([2, 3])
+  })
+
+  it('answers task.land through its dependency (§8.15)', async () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      landTask: async (params) => {
+        calls.push(params)
+        return params.action === 'abort'
+          ? { ok: true, result: { status: 'aborted' } }
+          : { ok: false, code: 'internal', message: 'Nothing to retry' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'task.land', params: { taskId: 't1', action: 'abort' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { status: 'aborted' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'task.land', params: { taskId: 't1', action: 'retry' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'internal', message: 'Nothing to retry' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'task.land', params: { taskId: 't1', action: 'merge' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([{ taskId: 't1', action: 'abort' }, { taskId: 't1', action: 'retry' }])
+  })
+
+  it('sends the inbox again when a landing changes', async () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'inbox.get' })
+    const streamWs = { worktreePath: '/x/.worktrees/rel', branchName: 'rel', baseBranch: 'main', relativeProjectPath: '' }
+    const own = { worktreePath: '/x/.worktrees/rel--fix', branchName: 'rel--fix', baseBranch: 'rel', relativeProjectPath: '' }
+    env.setProjects({
+      projects: [fixtureProject({
+        id: 'p1', name: 'api', directory: '/x',
+        tasks: [{ id: 't1', name: 'fix', workspace: streamWs, ownWorkspace: own, landing: { state: 'conflict', files: ['a.ts'] }, tabs: { left: [{ id: 'tab1', type: 'claude', title: 'Claude' }] }, activeTab: { left: 'tab1' } }]
+      })],
+      tags: [], projectOrder: ['p1'], pinnedItems: []
+    })
+    env.timers.advance(INBOX_THROTTLE_MS)
+    const task = env.channel.inboxEvents().at(-1)?.inbox.projects[0].tasks[0]
+    expect(task).toMatchObject({ branch: 'rel--fix', landing: { state: 'conflict', files: ['a.ts'], fileCount: 1 } })
+  })
+
   it('closes a tab, passing errors through', async () => {
     const env = pairedSetup({
       closeTab: async (tabId) => tabId === 'tab1' ? { ok: true } : { ok: false, code: 'not-found', message: 'No such tab' }
@@ -749,6 +806,8 @@ describe('MobileService task.close and tab.close (SPEC.md §8.7, §8.8)', () => 
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
     env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'tab.close', params: { tabId: 'tab1' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'task.land', params: { taskId: 't1', action: 'retry' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'unsupported' } })
   })
 })
 

@@ -49,7 +49,61 @@ export const TASK_CLOSE_BLOCKERS = ['working', 'unsaved'] as const
 export type TaskCloseBlocker = (typeof TASK_CLOSE_BLOCKERS)[number]
 
 export interface TaskCloseParams { taskId: string; stopWorking?: boolean; discardUnsaved?: boolean }
-export type TaskCloseResult = { closed: true } | { closed: false; blocker: TaskCloseBlocker }
+/**
+ * `landing` (version 3): a task with a worktree of its own didn't land into its
+ * stream, so it stays open with that landing state (§8.7, §8.15).
+ */
+export type TaskCloseResult =
+  | { closed: true }
+  | { closed: false; blocker: TaskCloseBlocker }
+  | { closed: false; landing: TaskLanding }
+
+/**
+ * A task's landing into its stream (SPEC.md §4.4 `landing`, version 3): running, or
+ * stopped on a conflict or on the stream's local changes, or with the task's agent
+ * asked to fix the conflict. `state` stays an open string, so a newer desktop's
+ * state still parses; the phone offers no buttons for one it doesn't know.
+ */
+export const TASK_LANDING_STATES = ['landing', 'conflict', 'blocked', 'fixing'] as const
+/** What the landing was asked for: `close` (the default), `land` (keep the task open), `update` (rebase only). */
+export const TASK_LANDING_INTENTS = ['close', 'land', 'update'] as const
+export type TaskLandingIntent = (typeof TASK_LANDING_INTENTS)[number]
+/** Caps on the wire: the first `files`, and git's `message`. */
+export const TaskLandingLimits = { files: 20, message: 1000 } as const
+
+export interface TaskLanding {
+  state: string
+  intent?: TaskLandingIntent
+  /** The conflicted files (`conflict`, `fixing`) or the stream's files in the way (`blocked`), the first 20. */
+  files?: string[]
+  /** How many there are in all; present with `files`. */
+  fileCount?: number
+  /** Git's reason (`blocked`), at most 1000 characters. */
+  message?: string
+}
+
+/**
+ * `task.land` (SPEC.md §8.15): a stopped landing's buttons. `fix-with-agent` asks the
+ * task's agent to resolve the conflict, `abort` undoes the rebase (the task stays
+ * open), `retry` picks the landing up again.
+ */
+export const TASK_LAND_OP = 'task.land'
+/** The handshake feature (§8.1) a desktop lists when it answers `task.land` and sends `landing` and a task's `branch` (§4.4). */
+export const TASK_LAND_FEATURE = 'task.land'
+export const TASK_LAND_ACTIONS = ['fix-with-agent', 'abort', 'retry'] as const
+export type TaskLandAction = (typeof TASK_LAND_ACTIONS)[number]
+/** What a `task.land` came to (§8.15). */
+export const TASK_LAND_STATUSES = ['landed', 'updated', 'nothing', 'aborted', 'fixing', 'conflict', 'blocked', 'working'] as const
+export type TaskLandStatus = (typeof TASK_LAND_STATUSES)[number]
+
+export interface TaskLandParams { taskId: string; action: TaskLandAction }
+export interface TaskLandResult {
+  status: TaskLandStatus
+  /** The landing finished a close: the task moved to its stream's Done row. */
+  closed?: true
+  /** The task's landing now (`fixing`, `conflict`, `blocked`). */
+  landing?: TaskLanding
+}
 
 /** `tab.close` (SPEC.md §8.8): close one agent or terminal tab of a task. */
 export const TAB_CLOSE_OP = 'tab.close'
@@ -734,10 +788,14 @@ export function parseTaskCloseParams(params: unknown): TaskCloseParams {
   return out
 }
 
-/** `task.close` result (the phone's side). A blocker outside {@link TASK_CLOSE_BLOCKERS} throws. */
+/**
+ * `task.close` result (the phone's side). A blocker outside {@link TASK_CLOSE_BLOCKERS}
+ * throws. `closed: false` with a `landing` is a task that didn't land (version 3).
+ */
 export function parseTaskCloseResult(value: unknown): TaskCloseResult {
   const o = obj(value, 'result')
   if (bool(o, 'closed')) return { closed: true }
+  if (!absent(o, 'landing')) return { closed: false, landing: parseTaskLanding(o.landing) }
   const blocker = str(o, 'blocker')
   if (!(TASK_CLOSE_BLOCKERS as readonly string[]).includes(blocker)) fail(`unknown blocker ${blocker}`)
   return { closed: false, blocker: blocker as TaskCloseBlocker }
@@ -777,6 +835,42 @@ export function parseTaskTriageParams(params: unknown): TaskTriageParams {
   if (until !== undefined) out.until = until
   else out.untilAttention = true
   return out
+}
+
+/**
+ * A task's `landing` (§4.4, version 3), on a wire task or in a `task.close` /
+ * `task.land` result. `state` is kept as sent (an open string); an unknown `intent`
+ * is dropped (it reads as `close`).
+ */
+export function parseTaskLanding(value: unknown): TaskLanding {
+  const o = obj(value, 'landing')
+  const landing: TaskLanding = { state: str(o, 'state') }
+  const intent = optStr(o, 'intent')
+  if (intent !== undefined && (TASK_LANDING_INTENTS as readonly string[]).includes(intent)) landing.intent = intent as TaskLandingIntent
+  if (!absent(o, 'files')) {
+    const files = strings(o, 'files')
+    if (files.length > 0) landing.files = files
+  }
+  const fileCount = optInt(o, 'fileCount')
+  if (fileCount !== undefined) landing.fileCount = fileCount
+  const message = optStr(o, 'message')
+  if (message !== undefined) landing.message = message
+  return landing
+}
+
+/** `task.land` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `taskId` or an unknown `action`. */
+export function parseTaskLandParams(params: unknown): TaskLandParams {
+  const o = obj(params, 'params')
+  return { taskId: str(o, 'taskId'), action: oneOf(o, 'action', TASK_LAND_ACTIONS) }
+}
+
+/** `task.land` result (the phone's side). A status outside {@link TASK_LAND_STATUSES} throws. */
+export function parseTaskLandResult(value: unknown): TaskLandResult {
+  const o = obj(value, 'result')
+  const result: TaskLandResult = { status: oneOf(o, 'status', TASK_LAND_STATUSES) }
+  if (flag(o, 'closed')) result.closed = true
+  if (!absent(o, 'landing')) result.landing = parseTaskLanding(o.landing)
+  return result
 }
 
 /**

@@ -56,9 +56,9 @@ describe('Noise channel (desktop responder)', () => {
     env.phone.startHandshake(env.phone.hello('resume'))
     env.pump()
     expect(env.hellos).toHaveLength(1)
-    expect(env.hellos[0].hello).toMatchObject({ kind: 'resume', deviceName: 'Test iPhone', v: 2, min: 2 })
+    expect(env.hellos[0].hello).toMatchObject({ kind: 'resume', deviceName: 'Test iPhone', v: 3, min: 2 })
     expect(bytesEqual(env.hellos[0].remoteStatic, env.phone.x.pub)).toBe(true)
-    expect(env.phone.desktopHello).toEqual({ v: 2, min: 2, app: 'devtool/test', features: [], desktopName: 'test-mbp', result: 'ok' })
+    expect(env.phone.desktopHello).toEqual({ v: 3, min: 2, app: 'devtool/test', features: [], desktopName: 'test-mbp', result: 'ok' })
     expect(env.channel.established).toBe(true)
     expect(env.established).toEqual(['ok'])
 
@@ -92,7 +92,7 @@ describe('Noise channel (desktop responder)', () => {
 
   it('answers incompatible on the version alone, before parsing the rest', () => {
     const env = setup()
-    env.phone.startHandshake(utf8Encode(JSON.stringify({ v: 4, min: 3, future: true })))
+    env.phone.startHandshake(utf8Encode(JSON.stringify({ v: 5, min: 4, future: true })))
     env.pump()
     expect(env.phone.desktopHello?.result).toBe('incompatible')
     expect(env.hellos).toHaveLength(0)
@@ -104,7 +104,7 @@ describe('Noise channel (desktop responder)', () => {
     const env = setup()
     env.phone.startHandshake({ ...env.phone.hello('resume'), v: 1, min: 1 })
     env.pump()
-    expect(env.phone.desktopHello).toMatchObject({ v: 2, min: 2, result: 'incompatible' })
+    expect(env.phone.desktopHello).toMatchObject({ v: 3, min: 2, result: 'incompatible' })
     expect(env.hellos).toHaveLength(0)
     expect(env.incompatible).toEqual([{ update: 'phone', deviceName: 'Test iPhone' }])
   })
