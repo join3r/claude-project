@@ -14,7 +14,7 @@ Persistent state lives in a config dir resolved in `src/main/config-dir.ts`: `~/
 
 Don't `chmod +s` `dist/chrome-sandbox` to chase sandbox errors — a setuid binary not owned by root makes Chromium reject it outright rather than fall back to the user-namespace sandbox.
 
-npm >=11.17 blocks dependency install scripts until they're approved, which would otherwise stop Electron from downloading at all. The `allowScripts` field in `package.json` covers `electron`, `esbuild` and `node-pty`; entries are pinned to exact versions, so bumping any of those needs a fresh `npm approve-scripts <pkg>`. `electron-winstaller` is deliberately left unapproved — portable Windows output is `npm run build:win` (`--win --dir`), not an installer, so `npm install` may warn about it harmlessly.
+npm >=11.17 blocks dependency install scripts until they're approved, which would otherwise stop Electron from downloading at all. The `allowScripts` field in `package.json` covers `electron`, `esbuild` and `node-pty`; entries are pinned to exact versions, so bumping any of those needs a fresh `npm approve-scripts <pkg>`. `electron-winstaller` is deliberately left unapproved — portable Windows output is `npm run build:win` (`--win --dir`), not an installer, so `npm install` may warn about it harmlessly. The same goes for `node-pty@1.2.0-beta.15`, installed under the `node-pty-server` alias only so `npm run build:server` can copy its prebuilt binaries into the server bundle: its install scripts must stay unapproved, and `@electron/rebuild` is limited to `-o node-pty`.
 
 ## Windows native rebuild (`node-pty`)
 
