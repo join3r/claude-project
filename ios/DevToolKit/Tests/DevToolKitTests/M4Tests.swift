@@ -177,6 +177,42 @@ import Testing
         }
     }
 
+    @Test func queueParamsAndResults() throws {
+        let file = try Vectors.load("chat-messages.json")
+        let update = try #require(file["queueUpdate"])
+        #expect(!update["params"].array.isEmpty)
+        for sample in update["params"].array {
+            let parsed = try QueueUpdateParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for sample in update["results"].array {
+            let parsed = try QueueUpdateResult.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in update["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str.prefix(80))") { _ = try QueueUpdateParams.parse(try JSONValue.parse(json.str)) }
+        }
+        for json in update["invalid"]["results"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try QueueUpdateResult.parse(try JSONValue.parse(json.str)) }
+        }
+        let run = try #require(file["queueRun"])
+        #expect(!run["params"].array.isEmpty)
+        for sample in run["params"].array {
+            let parsed = try QueueRunParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for sample in run["results"].array {
+            let parsed = try QueueRunResult.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in run["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try QueueRunParams.parse(try JSONValue.parse(json.str)) }
+        }
+        for json in run["invalid"]["results"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try QueueRunResult.parse(try JSONValue.parse(json.str)) }
+        }
+    }
+
     @Test func blockersAreTheDesktopsQuestions() {
         #expect(TaskCloseBlocker.allCases == [.working, .unsaved])
     }
@@ -351,6 +387,30 @@ import Testing
         await connection.stop()
     }
 
+    @Test func queueWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        desktop.features = [DesktopFeature.queue]
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features([DesktopFeature.queue]) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        let added = try await connection.updateQueue(projectId: "p", .add(text: "Next up", streamId: "s"))
+        #expect(added == "q-new-1")
+        #expect(desktop.requests.last?.params == .object(["projectId": "p", "action": "add", "text": "Next up", "streamId": "s"]))
+        #expect(try await connection.updateQueue(projectId: "p", .move(itemId: "q1", toIndex: 0)) == nil)
+        try await connection.updateQueue(projectId: "p", .autoRun(streamId: "s", on: true))
+        #expect(desktop.queueUpdateParams.map(\.action) == [
+            .add(text: "Next up", streamId: "s"), .move(itemId: "q1", toIndex: 0), .autoRun(streamId: "s", on: true),
+        ])
+        #expect(try await connection.runQueued(projectId: "p", itemId: "q1") == "t-run-1")
+        #expect(desktop.queueRunParams == [QueueRunParams(projectId: "p", itemId: "q1")])
+        await connection.stop()
+    }
+
     @Test func olderDesktopListsNoFeatures() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
@@ -408,6 +468,35 @@ import Testing
 
 /// `MockDesktopConnection`'s M4 ops and features.
 @Suite struct MockM4Tests {
+    @Test func editsAndRunsTheQueue() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        /// Waits for an inbox whose api-server matches, and returns that project.
+        @discardableResult
+        func api(_ predicate: @escaping @Sendable (InboxProject) -> Bool) async throws -> InboxProject {
+            let index = try await events.waitFor { event in
+                guard case .inbox(let inbox) = event, let api = inbox.projects.first(where: { $0.id == "p-api" }) else { return false }
+                return predicate(api)
+            }
+            guard case .inbox(let inbox) = await events.events[index - 1] else { throw CancellationError() }
+            return try #require(inbox.projects.first { $0.id == "p-api" })
+        }
+        try await api { $0.queue.map(\.id) == ["q-1", "q-2", "q-3"] }
+
+        let added = try #require(try await mock.updateQueue(projectId: "p-api", .add(text: "Ship it", streamId: nil)))
+        try await api { $0.queue.last == InboxQueuedPrompt(id: added, text: "Ship it", streamId: "s-api-main") }
+        try await mock.updateQueue(projectId: "p-api", .move(itemId: "q-2", toIndex: 0))
+        try await mock.updateQueue(projectId: "p-api", .remove(itemId: "q-3"))
+        try await api { $0.queue.map(\.id) == ["q-2", "q-1", added] }
+        await #expect(throws: DesktopConnectionError.self) { try await mock.updateQueue(projectId: "p-api", .remove(itemId: "q-3")) }
+
+        let taskId = try await mock.runQueued(projectId: "p-api", itemId: "q-2")
+        let project = try await api { $0.queue.map(\.id) == ["q-1", added] && $0.streams.contains { $0.queueTaskId == taskId } }
+        #expect(project.tasks.contains { $0.id == taskId && $0.streamId == "s-api-050" })
+        await mock.stop()
+    }
+
     @Test func listsFeaturesAndMakesStreams() async throws {
         let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
         let events = EventRecorder(mock)
@@ -417,7 +506,7 @@ import Testing
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
-            DesktopFeature.taskLand, DesktopFeature.sendImages,
+            DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let listed = try await mock.listBranches(projectId: "p-api")
@@ -621,5 +710,50 @@ import Testing
         #expect(store.load(desktopId: "d", tabId: "tab-2") == b)
         store.deleteAll(desktopId: "d")
         #expect(store.load(desktopId: "d", tabId: "tab-2") == nil)
+    }
+}
+
+/// The Queue section's grouping and the phone's own edits (§8.3, §8.16).
+@Suite struct PromptQueueTests {
+    let main = InboxStream(id: "m", name: "main", isMain: true)
+    let bugs = InboxStream(id: "b", name: "bugfixes")
+    let docs = InboxStream(id: "d", name: "docs", queueAutoRun: true, queueTaskId: "t1")
+
+    func project() -> InboxProject {
+        InboxProject(id: "p", name: "p", streams: [main, bugs, docs], tasks: [
+            InboxTask(id: "t1", name: "running", streamId: "d", streamName: "docs", tabs: []),
+        ], queue: [
+            InboxQueuedPrompt(id: "a", text: "a", streamId: "m"),
+            InboxQueuedPrompt(id: "b", text: "b", streamId: "d"),
+            InboxQueuedPrompt(id: "c", text: "c", streamId: "m"),
+        ])
+    }
+
+    @Test func groupsStreamsWithPromptsOrAutoRun() {
+        let groups = project().queueGroups
+        #expect(groups.map(\.stream.id) == ["m", "d"])
+        #expect(groups[0].prompts.map(\.id) == ["a", "c"])
+        let single = InboxProject(id: "p", name: "p", streams: [main], tasks: [])
+        #expect(single.queueGroups.map(\.stream.id) == ["m"])
+        #expect(project().queueWaitingTask(in: docs)?.id == "t1")
+        #expect(project().queueWaitingTask(in: main) == nil)
+    }
+
+    @Test func movesWithinItsStream() {
+        let p = project()
+        let c = p.queue[2]
+        #expect(p.queueMove(c, up: true) == .move(itemId: "c", toIndex: 0))
+        #expect(p.queueMove(c, up: false) == nil)
+        #expect(p.applying(.move(itemId: "c", toIndex: 0)).queue.map(\.id) == ["c", "a", "b"])
+        #expect(p.applying(p.queueMove(p.queue[0], up: false)!).queue.map(\.id) == ["b", "c", "a"])
+    }
+
+    @Test func appliesEditsAsTheDesktopDoes() {
+        let p = project()
+        #expect(p.applying(.edit(itemId: "a", text: "A")).queue[0].text == "A")
+        #expect(p.applying(.remove(itemId: "b")).queue.map(\.id) == ["a", "c"])
+        let off = p.applying(.autoRun(streamId: "d", on: false)).streams[2]
+        #expect(!off.queueAutoRun && off.queueTaskId == nil)
+        #expect(p.applying(.add(text: "x", streamId: nil)) == p)
     }
 }

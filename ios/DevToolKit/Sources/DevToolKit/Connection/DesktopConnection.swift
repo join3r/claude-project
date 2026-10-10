@@ -277,6 +277,23 @@ extension DesktopConnection {
         _ = try await request(TaskOp.triage, params: TaskTriageParams(taskId: taskId, action: action).json)
     }
 
+    /// `queue.update` (§8.16): one edit to the project's queue. Returns the new
+    /// prompt's id for `add`; the queue comes back in the next inbox.
+    @discardableResult
+    public func updateQueue(projectId: String, _ action: QueueUpdateParams.Action) async throws -> String? {
+        let result = try await request(TaskOp.updateQueue, params: QueueUpdateParams(projectId: projectId, action: action).json)
+        return try decode(result, QueueUpdateResult.parse).itemId
+    }
+
+    /// `queue.run` (§8.16): start a queued prompt now as a new task in its
+    /// stream. Returns the task's ID. A worktree stream makes the task's
+    /// worktree first, so this waits as long as `newTask`.
+    @discardableResult
+    public func runQueued(projectId: String, itemId: String) async throws -> String {
+        let result = try await request(TaskOp.runQueued, params: QueueRunParams(projectId: projectId, itemId: itemId).json, timeout: .seconds(60))
+        return try decode(result, QueueRunResult.parse).taskId
+    }
+
     /// `stream.new` (§8.12): a new stream at the end of the project's list,
     /// on a new worktree (`branch` nil: made from the name; `baseBranch` nil:
     /// the desktop's default base) or in the project folder. Returns its ID;

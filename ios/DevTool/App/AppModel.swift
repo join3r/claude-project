@@ -22,6 +22,10 @@ final class AppModel {
     var pinError: String?
     /// A failed Settle, Snooze or Mark unread (§8.11); `RootView` shows it and clears it.
     var triageError: String?
+    /// A failed queue change or Run now (§8.16); `RootView` shows it and clears it.
+    var queueError: String?
+    /// Queued prompts whose Run now is in flight (`desktopId/itemId`).
+    private(set) var startingQueued: Set<String> = []
 
     /// Push registration (SPEC.md §7.4); told about every established session.
     @ObservationIgnored weak var push: PushManager?
@@ -225,6 +229,69 @@ final class AppModel {
             if let before, let applied, task(ref)?.task == applied { updateTask(ref) { _ in before } }
             triageError = error.localizedDescription
         }
+    }
+
+    /// `queue.update` (§8.16), answered by the desktop: the Queue sheet's Add
+    /// and Save, which show their own error. Returns the new prompt's id for `add`.
+    @discardableResult
+    func updateQueue(_ action: QueueUpdateParams.Action, projectId: String, desktopId: String) async throws -> String? {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.updateQueue(projectId: projectId, action)
+    }
+
+    /// `queue.update` from a row or a switch: the queue changes at once and the
+    /// next inbox confirms it. A failure puts it back, unless an inbox has
+    /// replaced it meanwhile, and sets `queueError`.
+    func changeQueue(_ action: QueueUpdateParams.Action, projectId: String, desktopId: String) async {
+        guard let connection = connections[desktopId] else {
+            queueError = DesktopConnectionError.notConnected.localizedDescription
+            return
+        }
+        let before = project(projectId, desktopId: desktopId)
+        let applied = updateProject(projectId, desktopId: desktopId) { $0.applying(action) }
+        do {
+            try await connection.updateQueue(projectId: projectId, action)
+        } catch {
+            if let before, let applied, project(projectId, desktopId: desktopId) == applied {
+                updateProject(projectId, desktopId: desktopId) { _ in before }
+            }
+            queueError = error.localizedDescription
+        }
+    }
+
+    /// `queue.run` (§8.16): Run now. The task and the shorter queue come with
+    /// the next inbox; a failure sets `queueError`.
+    func runQueued(_ itemId: String, projectId: String, desktopId: String) async {
+        guard let connection = connections[desktopId] else {
+            queueError = DesktopConnectionError.notConnected.localizedDescription
+            return
+        }
+        let key = "\(desktopId)/\(itemId)"
+        guard !startingQueued.contains(key) else { return }
+        startingQueued.insert(key)
+        defer { startingQueued.remove(key) }
+        do {
+            try await connection.runQueued(projectId: projectId, itemId: itemId)
+        } catch {
+            queueError = error.localizedDescription
+        }
+    }
+
+    func isStartingQueued(_ itemId: String, desktopId: String) -> Bool {
+        startingQueued.contains("\(desktopId)/\(itemId)")
+    }
+
+    private func project(_ projectId: String, desktopId: String) -> InboxProject? {
+        inboxes[desktopId]?.projects.first { $0.id == projectId }
+    }
+
+    @discardableResult
+    private func updateProject(_ projectId: String, desktopId: String, _ change: (InboxProject) -> InboxProject) -> InboxProject? {
+        guard var inbox = inboxes[desktopId], let p = inbox.projects.firstIndex(where: { $0.id == projectId }) else { return nil }
+        let next = change(inbox.projects[p])
+        inbox.projects[p] = next
+        inboxes[desktopId] = inbox
+        return next
     }
 
     /// Opening an unread task reads it on the desktop too (§8.3).

@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -181,6 +181,14 @@ describe('M2 vectors', () => {
     for (const s of file.pinSet.invalid.params) expect(() => parsePinSetParams(JSON.parse(s)), s).toThrow()
     for (const s of file.taskTriage.params) expect(parseTaskTriageParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.taskTriage.invalid.params) expect(() => parseTaskTriageParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.queueUpdate.params) expect(parseQueueUpdateParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.queueUpdate.results) expect(parseQueueUpdateResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.queueUpdate.invalid.params) expect(() => parseQueueUpdateParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.queueUpdate.invalid.results) expect(() => parseQueueUpdateResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.queueRun.params) expect(parseQueueRunParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.queueRun.results) expect(parseQueueRunResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.queueRun.invalid.params) expect(() => parseQueueRunParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.queueRun.invalid.results) expect(() => parseQueueRunResult(JSON.parse(s)), s).toThrow()
     for (const s of file.settings.params) expect(parseChatSettingsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.settings.invalid.params) expect(() => parseChatSettingsParams(JSON.parse(s)), s).toThrow()
     for (const s of file.image.params) expect(parseChatImageParams(JSON.parse(s.json)), s.json).toEqual(s.expected)

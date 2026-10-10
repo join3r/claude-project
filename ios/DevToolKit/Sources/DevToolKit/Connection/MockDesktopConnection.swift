@@ -257,6 +257,22 @@ public actor MockDesktopConnection: DesktopConnection {
             }
             try setPin(parsed)
             return .object([:])
+        case TaskOp.updateQueue:
+            let parsed: QueueUpdateParams
+            do {
+                parsed = try QueueUpdateParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return QueueUpdateResult(itemId: try updateQueue(parsed)).json
+        case TaskOp.runQueued:
+            let parsed: QueueRunParams
+            do {
+                parsed = try QueueRunParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return QueueRunResult(taskId: try runQueued(parsed)).json
         case TaskOp.triage:
             let parsed: TaskTriageParams
             do {
@@ -551,6 +567,64 @@ public actor MockDesktopConnection: DesktopConnection {
         continuation.yield(.inbox(inbox))
     }
 
+    /// `queue.update`: edits the project's queue as `applyPromptQueueOp` does and
+    /// sends the inbox. Returns the new prompt's id for `add`.
+    private func updateQueue(_ params: QueueUpdateParams) throws -> String? {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == params.projectId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        let project = inbox.projects[p]
+        func requireItem(_ id: String) throws {
+            guard project.queue.contains(where: { $0.id == id }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "That prompt is no longer queued.")
+            }
+        }
+        func requireStream(_ id: String) throws {
+            guard project.streams.contains(where: { $0.id == id }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")
+            }
+        }
+        var added: String?
+        switch params.action {
+        case .add(let text, let streamId):
+            if project.id == Self.shellProjectId {
+                throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "A shell-command project runs one command, not Claude.")
+            }
+            if let streamId { try requireStream(streamId) }
+            newCount += 1
+            let id = "q-new-\(newCount)"
+            inbox.projects[p].queue.append(InboxQueuedPrompt(id: id, text: text, streamId: streamId ?? project.mainStream?.id ?? ""))
+            added = id
+        case .edit(let itemId, _), .remove(let itemId), .move(let itemId, _):
+            try requireItem(itemId)
+            inbox.projects[p] = project.applying(params.action)
+        case .autoRun(let streamId, _):
+            try requireStream(streamId)
+            inbox.projects[p] = project.applying(params.action)
+        }
+        guard inbox.projects[p] != project else { return added }
+        inbox.generatedAt = Date().unixMilliseconds
+        continuation.yield(.inbox(inbox))
+        return added
+    }
+
+    /// `queue.run`: the prompt leaves the queue and becomes a task in its
+    /// stream, which then waits for it.
+    private func runQueued(_ params: QueueRunParams) throws -> String {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == params.projectId }),
+              let i = inbox.projects[p].queue.firstIndex(where: { $0.id == params.itemId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "That prompt is no longer queued.")
+        }
+        let item = inbox.projects[p].queue.remove(at: i)
+        let result = try addTask(projectId: params.projectId, streamId: item.streamId, prompt: item.text)
+        if let s = inbox.projects[p].streams.firstIndex(where: { $0.id == item.streamId }) {
+            inbox.projects[p].streams[s].queueTaskId = result.taskId
+        }
+        startReply(tabId: result.tabId, text: item.text, images: 0)
+        continuation.yield(.inbox(inbox))
+        return result.taskId
+    }
+
     /// `task.triage`: applies the action as the desktop would and sends the inbox.
     private func triage(_ params: TaskTriageParams) throws {
         for p in inbox.projects.indices {
@@ -738,7 +812,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
-            DesktopFeature.taskLand, DesktopFeature.sendImages,
+            DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -849,7 +923,8 @@ public enum MockInbox {
         func ago(_ minutes: Double) -> Int64 { t - Int64(minutes * 60_000) }
 
         let apiMain = InboxStream(id: "s-api-main", name: "main", isMain: true)
-        let api050 = InboxStream(id: "s-api-050", name: "0.5.0", branch: "0.5.0")
+        // 0.5.0 runs its queue by itself, waiting on rate-limiter.
+        let api050 = InboxStream(id: "s-api-050", name: "0.5.0", branch: "0.5.0", queueAutoRun: true, queueTaskId: "t-rate")
         let apiBugs = InboxStream(id: "s-api-bugs", name: "bugfixes")
         let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true)
         let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign")
@@ -896,6 +971,10 @@ public enum MockInbox {
                     task("t-flaky", "flaky-login-test", apiBugs, lastInteractedAt: ago(30), eventAt: ago(30), tabs: [
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),
                     ]),
+                ], queue: [
+                    InboxQueuedPrompt(id: "q-1", text: "Add a Retry-After header to 429 responses", streamId: api050.id),
+                    InboxQueuedPrompt(id: "q-2", text: "Write an integration test for the rate limiter that covers burst traffic and the reset window", streamId: api050.id),
+                    InboxQueuedPrompt(id: "q-3", text: "Look into why the login test is flaky on CI", streamId: apiMain.id),
                 ]),
                 InboxProject(id: "p-web", name: "web-dashboard", emoji: "📊", streams: [webMain, webLogin, web240], tasks: [
                     task("t-charts", "usage-charts", webMain, lastInteractedAt: ago(25), tabs: [

@@ -11,11 +11,13 @@ import {
   type TaskLanding
 } from '../../shared/types'
 import { findStreamOfTask, taskTabs } from '../../shared/streams'
+import { promptQueue, promptQueueWatchedTask, queuedPromptStream } from '../../shared/prompt-queue'
 import { INBOX_TAB_TYPES, TaskLandingLimits } from '../../../protocol/ts/index.ts'
 import type {
   TaskLanding as WireLanding,
   Inbox as MobileInbox,
   InboxPin as MobileInboxPin,
+  InboxQueuedPrompt as MobileQueuedPrompt,
   InboxProject as MobileInboxProject,
   InboxStream as MobileInboxStream,
   InboxTab as MobileInboxTab,
@@ -147,6 +149,19 @@ function buildStream(stream: Stream): MobileInboxStream {
   const out: MobileInboxStream = { id: stream.id, name: stream.name }
   if (stream.isMain) out.main = true
   if (stream.workspace) out.branch = stream.workspace.branchName
+  if (stream.promptQueueAutoRun) out.queueAutoRun = true
+  const watched = promptQueueWatchedTask(stream)
+  if (watched) out.queueTaskId = watched.taskId
+  return out
+}
+
+/** Project Home's queue, each prompt with the stream it runs in (a closed one's go to `main`). */
+function buildQueue(project: Project): MobileQueuedPrompt[] {
+  const out: MobileQueuedPrompt[] = []
+  for (const item of promptQueue(project)) {
+    const stream = queuedPromptStream(project, item)
+    if (stream) out.push({ id: item.id, text: item.text, streamId: stream.id })
+  }
   return out
 }
 
@@ -161,6 +176,7 @@ export function isVisibleOnMobile(project: Project): boolean {
  */
 function buildProject(project: Project, lookup: InboxTabLookup, now: number): MobileInboxProject {
   const lastStream = project.streams.find((stream) => stream.id === project.lastStreamId)
+  const queue = buildQueue(project)
   return {
     id: project.id,
     name: project.name,
@@ -168,7 +184,8 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number): Mo
     remote: !!project.ssh,
     streams: project.streams.map(buildStream),
     ...(lastStream ? { lastStreamId: lastStream.id } : {}),
-    tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now)))
+    tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now))),
+    ...(queue.length > 0 ? { queue } : {})
   }
 }
 

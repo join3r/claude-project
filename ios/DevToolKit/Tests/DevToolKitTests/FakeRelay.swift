@@ -93,6 +93,8 @@ actor FakeRelay: WebSocketConnector {
         var closedTabs: [String] = []
         var pinSetParams: [PinSetParams] = []
         var taskTriageParams: [TaskTriageParams] = []
+        var queueUpdateParams: [QueueUpdateParams] = []
+        var queueRunParams: [QueueRunParams] = []
 
         var id: String { identity.deviceId }
 
@@ -272,6 +274,23 @@ actor FakeRelay: WebSocketConnector {
                     }
                     taskTriageParams.append(parsed)
                     return app(.resOk(id: id, result: .object([:])), to: from)
+                }
+                if op == TaskOp.updateQueue || op == TaskOp.runQueued {
+                    guard features.contains(DesktopFeature.queue) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    do {
+                        if op == TaskOp.runQueued {
+                            queueRunParams.append(try QueueRunParams.parse(params))
+                            return app(.resOk(id: id, result: QueueRunResult(taskId: "t-run-\(queueRunParams.count)").json), to: from)
+                        }
+                        let parsed = try QueueUpdateParams.parse(params)
+                        queueUpdateParams.append(parsed)
+                        let itemId: String? = if case .add = parsed.action { "q-new-\(queueUpdateParams.count)" } else { nil }
+                        return app(.resOk(id: id, result: QueueUpdateResult(itemId: itemId).json), to: from)
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
                 }
                 if let replies = chat.handle(id: id, op: op, params: params) {
                     return replies.flatMap { app($0, to: from) }

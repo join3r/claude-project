@@ -205,9 +205,10 @@ Desktop rules (a server follows them too):
     "id": "…", "name": "api-server", "emoji": "🚀", "remote": false,
     "streams": [
       { "id": "…", "name": "main", "main": true },
-      { "id": "…", "name": "0.5.0", "branch": "0.5.0" }
+      { "id": "…", "name": "0.5.0", "branch": "0.5.0", "queueAutoRun": true, "queueTaskId": "…" }
     ],
     "lastStreamId": "…",
+    "queue": [{ "id": "…", "text": "Add rate limiting to the login route", "streamId": "…" }],
     "tasks": [{
       "id": "…", "name": "fix-auth",
       "streamId": "…", "streamName": "0.5.0",
@@ -233,6 +234,7 @@ Desktop rules (a server follows them too):
 }
 ```
 - `streams` lists the project's open streams in sidebar order, `main` first (`main: true`, exactly one, the project folder), empty ones included. `branch` is present only on a worktree stream: the branch its worktree is on. `lastStreamId` is the stream the project was last used in, present only while that stream is open.
+- `queue` is Project Home's prompt queue (§8.16), first to run first: prompts planned ahead, each to become a new Claude chat task in stream `streamId`, always one of the project's `streams` (a prompt whose stream was closed runs in `main`). `text` is the whole prompt. The field is absent when the queue is empty. On a stream, `queueAutoRun: true` is present while it starts its next queued prompt by itself, and `queueTaskId` names the task its queue started last while that task still holds the queue up (it hasn't finished, been put away with Done for now, or been closed); a receiver ignores a `queueTaskId` it can't find in `tasks`.
 - `tasks` lists every open task, stream by stream. A task is one agent session or one terminal task (its main tab is a terminal). `streamId` and `streamName` name the stream holding it (the phone's `Project · Stream` line); `streamId` is always one of the project's `streams`.
 - A task's `status` is its one status: the strongest of its **status tabs** (its main tab, plus any agent tab) in the order `attention`, `working`, `exited`, else `idle`. An extra terminal's bell or exit lights only its own tab, never the task. `since` is when the task entered `status` (the oldest change among the status tabs in it), and `activity` the label of the first such tab that has one. The desktop Inbox and sidebar read the same status.
 - Only agent/terminal tab types are included in `tabs`: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. A tab's `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
@@ -451,7 +453,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"` and §8.15 `"task.land"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"` and §8.16 `"queue"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -475,6 +477,7 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - **Close tab:** a swipe action on a tab row (for desktops that list `tab.close`), confirmed first for an agent that is working or waiting.
 - **Pasted pictures:** a chat's composer takes pictures pasted into it (at most 4), shown above it with a remove button each and sent with the next message, for a desktop that lists `send.images`. For a desktop without it the phone says to update DevTool there and doesn't send them.
 - **Tool images:** a tool row with `images` (from a desktop that lists `chat.image`) shows a strip of thumbnails under it, fetched with a small `maxSide`. Tapping one opens it full screen, fetched again at the screen's size, with zoom and the share sheet. Against a desktop without the feature the row only says how many images there are. Fetched images are cached in memory for the session, not on disk.
+- **Queue:** a project's screen shows its `queue` (§4.4) in a Queue section above its streams, grouped by stream when the project has more than one (a group for each stream with prompts or with auto-run on), numbered, the first prompt of an auto-run stream marked "Next", and a line saying what an auto-run stream waits for (its `queueTaskId` task). For a desktop that lists `queue`, the section always shows, with **Add to queue** (the prompt and, with more than one stream, the stream: `main` first), a **Run next automatically** switch per group, and on each prompt **Run now**, Edit, Move up and down within its stream, and Remove, all disabled while the desktop is offline. Run now stays on the project's screen; the new task appears in its stream. Against a desktop without the feature a non-empty queue is shown read-only.
 - **Pinned:** a "Pinned" section above the projects lists the desktop's `pinned` entries in order: a project as a row that opens its tasks, a stream as a row (`Project › Stream`) that opens its tasks, and a task as a task row. For a desktop that lists `pin`, a project's header menu, a stream group's header menu and a task row's swipe and context menu offer Pin or Unpin, disabled while the desktop is offline. Against a desktop without the feature the section is still shown, read-only.
 - **Inbox:** an Inbox entry above the desktops, and the screen the app opens to, lists every task of every paired desktop in the desktop inbox's groups: **Needs you** (the task's `status` is `attention`, longest wait first), **Your turn**, **Working**, **Quiet**, then **Snoozed** and **Done for now** (settled tasks), both collapsed. A live agent wins over snooze and settle: a snoozed or settled task whose `status` is `attention` or `working` is shown under Needs you or Working, and returns to its group once the agent is quiet. A timed snooze ends on the phone's clock at `snoozedUntil`. Unread tasks are marked. For a desktop that lists `task.triage`, a task row offers Done for now (`settle`, or Back to Inbox for `unsettle`), Snooze with the desktop's presets (until it needs you, 1 hour, this evening at 18:00, tomorrow at 9:00, Monday at 9:00, in the phone's time zone), Unsnooze, and Mark read or unread, disabled while the desktop is offline. Opening an unread task, or a task's screen staying open while it turns unread, sends `read`. Against a desktop without the feature the groups are still shown, read-only.
 - **Commands:** for a desktop that lists `chat.commands`, typing `/` and a word in a chat's composer shows the matching commands above it, ranked as the desktop does (names starting with the word first, then, from two characters on, names containing it, each by name). Tapping one puts `/name ` in the composer. Terminal-only commands are shown disabled. `/btw <question>` opens the answer in a sheet instead of sending, and `/permissions` opens a rules editor (§8.14), read-only while the desktop is offline. Sending a terminal-only command is refused on the phone.
@@ -635,6 +638,27 @@ The result's `status` is what came of it: `landed` (the stream took the task's c
 
 - A desktop that implements this op lists `"task.land"` in its features (§8.1), and sends `branch` and `landing` on tasks (§4.4).
 - Errors: unknown or archived `taskId`, or a task in a project hidden from mobile → `not-found`. A task without a worktree of its own → `unsupported`. Missing `taskId` or an unknown `action` → `bad-request`. Nothing to retry or fix, the task already landing, an agent that can't be reached, or git failing → `internal`, with the reason as the `message`.
+
+### 8.16 `queue.update`, `queue.run` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `queue.update` | `{ projectId, action, text?, streamId?, itemId?, toIndex?, on? }` | `{ itemId? }` |
+| `queue.run` | `{ projectId, itemId }` | `{ taskId }` |
+
+Project Home's queue (§4.4 `queue`), as the desktop's Queue block edits and runs it. `queue.update`'s `action` is one of:
+- `add` `{ text, streamId? }`: puts a prompt at the end of the queue, for stream `streamId` (absent: `main`). The result's `itemId` is the new prompt's id.
+- `edit` `{ itemId, text }`: replaces the prompt's text.
+- `remove` `{ itemId }`: takes the prompt off the queue.
+- `move` `{ itemId, toIndex }`: moves the prompt to position `toIndex` of the whole `queue` (clamped to its end). A phone moves a prompt only among its own stream's.
+- `auto-run` `{ streamId, on }`: switches the stream's **Run next automatically**. On, the stream starts its next prompt whenever nothing its queue started is still running (at once when nothing is). Off means "stop after this one": the running task no longer holds anything up.
+
+`text` is not blank and at most 32000 characters, and is trimmed. Fields an action doesn't use are ignored. A `move` or `auto-run` that changes nothing changes nothing and still answers `{}`. Otherwise the desktop saves the change as a main-side projects commit and answers once it is made; the new queue arrives in the next `inbox` event.
+
+`queue.run` takes the prompt off the queue and starts it as a new Claude chat task in its stream, the way `task.new` does (§8.4: its own worktree in a worktree stream, the desktop's last permission mode, a title made from the prompt in the background), whether or not the stream's auto-run is on. The stream then waits for that task (`queueTaskId`). The desktop answers once the task exists and its first prompt was sent; no window switches to it. When starting it fails before the task could start (its worktree can't be made), the prompt goes back to where it was.
+
+- A desktop that implements these ops lists `"queue"` in its features (§8.1) and sends `queue`, `queueAutoRun` and `queueTaskId` (§4.4).
+- Errors: unknown `projectId` or a project hidden from mobile, an `itemId` that isn't queued, or a `streamId` that isn't one of the project's open streams → `not-found`. `add` on a shell-command project, which runs one command and not Claude → `unsupported`. Missing `projectId`, an unknown `action`, or a field the action needs missing or malformed (a blank or too-long `text`, a negative `toIndex`, a non-boolean `on`) → `bad-request`. `queue.run` refused by the desktop (Claude turned off there, the project can't run chats, a queued prompt of that stream already starting) or its worktree failing → `internal`, with the reason as the `message`.
 
 ## 9. Version 2: streams
 

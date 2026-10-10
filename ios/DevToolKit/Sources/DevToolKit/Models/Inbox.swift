@@ -121,9 +121,12 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
     public var lastStreamId: String?
     /// Open tasks, stream by stream.
     public var tasks: [InboxTask]
+    /// Project Home's queued prompts, first to run first (§4.4, §8.16).
+    public var queue: [InboxQueuedPrompt]
 
     public init(id: String, name: String, emoji: String? = nil, remote: Bool = false,
-                streams: [InboxStream] = [], lastStreamId: String? = nil, tasks: [InboxTask]) {
+                streams: [InboxStream] = [], lastStreamId: String? = nil, tasks: [InboxTask],
+                queue: [InboxQueuedPrompt] = []) {
         self.id = id
         self.name = name
         self.emoji = emoji
@@ -131,6 +134,7 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
         self.streams = streams
         self.lastStreamId = lastStreamId
         self.tasks = tasks
+        self.queue = queue
     }
 
     public init(from decoder: any Decoder) throws {
@@ -142,6 +146,12 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
         streams = try c.decodeIfPresent([InboxStream].self, forKey: .streams) ?? []
         lastStreamId = try c.decodeIfPresent(String.self, forKey: .lastStreamId)
         tasks = try c.decodeIfPresent([InboxTask].self, forKey: .tasks) ?? []
+        queue = try c.decodeIfPresent([InboxQueuedPrompt].self, forKey: .queue) ?? []
+    }
+
+    /// The queued prompts that run in `stream`, in queue order.
+    public func queue(in stream: InboxStream) -> [InboxQueuedPrompt] {
+        queue.filter { $0.streamId == stream.id }
     }
 
     /// The `main` stream (the project folder).
@@ -187,12 +197,19 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
     public var isMain: Bool
     /// Set on a worktree stream: its branch.
     public var branch: String?
+    /// The stream starts its next queued prompt by itself (§8.16).
+    public var queueAutoRun: Bool
+    /// The task its queue started last, while that task holds the queue up.
+    public var queueTaskId: String?
 
-    public init(id: String, name: String, isMain: Bool = false, branch: String? = nil) {
+    public init(id: String, name: String, isMain: Bool = false, branch: String? = nil,
+                queueAutoRun: Bool = false, queueTaskId: String? = nil) {
         self.id = id
         self.name = name
         self.isMain = isMain
         self.branch = branch
+        self.queueAutoRun = queueAutoRun
+        self.queueTaskId = queueTaskId
     }
 
     public init(from decoder: any Decoder) throws {
@@ -201,6 +218,21 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         isMain = (try? c.decodeIfPresent(Bool.self, forKey: .isMain)) == true
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        queueAutoRun = (try? c.decodeIfPresent(Bool.self, forKey: .queueAutoRun)) == true
+        queueTaskId = try c.decodeIfPresent(String.self, forKey: .queueTaskId)
+    }
+}
+
+/// A prompt waiting in Project Home's queue to become a task in stream `streamId` (§4.4).
+public struct InboxQueuedPrompt: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public var id: String
+    public var text: String
+    public var streamId: String
+
+    public init(id: String, text: String, streamId: String) {
+        self.id = id
+        self.text = text
+        self.streamId = streamId
     }
 }
 

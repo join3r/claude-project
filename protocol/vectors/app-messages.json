@@ -85,7 +85,7 @@
       }
     },
     {
-      "json": "{\"t\":\"res\",\"id\":1,\"ok\":true,\"result\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":true},{\"id\":\"s-050\",\"name\":\"0.5.0\",\"branch\":\"0.5.0\"},{\"id\":\"s-bugs\",\"name\":\"bugfixes\"}],\"lastStreamId\":\"s-050\",\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"topic\":\"Fix the login redirect\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"idle\",\"settledAt\":1789990000000,\"branch\":\"0.5.0--fix-the-login-redirect\",\"landing\":{\"state\":\"conflict\",\"files\":[\"src/auth.ts\",\"src/login.ts\"],\"fileCount\":2},\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"exited\",\"since\":1789990000000,\"snoozedUntil\":1790003600000,\"branch\":\"0.5.0--bump-deps\",\"landing\":{\"state\":\"blocked\",\"intent\":\"land\",\"files\":[\"package.json\"],\"fileCount\":1,\"message\":\"error: Your local changes to the following files would be overwritten by merge\"},\"tabs\":[]},{\"id\":\"t4\",\"name\":\"Terminal\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"attention\",\"snoozeUntilAttention\":true,\"tabs\":[{\"id\":\"tab4\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"attention\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"streams\":[{\"id\":\"s-main-2\",\"name\":\"main\",\"main\":true}],\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"taskId\":\"t2\"},{\"projectId\":\"p1\",\"streamId\":\"s-bugs\"},{\"projectId\":\"p2\"}]}}",
+      "json": "{\"t\":\"res\",\"id\":1,\"ok\":true,\"result\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":true},{\"id\":\"s-050\",\"name\":\"0.5.0\",\"branch\":\"0.5.0\",\"queueAutoRun\":true,\"queueTaskId\":\"t2\"},{\"id\":\"s-bugs\",\"name\":\"bugfixes\",\"queueAutoRun\":true}],\"lastStreamId\":\"s-050\",\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"topic\":\"Fix the login redirect\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"idle\",\"settledAt\":1789990000000,\"branch\":\"0.5.0--fix-the-login-redirect\",\"landing\":{\"state\":\"conflict\",\"files\":[\"src/auth.ts\",\"src/login.ts\"],\"fileCount\":2},\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"exited\",\"since\":1789990000000,\"snoozedUntil\":1790003600000,\"branch\":\"0.5.0--bump-deps\",\"landing\":{\"state\":\"blocked\",\"intent\":\"land\",\"files\":[\"package.json\"],\"fileCount\":1,\"message\":\"error: Your local changes to the following files would be overwritten by merge\"},\"tabs\":[]},{\"id\":\"t4\",\"name\":\"Terminal\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"attention\",\"snoozeUntilAttention\":true,\"tabs\":[{\"id\":\"tab4\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"attention\"}]}],\"queue\":[{\"id\":\"q1\",\"text\":\"Add rate limiting to the login route\",\"streamId\":\"s-main\"},{\"id\":\"q2\",\"text\":\"Bump the version to 0.5.1\\nand tag it\",\"streamId\":\"s-050\"}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"streams\":[{\"id\":\"s-main-2\",\"name\":\"main\",\"main\":true}],\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"taskId\":\"t2\"},{\"projectId\":\"p1\",\"streamId\":\"s-bugs\"},{\"projectId\":\"p2\"}]}}",
       "expected": {
         "t": "res",
         "id": 1,
@@ -111,11 +111,14 @@
                 {
                   "id": "s-050",
                   "name": "0.5.0",
-                  "branch": "0.5.0"
+                  "branch": "0.5.0",
+                  "queueAutoRun": true,
+                  "queueTaskId": "t2"
                 },
                 {
                   "id": "s-bugs",
-                  "name": "bugfixes"
+                  "name": "bugfixes",
+                  "queueAutoRun": true
                 }
               ],
               "lastStreamId": "s-050",
@@ -211,6 +214,18 @@
                     }
                   ]
                 }
+              ],
+              "queue": [
+                {
+                  "id": "q1",
+                  "text": "Add rate limiting to the login route",
+                  "streamId": "s-main"
+                },
+                {
+                  "id": "q2",
+                  "text": "Bump the version to 0.5.1\nand tag it",
+                  "streamId": "s-050"
+                }
               ]
             },
             {
@@ -257,7 +272,7 @@
       }
     },
     {
-      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":true},{\"id\":\"s-050\",\"name\":\"0.5.0\",\"branch\":\"0.5.0\"},{\"id\":\"s-bugs\",\"name\":\"bugfixes\"}],\"lastStreamId\":\"s-050\",\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"topic\":\"Fix the login redirect\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"idle\",\"settledAt\":1789990000000,\"branch\":\"0.5.0--fix-the-login-redirect\",\"landing\":{\"state\":\"conflict\",\"files\":[\"src/auth.ts\",\"src/login.ts\"],\"fileCount\":2},\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"exited\",\"since\":1789990000000,\"snoozedUntil\":1790003600000,\"branch\":\"0.5.0--bump-deps\",\"landing\":{\"state\":\"blocked\",\"intent\":\"land\",\"files\":[\"package.json\"],\"fileCount\":1,\"message\":\"error: Your local changes to the following files would be overwritten by merge\"},\"tabs\":[]},{\"id\":\"t4\",\"name\":\"Terminal\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"attention\",\"snoozeUntilAttention\":true,\"tabs\":[{\"id\":\"tab4\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"attention\"}]}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"streams\":[{\"id\":\"s-main-2\",\"name\":\"main\",\"main\":true}],\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"taskId\":\"t2\"},{\"projectId\":\"p1\",\"streamId\":\"s-bugs\"},{\"projectId\":\"p2\"}]}}",
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":1,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\"},\"generatedAt\":1790000000000,\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"emoji\":\"🚀\",\"remote\":false,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":true},{\"id\":\"s-050\",\"name\":\"0.5.0\",\"branch\":\"0.5.0\",\"queueAutoRun\":true,\"queueTaskId\":\"t2\"},{\"id\":\"s-bugs\",\"name\":\"bugfixes\",\"queueAutoRun\":true}],\"lastStreamId\":\"s-050\",\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"lastInteractedAt\":1790000000000,\"attentionAt\":1790000000000,\"eventAt\":1790000000000,\"unread\":true,\"tabs\":[{\"id\":\"tab1\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"working\",\"since\":1790000000000,\"activity\":\"Running Bash\",\"topic\":\"Fix the login redirect\"},{\"id\":\"tab2\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"idle\"}]},{\"id\":\"t2\",\"name\":\"Fix the login redirect\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"idle\",\"settledAt\":1789990000000,\"branch\":\"0.5.0--fix-the-login-redirect\",\"landing\":{\"state\":\"conflict\",\"files\":[\"src/auth.ts\",\"src/login.ts\"],\"fileCount\":2},\"tabs\":[{\"id\":\"tab3\",\"type\":\"claude-chat\",\"title\":\"Claude\",\"status\":\"idle\"}]},{\"id\":\"t3\",\"name\":\"bump-deps\",\"streamId\":\"s-050\",\"streamName\":\"0.5.0\",\"status\":\"exited\",\"since\":1789990000000,\"snoozedUntil\":1790003600000,\"branch\":\"0.5.0--bump-deps\",\"landing\":{\"state\":\"blocked\",\"intent\":\"land\",\"files\":[\"package.json\"],\"fileCount\":1,\"message\":\"error: Your local changes to the following files would be overwritten by merge\"},\"tabs\":[]},{\"id\":\"t4\",\"name\":\"Terminal\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"attention\",\"snoozeUntilAttention\":true,\"tabs\":[{\"id\":\"tab4\",\"type\":\"terminal\",\"title\":\"zsh\",\"status\":\"attention\"}]}],\"queue\":[{\"id\":\"q1\",\"text\":\"Add rate limiting to the login route\",\"streamId\":\"s-main\"},{\"id\":\"q2\",\"text\":\"Bump the version to 0.5.1\\nand tag it\",\"streamId\":\"s-050\"}]},{\"id\":\"p2\",\"name\":\"remote-box\",\"remote\":true,\"streams\":[{\"id\":\"s-main-2\",\"name\":\"main\",\"main\":true}],\"tasks\":[]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"taskId\":\"t2\"},{\"projectId\":\"p1\",\"streamId\":\"s-bugs\"},{\"projectId\":\"p2\"}]}}",
       "expected": {
         "t": "evt",
         "e": "inbox",
@@ -282,11 +297,14 @@
                 {
                   "id": "s-050",
                   "name": "0.5.0",
-                  "branch": "0.5.0"
+                  "branch": "0.5.0",
+                  "queueAutoRun": true,
+                  "queueTaskId": "t2"
                 },
                 {
                   "id": "s-bugs",
-                  "name": "bugfixes"
+                  "name": "bugfixes",
+                  "queueAutoRun": true
                 }
               ],
               "tasks": [
@@ -383,7 +401,19 @@
                 }
               ],
               "emoji": "🚀",
-              "lastStreamId": "s-050"
+              "lastStreamId": "s-050",
+              "queue": [
+                {
+                  "id": "q1",
+                  "text": "Add rate limiting to the login route",
+                  "streamId": "s-main"
+                },
+                {
+                  "id": "q2",
+                  "text": "Bump the version to 0.5.1\nand tag it",
+                  "streamId": "s-050"
+                }
+              ]
             },
             {
               "id": "p2",
@@ -417,7 +447,7 @@
       }
     },
     {
-      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":2,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"lastStreamId\":null,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":\"yes\",\"branch\":null,\"color\":\"green\"}],\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"thinking\",\"since\":null,\"activity\":null,\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"landing\":{\"state\":\"queued\",\"intent\":\"squash\",\"files\":null,\"fileCount\":null,\"message\":null,\"eta\":5},\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":null,\"taskId\":null,\"color\":\"red\"}]},\"compressed\":false}",
+      "json": "{\"t\":\"evt\",\"e\":\"inbox\",\"seq\":2,\"inbox\":{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"lastStreamId\":null,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":\"yes\",\"branch\":null,\"color\":\"green\",\"queueAutoRun\":\"yes\",\"queueTaskId\":null}],\"queue\":[{\"id\":\"q1\",\"text\":\"Add rate limiting\",\"streamId\":\"s-main\",\"author\":\"me\"}],\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"thinking\",\"since\":null,\"activity\":null,\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"landing\":{\"state\":\"queued\",\"intent\":\"squash\",\"files\":null,\"fileCount\":null,\"message\":null,\"eta\":5},\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":null,\"taskId\":null,\"color\":\"red\"}]},\"compressed\":false}",
       "expected": {
         "t": "evt",
         "e": "inbox",
@@ -465,6 +495,13 @@
                     "state": "queued"
                   }
                 }
+              ],
+              "queue": [
+                {
+                  "id": "q1",
+                  "text": "Add rate limiting",
+                  "streamId": "s-main"
+                }
               ]
             }
           ],
@@ -502,7 +539,7 @@
     }
   ],
   "inboxWithUnknownFields": {
-    "json": "{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"lastStreamId\":null,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":\"yes\",\"branch\":null,\"color\":\"green\"}],\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"thinking\",\"since\":null,\"activity\":null,\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"landing\":{\"state\":\"queued\",\"intent\":\"squash\",\"files\":null,\"fileCount\":null,\"message\":null,\"eta\":5},\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":null,\"taskId\":null,\"color\":\"red\"}]}",
+    "json": "{\"desktop\":{\"id\":\"20671253fbf6054273bb719d3a34999b\",\"name\":\"join3r-mbp\",\"color\":\"blue\"},\"generatedAt\":1790000000000,\"layout\":\"grid\",\"projects\":[{\"id\":\"p1\",\"name\":\"api-server\",\"remote\":false,\"emoji\":null,\"pinned\":true,\"lastStreamId\":null,\"streams\":[{\"id\":\"s-main\",\"name\":\"main\",\"main\":\"yes\",\"branch\":null,\"color\":\"green\",\"queueAutoRun\":\"yes\",\"queueTaskId\":null}],\"queue\":[{\"id\":\"q1\",\"text\":\"Add rate limiting\",\"streamId\":\"s-main\",\"author\":\"me\"}],\"tasks\":[{\"id\":\"t1\",\"name\":\"fix-auth\",\"streamId\":\"s-main\",\"streamName\":\"main\",\"status\":\"thinking\",\"since\":null,\"activity\":null,\"notes\":\"x\",\"attentionAt\":null,\"branch\":null,\"unread\":false,\"settledAt\":null,\"snoozeUntilAttention\":\"yes\",\"landing\":{\"state\":\"queued\",\"intent\":\"squash\",\"files\":null,\"fileCount\":null,\"message\":null,\"eta\":5},\"tabs\":[{\"id\":\"tab1\",\"type\":\"gemini\",\"title\":\"Gemini\",\"status\":\"thinking\",\"since\":5,\"badge\":3},{\"id\":\"tab2\",\"type\":\"pi\",\"title\":\"Pi\",\"status\":\"attention\",\"activity\":null}]}]}],\"pinned\":[{\"projectId\":\"p1\",\"streamId\":null,\"taskId\":null,\"color\":\"red\"}]}",
     "expected": {
       "desktop": {
         "id": "20671253fbf6054273bb719d3a34999b",
@@ -518,6 +555,13 @@
             {
               "id": "s-main",
               "name": "main"
+            }
+          ],
+          "queue": [
+            {
+              "id": "q1",
+              "text": "Add rate limiting",
+              "streamId": "s-main"
             }
           ],
           "tasks": [

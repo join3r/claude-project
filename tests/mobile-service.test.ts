@@ -141,7 +141,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -197,6 +197,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?
     closeTab: options.closeTab,
     setPin: options.setPin,
     triageTask: options.triageTask,
+    updateQueue: options.updateQueue,
+    runQueued: options.runQueued,
     chat: options.chat
   }
   const service = new MobileService(deps)
@@ -215,7 +217,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?
   }
 }
 
-function pairedSetup(options: { newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -808,6 +810,57 @@ describe('MobileService task.close and tab.close (SPEC.md §8.7, §8.8)', () => 
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
     env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'task.land', params: { taskId: 't1', action: 'retry' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService queue.update and queue.run (SPEC.md §8.16)', () => {
+  const tick = () => new Promise((resolve) => setImmediate(resolve))
+
+  it('passes the parsed params through and answers with the result', async () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      updateQueue: (params) => {
+        calls.push(params)
+        if (params.projectId !== 'p1') return { ok: false, code: 'not-found', message: 'No such project' }
+        return params.action === 'add' ? { ok: true, itemId: 'q9' } : { ok: true }
+      },
+      runQueued: async (params) => {
+        calls.push(params)
+        return params.itemId === 'q1' ? { ok: true, taskId: 't9' } : { ok: false, code: 'internal', message: 'Claude is turned off in Settings.' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'queue.update', params: { projectId: 'p1', action: 'add', text: ' next ' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { itemId: 'q9' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'queue.update', params: { projectId: 'p1', action: 'remove', itemId: 'q1' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: true, result: {} })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'queue.update', params: { projectId: 'nope', action: 'remove', itemId: 'q1' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 3, ok: false, error: { code: 'not-found', message: 'No such project' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 4, op: 'queue.update', params: { projectId: 'p1', action: 'add', text: '  ' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 4, ok: false, error: { code: 'bad-request' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 5, op: 'queue.run', params: { projectId: 'p1', itemId: 'q1' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 5, ok: true, result: { taskId: 't9' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'queue.run', params: { projectId: 'p1', itemId: 'q2' } })
+    await tick()
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 6, ok: false, error: { code: 'internal', message: 'Claude is turned off in Settings.' } })
+    expect(calls).toEqual([
+      { projectId: 'p1', action: 'add', text: 'next' },
+      { projectId: 'p1', action: 'remove', itemId: 'q1' },
+      { projectId: 'nope', action: 'remove', itemId: 'q1' },
+      { projectId: 'p1', itemId: 'q1' },
+      { projectId: 'p1', itemId: 'q2' }
+    ])
+  })
+
+  it('is unsupported without the dependencies', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'queue.update', params: { projectId: 'p1', action: 'remove', itemId: 'q1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'queue.run', params: { projectId: 'p1', itemId: 'q1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
   })
 })
 

@@ -34,6 +34,10 @@ import {
   type PinSetParams,
   parseTaskTriageParams,
   type TaskTriageParams,
+  parseQueueUpdateParams,
+  parseQueueRunParams,
+  type QueueUpdateParams,
+  type QueueRunParams,
   type TaskNewParams,
   type TaskCloseParams,
   type TaskCloseResult,
@@ -231,6 +235,10 @@ export interface MobileServiceDeps {
   newStream?(params: StreamNewParams): Promise<{ ok: true; streamId: string } | { ok: false; code: string; message: string }>
   /** `branches.list` (SPEC.md §8.13). Without it the op answers `unsupported`. */
   listBranches?(projectId: string): Promise<({ ok: true } & BranchesListResult) | { ok: false; code: string; message: string }>
+  /** `queue.update` (SPEC.md §8.16). Without it (or `runQueued`) both queue ops answer `unsupported`. */
+  updateQueue?(params: QueueUpdateParams): { ok: true; itemId?: string } | { ok: false; code: string; message: string }
+  /** `queue.run` (SPEC.md §8.16): starts a queued prompt as a new task. */
+  runQueued?(params: QueueRunParams): Promise<{ ok: true; taskId: string } | { ok: false; code: string; message: string }>
 }
 
 // ---- The service -----------------------------------------------------------------
@@ -935,6 +943,23 @@ export class MobileService {
         return outcome.ok
           ? { ok: true, result: { branches: outcome.branches, defaultBase: outcome.defaultBase }, log: `project=${projectId} branches=${outcome.branches.length}` }
           : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.QueueUpdate && this.deps.updateQueue) {
+      const updateQueue = this.deps.updateQueue
+      this.answerLater(session, id, message.op, () => parseQueueUpdateParams(message.params), async (params) => {
+        const outcome = updateQueue(params)
+        if (!outcome.ok) return outcome
+        return { ok: true, result: outcome.itemId !== undefined ? { itemId: outcome.itemId } : {}, log: `project=${params.projectId} action=${params.action}` }
+      })
+      return
+    }
+    if (message.op === AppOp.QueueRun && this.deps.runQueued) {
+      const runQueued = this.deps.runQueued
+      this.answerLater(session, id, message.op, () => parseQueueRunParams(message.params), async (params) => {
+        const outcome = await runQueued(params)
+        return outcome.ok ? { ok: true, result: { taskId: outcome.taskId }, log: `project=${params.projectId} task=${outcome.taskId}` } : outcome
       })
       return
     }

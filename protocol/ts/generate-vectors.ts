@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -222,8 +222,8 @@ function appMessages(): unknown {
         id: 'p1', name: 'api-server', emoji: '🚀', remote: false,
         streams: [
           { id: 's-main', name: 'main', main: true },
-          { id: 's-050', name: '0.5.0', branch: '0.5.0' },
-          { id: 's-bugs', name: 'bugfixes' }
+          { id: 's-050', name: '0.5.0', branch: '0.5.0', queueAutoRun: true, queueTaskId: 't2' },
+          { id: 's-bugs', name: 'bugfixes', queueAutoRun: true }
         ],
         lastStreamId: 's-050',
         tasks: [{
@@ -249,7 +249,11 @@ function appMessages(): unknown {
           id: 't4', name: 'Terminal', streamId: 's-main', streamName: 'main', status: 'attention',
           snoozeUntilAttention: true,
           tabs: [{ id: 'tab4', type: 'terminal', title: 'zsh', status: 'attention' }]
-        }]
+        }],
+        queue: [
+          { id: 'q1', text: 'Add rate limiting to the login route', streamId: 's-main' },
+          { id: 'q2', text: 'Bump the version to 0.5.1\nand tag it', streamId: 's-050' }
+        ]
       },
       { id: 'p2', name: 'remote-box', remote: true, streams: [{ id: 's-main-2', name: 'main', main: true }], tasks: [] }
     ],
@@ -265,7 +269,8 @@ function appMessages(): unknown {
     layout: 'grid',
     projects: [{
       id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true, lastStreamId: null,
-      streams: [{ id: 's-main', name: 'main', main: 'yes', branch: null, color: 'green' }],
+      streams: [{ id: 's-main', name: 'main', main: 'yes', branch: null, color: 'green', queueAutoRun: 'yes', queueTaskId: null }],
+      queue: [{ id: 'q1', text: 'Add rate limiting', streamId: 's-main', author: 'me' }],
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'thinking', since: null,
         activity: null, notes: 'x', attentionAt: null, branch: null,
@@ -286,6 +291,7 @@ function appMessages(): unknown {
     projects: [{
       id: 'p1', name: 'api-server', remote: false,
       streams: [{ id: 's-main', name: 'main' }],
+      queue: [{ id: 'q1', text: 'Add rate limiting', streamId: 's-main' }],
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'idle',
         landing: { state: 'queued' },
@@ -773,6 +779,48 @@ function chatMessages(): unknown {
           'null'
         ],
         results: [text({}), text({ streamId: 7 }), '[]']
+      }
+    },
+    // §8.16: `queue.update` edits Project Home's queue; `queue.run` starts a queued prompt now.
+    queueUpdate: {
+      params: [
+        text({ projectId: 'p1', action: 'add', text: '  Add rate limiting  ' }),
+        text({ projectId: 'p1', action: 'add', text: 'Bump to 0.5.1', streamId: 's-050', itemId: 'ignored' }),
+        text({ projectId: 'p1', action: 'add', text: 'x', streamId: null }),
+        text({ projectId: 'p1', action: 'edit', itemId: 'q1', text: 'Add rate limiting\nto every route', streamId: 's-050' }),
+        text({ projectId: 'p1', action: 'remove', itemId: 'q1', text: 'ignored' }),
+        text({ projectId: 'p1', action: 'move', itemId: 'q2', toIndex: 0 }),
+        text({ projectId: 'p1', action: 'auto-run', streamId: 's-main', on: true }),
+        text({ projectId: 'p1', action: 'auto-run', streamId: 's-main', on: false, extra: 1 })
+      ].map((json) => ({ json, expected: parseQueueUpdateParams(JSON.parse(json)) })),
+      results: [text({}), text({ itemId: 'q3' }), text({ itemId: null })].map((json) => ({ json, expected: parseQueueUpdateResult(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ action: 'add', text: 'x' }),
+          text({ projectId: 'p1', text: 'x' }),
+          text({ projectId: 'p1', action: 'clear' }),
+          text({ projectId: 'p1', action: 'add' }),
+          text({ projectId: 'p1', action: 'add', text: '  \n ' }),
+          text({ projectId: 'p1', action: 'add', text: 'x'.repeat(32001) }),
+          text({ projectId: 'p1', action: 'edit', itemId: 'q1' }),
+          text({ projectId: 'p1', action: 'edit', text: 'x' }),
+          text({ projectId: 'p1', action: 'remove' }),
+          text({ projectId: 'p1', action: 'move', itemId: 'q1' }),
+          text({ projectId: 'p1', action: 'move', itemId: 'q1', toIndex: -1 }),
+          text({ projectId: 'p1', action: 'auto-run', streamId: 's-main' }),
+          text({ projectId: 'p1', action: 'auto-run', on: true }),
+          text({ projectId: 'p1', action: 'auto-run', streamId: 's-main', on: 'yes' }),
+          'null'
+        ],
+        results: [text({ itemId: 7 }), '[]']
+      }
+    },
+    queueRun: {
+      params: [text({ projectId: 'p1', itemId: 'q1' }), text({ projectId: 'p1', itemId: 'q1', streamId: 's-050' })].map((json) => ({ json, expected: parseQueueRunParams(JSON.parse(json)) })),
+      results: [text({ taskId: 't9' }), text({ taskId: 't9', tabId: 'tab9' })].map((json) => ({ json, expected: parseQueueRunResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({ projectId: 'p1' }), text({ itemId: 'q1' }), text({ projectId: 'p1', itemId: 7 }), 'null'],
+        results: [text({}), text({ taskId: 7 }), '[]']
       }
     },
     // §8.13: `branches.list` lists a project's local branches for the From picker.

@@ -226,6 +226,8 @@ public enum DesktopFeature {
     public static let taskLand = "task.land"
     /// The desktop's `chat.send` and `task.new` take `images` (§6.3, §8.4).
     public static let sendImages = "send.images"
+    /// The desktop answers `queue.update` and `queue.run`, and sends `queue` (§8.16, §4.4).
+    public static let queue = "queue"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.
@@ -349,7 +351,13 @@ extension Inbox {
 
     private static func parseStream(_ value: JSONValue) throws(ProtocolError) -> InboxStream {
         let o = try Fields(value, "stream")
-        return InboxStream(id: try o.str("id"), name: try o.str("name"), isMain: o["main"] == .bool(true), branch: try optStr(o, "branch"))
+        return InboxStream(id: try o.str("id"), name: try o.str("name"), isMain: o["main"] == .bool(true), branch: try optStr(o, "branch"),
+                           queueAutoRun: o["queueAutoRun"] == .bool(true), queueTaskId: try optStr(o, "queueTaskId"))
+    }
+
+    private static func parseQueuedPrompt(_ value: JSONValue) throws(ProtocolError) -> InboxQueuedPrompt {
+        let o = try Fields(value, "queued prompt")
+        return InboxQueuedPrompt(id: try o.str("id"), text: try o.str("text"), streamId: try o.str("streamId"))
     }
 
     private static func optInt(_ f: Fields, _ key: String) throws(ProtocolError) -> Int64? {
@@ -369,7 +377,8 @@ extension Inbox {
             remote: o["remote"] == .bool(true),
             streams: try o.array("streams").map { (v) throws(ProtocolError) in try parseStream(v) },
             lastStreamId: try optStr(o, "lastStreamId"),
-            tasks: try o.array("tasks").map { (v) throws(ProtocolError) in try parseTask(v) }
+            tasks: try o.array("tasks").map { (v) throws(ProtocolError) in try parseTask(v) },
+            queue: o.isUnset("queue") ? [] : try o.array("queue").map { (v) throws(ProtocolError) in try parseQueuedPrompt(v) }
         )
     }
 
@@ -437,6 +446,7 @@ extension InboxProject {
         o["streams"] = .array(streams.map(\.json))
         if let lastStreamId { o["lastStreamId"] = .string(lastStreamId) }
         o["tasks"] = .array(tasks.map(\.json))
+        if !queue.isEmpty { o["queue"] = .array(queue.map(\.json)) }
         return .object(o)
     }
 }
@@ -446,7 +456,15 @@ extension InboxStream {
         var o: JSONObject = ["id": .string(id), "name": .string(name)]
         if isMain { o["main"] = .bool(true) }
         if let branch { o["branch"] = .string(branch) }
+        if queueAutoRun { o["queueAutoRun"] = .bool(true) }
+        if let queueTaskId { o["queueTaskId"] = .string(queueTaskId) }
         return .object(o)
+    }
+}
+
+extension InboxQueuedPrompt {
+    var json: JSONValue {
+        .object(["id": .string(id), "text": .string(text), "streamId": .string(streamId)])
     }
 }
 

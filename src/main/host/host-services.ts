@@ -85,6 +85,7 @@ import { registerTaskNameHandlers } from '../ipc/task-names'
 import { closeTask, findClosableTab, landTask, removeTabFromData } from '../mobile/close-task'
 import { setPinInData } from '../mobile/pin'
 import { triageTaskInData } from '../mobile/triage'
+import { queuedPromptForRun, updateQueueInData } from '../mobile/queue'
 import {
   AppErrorCode,
   BRANCHES_LIST_FEATURE,
@@ -99,6 +100,7 @@ import {
   TASK_LAND_FEATURE,
   TASK_NEW_FEATURE,
   TASK_TRIAGE_FEATURE,
+  QUEUE_FEATURE,
   SERVER_APP_NAME
 } from '../../../protocol/ts/index.ts'
 import { normalizeMobileConfig, normalizeRelayUrl, type MobileConfig } from '../../shared/mobile'
@@ -505,7 +507,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -571,6 +573,19 @@ export class HostServices {
         if (!outcome.ok) return outcome
         if (outcome.changed) this.commitProjects(outcome.data)
         return { ok: true }
+      },
+      updateQueue: (params) => {
+        const outcome = updateQueueInData(this.projectsStore.peek(), params)
+        if (!outcome.ok) return outcome
+        if (outcome.changed) this.commitProjects(outcome.data)
+        return outcome.itemId !== undefined ? { ok: true, itemId: outcome.itemId } : { ok: true }
+      },
+      runQueued: async (params) => {
+        const checked = queuedPromptForRun(this.projectsStore.peek(), params)
+        if (!checked.ok) return checked
+        // The runner's refusals (Claude off, a start in flight, the worktree) are messages to show.
+        const result = await this.promptQueue.run(params.projectId, params.itemId)
+        return result.ok ? result : { ok: false, code: AppErrorCode.Internal, message: result.error }
       },
       newStream: (params) => createStream({
         ...this.streamGit(),

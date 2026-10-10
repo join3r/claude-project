@@ -12,6 +12,7 @@ struct ProjectView: View {
     @State private var newTask: NewTaskTarget?
     @State private var newStream: NewStreamTarget?
     @State private var closing: CloseTaskRequest?
+    @State private var queuePrompt: QueuePromptTarget?
     /// A stream just made from the New stream sheet: scrolled to once the inbox has it.
     @State private var createdStream: String?
 
@@ -46,6 +47,9 @@ struct ProjectView: View {
             }
             .sheet(item: $newTask) { target in
                 NewTaskSheet(target: target)
+            }
+            .sheet(item: $queuePrompt) { target in
+                QueueSheet(target: target)
             }
             .sheet(item: $newStream) { target in
                 NewStreamSheet(target: target, streams: project.streams) { createdStream = $0 }
@@ -92,6 +96,7 @@ struct ProjectView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
             }
             .listSectionSpacing(.compact)
+            queueSections(project)
             ForEach(streams(project)) { stream in
                 streamSection(stream, project: project, inbox: inbox, now: now)
             }
@@ -243,6 +248,150 @@ struct ProjectView: View {
             }
     }
 
+    // MARK: - Queue (§8.3, §8.16)
+
+    private var canEditQueue: Bool { model.supports(DesktopFeature.queue, on: ref.desktopId) }
+
+    /// Project Home's queue: one section with one stream, else one per stream
+    /// with prompts or auto-run, and Add to queue at the end. A desktop without
+    /// the feature shows a non-empty queue read-only.
+    @ViewBuilder
+    private func queueSections(_ project: InboxProject) -> some View {
+        if canEditQueue || !project.queue.isEmpty {
+            let groups = project.queueGroups
+            let split = project.streams.count > 1
+            ForEach(Array(groups.enumerated()), id: \.element.stream.id) { index, group in
+                Section {
+                    queueGroup(group.stream, prompts: group.prompts, project: project)
+                    if index == groups.count - 1 { addToQueueRow(project) }
+                } header: {
+                    queueHeader(split ? group.stream : nil, count: split ? group.prompts.count : project.queue.count)
+                }
+            }
+            if groups.isEmpty, canEditQueue {
+                Section {
+                    addToQueueRow(project)
+                } header: {
+                    queueHeader(nil, count: 0)
+                }
+            }
+        }
+    }
+
+    private func queueHeader(_ stream: InboxStream?, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text("Queue")
+            if let stream {
+                Text("·").foregroundStyle(.tertiary)
+                Text(stream.name.isEmpty ? "Stream" : stream.name)
+                    .lineLimit(1)
+            }
+            if count > 0 {
+                Text("\(count)")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func queueGroup(_ stream: InboxStream, prompts: [InboxQueuedPrompt], project: InboxProject) -> some View {
+        if canEditQueue {
+            Toggle(isOn: Binding(
+                get: { stream.queueAutoRun },
+                set: { on in Task { await model.changeQueue(.autoRun(streamId: stream.id, on: on), projectId: project.id, desktopId: ref.desktopId) } }
+            )) {
+                Text("Run next automatically")
+            }
+            .disabled(offline)
+        } else if stream.queueAutoRun {
+            Label("Runs next automatically", systemImage: "play.circle")
+                .foregroundStyle(.secondary)
+        }
+        if let hint = queueHint(stream, prompts: prompts, project: project) {
+            Text(hint)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        ForEach(Array(prompts.enumerated()), id: \.element.id) { index, item in
+            queueRow(item, number: index + 1, next: stream.queueAutoRun && index == 0, project: project)
+        }
+    }
+
+    /// What an auto-run stream waits for, as the desktop's Queue says it.
+    private func queueHint(_ stream: InboxStream, prompts: [InboxQueuedPrompt], project: InboxProject) -> String? {
+        guard stream.queueAutoRun else { return nil }
+        let waiting = project.queueWaitingTask(in: stream)
+        if prompts.isEmpty { return waiting == nil ? "A prompt added here starts right away." : nil }
+        guard let waiting else { return nil }
+        return "The next prompt starts when \u{201C}\(waiting.name)\u{201D} finishes or you mark it Done for now."
+    }
+
+    private func queueRow(_ item: InboxQueuedPrompt, number: Int, next: Bool, project: InboxProject) -> some View {
+        let starting = model.isStartingQueued(item.id, desktopId: ref.desktopId)
+        let editable = canEditQueue && !offline && !starting
+        return Button {
+            queuePrompt = QueuePromptTarget(desktopId: ref.desktopId, projectId: project.id, item: item)
+        } label: {
+            QueueRow(item: item, number: number, next: next, starting: starting)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canEditQueue)
+        .opacity(offline ? 0.55 : 1)
+        .swipeActions(edge: .leading) {
+            if editable {
+                Button {
+                    Task { await model.runQueued(item.id, projectId: project.id, desktopId: ref.desktopId) }
+                } label: {
+                    Label("Run now", systemImage: "play.fill")
+                }
+                .tint(.accentColor)
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            if editable {
+                Button(role: .destructive) {
+                    Task { await model.changeQueue(.remove(itemId: item.id), projectId: project.id, desktopId: ref.desktopId) }
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
+            }
+        }
+        .contextMenu {
+            if canEditQueue {
+                Button("Run now", systemImage: "play.fill") {
+                    Task { await model.runQueued(item.id, projectId: project.id, desktopId: ref.desktopId) }
+                }
+                Button("Edit", systemImage: "pencil") {
+                    queuePrompt = QueuePromptTarget(desktopId: ref.desktopId, projectId: project.id, item: item)
+                }
+                Button("Move up", systemImage: "arrow.up") { move(item, up: true, in: project) }
+                    .disabled(project.queueMove(item, up: true) == nil)
+                Button("Move down", systemImage: "arrow.down") { move(item, up: false, in: project) }
+                    .disabled(project.queueMove(item, up: false) == nil)
+                Button("Remove", systemImage: "trash", role: .destructive) {
+                    Task { await model.changeQueue(.remove(itemId: item.id), projectId: project.id, desktopId: ref.desktopId) }
+                }
+            }
+        }
+    }
+
+    private func move(_ item: InboxQueuedPrompt, up: Bool, in project: InboxProject) {
+        guard let action = project.queueMove(item, up: up) else { return }
+        Task { await model.changeQueue(action, projectId: project.id, desktopId: ref.desktopId) }
+    }
+
+    @ViewBuilder
+    private func addToQueueRow(_ project: InboxProject) -> some View {
+        if canEditQueue {
+            Button("Add to queue", systemImage: "plus") {
+                queuePrompt = QueuePromptTarget(desktopId: ref.desktopId, projectId: project.id)
+            }
+            .disabled(offline)
+        }
+    }
+
     /// Tasks that need you first (newest attention first), then by last interaction.
     private func sorted(_ tasks: [InboxTask]) -> [InboxTask] {
         tasks.sorted { a, b in
@@ -311,5 +460,44 @@ struct ProjectTaskRow: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A queued prompt: its place in its stream, up to three lines of it, and
+/// "Next" on the one an auto-run stream starts next.
+struct QueueRow: View {
+    let item: InboxQueuedPrompt
+    let number: Int
+    let next: Bool
+    let starting: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("\(number)")
+                .font(.footnote)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 16, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.text)
+                    .lineLimit(3)
+                    .foregroundStyle(.primary)
+                if starting {
+                    Text("Starting…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if next {
+                    Text("Next")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            Spacer(minLength: 0)
+            if starting { ProgressView() }
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens the queued prompt")
     }
 }

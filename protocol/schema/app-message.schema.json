@@ -20,7 +20,7 @@
         "t": { "const": "req" },
         "id": { "$ref": "#/$defs/id" },
         "op": { "type": "string", "description": "inbox.get, a chat.* op (SPEC.md §6.3), or a §7.4/§8 op such as task.new or stream.new" },
-        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams." }
+        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams." }
       }
     },
     "resOk": {
@@ -30,7 +30,7 @@
         "t": { "const": "res" },
         "id": { "$ref": "#/$defs/id" },
         "ok": { "const": true },
-        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land." }
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run." }
       }
     },
     "resErr": {
@@ -92,6 +92,37 @@
         "branches": { "type": "array", "items": { "type": "string" } },
         "defaultBase": { "type": "string" }
       }
+    },
+    "queueUpdateParams": {
+      "description": "queue.update params (SPEC.md §8.16). add takes text and streamId?, edit itemId and text, remove itemId, move itemId and toIndex, auto-run streamId and on.",
+      "type": "object",
+      "required": ["projectId", "action"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "action": { "enum": ["add", "edit", "remove", "move", "auto-run"] },
+        "text": { "type": "string", "pattern": "\\S", "maxLength": 32000 },
+        "streamId": { "type": "string" },
+        "itemId": { "type": "string" },
+        "toIndex": { "type": "integer", "minimum": 0 },
+        "on": { "type": "boolean" }
+      }
+    },
+    "queueUpdateResult": {
+      "description": "queue.update result (SPEC.md §8.16): the new prompt's itemId for add, {} otherwise.",
+      "type": "object",
+      "properties": { "itemId": { "type": "string" } }
+    },
+    "queueRunParams": {
+      "description": "queue.run params (SPEC.md §8.16).",
+      "type": "object",
+      "required": ["projectId", "itemId"],
+      "properties": { "projectId": { "type": "string" }, "itemId": { "type": "string" } }
+    },
+    "queueRunResult": {
+      "description": "queue.run result (SPEC.md §8.16): the task the prompt became.",
+      "type": "object",
+      "required": ["taskId"],
+      "properties": { "taskId": { "type": "string" } }
     },
     "taskCloseResult": {
       "description": "task.close result (SPEC.md §8.7): archived, a blocker to confirm, or (version 3) a task with a worktree of its own that didn't land.",

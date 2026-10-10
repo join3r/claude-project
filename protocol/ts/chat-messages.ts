@@ -158,6 +158,33 @@ export interface StreamNewParams { projectId: string; name: string; worktree: bo
 export interface StreamNewResult { streamId: string }
 
 /**
+ * `queue.update` and `queue.run` (SPEC.md §8.16): Project Home's prompt queue. The
+ * phone adds, edits, removes and reorders queued prompts, switches a stream's
+ * auto-run, and starts one now as a new Claude chat task.
+ */
+export const QUEUE_UPDATE_OP = 'queue.update'
+export const QUEUE_RUN_OP = 'queue.run'
+/** The handshake feature (§8.1) a desktop lists when it answers both and sends `queue` (§4.4). */
+export const QUEUE_FEATURE = 'queue'
+export const QUEUE_ACTIONS = ['add', 'edit', 'remove', 'move', 'auto-run'] as const
+export type QueueAction = (typeof QUEUE_ACTIONS)[number]
+
+/**
+ * Each action keeps only its own fields: `add` text and streamId?, `edit` itemId and
+ * text, `remove` itemId, `move` itemId and toIndex, `auto-run` streamId and on.
+ */
+export type QueueUpdateParams =
+  | { projectId: string; action: 'add'; text: string; streamId?: string }
+  | { projectId: string; action: 'edit'; itemId: string; text: string }
+  | { projectId: string; action: 'remove'; itemId: string }
+  | { projectId: string; action: 'move'; itemId: string; toIndex: number }
+  | { projectId: string; action: 'auto-run'; streamId: string; on: boolean }
+/** `itemId` only answers `add`: the new prompt's id. */
+export interface QueueUpdateResult { itemId?: string }
+export interface QueueRunParams { projectId: string; itemId: string }
+export interface QueueRunResult { taskId: string }
+
+/**
  * `branches.list` (SPEC.md §8.13): a project's local branches, for the New stream
  * sheet's From picker, and the one the desktop's dialog picks first.
  */
@@ -282,7 +309,9 @@ export const ChatLimits = {
   /** `chat.btw` question (§8.14). */
   btwQuestion: 20_000,
   /** `chat.permissions.update` rule (§8.14). */
-  permissionRule: 2000
+  permissionRule: 2000,
+  /** A queued prompt's text (§8.16), as `chat.send`'s. */
+  queueText: 32000
 } as const
 
 export type ChatViewToolStatus = 'pending' | 'running' | 'waiting' | 'done' | 'error' | 'denied'
@@ -1083,6 +1112,60 @@ export function parseStreamNewParams(params: unknown): StreamNewParams {
 /** `stream.new` result (the phone's side). */
 export function parseStreamNewResult(value: unknown): StreamNewResult {
   return { streamId: str(obj(value, 'result'), 'streamId') }
+}
+
+/** A queued prompt's text: not blank, at most {@link ChatLimits.queueText} characters, trimmed. */
+function queueText(o: Obj): string {
+  const text = str(o, 'text').trim()
+  if (!text) fail('text is empty')
+  if (text.length > ChatLimits.queueText) fail(`text over ${ChatLimits.queueText} characters`)
+  return text
+}
+
+/**
+ * `queue.update` params (the desktop's side). Throws ProtocolError — `bad-request` — on
+ * a missing `projectId`, an unknown `action`, or a field the action needs missing or
+ * malformed (a blank or too-long `text` among them). Fields the action doesn't use are
+ * dropped.
+ */
+export function parseQueueUpdateParams(params: unknown): QueueUpdateParams {
+  const o = obj(params, 'params')
+  const projectId = str(o, 'projectId')
+  const action = oneOf(o, 'action', QUEUE_ACTIONS)
+  switch (action) {
+    case 'add': {
+      const out: QueueUpdateParams = { projectId, action, text: queueText(o) }
+      const streamId = optStr(o, 'streamId')
+      if (streamId !== undefined) out.streamId = streamId
+      return out
+    }
+    case 'edit':
+      return { projectId, action, itemId: str(o, 'itemId'), text: queueText(o) }
+    case 'remove':
+      return { projectId, action, itemId: str(o, 'itemId') }
+    case 'move':
+      return { projectId, action, itemId: str(o, 'itemId'), toIndex: int(o, 'toIndex') }
+    case 'auto-run':
+      return { projectId, action, streamId: str(o, 'streamId'), on: bool(o, 'on') }
+  }
+}
+
+/** `queue.update` result (the phone's side). */
+export function parseQueueUpdateResult(value: unknown): QueueUpdateResult {
+  const o = obj(value, 'result')
+  const itemId = optStr(o, 'itemId')
+  return itemId === undefined ? {} : { itemId }
+}
+
+/** `queue.run` params (the desktop's side). Throws ProtocolError on a missing `projectId` or `itemId`. */
+export function parseQueueRunParams(params: unknown): QueueRunParams {
+  const o = obj(params, 'params')
+  return { projectId: str(o, 'projectId'), itemId: str(o, 'itemId') }
+}
+
+/** `queue.run` result (the phone's side). */
+export function parseQueueRunResult(value: unknown): QueueRunResult {
+  return { taskId: str(obj(value, 'result'), 'taskId') }
 }
 
 /** `branches.list` params (the desktop's side). Throws ProtocolError on a missing `projectId`. */

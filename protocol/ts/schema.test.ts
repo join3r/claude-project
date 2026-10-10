@@ -151,6 +151,16 @@ describe('JSON Schema', () => {
     for (const text of chat.branchesList.invalid.results) expect(check('branchesListResult', JSON.parse(text)), text).not.toEqual([])
   })
 
+  it('accepts the queue.update and queue.run samples and rejects the invalid ones (§8.16)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
+    for (const s of chat.queueUpdate.params) expect(check('queueUpdateParams', s.expected), s.json).toEqual([])
+    for (const s of chat.queueUpdate.results) expect(check('queueUpdateResult', s.expected), s.json).toEqual([])
+    for (const s of chat.queueRun.params) expect(check('queueRunParams', s.expected), s.json).toEqual([])
+    for (const s of chat.queueRun.results) expect(check('queueRunResult', s.expected), s.json).toEqual([])
+    for (const text of chat.queueRun.invalid.params) expect(check('queueRunParams', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.queueRun.invalid.results) expect(check('queueRunResult', JSON.parse(text)), text).not.toEqual([])
+  })
+
   it('accepts the task.close and task.land samples and rejects the invalid ones (§8.7, §8.15)', () => {
     const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
     for (const s of chat.taskClose.results) expect(check('taskCloseResult', s.expected), s.json).toEqual([])

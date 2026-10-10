@@ -535,6 +535,70 @@ public struct StreamNewResult: Sendable, Equatable {
     }
 }
 
+/// `queue.update` (§8.16) params: one edit to Project Home's queue.
+public struct QueueUpdateParams: Sendable, Equatable {
+    public enum Action: Sendable, Equatable {
+        /// At the end of the queue, for `streamId` (nil: `main`).
+        case add(text: String, streamId: String?)
+        case edit(itemId: String, text: String)
+        case remove(itemId: String)
+        /// To position `toIndex` of the whole queue.
+        case move(itemId: String, toIndex: Int64)
+        /// The stream's Run next automatically.
+        case autoRun(streamId: String, on: Bool)
+
+        public var name: String {
+            switch self {
+            case .add: "add"
+            case .edit: "edit"
+            case .remove: "remove"
+            case .move: "move"
+            case .autoRun: "auto-run"
+            }
+        }
+    }
+
+    /// A queued prompt's longest `text`, in UTF-16 code units (as `chat.send`'s).
+    public static let textLimit = 32000
+
+    public var projectId: String
+    public var action: Action
+
+    public init(projectId: String, action: Action) {
+        self.projectId = projectId
+        self.action = action
+    }
+}
+
+/// `queue.update` result: the new prompt's id for `add`, nil otherwise.
+public struct QueueUpdateResult: Sendable, Equatable {
+    public var itemId: String?
+
+    public init(itemId: String? = nil) {
+        self.itemId = itemId
+    }
+}
+
+/// `queue.run` (§8.16) params: start a queued prompt now.
+public struct QueueRunParams: Sendable, Equatable {
+    public var projectId: String
+    public var itemId: String
+
+    public init(projectId: String, itemId: String) {
+        self.projectId = projectId
+        self.itemId = itemId
+    }
+}
+
+/// `queue.run` result: the task the prompt became.
+public struct QueueRunResult: Sendable, Equatable {
+    public var taskId: String
+
+    public init(taskId: String) {
+        self.taskId = taskId
+    }
+}
+
 /// `branches.list` (§8.13) result: a project's local branches for the New
 /// stream sheet's From picker, and the one to pick first ("" when there is none).
 public struct BranchesListResult: Sendable, Equatable {
@@ -643,6 +707,10 @@ public enum TaskOp {
     public static let listBranches = "branches.list"
     /// `task.land` (§8.15): a stopped landing's Ask agent to fix, Abort and Retry.
     public static let land = "task.land"
+    /// `queue.update` (§8.16): add, edit, remove or move a queued prompt, or switch auto-run.
+    public static let updateQueue = "queue.update"
+    /// `queue.run` (§8.16): start a queued prompt now.
+    public static let runQueued = "queue.run"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
 }
@@ -1175,6 +1243,83 @@ extension StreamNewParams {
         if worktree, let baseBranch { fields["baseBranch"] = .string(baseBranch) }
         return .object(fields)
     }
+}
+
+extension QueueUpdateParams {
+    /// The desktop's side: a missing `projectId`, an unknown `action`, or a field
+    /// the action needs missing or malformed (a blank or too-long `text`) throws
+    /// (`bad-request`). `text` comes back trimmed; other fields are dropped.
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> QueueUpdateParams {
+        let o = try Fields(value, "params")
+        let projectId = try o.str("projectId")
+        let name = try o.str("action")
+        func text() throws(ProtocolError) -> String {
+            let text = try o.str("text").trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { throw ProtocolError("text is empty") }
+            if text.utf16.count > textLimit { throw ProtocolError("text over \(textLimit) characters") }
+            return text
+        }
+        let action: Action
+        switch name {
+        case "add": action = .add(text: try text(), streamId: try o.optStr("streamId"))
+        case "edit": action = .edit(itemId: try o.str("itemId"), text: try text())
+        case "remove": action = .remove(itemId: try o.str("itemId"))
+        case "move": action = .move(itemId: try o.str("itemId"), toIndex: try o.int("toIndex"))
+        case "auto-run": action = .autoRun(streamId: try o.str("streamId"), on: try o.bool("on"))
+        default: throw ProtocolError("unknown action \(name)")
+        }
+        return QueueUpdateParams(projectId: projectId, action: action)
+    }
+
+    public var json: JSONValue {
+        var fields: JSONObject = ["projectId": .string(projectId), "action": .string(action.name)]
+        switch action {
+        case .add(let text, let streamId):
+            fields["text"] = .string(text)
+            if let streamId { fields["streamId"] = .string(streamId) }
+        case .edit(let itemId, let text):
+            fields["itemId"] = .string(itemId)
+            fields["text"] = .string(text)
+        case .remove(let itemId):
+            fields["itemId"] = .string(itemId)
+        case .move(let itemId, let toIndex):
+            fields["itemId"] = .string(itemId)
+            fields["toIndex"] = .int(toIndex)
+        case .autoRun(let streamId, let on):
+            fields["streamId"] = .string(streamId)
+            fields["on"] = .bool(on)
+        }
+        return .object(fields)
+    }
+}
+
+extension QueueUpdateResult {
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> QueueUpdateResult {
+        QueueUpdateResult(itemId: try Fields(value, "result").optStr("itemId"))
+    }
+
+    public var json: JSONValue {
+        guard let itemId else { return .object([:]) }
+        return .object(["itemId": .string(itemId)])
+    }
+}
+
+extension QueueRunParams {
+    /// The desktop's side: a missing `projectId` or `itemId` throws (`bad-request`).
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> QueueRunParams {
+        let o = try Fields(value, "params")
+        return QueueRunParams(projectId: try o.str("projectId"), itemId: try o.str("itemId"))
+    }
+
+    public var json: JSONValue { .object(["projectId": .string(projectId), "itemId": .string(itemId)]) }
+}
+
+extension QueueRunResult {
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> QueueRunResult {
+        QueueRunResult(taskId: try Fields(value, "result").str("taskId"))
+    }
+
+    public var json: JSONValue { .object(["taskId": .string(taskId)]) }
 }
 
 extension StreamNewResult {

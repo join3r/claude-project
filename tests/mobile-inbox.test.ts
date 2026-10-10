@@ -214,6 +214,26 @@ describe('buildInbox', () => {
     expect(inbox.projects.map(p => p.id)).toEqual(['c', 'a', 'b'])
   })
 
+  it('carries the queue with each prompt\'s stream, and each stream\'s auto-run and running task', () => {
+    const bugs: Stream = { id: 's-bugs', name: 'bugfixes', tasks: [], promptQueueAutoRun: true, promptQueueWatch: { taskId: 't1', tabId: 'a' } }
+    const p = project('p1', [], {
+      streams: [bugs],
+      promptQueue: [{ id: 'q1', text: 'first' }, { id: 'q2', text: 'second', streamId: 's-bugs' }, { id: 'q3', text: 'closed', streamId: 's-gone' }]
+    })
+    p.streams[1].tasks.push(fixtureTask({ id: 't1', name: 'running', tabs: { left: [tab('a', 'claude-chat')], right: [] } }))
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW).projects
+    expect(wire.queue).toEqual([
+      { id: 'q1', text: 'first', streamId: mainStreamId('p1') },
+      { id: 'q2', text: 'second', streamId: 's-bugs' },
+      { id: 'q3', text: 'closed', streamId: mainStreamId('p1') }
+    ])
+    expect(wire.streams[1]).toEqual({ id: 's-bugs', name: 'bugfixes', queueAutoRun: true, queueTaskId: 't1' })
+    // A finished (settled) watched task no longer holds the queue up.
+    p.streams[1].tasks[0].inbox = { settledAt: NOW }
+    expect(buildInbox(data([p]), lookup(), DESKTOP, NOW).projects[0].streams[1]).toEqual({ id: 's-bugs', name: 'bugfixes', queueAutoRun: true })
+    expect('queue' in buildInbox(data([project('p2', [])]), lookup(), DESKTOP, NOW).projects[0]).toBe(false)
+  })
+
   it('carries the Pinned list in its order, leaving out what the phone cannot see', () => {
     const p1 = project('p1', [task('t1', []), task('t2', [])])
     const hidden = project('hidden', [task('h1', [])], { hideFromMobile: true })

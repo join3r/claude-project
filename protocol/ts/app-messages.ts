@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
 import type { ChatViewEvent, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -112,6 +112,17 @@ export interface InboxStream {
   main?: true
   /** Present on a worktree stream: the branch its worktree is on. */
   branch?: string
+  /** The stream starts its next queued prompt by itself (§4.4 `queue`). */
+  queueAutoRun?: true
+  /** The task its queue started last, while it still runs: the next prompt waits for it. */
+  queueTaskId?: string
+}
+
+/** A prompt in a project's queue (§4.4), waiting to become a task in stream `streamId`. */
+export interface InboxQueuedPrompt {
+  id: string
+  text: string
+  streamId: string
 }
 
 export interface InboxProject {
@@ -125,6 +136,8 @@ export interface InboxProject {
   lastStreamId?: string
   /** Every open task, stream by stream. */
   tasks: InboxTask[]
+  /** Project Home's queued prompts, first to run first; absent when the queue is empty. */
+  queue?: InboxQueuedPrompt[]
 }
 
 /**
@@ -201,6 +214,8 @@ export const AppOp = {
   TaskClose: TASK_CLOSE_OP,
   TabClose: TAB_CLOSE_OP,
   PinSet: PIN_SET_OP,
+  QueueUpdate: QUEUE_UPDATE_OP,
+  QueueRun: QUEUE_RUN_OP,
   TaskTriage: TASK_TRIAGE_OP,
   TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,
@@ -407,7 +422,15 @@ function parseStream(value: unknown): InboxStream {
   if (o.main === true) stream.main = true
   const branch = optStr(o, 'branch')
   if (branch !== undefined) stream.branch = branch
+  if (o.queueAutoRun === true) stream.queueAutoRun = true
+  const queueTaskId = optStr(o, 'queueTaskId')
+  if (queueTaskId !== undefined) stream.queueTaskId = queueTaskId
   return stream
+}
+
+function parseQueuedPrompt(value: unknown): InboxQueuedPrompt {
+  const o = obj(value, 'queued prompt')
+  return { id: str(o, 'id'), text: str(o, 'text'), streamId: str(o, 'streamId') }
 }
 
 function parseProject(value: unknown): InboxProject {
@@ -423,6 +446,10 @@ function parseProject(value: unknown): InboxProject {
   if (emoji !== undefined) project.emoji = emoji
   const lastStreamId = optStr(o, 'lastStreamId')
   if (lastStreamId !== undefined) project.lastStreamId = lastStreamId
+  if (o.queue !== undefined && o.queue !== null) {
+    const queue = arr(o, 'queue').map(parseQueuedPrompt)
+    if (queue.length > 0) project.queue = queue
+  }
   return project
 }
 

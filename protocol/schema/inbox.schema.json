@@ -37,7 +37,18 @@
         "id": { "type": "string" },
         "name": { "type": "string" },
         "main": { "const": true, "description": "The project's default stream (its folder); exactly one per project." },
-        "branch": { "type": "string", "description": "Present on a worktree stream: the git branch of its worktree (SPEC.md §4.4)." }
+        "branch": { "type": "string", "description": "Present on a worktree stream: the git branch of its worktree (SPEC.md §4.4)." },
+        "queueAutoRun": { "const": true, "description": "The stream starts its next queued prompt by itself (SPEC.md §4.4, §8.16)." },
+        "queueTaskId": { "type": "string", "description": "The task the stream's queue started last, while it still runs." }
+      }
+    },
+    "queuedPrompt": {
+      "type": "object",
+      "required": ["id", "text", "streamId"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "streamId": { "type": "string", "description": "The open stream its task goes to." }
       }
     },
     "status": { "enum": ["working", "attention", "exited", "idle"] },
@@ -51,7 +62,8 @@
         "remote": { "type": "boolean" },
         "streams": { "type": "array", "items": { "$ref": "#/$defs/stream" }, "description": "Open streams in sidebar order, main first." },
         "lastStreamId": { "type": "string", "description": "The stream the project was last used in." },
-        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" }, "description": "Open tasks, stream by stream." }
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" }, "description": "Open tasks, stream by stream." },
+        "queue": { "type": "array", "items": { "$ref": "#/$defs/queuedPrompt" }, "description": "Project Home's queued prompts, first to run first (SPEC.md §4.4). Absent when empty." }
       }
     },
     "task": {

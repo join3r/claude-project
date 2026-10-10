@@ -618,6 +618,8 @@ var TAB_CLOSE_OP = "tab.close";
 var PIN_SET_OP = "pin.set";
 var TASK_TRIAGE_OP = "task.triage";
 var STREAM_NEW_OP = "stream.new";
+var QUEUE_UPDATE_OP = "queue.update";
+var QUEUE_RUN_OP = "queue.run";
 var BRANCHES_LIST_OP = "branches.list";
 var CHAT_SETTINGS_OP = "chat.settings";
 var CHAT_IMAGE_OP = "chat.image";
@@ -640,6 +642,8 @@ var AppOp = {
   TaskClose: TASK_CLOSE_OP,
   TabClose: TAB_CLOSE_OP,
   PinSet: PIN_SET_OP,
+  QueueUpdate: QUEUE_UPDATE_OP,
+  QueueRun: QUEUE_RUN_OP,
   TaskTriage: TASK_TRIAGE_OP,
   TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,

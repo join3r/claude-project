@@ -70,6 +70,11 @@ struct RootView: View {
         } message: {
             Text(model.triageError ?? "")
         }
+        .alert("Couldn't change the queue", isPresented: Binding(get: { model.queueError != nil }, set: { if !$0 { model.queueError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.queueError ?? "")
+        }
         .onAppear { if sidebar == nil { sidebar = defaultSidebar } }
         .onChange(of: model.desktops.map(\.id)) { _, ids in
             if case .desktop(let id) = sidebar, !ids.contains(id) { sidebar = defaultSidebar }
