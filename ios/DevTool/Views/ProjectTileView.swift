@@ -51,30 +51,76 @@ struct TaskTitleHeader: View {
     var projectFont: Font = .headline
     /// Appended to the task line, e.g. the chat's permission mode.
     var detail: String?
+    /// In a task screen's bar: the tile and project line open the project
+    /// (its queue lives there), the task line calls `onTask`.
+    var onProject: (() -> Void)?
+    var onTask: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 10) {
-            ProjectTileView(tile: project.tile, size: tileSize)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(project.name)
-                        .font(projectFont)
-                        .layoutPriority(1)
-                    if let stream = streamName {
-                        Text(stream)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+        if let onProject, let onTask {
+            HStack(spacing: 10) {
+                Button(action: onProject) { tile }
+                    .buttonStyle(.plain)
+                    // The project line's button says the same.
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Button(action: onProject) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            projectLine
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(project.place(of: task))
+                    .accessibilityHint("Opens the project")
+                    Button(action: onTask) {
+                        taskLine
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows the task's details")
                 }
-                .lineLimit(1)
-                Text(detail.map { "\(task.name) · \($0)" } ?? task.name)
-                    .font(.footnote)
+            }
+        } else {
+            HStack(spacing: 10) {
+                tile
+                VStack(alignment: .leading, spacing: 1) {
+                    projectLine
+                    taskLine
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(project.place(of: task)), \(task.name)")
+        }
+    }
+
+    private var tile: some View {
+        ProjectTileView(tile: project.tile, size: tileSize)
+    }
+
+    private var projectLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(project.name)
+                .font(projectFont)
+                .layoutPriority(1)
+            if let stream = streamName {
+                Text(stream)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(project.place(of: task)), \(task.name)")
+        .lineLimit(1)
+    }
+
+    private var taskLine: some View {
+        Text(detail.map { "\(task.name) · \($0)" } ?? task.name)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 
     /// The stream, unless it is `main` (`InboxProject.place(of:)`).

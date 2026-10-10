@@ -10,11 +10,12 @@ enum SidebarSelection: Hashable {
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
     let demoRoute: LaunchOptions.DemoRoute?
 
     @State private var sidebar: SidebarSelection?
     @State private var taskSelection: TaskRef?
-    /// Projects pushed on a desktop's screen.
+    /// Projects pushed on the Inbox or a desktop's screen.
     @State private var projectPath: [ProjectRef] = []
     /// A chat a notification asked for; the task screen opens it when it is one of the task's.
     @State private var openTab: ChatRoute?
@@ -101,16 +102,18 @@ struct RootView: View {
                 onPair: model.presentPairing
             )
         } content: {
-            switch sidebar ?? defaultSidebar {
-            case .inbox:
-                InboxView(selection: $taskSelection)
-            case let scope:
-                NavigationStack(path: $projectPath) {
-                    DesktopView(scope: scope, selection: $taskSelection)
-                        .navigationDestination(for: ProjectRef.self) { ref in
-                            ProjectView(ref: ref, selection: $taskSelection,
-                                        demoSheet: demoRoute == .newStream || demoRoute == .newTask ? demoRoute : nil)
-                        }
+            NavigationStack(path: $projectPath) {
+                Group {
+                    switch sidebar ?? defaultSidebar {
+                    case .inbox:
+                        InboxView(selection: $taskSelection, onOpenProject: openProject)
+                    case let scope:
+                        DesktopView(scope: scope, selection: $taskSelection)
+                    }
+                }
+                .navigationDestination(for: ProjectRef.self) { ref in
+                    ProjectView(ref: ref, selection: $taskSelection,
+                                demoSheet: demoRoute == .newStream || demoRoute == .newTask ? demoRoute : nil)
                 }
             }
         } detail: {
@@ -120,7 +123,8 @@ struct RootView: View {
                         ref: ref,
                         openTab: openTab?.desktopId == ref.desktopId ? openTab?.tabId : nil,
                         showInfo: demoInfo,
-                        onClosed: { taskSelection = nil }
+                        onClosed: { taskSelection = nil },
+                        onOpenProject: openProject
                     )
                     .id(ref)
                 } else {
@@ -195,6 +199,20 @@ struct RootView: View {
         openTab = tab
         taskSelection = ref
         preferredColumn = .detail
+    }
+
+    /// Shows a project's screen on top of the Inbox or desktop the task came
+    /// from, so Back returns there. On a phone the task screen gives way to it.
+    private func openProject(_ ref: ProjectRef) {
+        // Switching scope would clear the path; every task on screen is in scope.
+        guard scopeIds.contains(ref.desktopId) else { return }
+        if projectPath.last != ref { projectPath = [ref] }
+        if sizeClass == .compact {
+            taskSelection = nil
+            preferredColumn = .content
+        } else if columnVisibility == .detailOnly {
+            columnVisibility = .doubleColumn
+        }
     }
 
     /// Debug-only shortcuts for screenshots (`-demoRoute`).

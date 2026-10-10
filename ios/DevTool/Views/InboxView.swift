@@ -7,6 +7,8 @@ import SwiftUI
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: TaskRef?
+    /// A row's long-press Open project (its queue lives there).
+    var onOpenProject: (ProjectRef) -> Void = { _ in }
     @State private var showWorking = false
     @State private var showSettled = false
     @State private var showSnoozed = false
@@ -223,6 +225,11 @@ struct InboxView: View {
             }
         }
         .contextMenu {
+            Button {
+                onOpenProject(ProjectRef(desktopId: entry.desktopId, projectId: entry.project.id))
+            } label: {
+                Label("Open \(entry.project.name)", systemImage: "folder")
+            }
             if model.supports(DesktopFeature.taskTriage, on: entry.desktopId) {
                 TriageMenuItems(ref: ref, task: entry.task, now: now)
                     .disabled(offline)

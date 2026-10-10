@@ -24,6 +24,8 @@ struct ChatScreen: View {
 
     /// Opens the task info sheet (the header and ⓘ).
     private let onInfo: (() -> Void)?
+    /// Opens the task's project from the header.
+    private let onProject: (() -> Void)?
 
     private static let bottomID = "chat-bottom"
     /// iOS 18 reports when the user drags; iOS 17 falls back on the bottom marker.
@@ -34,8 +36,9 @@ struct ChatScreen: View {
     /// Keep the newest content in view: the user hasn't scrolled away from it.
     private var pinned: Bool { atBottom || !scrolledAway }
 
-    init(route: ChatRoute, app: AppModel, onInfo: (() -> Void)? = nil) {
+    init(route: ChatRoute, app: AppModel, onInfo: (() -> Void)? = nil, onProject: (() -> Void)? = nil) {
         self.onInfo = onInfo
+        self.onProject = onProject
         _model = State(initialValue: ChatModel(route: route, dependencies: .init(
             connection: { [weak app] in app?.connection(for: route.desktopId) },
             loadCache: { [weak app] in app?.cachedChat(route) },
@@ -55,7 +58,7 @@ struct ChatScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if let context, let onInfo {
-                    TaskNavigationHeader(project: context.project, task: context.task, detail: modeLabel, onInfo: onInfo)
+                    TaskNavigationHeader(project: context.project, task: context.task, detail: modeLabel, onInfo: onInfo, onProject: onProject)
                 } else {
                     ToolbarItem(placement: .principal) { titleView }
                 }

@@ -2,7 +2,8 @@ import DevToolKit
 import SwiftUI
 
 /// A task opens on its conversation (§8.3): a Claude chat task on `ChatScreen`,
-/// any other on its status screen. The header (or ⓘ) opens the task info sheet.
+/// any other on its status screen. The header's task line (or ⓘ) opens the
+/// task info sheet, its tile and project the project's screen.
 struct TaskScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
@@ -11,24 +12,29 @@ struct TaskScreen: View {
     var openTab: String?
     /// The phone closed this task (§8.7); the caller leaves the screen.
     var onClosed: () -> Void = {}
+    /// Opens the task's project (its queue lives there).
+    var onOpenProject: ((ProjectRef) -> Void)?
 
     @State private var showInfo: Bool
     /// A chat picked in the info sheet (a task from before one agent per task).
     @State private var chosenTab: String?
 
-    init(ref: TaskRef, openTab: String? = nil, showInfo: Bool = false, onClosed: @escaping () -> Void = {}) {
+    init(ref: TaskRef, openTab: String? = nil, showInfo: Bool = false, onClosed: @escaping () -> Void = {},
+         onOpenProject: ((ProjectRef) -> Void)? = nil) {
         self.ref = ref
         self.openTab = openTab
         self.onClosed = onClosed
+        self.onOpenProject = onOpenProject
         _showInfo = State(initialValue: showInfo)
     }
 
     var body: some View {
         if let found = model.task(ref) {
             let task = found.task
+            let openProject = onOpenProject.map { open in { open(ProjectRef(desktopId: ref.desktopId, projectId: found.project.id)) } }
             Group {
                 if let chat = chatTab(task) {
-                    ChatScreen(route: ChatRoute(desktopId: ref.desktopId, tabId: chat.id), app: model, onInfo: { showInfo = true })
+                    ChatScreen(route: ChatRoute(desktopId: ref.desktopId, tabId: chat.id), app: model, onInfo: { showInfo = true }, onProject: openProject)
                         .id(chat.id)
                         // Above the transcript, as on the desktop: a landing that stopped waits for you.
                         .safeAreaInset(edge: .top, spacing: 0) {
@@ -42,7 +48,8 @@ struct TaskScreen: View {
                             }
                         }
                 } else {
-                    TaskStatusView(ref: ref, project: found.project, task: task, onInfo: { showInfo = true }, onClosed: onClosed)
+                    TaskStatusView(ref: ref, project: found.project, task: task, onInfo: { showInfo = true },
+                                   onProject: openProject, onClosed: onClosed)
                 }
             }
             .sheet(isPresented: $showInfo) {
@@ -83,22 +90,29 @@ struct TaskScreen: View {
 }
 
 /// The header of a task's screen in the navigation bar: tile, **project** ›
-/// stream, task name. Tapping it opens the task info sheet.
+/// stream, task name. Tapping it opens the task info sheet; with `onProject`,
+/// the tile and project open the project instead.
 struct TaskNavigationHeader: ToolbarContent {
     let project: InboxProject
     let task: InboxTask
     var detail: String?
     let onInfo: () -> Void
+    var onProject: (() -> Void)?
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            Button(action: onInfo) {
-                TaskTitleHeader(project: project, task: task, detail: detail)
+            if let onProject {
+                TaskTitleHeader(project: project, task: task, detail: detail, onProject: onProject, onTask: onInfo)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+            } else {
+                Button(action: onInfo) {
+                    TaskTitleHeader(project: project, task: task, detail: detail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows the task's details")
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Shows the task's details")
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button("Task info", systemImage: "info.circle", action: onInfo)
@@ -114,6 +128,7 @@ struct TaskStatusView: View {
     let project: InboxProject
     let task: InboxTask
     let onInfo: () -> Void
+    var onProject: (() -> Void)?
     let onClosed: () -> Void
     @State private var closing: CloseTaskRequest?
 
@@ -187,7 +202,7 @@ struct TaskStatusView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(task.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { TaskNavigationHeader(project: project, task: task, onInfo: onInfo) }
+        .toolbar { TaskNavigationHeader(project: project, task: task, onInfo: onInfo, onProject: onProject) }
         // A landing that stops shows its banner above.
         .closeTaskFlow($closing, onClosed: { _ in onClosed() }, onLanding: { _, _ in })
         .refreshable { await model.refresh([ref.desktopId]) }
