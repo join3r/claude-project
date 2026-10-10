@@ -322,6 +322,7 @@ export class HostServices {
     this.promptQueue = new PromptQueueRunner({
       peek: () => this.projectsStore.peek(),
       commit: (data) => { this.commitProjects(data) },
+      subscribeProjects: (listener) => this.projectsStore.subscribe(() => listener()),
       statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
       subscribe: (listener) => this.activityRegistry.subscribe(listener),
       blocker: (project) => {

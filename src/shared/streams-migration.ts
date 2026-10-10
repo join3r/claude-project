@@ -26,6 +26,9 @@
  * Task worktrees (docs/plans/2026-10-09-task-worktrees.md) add one more pass,
  * `adoptTaskWorktrees`: the tasks of a worktree stream from before them keep
  * working in the stream's worktree.
+ *
+ * Per-stream prompt queues add `adoptStreamPromptQueue`: auto-run and its watch
+ * move from the project onto its streams.
  */
 import { createMainStream, isAgentTabType, mainStreamId } from './types'
 import type {
@@ -38,6 +41,7 @@ import type {
   WorkspaceConfig
 } from './types'
 import { mapProjectTasks, singlePane } from './streams'
+import { adoptStreamPromptQueue } from './prompt-queue'
 import { normalizeTaskLayout } from './panes'
 
 /** A task as builds before the streams redesign wrote it. */
@@ -333,7 +337,7 @@ export function migrateProjects(raw: unknown[]): { projects: Project[]; migrated
     // Pane rows are rewritten in place by the UI; repair any that a crash, an
     // older build or a hand edit left inconsistent (empty panes, widths, active
     // and main tabs). Same objects back when nothing is wrong.
-    projects.push(adoptTaskWorktrees(mapProjectTasks(project, normalizeTaskLayout)))
+    projects.push(adoptStreamPromptQueue(adoptTaskWorktrees(mapProjectTasks(project, normalizeTaskLayout))))
   }
   return { projects, migrated, migratedStreamIds }
 }

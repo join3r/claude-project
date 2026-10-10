@@ -1,7 +1,9 @@
 /**
  * The prompt queue on Project Home: prompts planned ahead, each run as a new
- * Claude chat task in its stream. The edits here are the windows'; running one is
- * main's (`main/prompt-queue-runner.ts`), so a queue keeps going with no window open.
+ * Claude chat task in its stream. Each stream runs its own prompts one at a time,
+ * with its own auto-run switch, so streams (each its own branch) move in parallel.
+ * The edits here are the windows'; running one is main's
+ * (`main/prompt-queue-runner.ts`), so a queue keeps going with no window open.
  *
  * Every edit is data (`PromptQueueOp`) rather than a closure, and applying one to
  * a project that no longer has the item is a no-op: a window's updater is replayed
@@ -9,13 +11,14 @@
  */
 import type { Project, QueuedPrompt, Stream } from './types'
 import { findMainStream } from './streams'
+import { isSettled } from './inbox-state'
 
 export type PromptQueueOp =
   | { op: 'add'; item: QueuedPrompt }
   | { op: 'edit'; id: string; text: string }
   | { op: 'remove'; id: string }
   | { op: 'move'; id: string; toIndex: number }
-  | { op: 'auto-run'; on: boolean }
+  | { op: 'auto-run'; streamId: string; on: boolean }
 
 /** What running a queued prompt (`prompt-queue-run`) answers. */
 export type PromptQueueRunResult =
@@ -60,18 +63,24 @@ export function applyPromptQueueOp(project: Project, op: PromptQueueOp): Project
       next.splice(to, 0, item)
       return withQueue(project, next)
     }
-    case 'auto-run': {
-      const next = { ...project }
-      if (op.on) {
-        next.promptQueueAutoRun = true
-      } else {
-        delete next.promptQueueAutoRun
-        // Off means "stop after this one": nothing is waited on any more.
-        delete next.promptQueueWatch
-      }
-      return next
-    }
+    case 'auto-run':
+      return mapStream(project, op.streamId, stream => {
+        const next = { ...stream }
+        if (op.on) {
+          next.promptQueueAutoRun = true
+        } else {
+          delete next.promptQueueAutoRun
+          // Off means "stop after this one": nothing is waited on any more.
+          delete next.promptQueueWatch
+        }
+        return next
+      })
   }
+}
+
+function mapStream(project: Project, streamId: string, update: (stream: Stream) => Stream): Project {
+  if (!project.streams.some(stream => stream.id === streamId)) return project
+  return { ...project, streams: project.streams.map(stream => (stream.id === streamId ? update(stream) : stream)) }
 }
 
 /** The stream a queued prompt runs in: its own while it is open, else `main`. */
@@ -96,16 +105,61 @@ export function restoreQueuedPrompt(project: Project, item: QueuedPrompt, index:
   return withQueue(project, next)
 }
 
-export function setPromptQueueWatch(project: Project, watch: Project['promptQueueWatch'] | null): Project {
-  const next = { ...project }
-  if (watch) next.promptQueueWatch = watch
-  else delete next.promptQueueWatch
-  return next
+/** The prompts that run in `streamId`, in queue order. */
+export function streamPromptQueue(project: Project, streamId: string): QueuedPrompt[] {
+  return promptQueue(project).filter(item => queuedPromptStream(project, item)?.id === streamId)
 }
 
-/** The queue-started task auto-run is waiting on, while it still exists. */
-export function promptQueueWatchedTask(project: Project): { taskId: string; tabId: string } | null {
-  const watch = project.promptQueueWatch
+export function setPromptQueueWatch(project: Project, streamId: string, watch: Stream['promptQueueWatch'] | null): Project {
+  return mapStream(project, streamId, stream => {
+    if (!watch && !stream.promptQueueWatch) return stream
+    const next = { ...stream }
+    if (watch) next.promptQueueWatch = watch
+    else delete next.promptQueueWatch
+    return next
+  })
+}
+
+/** Switch a stream's auto-run off, keeping what it waits on. */
+export function stopPromptQueueAutoRun(project: Project, streamId: string): Project {
+  return mapStream(project, streamId, stream => {
+    if (!stream.promptQueueAutoRun) return stream
+    const next = { ...stream }
+    delete next.promptQueueAutoRun
+    return next
+  })
+}
+
+/**
+ * The queue-started task a stream is waiting on, while it still runs: a task
+ * closed since, or put away with Done for now, no longer holds the queue up.
+ */
+export function promptQueueWatchedTask(stream: Stream): { taskId: string; tabId: string } | null {
+  const watch = stream.promptQueueWatch
   if (!watch) return null
-  return project.streams.some(stream => stream.tasks.some(task => task.id === watch.taskId)) ? watch : null
+  const task = stream.tasks.find(t => t.id === watch.taskId)
+  return task && !isSettled(task) ? watch : null
+}
+
+/** The prompt a stream's auto-run starts now, if it may start one. */
+export function nextAutoRunPrompt(project: Project, stream: Stream): QueuedPrompt | undefined {
+  if (!stream.promptQueueAutoRun || promptQueueWatchedTask(stream)) return undefined
+  return streamPromptQueue(project, stream.id)[0]
+}
+
+/**
+ * Builds before per-stream queues kept auto-run and its watch on the project: they
+ * go to `main`, and the watch to the stream its task is in. `project` itself when
+ * there is nothing to move.
+ */
+export function adoptStreamPromptQueue(project: Project): Project {
+  const legacy = project as Project & { promptQueueAutoRun?: unknown; promptQueueWatch?: Stream['promptQueueWatch'] }
+  if (!('promptQueueAutoRun' in legacy) && !('promptQueueWatch' in legacy)) return project
+  const { promptQueueAutoRun: autoRun, promptQueueWatch: watch, ...rest } = legacy
+  let next: Project = rest
+  const main = findMainStream(next) ?? next.streams[0]
+  if (autoRun === true && main) next = mapStream(next, main.id, stream => ({ ...stream, promptQueueAutoRun: true }))
+  const watched = watch && next.streams.find(stream => stream.tasks.some(task => task.id === watch.taskId))
+  if (watch && watched) next = setPromptQueueWatch(next, watched.id, watch)
+  return next
 }

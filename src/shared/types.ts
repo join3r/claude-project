@@ -221,6 +221,10 @@ export interface Stream {
    * themselves live in `archive/<projectId>.json` (`src/shared/archive.ts`).
    */
   archivedTaskCount?: number
+  /** The stream starts its next queued prompt on its own whenever none of its queue's tasks is running. */
+  promptQueueAutoRun?: true
+  /** The task the queue started last in this stream, while it counts as running. */
+  promptQueueWatch?: { taskId: string; tabId: string }
 }
 
 export interface WorkspaceConfig {
@@ -424,12 +428,11 @@ export interface Project {
   ephemeral?: true
   /** Left out of the inbox sent to paired phones — filtered before encryption. */
   hideFromMobile?: true
-  /** Prompts planned on Project Home, first to run first (`shared/prompt-queue.ts`). */
+  /**
+   * Prompts planned on Project Home, first to run first (`shared/prompt-queue.ts`).
+   * One list; each stream runs the ones that go to it, and keeps its own auto-run.
+   */
   promptQueue?: QueuedPrompt[]
-  /** When the task the queue started last finishes, the next prompt starts on its own. */
-  promptQueueAutoRun?: true
-  /** The task the queue started last, while main waits for it to finish. */
-  promptQueueWatch?: { taskId: string; tabId: string }
 }
 
 /** A prompt waiting on Project Home to become a task. */
