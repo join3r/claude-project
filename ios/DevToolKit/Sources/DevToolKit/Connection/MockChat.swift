@@ -128,7 +128,7 @@ enum MockChats {
             ChatItem(id: "n1", .notice(text: "Permission mode changed to Accept edits", tone: .muted)),
             ChatItem(id: "t5", .tool(ChatTool(name: "Task", summary: "Explore: other callers of verifyRefreshToken", status: .done, hasDetail: true,
                                                 childCount: 6, lastChild: "Read src/routes/session.ts"))),
-            ChatItem(id: "a2", .text(markdown: "The fix is in, per the [jsonwebtoken docs](https://github.com/auth0/node-jsonwebtoken#errors--codes). Running the auth tests: https://github.com/acme/api/actions", streaming: false)),
+            ChatItem(id: "a2", .text(markdown: "The fix is in, per the [jsonwebtoken docs](https://github.com/auth0/node-jsonwebtoken#errors--codes). Running the auth tests now; CI runs the whole suite as well: https://github.com/acme/api/actions", streaming: false)),
             ChatItem(id: "t6", .tool(ChatTool(name: "Bash", summary: "npm test -- auth", status: .waiting, hasDetail: true))),
         ]
         details["t1"] = toolDetail(.object(["pattern": "refreshToken", "path": "src/", "output_mode": "content"]), """

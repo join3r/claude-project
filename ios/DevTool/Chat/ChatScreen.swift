@@ -9,7 +9,11 @@ struct ChatScreen: View {
     @State private var draft = ""
     /// Pictures pasted into the composer, sent with the next message.
     @State private var pictures: [PickedImage] = []
+    /// The bottom marker is on screen. It also flickers off while lazy rows
+    /// are measured, so on its own it doesn't say the user scrolled away.
     @State private var atBottom = true
+    /// The user dragged the transcript and it came to rest away from the bottom.
+    @State private var scrolledAway = false
     @State private var detailItem: ChatItem?
     @State private var viewerImage: ChatImageRef?
     @State private var sideQuestion: SideQuestion?
@@ -22,6 +26,13 @@ struct ChatScreen: View {
     private let onInfo: (() -> Void)?
 
     private static let bottomID = "chat-bottom"
+    /// iOS 18 reports when the user drags; iOS 17 falls back on the bottom marker.
+    private static var tracksScrollPhase: Bool {
+        if #available(iOS 18, *) { true } else { false }
+    }
+
+    /// Keep the newest content in view: the user hasn't scrolled away from it.
+    private var pinned: Bool { atBottom || !scrolledAway }
 
     init(route: ChatRoute, app: AppModel, onInfo: (() -> Void)? = nil) {
         self.onInfo = onInfo
@@ -184,16 +195,30 @@ struct ChatScreen: View {
                     Color.clear
                         .frame(height: 1)
                         .id(Self.bottomID)
-                        .onAppear { atBottom = true }
-                        .onDisappear { atBottom = false }
+                        .onAppear {
+                            atBottom = true
+                            if !Self.tracksScrollPhase { scrolledAway = false }
+                        }
+                        .onDisappear {
+                            atBottom = false
+                            if !Self.tracksScrollPhase { scrolledAway = true }
+                        }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
                 .frame(maxWidth: 780)
                 .frame(maxWidth: .infinity)
+                // Rows measured late resize the content under a scroll view that
+                // doesn't move with it, which can leave it past the end: blank.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
+                    if pinned { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+                }
             }
             .defaultScrollAnchor(.bottom)
+            .modifier(ScrollPhaseTracker { interacting in
+                scrolledAway = interacting || !atBottom
+            })
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: model.view?.items.last) { _, _ in follow(proxy) }
             .onChange(of: model.view?.items.count) { _, _ in follow(proxy) }
@@ -214,7 +239,7 @@ struct ChatScreen: View {
 
     /// Keeps the newest content in view while the user is at the bottom.
     private func follow(_ proxy: ScrollViewProxy) {
-        guard atBottom else { return }
+        guard pinned else { return }
         withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
     }
 
@@ -313,7 +338,7 @@ struct ChatScreen: View {
         .animation(.snappy, value: suggestions?.map(\.name))
         // Above the bar, not over it: over the composer it would cover Stop and Send.
         .overlay(alignment: .topTrailing) {
-            if !atBottom {
+            if !pinned {
                 Button {
                     withAnimation { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
                 } label: {
@@ -438,6 +463,7 @@ struct ChatScreen: View {
         draft = ""
         pictures = []
         atBottom = true
+        scrolledAway = false
         // Hand the screen back to the transcript: the reply and any card land there.
         composerFocused = false
         Task {
@@ -514,4 +540,23 @@ extension ChatScreen {
 
 extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+/// Reports the user starting to drag (true) and the scroll coming to rest (false).
+private struct ScrollPhaseTracker: ViewModifier {
+    let changed: (_ interacting: Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.onScrollPhaseChange { _, phase in
+                switch phase {
+                case .interacting: changed(true)
+                case .idle: changed(false)
+                default: break
+                }
+            }
+        } else {
+            content
+        }
+    }
 }
