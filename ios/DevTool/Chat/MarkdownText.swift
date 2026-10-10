@@ -2,11 +2,11 @@ import DevToolKit
 import SwiftUI
 
 /// Chat Markdown: blocks from `MarkdownBlock.parse`, each block's inline
-/// Markdown (bold, italics, `code`, links) through `AttributedString(markdown:)`.
-/// No syntax highlighting.
+/// Markdown (bold, italics, `code`, links) through `AttributedString(markdown:)`,
+/// shown in `LinkText` so links can be tapped and copied. No syntax highlighting.
 struct MarkdownText: View {
     let markdown: String
-    var font: Font = .body
+    var font: UIFont.TextStyle = .body
 
     var body: some View {
         let blocks = MarkdownBlock.parse(markdown)
@@ -15,7 +15,7 @@ struct MarkdownText: View {
                 blockView(block)
             }
         }
-        .font(font)
+        .font(Font(UIFont.preferredFont(forTextStyle: font)))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -23,31 +23,29 @@ struct MarkdownText: View {
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block {
         case .paragraph(let text):
-            Text(Self.inline(text))
-                .fixedSize(horizontal: false, vertical: true)
+            LinkText(text: LinkText.attributed(Self.inline(text), style: font))
         case .heading(let level, let text):
-            Text(Self.inline(text))
-                .font(level <= 1 ? .title3.bold() : level == 2 ? .headline : .subheadline.bold())
-                .padding(.top, 2)
-                .fixedSize(horizontal: false, vertical: true)
+            LinkText(text: LinkText.attributed(
+                Self.inline(text),
+                style: level <= 1 ? .title3 : level == 2 ? .headline : .subheadline,
+                bold: level != 2
+            ))
+            .padding(.top, 2)
         case .listItem(let marker, let indent, let text):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(marker)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 14, alignment: .trailing)
-                Text(Self.inline(text))
-                    .fixedSize(horizontal: false, vertical: true)
+                LinkText(text: LinkText.attributed(Self.inline(text), style: font))
             }
             .padding(.leading, CGFloat(indent) * 18)
         case .quote(let text):
-            Text(Self.inline(text))
-                .foregroundStyle(.secondary)
+            LinkText(text: LinkText.attributed(Self.inline(text), style: font, color: .secondaryLabel))
                 .padding(.leading, 10)
                 .overlay(alignment: .leading) {
                     Capsule().fill(.quaternary).frame(width: 3)
                 }
-                .fixedSize(horizontal: false, vertical: true)
         case .code(_, let text):
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(text)
@@ -61,8 +59,7 @@ struct MarkdownText: View {
                 Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
                     GridRow {
                         ForEach(header.indices, id: \.self) { column in
-                            tableCell(header[column], alignment: alignments[column])
-                                .bold()
+                            tableCell(header[column], alignment: alignments[column], bold: true)
                         }
                     }
                     .background(Color(.tertiarySystemFill))
@@ -75,7 +72,6 @@ struct MarkdownText: View {
                         }
                     }
                 }
-                .font(.subheadline)
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(.quaternary))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
@@ -84,19 +80,25 @@ struct MarkdownText: View {
         }
     }
 
-    private func tableCell(_ text: String, alignment: MarkdownBlock.TableAlignment) -> some View {
+    private func tableCell(_ text: String, alignment: MarkdownBlock.TableAlignment, bold: Bool = false) -> some View {
         let frameAlignment: Alignment = switch alignment {
         case .leading: .leading
         case .center: .center
         case .trailing: .trailing
         }
-        return Text(Self.inline(text))
-            .multilineTextAlignment(alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
-            .frame(maxWidth: 260, alignment: frameAlignment)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .gridColumnAlignment(alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
+        let textAlignment: NSTextAlignment = switch alignment {
+        case .leading: .natural
+        case .center: .center
+        case .trailing: .right
+        }
+        return LinkText(
+            text: LinkText.attributed(Self.inline(text), style: .subheadline, bold: bold, alignment: textAlignment),
+            maxWidth: 260
+        )
+        .frame(maxWidth: 260, alignment: frameAlignment)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .gridColumnAlignment(alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
     }
 
     /// Inline Markdown, keeping line breaks. Falls back to the plain text when it doesn't parse.

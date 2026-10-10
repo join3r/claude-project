@@ -47,10 +47,13 @@ struct UserBubble: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.white.opacity(0.85))
                 }
-                Text(text)
-                    .foregroundStyle(.white)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                LinkText(
+                    text: NSAttributedString(string: text, attributes: [
+                        .font: UIFont.preferredFont(forTextStyle: .body),
+                        .foregroundColor: UIColor.white,
+                    ]),
+                    linkColor: .white
+                )
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
