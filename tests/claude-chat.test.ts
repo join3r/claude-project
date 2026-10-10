@@ -5,7 +5,7 @@ import { buildTimeline, summarizeGroup } from '../src/renderer/components/claude
 import { contextTone, formatCost, formatResetAt, formatResetIn, formatTokens, limitTone } from '../src/renderer/components/claude-chat/UsageMeter'
 import { diffLines, diffStats, editPairs } from '../src/renderer/components/claude-chat/diff'
 import { JsonLineGate, sdkAddedEnv } from '../src/main/claude-chat/remote-spawn'
-import { backgroundTaskCount, coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput } from '../src/main/claude-chat/chat-session'
+import { backgroundTaskCount, coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput, TurnStopTracker } from '../src/main/claude-chat/chat-session'
 import { coldCacheText, formatIdle } from '../src/renderer/components/claude-chat/ColdCacheNotice'
 import { parseTranscriptLines, remoteTranscriptScript } from '../src/main/claude-chat/transcript'
 import { claudeTabType, createTab } from '../src/renderer/components/newTaskTabs'
@@ -443,5 +443,30 @@ describe('backgroundTaskCount', () => {
     expect(backgroundTaskCount({ type: 'system', subtype: 'task_started', task_id: 'b1' })).toBeNull()
     expect(backgroundTaskCount({ type: 'result' })).toBeNull()
     expect(backgroundTaskCount(null)).toBeNull()
+  })
+})
+
+describe('TurnStopTracker', () => {
+  it('owes a Stop for an interrupted turn, which the CLI ends without one', () => {
+    const tracker = new TurnStopTracker()
+    tracker.hook('UserPromptSubmit')
+    tracker.hook('PreToolUse')
+    expect(tracker.result()).toBe(true)
+    // Only once per turn.
+    expect(tracker.result()).toBe(false)
+  })
+
+  it('owes nothing when Stop or StopFailure came', () => {
+    const tracker = new TurnStopTracker()
+    tracker.hook('UserPromptSubmit')
+    tracker.hook('Stop')
+    expect(tracker.result()).toBe(false)
+    tracker.hook('UserPromptSubmit')
+    tracker.hook('StopFailure')
+    expect(tracker.result()).toBe(false)
+  })
+
+  it('owes nothing for a result with no turn behind it', () => {
+    expect(new TurnStopTracker().result()).toBe(false)
   })
 })

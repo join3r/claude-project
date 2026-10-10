@@ -38,6 +38,28 @@ export const FORWARDED_HOOK_EVENTS: HookEvent[] = [
 ]
 
 /**
+ * The CLI skips the Stop hook when a turn is interrupted (Esc / Stop), so the tab's
+ * status would stay "working" with nothing left to clear it. The turn's `result`
+ * still arrives: when it does and neither Stop nor StopFailure came for that turn,
+ * the session reports the Stop itself.
+ */
+export class TurnStopTracker {
+  private open = false
+
+  hook(event: unknown): void {
+    if (event === 'UserPromptSubmit') this.open = true
+    else if (event === 'Stop' || event === 'StopFailure') this.open = false
+  }
+
+  /** A turn's `result` arrived; true when its Stop is missing and must be sent for it. */
+  result(): boolean {
+    const missed = this.open
+    this.open = false
+    return missed
+  }
+}
+
+/**
  * SessionStart runs before the CLI registers SDK hook callbacks, so a callback never
  * sees it. A command hook does: it echoes its input to stderr, which comes back in
  * the `hook_response` message over the protocol channel, so it works through ssh
@@ -275,6 +297,7 @@ export class ChatSession {
   private lastContextRefresh = 0
   /** A turn reported its cost; that running total (it includes a resumed session's past turns) wins over `/usage`'s. */
   private sawResultCost = false
+  private readonly turnStop = new TurnStopTracker()
 
   constructor(private readonly options: ChatSessionOptions) {}
 
@@ -285,6 +308,7 @@ export class ChatSession {
     for (const event of FORWARDED_HOOK_EVENTS) {
       hooks[event] = [{
         hooks: [async (input) => {
+          this.turnStop.hook(input.hook_event_name)
           try { o.onHook(input as unknown as Record<string, unknown>) } catch { /* status is best-effort */ }
           return {}
         }]
@@ -362,6 +386,10 @@ export class ChatSession {
         const background = backgroundTaskCount(message)
         if (background !== null) {
           try { this.options.onHook({ hook_event_name: 'DevtoolBackgroundTasks', count: background }) } catch { /* status is best-effort */ }
+        }
+        if ((message as { type?: string }).type === 'result' && this.turnStop.result()) {
+          const sessionId = (message as { session_id?: unknown }).session_id
+          try { this.options.onHook({ hook_event_name: 'Stop', session_id: sessionId }) } catch { /* status is best-effort */ }
         }
         this.noteForUsage(message as { type?: string; subtype?: string; parent_tool_use_id?: unknown; total_cost_usd?: unknown })
       }
