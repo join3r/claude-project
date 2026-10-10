@@ -165,7 +165,7 @@ describe('buildTimeline', () => {
   it('folds runs of reads and searches and hides empty blocks', () => {
     const state = fold([
       sdk({ type: 'assistant', message: { id: 'm', content: [{ type: 'tool_use', id: 'a', name: 'Read', input: { file_path: '/a.ts' } }] }, parent_tool_use_id: null }),
-      sdk({ type: 'assistant', message: { id: 'm', content: [{ type: 'thinking', thinking: 'hmm' }] }, parent_tool_use_id: null }),
+      sdk({ type: 'assistant', message: { id: 'm', content: [{ type: 'thinking', thinking: '' }] }, parent_tool_use_id: null }),
       sdk({ type: 'assistant', message: { id: 'm', content: [{ type: 'tool_use', id: 'b', name: 'Grep', input: { pattern: 'x' } }] }, parent_tool_use_id: null }),
       sdk({ type: 'assistant', message: { id: 'm', content: [{ type: 'tool_use', id: 'c', name: 'Read', input: { file_path: '/c.ts' } }] }, parent_tool_use_id: null }),
       sdk({ type: 'assistant', message: { id: 'm', content: [{ type: 'tool_use', id: 'd', name: 'Edit', input: { file_path: '/c.ts', old_string: 'a', new_string: 'b' } }] }, parent_tool_use_id: null })
@@ -216,6 +216,13 @@ describe('buildTimeline folding', () => {
     expect(rows[0].type === 'group' && summarizeGroup(rows[0].tools)).toBe('Read 1 file · edited 1 file · ran 1 command')
     // The turn ended with no reply after the calls: folded too.
     expect(buildTimeline(fold(events).items, false).map((row) => row.type)).toEqual(['group'])
+  })
+
+  it('shows a progress update between calls instead of folding it away', () => {
+    const update = sdk({ type: 'assistant', message: { id: 'u', content: [{ type: 'thinking', thinking: 'Found it; now checking the tests.' }] }, parent_tool_use_id: null })
+    const state = fold([call('a', 'Read'), call('b', 'Grep'), done('a'), done('b'), update, call('c', 'Read'), done('c'), reply])
+    const rows = buildTimeline(state.items, false)
+    expect(rows.map((row) => row.type === 'item' ? row.item.kind : row.type)).toEqual(['group', 'thinking', 'tool', 'text'])
   })
 
   it('leaves a run with a call still going unfolded, and todos standing alone', () => {

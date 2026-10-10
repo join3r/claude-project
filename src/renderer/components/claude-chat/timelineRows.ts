@@ -5,6 +5,10 @@ import type { ChatItem, ChatToolItem } from '../../../shared/claude-chat'
  * blocks vanish (Claude often streams a thinking block with its text withheld),
  * and tool calls fold so they cost as little height as possible:
  *
+ * - Thinking that does carry text is a progress update (Claude Code asks for
+ *   `display: "updates"`, which returns a short note and withholds the rest),
+ *   so it stands between the calls like a reply does rather than folding away.
+ *
  * - A run of tool calls that has finished, with something after it (Claude's
  *   reply, your next message, or the turn simply ended), folds into one row.
  *   Its images stay visible on that row.
@@ -73,8 +77,6 @@ export function buildTimeline(items: ChatItem[], busy = false): TimelineRow[] {
       run.push(item)
       continue
     }
-    // Thinking between two calls shouldn't split the run.
-    if (item.kind === 'thinking' && run.length > 0) continue
     if (run.length > 0) flush(true)
     rows.push({ type: 'item', key: item.id, item })
   }

@@ -157,18 +157,24 @@ const AssistantText = memo(function AssistantText({ text, streaming }: { text: s
   )
 })
 
-function Thinking({ text, streaming }: { text: string; streaming?: boolean }): React.ReactElement {
+/** Past this, a note is full summarized thinking rather than a progress update, and starts clamped. */
+const LONG_THINKING = 280
+
+/** Thinking with text: usually a one-line progress update between calls, shown as is. */
+const Thinking = memo(function Thinking({ text, streaming }: { text: string; streaming?: boolean }): React.ReactElement {
   const [open, setOpen] = useState(false)
+  const html = useMemo(() => renderChatMarkdown(text), [text])
+  const long = text.length > LONG_THINKING
   return (
-    <div className="text-sm text-text-subtle">
-      <button type="button" className="chat-row-btn" onClick={() => setOpen(!open)}>
-        <ChevronRight size={12} className={`shrink-0 transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
-        <span className="italic">{streaming ? 'Thinking…' : 'Thought'}</span>
-      </button>
-      {open && <div className="ml-5 mt-1 whitespace-pre-wrap text-text-muted">{text}</div>}
-    </div>
+    <div
+      className={`note-preview chat-md text-sm text-text-muted break-words${streaming ? ' chat-streaming' : ''}${long && !open ? ' line-clamp-3 cursor-pointer' : ''}`}
+      title={long && !open ? 'Show all' : undefined}
+      onClick={long && !open ? () => setOpen(true) : undefined}
+      // Sanitized by DOMPurify in renderChatMarkdown.
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
-}
+})
 
 function Notice({ text, tone }: { text: string; tone: 'muted' | 'warning' | 'error' }): React.ReactElement {
   const color = tone === 'error'
