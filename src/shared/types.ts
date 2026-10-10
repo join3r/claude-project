@@ -39,6 +39,12 @@ export type PromptBoxAgent = typeof PROMPT_BOX_AGENTS[number]
  */
 export type TabStatusValue = 'working' | 'attention' | 'exited' | null
 
+/** Main's status for a tab, as windows mirror it (`since` is null when main never heard of it). */
+export interface HostTabStatus {
+  status: TabStatusValue
+  since: number | null
+}
+
 export interface Tab {
   id: string
   type: TabType

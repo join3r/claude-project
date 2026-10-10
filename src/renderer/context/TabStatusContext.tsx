@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useRef, useSyncExternalStore } from 'react'
+import React, { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 import { logStatusTransition } from '../statusDebug'
-import type { TabStatusValue } from '../../shared/types'
+import type { HostTabStatus, TabStatusValue } from '../../shared/types'
 
 // Re-exported so the many `from '../context/TabStatusContext'` importers keep
 // working now that main needs the same type (see shared/types.ts).
@@ -21,9 +21,18 @@ export interface TabStatusStore {
   getSnapshot(): Record<string, TabStatusValue>
   /** When each tab's current status began — drives the inbox's "waiting 4m". */
   getSinceSnapshot(): Record<string, number>
+  /** Start mirroring main's statuses (`tab-host-status`). */
+  connectHost(): void
 }
 
 function createTabStatusStore(): TabStatusStore {
+  // This window's own verdicts, for the tabs it mounts.
+  const own: Record<string, TabStatusValue> = {}
+  const ownSince: Record<string, number> = {}
+  // Main's, for every tab it knows (`tab-host-status`). A tab this window never set
+  // a status for shows main's: a task the prompt queue or a phone started, or one
+  // mounted only in another window, would otherwise sit in the inbox as Ready.
+  const host: Record<string, HostTabStatus> = {}
   let statuses: Record<string, TabStatusValue> = {}
   let since: Record<string, number> = {}
   const listeners = new Set<() => void>()
@@ -35,9 +44,39 @@ function createTabStatusStore(): TabStatusStore {
   }
 
   function notify() {
-    statuses = { ...statuses }
-    since = { ...since }
+    statuses = {}
+    since = {}
+    for (const [tabId, entry] of Object.entries(host)) {
+      statuses[tabId] = entry.status
+      if (entry.since !== null) since[tabId] = entry.since
+    }
+    Object.assign(statuses, own)
+    for (const tabId of Object.keys(own)) {
+      if (tabId in ownSince) since[tabId] = ownSince[tabId]
+      else delete since[tabId]
+    }
     listeners.forEach((l) => l())
+  }
+
+  function connectHost() {
+    // Test windows stub `window.api` piecemeal; without these the store is window-only.
+    const api = window.api
+    if (!api?.onTabHostStatus || !api.getTabStatuses) return
+    let live = new Set<string>()
+    api.onTabHostStatus((tabId, entry) => {
+      live.add(tabId)
+      if (entry.since === null) delete host[tabId]
+      else host[tabId] = entry
+      notify()
+    })
+    api.getTabStatuses().then((snapshot) => {
+      // A live update beats the snapshot for the tabs it touched.
+      for (const [tabId, entry] of Object.entries(snapshot)) {
+        if (!live.has(tabId)) host[tabId] = entry
+      }
+      live = new Set()
+      notify()
+    }).catch(() => {})
   }
 
   return {
@@ -45,17 +84,20 @@ function createTabStatusStore(): TabStatusStore {
       return statuses[tabId] ?? null
     },
     setStatus(tabId: string, status: TabStatusValue, reason?: string) {
-      if (statuses[tabId] === status) return
+      if (tabId in own && own[tabId] === status) return
       logStatusTransition(tabId, statuses[tabId] ?? null, status, reason)
-      statuses[tabId] = status
-      since[tabId] = Date.now()
+      // Taking over from main's status keeps its start time when they agree.
+      const keepSince = !(tabId in own) && statuses[tabId] === status && tabId in since
+      own[tabId] = status
+      ownSince[tabId] = keepSince ? since[tabId] : Date.now()
       if (mirrored.has(tabId)) report(tabId, status)
       notify()
     },
     removeTab(tabId: string) {
-      if (!(tabId in statuses)) return
-      delete statuses[tabId]
-      delete since[tabId]
+      if (!(tabId in own) && !(tabId in host)) return
+      delete own[tabId]
+      delete ownSince[tabId]
+      delete host[tabId]
       notify()
     },
     mirrorToMain(tabId: string) {
@@ -72,7 +114,8 @@ function createTabStatusStore(): TabStatusStore {
     },
     getSinceSnapshot() {
       return since
-    }
+    },
+    connectHost
   }
 }
 
@@ -81,6 +124,7 @@ const TabStatusContext = createContext<TabStatusStore | null>(null)
 export function TabStatusProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const storeRef = useRef<TabStatusStore | null>(null)
   if (!storeRef.current) storeRef.current = createTabStatusStore()
+  useEffect(() => storeRef.current?.connectHost(), [])
   return <TabStatusContext.Provider value={storeRef.current}>{children}</TabStatusContext.Provider>
 }
 

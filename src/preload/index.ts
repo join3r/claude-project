@@ -31,7 +31,8 @@ import type {
   TaskLandingResult,
   TaskWorktreeResult,
   TaskWorktreeState,
-  WorktreeSetupDecision
+  WorktreeSetupDecision,
+  HostTabStatus
 } from '../shared/types'
 import type { ArchivedStream, ArchivedTask, ProjectArchive } from '../shared/archive'
 import type { CondaListResult } from '../shared/conda'
@@ -253,6 +254,13 @@ const api = {
   /** Any other Claude hook; `statusEvent` is the status transition it implies, if any. */
   onHookActivity: (callback: (tabId: string, statusEvent: AiStatusEvent | null) => void): void => {
     ipcRenderer.on('hook-activity', (_e, tabId, statusEvent) => callback(tabId, statusEvent))
+  },
+  /** Main's status for every tab, for the tabs this window doesn't mount. */
+  getTabStatuses: (): Promise<Record<string, HostTabStatus>> => ipcRenderer.invoke('get-tab-statuses'),
+  onTabHostStatus: (callback: (tabId: string, entry: HostTabStatus) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, tabId: string, entry: HostTabStatus) => callback(tabId, entry)
+    ipcRenderer.on('tab-host-status', handler)
+    return () => ipcRenderer.removeListener('tab-host-status', handler)
   },
   /** What each Claude tab is doing, across every window. `null` = forgotten. */
   getAgentActivity: (): Promise<Record<string, AgentActivity>> => ipcRenderer.invoke('get-agent-activity'),

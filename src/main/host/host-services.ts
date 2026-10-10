@@ -112,6 +112,7 @@ import type {
   WorkspaceDeleteRequest,
   WorkspaceDeleteResult,
   NotesRecord,
+  HostTabStatus,
   TabStatusValue
 } from '../../shared/types'
 import type { ClientHub } from './client-hub'
@@ -201,6 +202,8 @@ export class HostServices {
   private readonly dirtyTabsByClient = new Map<string, Set<string>>()
   /** Which client last reported each hook-less tab's status (`report-tab-status`). */
   private readonly statusReporters = new Map<string, string>()
+  /** The last status `tab-host-status` sent per tab. */
+  private readonly sentTabStatuses = new Map<string, TabStatusValue>()
   private hookInjector!: HookInjector
   sshManager!: SshConnectionManager
   /** Claude chat tabs' processes — the Agent SDK counterpart of `ptySessions`. */
@@ -359,6 +362,7 @@ export class HostServices {
       (message) => this.logDebug(message)
     )
     this.activityRegistry.subscribe(() => this.sleepBlocker.update())
+    this.activityRegistry.subscribe((tabId) => this.broadcastTabStatus(tabId))
     this.ptySessions = new PtySessions({
       ptyManager: this.ptyManager,
       scrollbackStorage: this.scrollbackStorage,
@@ -979,6 +983,7 @@ export class HostServices {
       notesStore: this.notesStore,
       paletteFrecency: this.paletteFrecencyStorage,
       getAgentActivity: () => this.activityRegistry.getActivitySnapshot(),
+      getTabStatuses: () => this.hostTabStatuses(),
       restartTabs: (clientId, tabIds) => this.restartTabs(clientId, tabIds),
       reportTabStatus: (clientId, tabId, status) => {
         this.statusReporters.set(tabId, clientId)
@@ -1180,6 +1185,27 @@ export class HostServices {
     const update = this.activityRegistry.applyHook(tabId, body)
     if (update) this.clients.broadcast('agent-activity', tabId, update.activity)
     return update
+  }
+
+  /**
+   * A tab's status as main has it, to every window: one that doesn't mount the tab
+   * (a task the queue or a phone started, or one open in another window) has no
+   * other way to see it. Sent only when the status changed, not on every hook.
+   */
+  private broadcastTabStatus(tabId: string): void {
+    const status = this.activityRegistry.getStatus(tabId)
+    if (this.sentTabStatuses.has(tabId) && this.sentTabStatuses.get(tabId) === status) return
+    const entry: HostTabStatus = { status, since: this.activityRegistry.getSince(tabId) }
+    // A removed tab is forgotten here too.
+    if (entry.since === null) this.sentTabStatuses.delete(tabId)
+    else this.sentTabStatuses.set(tabId, status)
+    this.clients.broadcast('tab-host-status', tabId, entry)
+  }
+
+  private hostTabStatuses(): Record<string, HostTabStatus> {
+    const since = this.activityRegistry.getSinceSnapshot()
+    return Object.fromEntries(Object.entries(this.activityRegistry.getSnapshot())
+      .map(([tabId, status]): [string, HostTabStatus] => [tabId, { status, since: since[tabId] ?? null }]))
   }
 
   private broadcastAgentActivity(tabId: string): void {

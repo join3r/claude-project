@@ -193,8 +193,8 @@ export class DesktopRouting {
   }
 
   /**
-   * A server came (back) online: its agents' activity may have moved on while
-   * the link was down, so the windows get it again, tab by tab.
+   * A server came (back) online: its agents' activity and statuses may have moved
+   * on while the link was down, so the windows get them again, tab by tab.
    */
   private async refreshActivity(serverId: string): Promise<void> {
     const hub = this.hub
@@ -204,6 +204,10 @@ export class DesktopRouting {
       for (const [tabId, entry] of Object.entries(activity ?? {})) {
         // Only its own tabs: a server can't set what a local tab shows.
         if (this.index.tabOf(tabId, serverId)) this.deps.windows.broadcast('agent-activity', tabId, entry)
+      }
+      const statuses = await hub.call(serverId, MAIN_CLIENT_ID, 'get-tab-statuses') as Record<string, unknown> | null
+      for (const [tabId, entry] of Object.entries(statuses ?? {})) {
+        if (this.index.tabOf(tabId, serverId)) this.deps.windows.broadcast('tab-host-status', tabId, entry)
       }
     } catch (err) {
       this.deps.log(`servers activityRefresh server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)

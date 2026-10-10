@@ -1,4 +1,4 @@
-import type { AppConfig, NotesRecord, ProjectsData, TabStatusValue } from '../../shared/types'
+import type { AppConfig, HostTabStatus, NotesRecord, ProjectsData, TabStatusValue } from '../../shared/types'
 import type { AgentActivity } from '../../shared/agent-activity'
 import type { RevisionStore } from '../revision-store'
 import type { PaletteFrecencyStorage } from '../palette-frecency-storage'
@@ -13,6 +13,8 @@ export interface AppStateDeps {
   notesStore: RevisionStore<NotesRecord>
   paletteFrecency: PaletteFrecencyStorage
   getAgentActivity: () => Record<string, AgentActivity>
+  /** Main's status for every tab it knows, for tabs a window doesn't mount. */
+  getTabStatuses: () => Record<string, HostTabStatus>
   setDirtyTabs: (clientId: string, tabIds: string[]) => void
   /** A window's status for a tab without hooks (see `TabActivityRegistry.reported`). */
   reportTabStatus: (clientId: string, tabId: string, status: TabStatusValue) => void
@@ -47,6 +49,7 @@ export function registerAppStateHandlers(ipc: IpcRegistrar, deps: AppStateDeps):
     deps.projectsStore.save(payload.baseRevision, mergeProjectsSlice(deps.projectsStore.peek(), payload.data.projects)))
 
   ipc.handle('get-agent-activity', [], () => deps.getAgentActivity())
+  ipc.handle('get-tab-statuses', [], () => deps.getTabStatuses())
 
   // Windows publish their unsaved editors: a phone closing a task has nobody to show
   // a Save/Discard dialog to, so a dirty buffer comes back to it as a blocker.
