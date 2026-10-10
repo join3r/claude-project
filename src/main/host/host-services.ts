@@ -22,6 +22,7 @@ import { bracketedPaste } from '../pty-paste'
 import { NotesStorage } from '../notes-storage'
 import { RevisionStore } from '../revision-store'
 import { TabActivityRegistry } from '../tab-activity-registry'
+import { KeyInterrupts } from '../key-interrupts'
 import { TerminalStatusTracker } from '../terminal-status-tracker'
 import { SleepBlocker } from '../sleep-blocker'
 import type { ActivityUpdate } from '../../shared/agent-activity'
@@ -191,6 +192,8 @@ export class HostServices {
   private readonly workspaceManager: WorkspaceManager
   private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
   private readonly ptySessions: PtySessions
+  /** Esc in a Claude terminal tab, standing in for the Stop the CLI skips. */
+  private readonly keyInterrupts = new KeyInterrupts()
   /** Main's authoritative view of what every tab's agent is doing. */
   private readonly activityRegistry = new TabActivityRegistry()
   private readonly sleepBlocker: SleepBlocker
@@ -371,6 +374,12 @@ export class HostServices {
       piExtensionPath: () => env.resourcePath(PI_EXTENSION_RESOURCE),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
       onKill: (tabId) => this.shutdownNotebookKernel(tabId),
+      onInterruptKey: (tabId) => {
+        this.keyInterrupts.pressed(tabId, this.activityRegistry.getStatus(tabId), () => {
+          this.logDebug(`interruptKey tab=${tabId}`)
+          this.handleHook('stopped', tabId, { hook_event_name: 'Stop' })
+        })
+      },
       terminalStatus: terminalStatus === 'host' ? this.hostTerminalStatus() : undefined
     })
   }
@@ -732,6 +741,7 @@ export class HostServices {
       deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
       forgetActivity: (tabId) => {
         this.statusReporters.delete(tabId)
+        this.keyInterrupts.forget(tabId)
         this.activityRegistry.remove(tabId)
         this.broadcastAgentActivity(tabId)
       },
@@ -859,6 +869,10 @@ export class HostServices {
    * the phone's inbox and the sidebar's activity line read.
    */
   private handleHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
+    if (this.keyInterrupts.hook(tabId, body)) {
+      this.activityRegistry.working(tabId)
+      this.broadcastToAttachedClients(tabId, 'hook-working', tabId)
+    }
     switch (endpoint) {
       case 'session-start':
         this.activityRegistry.touch(tabId)
@@ -995,6 +1009,7 @@ export class HostServices {
         this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId),
       forgetActivity: (tabId) => {
         this.statusReporters.delete(tabId)
+        this.keyInterrupts.forget(tabId)
         this.activityRegistry.remove(tabId)
         this.broadcastAgentActivity(tabId)
       },

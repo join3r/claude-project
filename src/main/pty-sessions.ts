@@ -9,6 +9,7 @@ import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCo
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { wrapInteractiveShellWithCondaActivate } from './conda-env'
 import type { CondaEnvInfo } from '../shared/conda'
+import { isInterruptKey } from './key-interrupts'
 import { buildRemotePiExtensionScript, piExtensionRemotePath } from './pi-extension-injector'
 
 export const MAX_SCROLLBACK_CHARS = 2_000_000
@@ -27,6 +28,8 @@ interface PtyRuntime {
   rows: number
   scrollback: string
   exitCode: number | null
+  /** A Claude tab reporting through hooks, whose Esc may end a turn without a Stop. */
+  claudeHooks: boolean
 }
 
 export interface PtyAttachResult {
@@ -67,6 +70,8 @@ export interface PtySessionsDeps {
   condaEnvForProject?: (projectId?: string) => CondaEnvInfo | undefined
   /** A tab's process was killed (closing a notebook tab also stops its kernel). */
   onKill?: (tabId: string) => void
+  /** Esc was typed into a Claude tab (see `KeyInterrupts`). */
+  onInterruptKey?: (tabId: string) => void
   /**
    * Host-side status (a DevTool server): output of the tabs no hook reports on
    * (shells, Codex), and the end of any tab's process. Unset on a desktop, whose
@@ -187,6 +192,7 @@ export class PtySessions {
     if (!runtime || !runtime.attachedClientIds.has(clientId)) return
     this.claimControl(id, clientId)
     this.deps.ptyManager.write(id, data)
+    if (runtime.claudeHooks && runtime.exitCode === null && isInterruptKey(data)) this.deps.onInterruptKey?.(id)
   }
 
   /** Main's own input to a tab's live process (no window involved). False when it has none. */
@@ -254,7 +260,8 @@ export class PtySessions {
         cols,
         rows,
         scrollback: this.deps.scrollbackStorage.load(id) ?? '',
-        exitCode: null
+        exitCode: null,
+        claudeHooks: request.shell === 'claude' && !!request.extraEnv?.DEVTOOL_TAB_ID
       }
       this.runtimes.set(id, runtime)
       runtime.attachedClientIds.add(clientId)
