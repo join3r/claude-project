@@ -49,6 +49,7 @@ import {
 import { removeTaskView, selectNewTaskView } from './viewState'
 import { reportRefusedWorkspaceDelete } from './useProjects'
 import { resolveLandingTaskId } from '../taskNavigation'
+import { renameTaskIfStill } from '../../../shared/task-name'
 
 /** A reopened stream's worktree came back, but its setup failed or waits for approval. */
 export interface ReopenedStreamSetup {
@@ -73,6 +74,11 @@ export interface TasksActions {
   /** `dirtyChecked`: the caller already asked about unsaved editors (a landing saves them first). */
   archiveTask: (projectId: string, taskId: string, options?: { dirtyChecked?: boolean }) => Promise<boolean>
   renameTask: (projectId: string, taskId: string, name: string) => void
+  /**
+   * Ask main for a short title for a task started from `prompt` and rename the task
+   * to it, unless it no longer has the name `from` it was given (a rename wins).
+   */
+  titleTaskFromPrompt: (taskId: string, from: string, prompt: string) => void
   /**
    * Move a task to `toIndex` of stream `toStreamId` (counted without the task).
    * `restart` is for a move into another directory: its sessions are copied
@@ -199,6 +205,12 @@ export function useTasks(
 
   const renameTask = useCallback((projectId: string, taskId: string, name: string) => {
     mutateProjects(prev => mapTask(prev, projectId, taskId, task => ({ ...task, name })))
+  }, [mutateProjects])
+
+  const titleTaskFromPrompt = useCallback((taskId: string, from: string, prompt: string) => {
+    void window.api.taskNameSuggest(prompt).then((name) => {
+      if (name) mutateProjects(prev => renameTaskIfStill(prev, taskId, from, name))
+    }, () => {})
   }, [mutateProjects])
 
   const moveTask = useCallback(async (
@@ -469,7 +481,7 @@ export function useTasks(
   }, [addTask, switchToTask])
 
   return {
-    addTask, addTaskInDirectory, addStream, archiveTask, renameTask, moveTask, archiveStream, renameStream, taskForTab,
+    addTask, addTaskInDirectory, addStream, archiveTask, renameTask, titleTaskFromPrompt, moveTask, archiveStream, renameStream, taskForTab,
     reopenTask, reopenStream, deleteArchived
   }
 }

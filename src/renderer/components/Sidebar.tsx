@@ -81,7 +81,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     selectedProjectId, selectedTaskId,
     switchToTask, selectProjectHome, showArchived,
     addProject, addRemoteProject, addShellCommandProject, addServerProjects, addTag, renameProject, updateProject,
-    addTask, addTaskInDirectory, addStream, renameTask,
+    addTask, addTaskInDirectory, addStream, renameTask, titleTaskFromPrompt,
     moveTask, renameStream, reopenTask, reopenStream, deleteArchived,
     reorderProjects, getProjectDir,
     config, updateConfig,
@@ -420,10 +420,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       tabs = [tab]
       name = taskNameFromPrompt(start.prompt.text)
     }
-    if (target.kind === 'dir') {
-      addTaskInDirectory(target.directory, name, tabs)
-    } else {
-      addTask(target.projectId, name, tabs, streamId)
+    const task = target.kind === 'dir'
+      ? addTaskInDirectory(target.directory, name, tabs)
+      : addTask(target.projectId, name, tabs, streamId)
+    if (start) titleTaskFromPrompt(task.id, name, start.prompt.text)
+    if (target.kind !== 'dir') {
       // The task is selected on create; expand its project and stream so switching
       // back to the tree doesn't hide the thing you just made.
       setProjectExpanded(target.projectId, true)

@@ -483,6 +483,10 @@ const api = {
 
   // Landing a task's worktree into its stream (main's TaskLandingManager). A stop is also on `Task.landing`.
   /** Close (default): land, stop the task's tabs, remove the worktree and branch, and archive the task (main does). `keepWorktree`: the Land action. */
+  /** A short title for a task's first prompt, or null when none could be had (main's `task-namer.ts`). */
+  taskNameSuggest: (prompt: string): Promise<string | null> =>
+    ipcRenderer.invoke('task-name-suggest', prompt),
+
   /** Project Home's queue: start the queued prompt `itemId` as a new Claude chat task (main's PromptQueueRunner). */
   promptQueueRun: (projectId: string, itemId: string): Promise<PromptQueueRunResult> =>
     ipcRenderer.invoke('prompt-queue-run', projectId, itemId),

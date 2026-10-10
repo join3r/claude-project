@@ -197,6 +197,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   // Project Home's queue (ipc/prompt-queue.ts)
   'prompt-queue-run': project0,
   'task-worktree-close': project0,
+  // a task's title from its first prompt (ipc/task-names.ts): this desktop's claude names it
+  'task-name-suggest': 'local',
 
   // adding a server project (ipc/host-fs.ts): the first argument names the host
   'server-list-dirs': { by: [{ host: 0 }] },

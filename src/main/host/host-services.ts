@@ -79,6 +79,9 @@ import { ChatBridge } from '../mobile/chat-bridge'
 import { PushEmitter } from '../mobile/push-emitter'
 import { createStream, listProjectBranches, type StreamGit } from '../mobile/new-stream'
 import { addTaskWithChat } from '../mobile/new-task'
+import { suggestTaskName } from '../task-namer'
+import { renameTaskIfStill } from '../../shared/task-name'
+import { registerTaskNameHandlers } from '../ipc/task-names'
 import { closeTask, findClosableTab, landTask, removeTabFromData } from '../mobile/close-task'
 import { setPinInData } from '../mobile/pin'
 import { triageTaskInData } from '../mobile/triage'
@@ -335,6 +338,7 @@ export class HostServices {
         const result = await this.taskWorktrees.ensureTaskWorktree(projectId, taskId)
         return result.status === 'failed' ? { ok: false, error: result.error } : { ok: true }
       },
+      nameTask: (projectId, taskId, prompt) => { this.nameTaskInBackground(projectId, taskId, prompt) },
       sendFirstPrompt: async (projectId, taskId, tabId, prompt) => {
         const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
         const task = findTaskInProject(project, taskId)
@@ -517,6 +521,7 @@ export class HostServices {
         const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId)
         if (!added.ok) return added
         this.commitProjects(added.data)
+        this.nameTaskInBackground(projectId, added.taskId, prompt)
         // In a worktree stream the chat starts in the task's own worktree. Setup
         // commands awaiting approval don't hold it up: that question is the desktop's.
         const worktree = await this.taskWorktrees.ensureTaskWorktree(projectId, added.taskId)
@@ -911,6 +916,29 @@ export class HostServices {
     }
   }
 
+  /** A short title for a task's first prompt from the user's `claude`; null when Claude is off. */
+  private suggestTaskName(prompt: string): Promise<string | null> {
+    if (!this.isServer && !this.config.enableClaude) return Promise.resolve(null)
+    return suggestTaskName(prompt, {
+      executable: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
+      env: () => getShellEnv(),
+      log: (message) => this.logDebug(message)
+    })
+  }
+
+  /** Main-made tasks (a phone's `task.new`, the queue): retitled once a title comes back. */
+  private nameTaskInBackground(projectId: string, taskId: string, prompt: string): void {
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    const from = findTaskInProject(project, taskId)?.name
+    if (from === undefined) return
+    void this.suggestTaskName(prompt).then((name) => {
+      if (!name) return
+      const data = this.projectsStore.peek()
+      const next = renameTaskIfStill(data, taskId, from, name)
+      if (next !== data) this.commitProjects(next)
+    })
+  }
+
   private createChatManager(): ClaudeChatManager {
     return new ClaudeChatManager({
       sendToClient: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
@@ -1056,6 +1084,7 @@ export class HostServices {
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
     registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
+    registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })
     registerHostFsHandlers(ipc, {
       send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       env: () => getShellEnv()

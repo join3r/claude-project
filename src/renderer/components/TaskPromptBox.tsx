@@ -33,7 +33,7 @@ const linkCls = 'bg-transparent border-0 p-0 text-sm text-text-muted underline d
  * back to plain open-a-tab buttons.
  */
 export default function TaskPromptBox({ project, taskId, taskName, projectDir, visible }: Props): React.ReactElement {
-  const { config, addTab, renameTask, updateConfig } = useApp()
+  const { config, addTab, renameTask, titleTaskFromPrompt, updateConfig } = useApp()
   const agents = useMemo(() => (config ? availablePromptAgents(config, project) : []), [config, project])
   const [picked, setPicked] = useState<PromptBoxAgent | null>(null)
   const agent = pickPromptAgent(picked ?? config?.promptBoxAgent, agents)
@@ -100,7 +100,11 @@ export default function TaskPromptBox({ project, taskId, taskName, projectDir, v
       ...(agent === 'claude-chat' && effort ? { effort } : {}),
       ...(images.length > 0 ? { images: toChatImages(images) } : {})
     })
-    if (shouldNameTask(taskName)) renameTask(project.id, taskId, taskNameFromPrompt(text))
+    if (shouldNameTask(taskName)) {
+      const placeholder = taskNameFromPrompt(text)
+      renameTask(project.id, taskId, placeholder)
+      titleTaskFromPrompt(taskId, placeholder, text)
+    }
     updateConfig({ promptBoxAgent: agent, ...(takesMode ? { promptBoxMode: currentMode } : {}) })
     setDraft('')
     attachments.clear()

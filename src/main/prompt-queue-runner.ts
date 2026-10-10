@@ -24,6 +24,8 @@ export interface PromptQueueRunnerDeps {
   ensureWorktree(projectId: string, taskId: string): Promise<{ ok: true } | { ok: false; error: string }>
   /** Starts the chat tab's runtime and sends it the first prompt. */
   sendFirstPrompt(projectId: string, taskId: string, tabId: string, prompt: string): Promise<void>
+  /** Gives the new task a short title in the background (`task-namer.ts`). */
+  nameTask(projectId: string, taskId: string, prompt: string): void
   log(message: string): void
 }
 
@@ -98,6 +100,7 @@ export class PromptQueueRunner {
         }))
         return { ok: false, error: `Couldn't create the task's worktree: ${worktree.error}` }
       }
+      this.deps.nameTask(projectId, added.taskId, taken.item.text)
       // The task exists from here on, so a failed start is logged, not undone:
       // the chat shows its own state, and running it again would make a second task.
       try {

@@ -86,6 +86,7 @@ function harness(initial: Project, overrides: Partial<PromptQueueRunnerDeps> = {
   let listener: ((tabId: string) => void) | null = null
   const projectListeners = new Set<() => void>()
   const sent: { taskId: string; prompt: string }[] = []
+  const named: { taskId: string; prompt: string }[] = []
   const deps: PromptQueueRunnerDeps = {
     peek: () => data,
     commit: (next) => {
@@ -98,6 +99,7 @@ function harness(initial: Project, overrides: Partial<PromptQueueRunnerDeps> = {
     blocker: () => null,
     ensureWorktree: async () => ({ ok: true }),
     sendFirstPrompt: async (_projectId, taskId, _tabId, prompt) => { sent.push({ taskId, prompt }) },
+    nameTask: (_projectId, taskId, prompt) => { named.push({ taskId, prompt }) },
     log: () => {},
     ...overrides
   }
@@ -108,7 +110,7 @@ function harness(initial: Project, overrides: Partial<PromptQueueRunnerDeps> = {
     listener?.(tabId)
   }
   const update = (fn: (p: Project) => Project) => deps.commit({ ...data, projects: [fn(data.projects[0])] })
-  return { runner, sent, setStatus, update, project: () => data.projects[0] }
+  return { runner, sent, named, setStatus, update, project: () => data.projects[0] }
 }
 
 describe('PromptQueueRunner', () => {
@@ -126,6 +128,7 @@ describe('PromptQueueRunner', () => {
     expect(stream(p, 's-ui').promptQueueWatch).toEqual({ taskId: result.taskId, tabId: task?.panes[0].tabs[0].id })
     expect(stream(p, MAIN).promptQueueWatch).toBeUndefined()
     expect(h.sent).toEqual([{ taskId: result.taskId, prompt: 'Fix the login' }])
+    expect(h.named).toEqual([{ taskId: result.taskId, prompt: 'Fix the login' }])
   })
 
   it('a blocked project or a failed worktree leaves the queue as it was', async () => {
