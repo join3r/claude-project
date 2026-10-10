@@ -46,6 +46,8 @@ type Props = {
   layout?: AppConfig['inboxLayout']
   /** Project tiles beside project names (Settings → Show project icons). */
   showIcons?: boolean
+  /** Pinned projects in pin order; the grouped layout puts their groups first. */
+  pinnedProjectIds?: readonly string[]
 }
 
 type GroupKey = 'needsYou' | 'ready' | 'working' | 'settled' | 'snoozed'
@@ -84,6 +86,7 @@ function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey, agent: Tas
 }
 
 const TILE = 16
+const NO_PINS: readonly string[] = []
 
 /** The row's dot: the sidebar's colours for the same states. In Ready only the rows waiting on your reply get one. */
 function rowState(group: GroupKey, entry: InboxEntry): SidebarTaskState {
@@ -309,7 +312,8 @@ export default function InboxPanel({
   now,
   theme,
   layout = 'flat',
-  showIcons = false
+  showIcons = false,
+  pinnedProjectIds = NO_PINS
 }: Props): React.ReactElement {
   // Fold state lives with the panel, as it always has for Snoozed and Done for now.
   // Ready and Working are never folded: Ready holds the replies you owe, and the
@@ -329,9 +333,9 @@ export default function InboxPanel({
   // below, as in the flat list.
   const projectGroups = useMemo(
     () => (grouped
-      ? groupInboxByProject([...partition.needsYou, ...partition.ready, ...partition.working])
+      ? groupInboxByProject([...partition.needsYou, ...partition.ready, ...partition.working], pinnedProjectIds)
       : []),
-    [grouped, partition]
+    [grouped, partition, pinnedProjectIds]
   )
 
   const total = Object.values(partition).reduce((sum, entries) => sum + entries.length, 0)

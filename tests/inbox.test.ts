@@ -375,6 +375,13 @@ describe('inbox sources and the grouped layout', () => {
     ])
   })
 
+  it('grouped: pinned projects come first, in pin order', () => {
+    const { needsYou, ready } = partitionInbox(inboxSources([devtool, stem]), statuses, since, NOW)
+    const entries = [...needsYou, ...ready]
+    expect(groupInboxByProject(entries, ['devtool']).map(g => g.project.id)).toEqual(['devtool', 'stem'])
+    expect(groupInboxByProject(entries, ['gone', 'stem', 'devtool']).map(g => g.project.id)).toEqual(['stem', 'devtool'])
+  })
+
   it('keeps two projects apart even when both only have main', () => {
     const { ready } = partitionInbox(inboxSources([devtool, stem]), {}, {}, NOW)
     expect(groupInboxByProject(ready).map(g => g.project.id).sort()).toEqual(['devtool', 'stem'])

@@ -27,7 +27,7 @@ import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from
 import { isSettled, isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
 import { useResizeHandle } from '../hooks/useResizeHandle'
-import { GitBranch, Plus, Search, Settings as SettingsIcon, SquarePen, X, Cog } from 'lucide-react'
+import { Folders, GitBranch, List, Plus, Search, Settings as SettingsIcon, SquarePen, X, Cog } from 'lucide-react'
 import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
 import { fetchDashboardIconsMetadata, type DashboardIconsMetadata } from './dashboardIcons'
@@ -110,6 +110,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   )
 
   const inboxActive = sidebarTab === 'inbox'
+  const inboxGrouped = config?.inboxLayout === 'grouped'
 
   // Badge count is what makes the tab worth having: attention is visible without
   // leaving the tree. Snoozed tasks are deliberately excluded — that's the point.
@@ -250,6 +251,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     () => new Set(resolvedPins.filter(pin => pin.item.type === 'project').map(pin => pin.project.id)),
     [resolvedPins]
   )
+  const pinnedProjectOrder = React.useMemo(() => [...pinnedProjectIds], [pinnedProjectIds])
   const listedProjectIds = React.useMemo(
     () => treeProjectIds.filter(id => !pinnedProjectIds.has(id)),
     [treeProjectIds, pinnedProjectIds]
@@ -1005,6 +1007,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           {inboxActive && (
             <button
               className={headerIconCls}
+              onClick={() => updateConfig({ inboxLayout: inboxGrouped ? 'flat' : 'grouped' })}
+              title={inboxGrouped ? 'Group by status' : 'Group by project'}
+              data-testid="inbox-layout-toggle"
+            >{inboxGrouped ? <List size={14} /> : <Folders size={14} />}</button>
+          )}
+          {inboxActive && (
+            <button
+              className={headerIconCls}
               onClick={() => setNewTaskOpen(true)}
               title="New task"
             ><SquarePen size={14} /></button>
@@ -1055,8 +1065,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           activities={agentActivities}
           now={now}
           theme={effectiveTheme}
-          layout={config?.inboxLayout ?? 'flat'}
+          layout={inboxGrouped ? 'grouped' : 'flat'}
           showIcons={showIcons}
+          pinnedProjectIds={pinnedProjectOrder}
         />
       ) : (
       <div className="sidebar-list flex-1 overflow-y-auto pb-1">

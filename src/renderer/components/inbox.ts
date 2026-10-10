@@ -191,9 +191,13 @@ export interface InboxProjectGroup {
  * Rows gathered by project for the grouped Inbox layout (the stream is a label on
  * each row). A group sits where its most urgent row would sit in the flat list
  * and keeps that list's order inside, so grouping never buries a task that needs
- * you under a busier project.
+ * you under a busier project. Pinned projects come first, in pin order, as they
+ * do in the sidebar tree.
  */
-export function groupInboxByProject(entries: readonly InboxEntry[]): InboxProjectGroup[] {
+export function groupInboxByProject(
+  entries: readonly InboxEntry[],
+  pinnedProjectIds: readonly string[] = []
+): InboxProjectGroup[] {
   const groups = new Map<string, InboxProjectGroup>()
   for (const entry of entries) {
     let group = groups.get(entry.project.id)
@@ -203,7 +207,9 @@ export function groupInboxByProject(entries: readonly InboxEntry[]): InboxProjec
     }
     group.entries.push(entry)
   }
-  return [...groups.values()]
+  const pinned = pinnedProjectIds.flatMap(id => groups.get(id) ?? [])
+  const pinnedIds = new Set(pinned.map(group => group.project.id))
+  return [...pinned, ...[...groups.values()].filter(group => !pinnedIds.has(group.project.id))]
 }
 
 /** Sort key for the snoozed group; "until it needs me" has no clock, so it sorts last. */

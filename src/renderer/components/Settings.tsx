@@ -521,13 +521,13 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
               <SetBlock label="Inbox layout">
                 <SegCtl
                   options={[
-                    { value: 'flat', label: 'Flat' },
-                    { value: 'grouped', label: 'Grouped by project' }
+                    { value: 'flat', label: 'By status' },
+                    { value: 'grouped', label: 'By project' }
                   ] as const}
                   value={config.inboxLayout}
                   onChange={(inboxLayout) => updateConfig({ inboxLayout })}
                 />
-                <HelperText>Grouped puts open tasks under a header per project, each row naming its stream; Snoozed and Done for now stay folded at the bottom.</HelperText>
+                <HelperText>By project puts open tasks under a header per project, pinned projects first, each row naming its stream; Snoozed and Done for now stay folded at the bottom. The button in the Inbox header switches it too.</HelperText>
               </SetBlock>
             </FormGroup>
 
