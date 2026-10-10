@@ -182,6 +182,33 @@ export class WorkspaceManager {
       .filter(Boolean)
   }
 
+  /**
+   * The branch's work is already in `base` under other commits, as after a
+   * squash or rebase landing, which `git branch --merged` still counts as
+   * unmerged. Any one of these is proof:
+   * - every branch commit has a same-patch twin on base (a rebase landing);
+   * - base once held exactly the branch's tree (base took the work commit by
+   *   commit while the branch squashed it, or base squashed it and moved on);
+   * - merging the branch would leave base's tree as it is.
+   * A git error or a merge conflict proves nothing, so it never hides work.
+   */
+  private async branchAddsNothing(repoRoot: string, base: string, branch: string): Promise<boolean> {
+    const run = (args: string[]) => this.runner.run(args, { cwd: repoRoot, timeoutMs: 10000 })
+
+    const cherry = await run(['cherry', base, branch])
+    if (cherry.code === 0 && cherry.stdout.split('\n').every(line => !line.startsWith('+'))) return true
+
+    const branchTree = await run(['rev-parse', `${branch}^{tree}`])
+    const mergeBase = await run(['merge-base', base, branch])
+    if (branchTree.code !== 0 || mergeBase.code !== 0) return false
+    const baseTrees = await run(['log', '--format=%T', `${mergeBase.stdout.trim()}..${base}`])
+    if (baseTrees.code === 0 && baseTrees.stdout.split('\n').includes(branchTree.stdout.trim())) return true
+
+    const merged = await run(['merge-tree', '--write-tree', base, branch])
+    const baseTree = await run(['rev-parse', `${base}^{tree}`])
+    return merged.code === 0 && baseTree.code === 0 && merged.stdout.split('\n')[0]?.trim() === baseTree.stdout.trim()
+  }
+
   async delete(opts: {
     projectDir: string
     worktreePath: string
@@ -215,6 +242,7 @@ export class WorkspaceManager {
         const stdout = await this.git(repoRoot, ['branch', '--merged', opts.baseBranch])
         const mergedBranches = stdout.split('\n').map(b => b.trim().replace(/^[*+] /, ''))
         isUnmerged = !mergedBranches.includes(opts.branchName)
+          && !(await this.branchAddsNothing(repoRoot, opts.baseBranch, opts.branchName))
       } catch (err) {
         return {
           status: 'check-failed',

@@ -138,6 +138,78 @@ describe('WorkspaceManager', () => {
       expect(fs.existsSync(result.worktreePath)).toBe(true)
     })
 
+    it('deletes a branch whose changes reached base under other commits, as after a squash landing', async () => {
+      const result = await manager.create(repoDir, 'squashed-ws', 'master')
+      fs.writeFileSync(path.join(result.worktreePath, 'landed.txt'), 'content')
+      execFileSync('git', ['-C', result.worktreePath, 'add', '.'])
+      execFileSync('git', ['-C', result.worktreePath, 'commit', '-m', 'branch commit'])
+      // The same change lands on master as a different commit, and master moves on.
+      fs.writeFileSync(path.join(repoDir, 'landed.txt'), 'content')
+      execFileSync('git', ['-C', repoDir, 'add', 'landed.txt'])
+      execFileSync('git', ['-C', repoDir, 'commit', '-m', 'squash'])
+      fs.writeFileSync(path.join(repoDir, 'later.txt'), 'later')
+      execFileSync('git', ['-C', repoDir, 'add', 'later.txt'])
+      execFileSync('git', ['-C', repoDir, 'commit', '-m', 'later'])
+
+      const status = await manager.delete({
+        projectDir: repoDir,
+        worktreePath: result.worktreePath,
+        branchName: result.branchName,
+        baseBranch: 'master'
+      })
+
+      expect(status.status).toBe('ok')
+      expect(fs.existsSync(result.worktreePath)).toBe(false)
+      expect(await manager.listBranches(repoDir)).not.toContain('squashed-ws')
+    })
+
+    it('deletes a squashed branch whose work base took commit by commit and then edited further', async () => {
+      const result = await manager.create(repoDir, 'squash-of-ff-ws', 'master')
+      // Master takes the work as two commits; the branch holds them as one squash.
+      for (const line of ['one', 'two']) {
+        fs.appendFileSync(path.join(repoDir, 'work.txt'), `${line}\n`)
+        execFileSync('git', ['-C', repoDir, 'add', 'work.txt'])
+        execFileSync('git', ['-C', repoDir, 'commit', '-m', line])
+      }
+      fs.writeFileSync(path.join(result.worktreePath, 'work.txt'), 'one\ntwo\n')
+      execFileSync('git', ['-C', result.worktreePath, 'add', 'work.txt'])
+      execFileSync('git', ['-C', result.worktreePath, 'commit', '-m', 'squash'])
+      // Master then edits the same file, so a three-way merge would not come out as master.
+      fs.writeFileSync(path.join(repoDir, 'work.txt'), 'one\n')
+      execFileSync('git', ['-C', repoDir, 'add', 'work.txt'])
+      execFileSync('git', ['-C', repoDir, 'commit', '-m', 'drop two'])
+
+      const status = await manager.delete({
+        projectDir: repoDir,
+        worktreePath: result.worktreePath,
+        branchName: result.branchName,
+        baseBranch: 'master'
+      })
+
+      expect(status.status).toBe('ok')
+      expect(await manager.listBranches(repoDir)).not.toContain('squash-of-ff-ws')
+    })
+
+    it('still reports unmerged when base holds a different version of the change', async () => {
+      const result = await manager.create(repoDir, 'diverged-ws', 'master')
+      fs.writeFileSync(path.join(result.worktreePath, 'shared.txt'), 'branch version')
+      execFileSync('git', ['-C', result.worktreePath, 'add', '.'])
+      execFileSync('git', ['-C', result.worktreePath, 'commit', '-m', 'branch commit'])
+      fs.writeFileSync(path.join(repoDir, 'shared.txt'), 'master version')
+      execFileSync('git', ['-C', repoDir, 'add', 'shared.txt'])
+      execFileSync('git', ['-C', repoDir, 'commit', '-m', 'master commit'])
+
+      const status = await manager.delete({
+        projectDir: repoDir,
+        worktreePath: result.worktreePath,
+        branchName: result.branchName,
+        baseBranch: 'master'
+      })
+
+      expect(status.status).toBe('unmerged')
+      expect(fs.existsSync(result.worktreePath)).toBe(true)
+    })
+
     it('force deletes dirty worktree', async () => {
       const result = await manager.create(repoDir, 'force-ws', 'master')
       fs.writeFileSync(path.join(result.worktreePath, 'dirty.txt'), 'dirty')

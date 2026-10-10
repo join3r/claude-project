@@ -272,6 +272,32 @@ def real_path(target):
     except Exception:
         return os.path.abspath(target)
 
+def branch_adds_nothing(repo_root, base, branch):
+    # The branch's work is already in base under other commits (a squash or
+    # rebase landing), which git branch --merged still counts as unmerged. Any
+    # one proves it: every commit has a same-patch twin on base; base once held
+    # exactly the branch's tree; merging would leave base's tree as it is.
+    # A git error or a merge conflict proves nothing, so it never hides work.
+    def run(args):
+        return subprocess.run(['git', '-C', repo_root] + args, capture_output=True, text=True, timeout=10)
+    try:
+        cherry = run(['cherry', base, branch])
+        if cherry.returncode == 0 and not any(line.startswith('+') for line in cherry.stdout.splitlines()):
+            return True
+        branch_tree = run(['rev-parse', branch + '^{tree}'])
+        merge_base = run(['merge-base', base, branch])
+        if branch_tree.returncode != 0 or merge_base.returncode != 0:
+            return False
+        base_trees = run(['log', '--format=%T', merge_base.stdout.strip() + '..' + base])
+        if base_trees.returncode == 0 and branch_tree.stdout.strip() in base_trees.stdout.splitlines():
+            return True
+        merged = run(['merge-tree', '--write-tree', base, branch])
+        base_tree = run(['rev-parse', base + '^{tree}'])
+        lines = merged.stdout.splitlines()
+        return merged.returncode == 0 and base_tree.returncode == 0 and bool(lines) and lines[0].strip() == base_tree.stdout.strip()
+    except Exception:
+        return False
+
 try:
     repo_root = subprocess.run(
         ['git', 'rev-parse', '--show-toplevel'],
@@ -312,7 +338,9 @@ try:
                 check=True
             ).stdout
             merged_branches = [line.strip().lstrip('*+ ').strip() for line in merged_stdout.splitlines()]
-            is_unmerged = payload['branchName'] not in merged_branches
+            is_unmerged = payload['branchName'] not in merged_branches and not branch_adds_nothing(
+                repo_root, payload['baseBranch'], payload['branchName']
+            )
         except Exception as err:
             emit({
                 'status': 'check-failed',

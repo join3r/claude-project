@@ -224,6 +224,56 @@ describe.skipIf(!hasPython3)('RemoteWorkspaceManager remote script', { timeout: 
     expect(listBranches()).toContain('dirty-ws')
   })
 
+  it('deletes a branch whose changes reached base under other commits, as after a squash landing', async () => {
+    const worktreePath = createWorktree('squashed-ws', 'master')
+    commitInWorktree(worktreePath, 'landed.txt')
+    fs.writeFileSync(path.join(repoDir, 'landed.txt'), 'content')
+    execFileSync('git', ['-C', repoDir, 'add', 'landed.txt'])
+    execFileSync('git', ['-C', repoDir, 'commit', '-m', 'squash'])
+    fs.writeFileSync(path.join(repoDir, 'later.txt'), 'later')
+    execFileSync('git', ['-C', repoDir, 'add', 'later.txt'])
+    execFileSync('git', ['-C', repoDir, 'commit', '-m', 'later'])
+
+    const result = await deleteWorkspace({ worktreePath, branchName: 'squashed-ws', baseBranch: 'master' })
+
+    expect(result.status).toBe('ok')
+    expect(fs.existsSync(worktreePath)).toBe(false)
+    expect(listBranches()).not.toContain('squashed-ws')
+  })
+
+  it('deletes a squashed branch whose work base took commit by commit and then edited further', async () => {
+    const worktreePath = createWorktree('squash-of-ff-ws', 'master')
+    for (const line of ['one', 'two']) {
+      fs.appendFileSync(path.join(repoDir, 'work.txt'), `${line}\n`)
+      execFileSync('git', ['-C', repoDir, 'add', 'work.txt'])
+      execFileSync('git', ['-C', repoDir, 'commit', '-m', line])
+    }
+    fs.writeFileSync(path.join(worktreePath, 'work.txt'), 'one\ntwo\n')
+    execFileSync('git', ['-C', worktreePath, 'add', 'work.txt'])
+    execFileSync('git', ['-C', worktreePath, 'commit', '-m', 'squash'])
+    fs.writeFileSync(path.join(repoDir, 'work.txt'), 'one\n')
+    execFileSync('git', ['-C', repoDir, 'add', 'work.txt'])
+    execFileSync('git', ['-C', repoDir, 'commit', '-m', 'drop two'])
+
+    const result = await deleteWorkspace({ worktreePath, branchName: 'squash-of-ff-ws', baseBranch: 'master' })
+
+    expect(result.status).toBe('ok')
+    expect(listBranches()).not.toContain('squash-of-ff-ws')
+  })
+
+  it('still reports unmerged when base holds a different version of the change', async () => {
+    const worktreePath = createWorktree('diverged-ws', 'master')
+    commitInWorktree(worktreePath, 'shared.txt')
+    fs.writeFileSync(path.join(repoDir, 'shared.txt'), 'master version')
+    execFileSync('git', ['-C', repoDir, 'add', 'shared.txt'])
+    execFileSync('git', ['-C', repoDir, 'commit', '-m', 'master commit'])
+
+    const result = await deleteWorkspace({ worktreePath, branchName: 'diverged-ws', baseBranch: 'master' })
+
+    expect(result).toEqual({ status: 'unmerged', baseBranch: 'master' })
+    expect(listBranches()).toContain('diverged-ws')
+  })
+
   it('refuses to delete when the base branch was renamed', async () => {
     const worktreePath = createWorktree('renamed-base-ws', 'master')
     commitInWorktree(worktreePath, 'only-here.txt')
