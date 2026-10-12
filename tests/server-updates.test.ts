@@ -261,10 +261,11 @@ describe.skipIf(process.platform === 'win32')('updates through the relay', () =>
   it('a bundle that fails its check is refused and not sent again', { timeout: 30_000 }, async () => {
     const bundle = makeBundle('2026-10-09T10:00:00.000Z')
     fs.appendFileSync(path.join(bundle.dir, 'main.js'), '// changed after the manifest\n')
-    const { d, s, restarts, home } = await rig(bundle)
+    const { d, s, updater, restarts, home } = await rig(bundle)
     await pair(d, s)
     await waitFor(() => d.log.some((line) => line.includes('upload failed')), 'upload failed', 15_000)
     expect(d.log.find((line) => line.includes('upload failed'))).toMatch(/content hash/)
+    expect(updater.lastRefusal).toMatch(/content hash/)
     expect(restarts).toEqual([])
     expect(fs.readdirSync(path.join(home, 'app'))).toEqual([])
     await expect(d.hub.updateServer(s.id)).resolves.toMatchObject({ upload: false })

@@ -262,6 +262,7 @@ export async function runBootstrap(args: BootstrapArgs, io: BootstrapIo = { out:
     ])
     log(`bootstrap done desktop=${result.desktopId} uploaded=${result.uploaded}`)
     const bundle = installed()
+    if (!bundle && updater.lastRefusal) throw new InstallError(`The server from ${printable(desktop.name)} was refused: ${printable(updater.lastRefusal)}. Update DevTool and run the command again.`)
     if (!bundle) throw new InstallError(`${printable(desktop.name)} has no server bundle to send. Update DevTool (a dev build needs npm run build:server) and run the command again.`)
     io.out(`DevTool server ${bundle.manifest.version} (${bundle.manifest.commit.slice(0, 12)}) is in ${paths.home}.`)
   } catch (err) {

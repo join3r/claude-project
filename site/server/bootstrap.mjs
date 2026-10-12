@@ -4304,6 +4304,8 @@ var ServerUpdater = class {
   restarting = false;
   restartCalled = false;
   receiving = false;
+  /** Why the last bundle was refused, for the installer to show; cleared when one is accepted. */
+  lastRefusal = null;
   idleUnsub = null;
   stagedFile;
   /** The `bundle` stream kind. */
@@ -4382,6 +4384,7 @@ var ServerUpdater = class {
       return;
     }
     const refuse = (why) => {
+      this.lastRefusal = why;
       this.options.log(`update refused version=${params.version} sha=${params.sha256.slice(0, 12)}: ${why}`);
       stream.destroy(new Error(why));
     };
@@ -4427,6 +4430,7 @@ var ServerUpdater = class {
     } finally {
       this.receiving = false;
     }
+    this.lastRefusal = null;
     let state;
     if (this.options.mode === "install") {
       this.applyStaged();
@@ -4689,6 +4693,7 @@ async function runBootstrap(args, io = { out: (line) => process.stdout.write(`${
     ]);
     log(`bootstrap done desktop=${result.desktopId} uploaded=${result.uploaded}`);
     const bundle = installed();
+    if (!bundle && updater.lastRefusal) throw new InstallError(`The server from ${printable(desktop.name)} was refused: ${printable(updater.lastRefusal)}. Update DevTool and run the command again.`);
     if (!bundle) throw new InstallError(`${printable(desktop.name)} has no server bundle to send. Update DevTool (a dev build needs npm run build:server) and run the command again.`);
     io.out(`DevTool server ${bundle.manifest.version} (${bundle.manifest.commit.slice(0, 12)}) is in ${paths.home}.`);
   } catch (err) {

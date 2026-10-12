@@ -59,6 +59,9 @@
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "signIgnore": [
+        "/Contents/Resources/server/"
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "DevTool forwards microphone access to terminal apps you run inside it, such as Claude Code's voice mode.",
         "NSCameraUsageDescription": "DevTool forwards camera access to terminal apps you run inside it that request video input."
@@ -95,7 +98,8 @@
       "repo": "claude-project"
     },
     "electronDist": "node_modules/electron/dist",
-    "afterPack": "scripts/win-rcedit.cjs"
+    "afterPack": "scripts/server-resources.cjs",
+    "afterSign": "scripts/server-resources.cjs"
   },
   "keywords": [],
   "author": "",

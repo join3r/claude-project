@@ -88,6 +88,8 @@ export class ServerUpdater {
   private restarting = false
   private restartCalled = false
   private receiving = false
+  /** Why the last bundle was refused, for the installer to show; cleared when one is accepted. */
+  lastRefusal: string | null = null
   private idleUnsub: (() => void) | null = null
   private readonly stagedFile: string
 
@@ -178,6 +180,7 @@ export class ServerUpdater {
       return
     }
     const refuse = (why: string) => {
+      this.lastRefusal = why
       this.options.log(`update refused version=${params.version} sha=${params.sha256.slice(0, 12)}: ${why}`)
       stream.destroy(new Error(why))
     }
@@ -225,6 +228,7 @@ export class ServerUpdater {
       this.receiving = false
     }
 
+    this.lastRefusal = null
     let state: BundleStreamResult['state']
     if (this.options.mode === 'install') {
       this.applyStaged()
