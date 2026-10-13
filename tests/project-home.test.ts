@@ -81,13 +81,13 @@ describe('dropHomeTasks', () => {
 })
 
 describe('Home page selection', () => {
-  it('selectProjectHomeView selects the project with no task and opens its notes', () => {
-    const next = selectProjectHomeView({ ...createDefaultWindowViewState(), selectedTaskId: 't1' }, 'p1')
+  it('selectProjectHomeView selects the project with no task and leaves the file browser alone', () => {
+    const next = selectProjectHomeView({ ...createDefaultWindowViewState(), selectedTaskId: 't1', fileBrowserOpen: false, fileBrowserActiveTab: 'files' }, 'p1')
     expect(next.selectedProjectId).toBe('p1')
     expect(next.selectedTaskId).toBeNull()
     expect(next.expandedProjectIds).toContain('p1')
-    expect(next.fileBrowserOpen).toBe(true)
-    expect(next.fileBrowserActiveTab).toBe('notes')
+    expect(next.fileBrowserOpen).toBe(false)
+    expect(next.fileBrowserActiveTab).toBe('files')
   })
 
   it('resolveStoredSelection restores Home when no task was remembered', () => {

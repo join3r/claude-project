@@ -60,16 +60,14 @@ export function selectProjectView(prev: WindowViewState, id: string | null, proj
 
 /**
  * Land on the project's Home page: the project selected with no task. The file
- * browser opens on the project's notes, as Home always has.
+ * browser stays as the window had it.
  */
 export function selectProjectHomeView(prev: WindowViewState, projectId: string): WindowViewState {
   return {
     ...prev,
     selectedProjectId: projectId,
     selectedTaskId: null,
-    expandedProjectIds: withId(prev.expandedProjectIds, projectId),
-    fileBrowserOpen: true,
-    fileBrowserActiveTab: 'notes'
+    expandedProjectIds: withId(prev.expandedProjectIds, projectId)
   }
 }
 
