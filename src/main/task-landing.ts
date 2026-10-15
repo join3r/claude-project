@@ -667,6 +667,13 @@ export class TaskLandingManager {
     this.stopWatching(taskId)
     this.deps.log?.(`task landing task=${taskId} agent finished the rebase, resuming ${intent}`)
     const result = await this.enqueue(projectId, taskId, current => this.resume(current, current.task.landing?.intent ?? intent))
+    // The agent's rebase went onto the stream as it was; a stream that moved since conflicts afresh.
+    if (result.status === 'conflict') {
+      const landing = findTaskInProject(this.deps.projects.peek().projects.find(p => p.id === projectId), taskId)?.landing
+      if (landing?.state === 'conflict') {
+        this.setLanding(taskId, { ...landing, message: `The agent resolved the earlier conflicts, but ${at.target.branchName} moved on meanwhile and conflicts again.` })
+      }
+    }
     this.deps.onResumed?.(projectId, taskId, intent, result)
   }
 

@@ -104,6 +104,11 @@ describe('TaskLandingBanner', () => {
     expect((screen.getByRole('button', { name: 'Ask agent to fix' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('says when the agent\'s fix ran into a stream that moved on', () => {
+    mount({ state: 'conflict', files: ['a.txt'], message: 'The agent resolved the earlier conflicts, but 0.5.0 moved on meanwhile and conflicts again.' })
+    expect(screen.getByRole('alert').textContent).toContain('moved on meanwhile and conflicts again.')
+  })
+
   it('shows the agent fixing, with Retry and Abort', async () => {
     mount({ state: 'fixing', files: ['a.txt'] })
     expect(screen.getByText('Fixing conflicts with 0.5.0…')).toBeTruthy()

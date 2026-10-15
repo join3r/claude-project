@@ -124,6 +124,7 @@ export interface TaskLanding {
   intent?: TaskLandingIntent
   /** The conflicted files (`conflict`), or the stream's files in the way (`blocked`). */
   files?: string[]
+  /** `blocked`: git's error. `conflict`: set when the agent's fix ran into a stream that had moved on. */
   message?: string
 }
 

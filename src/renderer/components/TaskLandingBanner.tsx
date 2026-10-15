@@ -66,6 +66,7 @@ export default function TaskLandingBanner({ project, stream, task }: { project: 
       : `Conflicts with ${streamName} in ${plural(files.length, 'file')}`
     detail = (
       <>
+        {landing.message && <>{landing.message}{' '}</>}
         Resolve them in the task&apos;s worktree, <span className="font-mono">git add</span> them, then Retry.
         Abort puts the branch back as it was.
       </>

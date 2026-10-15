@@ -317,6 +317,28 @@ describe('TaskLandingManager', () => {
     expect(taskOf('t1')?.landing).toBeUndefined()
   })
 
+  it('a fix that lands on a stream that moved meanwhile is a new conflict, and says so', async () => {
+    const ws = taskWorktree('t1')
+    makeConflict(ws.worktreePath)
+    setTasks([task('t1', 'Edit a', ws)])
+    await manager.landTask('p1', 't1')
+    await manager.fixWithAgent('p1', 't1')
+
+    activity.set('tab-t1', 'working')
+    write(ws.worktreePath, 'a.txt', 'fixed\n')
+    git(ws.worktreePath, 'add', 'a.txt')
+    execFileSync('git', ['-C', ws.worktreePath, 'rebase', '--continue'], { env: { ...process.env, GIT_EDITOR: 'true' }, stdio: 'pipe' })
+    // Another task lands into the stream while the agent works.
+    write(streamPath, 'a.txt', 'stream again\n')
+    commitAll(streamPath, 'stream edits a again')
+    activity.set('tab-t1', null)
+
+    await expect.poll(() => resumed.length).toBe(1)
+    expect(resumed[0].result).toEqual({ status: 'conflict', files: ['a.txt'] })
+    expect(taskOf('t1')?.landing?.state).toBe('conflict')
+    expect(taskOf('t1')?.landing?.message).toContain('moved on meanwhile')
+  })
+
   it('an agent that stops with the rebase still stopped leaves a conflict', async () => {
     const ws = taskWorktree('t1')
     makeConflict(ws.worktreePath)
