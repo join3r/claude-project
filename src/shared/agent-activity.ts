@@ -67,7 +67,8 @@ export function firstLine(text: string | undefined, limit = TEXT_LIMIT): string 
 
 /**
  * Claude Code wraps harness-injected turns (background task notifications, slash
- * command echoes, system reminders) in hyphenated pseudo-tags. Those are not
+ * command echoes, system reminders, messages from other agents) in hyphenated
+ * pseudo-tags, some with attributes (`<agent-message from="…">`). Those are not
  * something you said: a slash command reads as `/name args`, anything else keeps
  * the previous prompt.
  */
@@ -80,7 +81,7 @@ function promptLine(prompt: string | undefined): string | undefined {
     const name = command[1].trim()
     return firstLine(args ? `${name} ${args}` : name)
   }
-  if (/^<[a-z]+(?:-[a-z]+)+>/.test(trimmed)) return undefined
+  if (/^<[a-z]+(?:-[a-z]+)+(?:\s[^>]*)?>/.test(trimmed)) return undefined
   return firstLine(trimmed)
 }
 

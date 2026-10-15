@@ -82,6 +82,12 @@ describe('reduceAgentActivity', () => {
     ])
     expect(describeActivity(activity, 'working')).toBe('Thinking · Check the new mail')
 
+    const fromAgent = fold([
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Redesign the sub-classes' },
+      { hook_event_name: 'UserPromptSubmit', prompt: '<agent-message from="a8b837cd101625cb5">\nDone.\n</agent-message>' }
+    ]).activity
+    expect(fromAgent?.lastPrompt).toBe('Redesign the sub-classes')
+
     const command = fold([
       { hook_event_name: 'UserPromptSubmit', prompt: '<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>42</command-args>' }
     ]).activity
