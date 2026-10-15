@@ -31,11 +31,12 @@ type Props = {
   /** The project whose home page is showing (no task selected), highlighted in the grouped layout. */
   selectedProjectHomeId?: string | null
   onTaskContextMenu: (e: React.MouseEvent, projectId: string, taskId: string) => void
-  onSettle: (projectId: string, taskId: string) => void
   /** Snooze (opens the presets at the click) or, on a snoozed row, wake it now. */
   onSnooze: (e: React.MouseEvent, projectId: string, taskId: string) => void
-  /** Archives the task, with the sidebar's confirm rules (`useCloseTask`). */
+  /** The row's ✓: closes the task, landing a worktree task first (`useCloseTask`). */
   onClose: (projectId: string, taskId: string) => void
+  /** The row's ✕: removes the task and, after a confirm, its worktree's changes unlanded. */
+  onRemove: (projectId: string, taskId: string) => void
   onNewTask: () => void
   allStatuses: Record<string, TabStatusValue>
   statusSince: Record<string, number>
@@ -109,9 +110,9 @@ function InboxRow({
   showIcon,
   onSelect,
   onContextMenu,
-  onSettle,
   onSnooze,
-  onClose
+  onClose,
+  onRemove
 }: {
   entry: InboxEntry
   group: GroupKey
@@ -125,9 +126,9 @@ function InboxRow({
   showIcon: boolean
   onSelect: () => void
   onContextMenu: (e: React.MouseEvent) => void
-  onSettle: () => void
   onSnooze: (e: React.MouseEvent) => void
   onClose: () => void
+  onRemove: () => void
 }): React.ReactElement {
   const { task, project, stream, unread } = entry
   const activity = lastActivityAt(task)
@@ -142,17 +143,13 @@ function InboxRow({
   const trailing = (
     <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
       <RowActions>
-        <RowAction
-          title={group === 'settled' ? 'Back to Inbox' : 'Done for now'}
-          on={group === 'settled'}
-          onClick={onSettle}
-        >
+        <RowAction title="Close task" onClick={onClose}>
           <Check size={13} />
         </RowAction>
         <RowAction title={group === 'snoozed' ? 'Wake now' : 'Snooze…'} onClick={onSnooze}>
           {group === 'snoozed' ? <AlarmClockOff size={13} /> : <Clock size={13} />}
         </RowAction>
-        <RowAction danger title="Close task" onClick={onClose}>
+        <RowAction danger title="Remove task" onClick={onRemove}>
           <X size={13} />
         </RowAction>
       </RowActions>
@@ -302,9 +299,9 @@ export default function InboxPanel({
   onOpenProject,
   selectedProjectHomeId = null,
   onTaskContextMenu,
-  onSettle,
   onSnooze,
   onClose,
+  onRemove,
   onNewTask,
   allStatuses,
   statusSince,
@@ -356,9 +353,9 @@ export default function InboxPanel({
       showIcon={showIcons}
       onSelect={() => onSelectTask(entry.project.id, entry.task)}
       onContextMenu={(e) => onTaskContextMenu(e, entry.project.id, entry.task.id)}
-      onSettle={() => onSettle(entry.project.id, entry.task.id)}
       onSnooze={(e) => onSnooze(e, entry.project.id, entry.task.id)}
       onClose={() => onClose(entry.project.id, entry.task.id)}
+      onRemove={() => onRemove(entry.project.id, entry.task.id)}
     />
   )
 

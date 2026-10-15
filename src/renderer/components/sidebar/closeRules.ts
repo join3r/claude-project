@@ -35,6 +35,13 @@ export function taskCloseQuestion(task: Task, statusOf: StatusOf): string | null
   return `"${task.name}" is still working.\n\nClose it anyway? Its agent stops and its tabs close.`
 }
 
+/** The confirm before removing a task with a worktree of its own: nothing of it lands. */
+export function taskRemoveQuestion(task: Task): string {
+  const branch = task.workspace?.branchName
+  return `Do you really want to remove "${task.name}" and all its changes?\n\n`
+    + `Its worktree${branch ? ` and branch "${branch}"` : ''} are deleted, uncommitted work with them. Nothing is landed.`
+}
+
 /** The question before closing a stream's tasks, or null when none is working. */
 export function streamCloseQuestion(stream: Stream, statusOf: StatusOf): string | null {
   if (stream.isMain) return null

@@ -7,6 +7,7 @@ import {
   isTaskWorking,
   streamCloseQuestion,
   taskCloseQuestion,
+  taskRemoveQuestion,
   worktreePreflight,
   worktreeRemovalFor
 } from '../src/renderer/components/sidebar/closeRules'
@@ -37,6 +38,11 @@ describe('close confirm rules', () => {
     expect(taskCloseQuestion(task, statuses({ 't-sh': 'working' }))).toBeNull()
     expect(isTaskWorking(task, statuses({ 't-agent': 'working' }))).toBe(true)
     expect(taskCloseQuestion(task, statuses({ 't-agent': 'working' }))).toMatch(/^"Fix it" is still working/)
+  })
+
+  it('warns that removing a worktree task deletes its branch and changes', () => {
+    const task = { ...agentTask('t', 'Fix it'), workspace }
+    expect(taskRemoveQuestion(task)).toMatch(/^Do you really want to remove "Fix it" and all its changes\?[\s\S]*branch "rel-0\.5"/)
   })
 
   it('asks before closing a stream while any of its tasks works, never for main', () => {

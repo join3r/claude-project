@@ -54,7 +54,7 @@ const since = { 'c-tab': NOW - 120_000, 'd-tab': NOW - 30_000 }
 
 function renderPanel(
   layout: 'flat' | 'grouped',
-  handlers: { onClose?: () => void; onSettle?: () => void; onSnooze?: () => void } = {},
+  handlers: { onClose?: () => void; onRemove?: () => void; onSnooze?: () => void } = {},
   showIcons = false
 ) {
   return render(
@@ -63,9 +63,9 @@ function renderPanel(
       selectedTaskId={null}
       onSelectTask={vi.fn()}
       onTaskContextMenu={vi.fn()}
-      onSettle={handlers.onSettle ?? vi.fn()}
       onSnooze={handlers.onSnooze ?? vi.fn()}
       onClose={handlers.onClose ?? vi.fn()}
+      onRemove={handlers.onRemove ?? vi.fn()}
       onNewTask={vi.fn()}
       allStatuses={statuses}
       statusSince={since}
@@ -142,9 +142,9 @@ describe('InboxPanel', () => {
         onOpenProject={onOpenProject}
         selectedProjectHomeId="q"
         onTaskContextMenu={vi.fn()}
-        onSettle={vi.fn()}
         onSnooze={vi.fn()}
         onClose={vi.fn()}
+        onRemove={vi.fn()}
         onNewTask={vi.fn()}
         allStatuses={statuses}
         statusSince={since}
@@ -169,17 +169,17 @@ describe('InboxPanel', () => {
       .toEqual(['DTDevTool5', 'STStem1'])
   })
 
-  it('settles, snoozes and closes a task from its row', () => {
+  it('closes, snoozes and removes a task from its row', () => {
     const onClose = vi.fn()
-    const onSettle = vi.fn()
+    const onRemove = vi.fn()
     const onSnooze = vi.fn()
-    renderPanel('flat', { onClose, onSettle, onSnooze })
-    fireEvent.click(row('a').querySelector('button[title="Done for now"]')!)
-    expect(onSettle).toHaveBeenCalledWith('p', 'a')
-    fireEvent.click(row('a').querySelector('button[title="Snooze…"]')!)
-    expect(onSnooze).toHaveBeenCalledWith(expect.anything(), 'p', 'a')
+    renderPanel('flat', { onClose, onRemove, onSnooze })
     fireEvent.click(row('a').querySelector('button[title="Close task"]')!)
     expect(onClose).toHaveBeenCalledWith('p', 'a')
+    fireEvent.click(row('a').querySelector('button[title="Snooze…"]')!)
+    expect(onSnooze).toHaveBeenCalledWith(expect.anything(), 'p', 'a')
+    fireEvent.click(row('a').querySelector('button[title="Remove task"]')!)
+    expect(onRemove).toHaveBeenCalledWith('p', 'a')
   })
 
   it('has no inline approvals or filter chips', () => {

@@ -1057,9 +1057,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onOpenProject={selectProjectHome}
           selectedProjectHomeId={selectedTaskId ? null : selectedProjectId}
           onTaskContextMenu={handleTaskContextMenu}
-          onSettle={handleToggleSettled}
           onSnooze={handleSnoozeFromRow}
           onClose={(projectId, taskId) => void handleCloseTask(projectId, taskId)}
+          onRemove={(projectId, taskId) => void closeTaskFlow.removeTask(projectId, taskId)}
           onNewTask={() => setNewTaskOpen(true)}
           allStatuses={allStatuses}
           statusSince={statusSince}
