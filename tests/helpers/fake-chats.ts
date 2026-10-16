@@ -82,6 +82,12 @@ export class FakeChats implements ChatBridgeChats {
     return this.sideAnswer
   }
 
+  readonly bashCommands: { tabId: string; command: string }[] = []
+
+  async runBash(tabId: string, command: string): Promise<void> {
+    this.bashCommands.push({ tabId, command })
+  }
+
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean {
     const runtime = this.runtimes.get(tabId)
     if (!runtime || !runtime.state.pending.some((p) => p.id === promptId)) return false

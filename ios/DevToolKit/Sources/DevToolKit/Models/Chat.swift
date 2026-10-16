@@ -759,6 +759,8 @@ public enum ChatOp {
     public static let btw = "chat.btw"
     public static let permissions = "chat.permissions"
     public static let permissionsUpdate = "chat.permissions.update"
+    /// `!command` (§8.17); parsed by `ChatBashParams`, not `ChatParams`.
+    public static let bash = "chat.bash"
 
     /// §6.3 limits.
     public static let maxSendLength = 32_000
@@ -766,6 +768,8 @@ public enum ChatOp {
     /// §8.14 limits.
     public static let maxBtwLength = 20_000
     public static let maxRuleLength = 2000
+    /// §8.17 limit, as `chat.send`'s.
+    public static let maxBashLength = 32_000
 }
 
 // MARK: - Parsing

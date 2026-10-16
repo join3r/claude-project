@@ -228,6 +228,8 @@ public enum DesktopFeature {
     public static let sendImages = "send.images"
     /// The desktop answers `queue.update` and `queue.run`, and sends `queue` (§8.16, §4.4).
     public static let queue = "queue"
+    /// The desktop answers `chat.bash` (§8.17).
+    public static let chatBash = "chat.bash"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

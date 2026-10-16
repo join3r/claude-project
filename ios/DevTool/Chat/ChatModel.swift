@@ -261,6 +261,21 @@ final class ChatModel {
         }
     }
 
+    /// `!command` (§8.17): the desktop runs it; its row arrives as a chat item.
+    /// Returns true when the desktop took it.
+    func runBash(_ command: String) async -> Bool {
+        guard let connection = connection() else { return false }
+        sending = true
+        defer { sending = false }
+        do {
+            try await connection.runBash(tabId: route.tabId, command: command)
+            return true
+        } catch {
+            show(error)
+            return false
+        }
+    }
+
     func interrupt() async {
         guard let connection = connection(), !interrupting else { return }
         interrupting = true

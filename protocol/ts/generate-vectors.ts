@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -920,6 +920,22 @@ function chatMessages(): unknown {
           'null'
         ],
         results: [text({ response: 4 }), '[]', 'null']
+      }
+    },
+    // §8.17: `!command` in the composer.
+    bash: {
+      params: [
+        text({ tabId: 'tab-chat', command: 'git status' }),
+        text({ tabId: 'tab-chat', command: '  ls -la\n  pwd  ', extra: true })
+      ].map((json) => ({ json, expected: parseChatBashParams(JSON.parse(json)) })),
+      invalid: {
+        params: [
+          text({ command: 'ls' }),
+          text({ tabId: 'tab-chat' }),
+          text({ tabId: 'tab-chat', command: ' \n ' }),
+          text({ tabId: 'tab-chat', command: 'x'.repeat(32001) }),
+          'null'
+        ]
       }
     },
     permissions: {

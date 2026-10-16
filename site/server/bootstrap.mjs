@@ -627,6 +627,7 @@ var CHAT_COMMANDS_OP = "chat.commands";
 var CHAT_BTW_OP = "chat.btw";
 var CHAT_PERMISSIONS_OP = "chat.permissions";
 var CHAT_PERMISSIONS_UPDATE_OP = "chat.permissions.update";
+var CHAT_BASH_OP = "chat.bash";
 
 // protocol/ts/app-messages.ts
 var AppOp = {
@@ -652,6 +653,7 @@ var AppOp = {
   ChatImage: CHAT_IMAGE_OP,
   ChatCommands: CHAT_COMMANDS_OP,
   ChatBtw: CHAT_BTW_OP,
+  ChatBash: CHAT_BASH_OP,
   ChatPermissions: CHAT_PERMISSIONS_OP,
   ChatPermissionsUpdate: CHAT_PERMISSIONS_UPDATE_OP,
   PushRegister: PushOp.Register,

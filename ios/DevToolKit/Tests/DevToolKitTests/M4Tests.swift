@@ -507,6 +507,7 @@ import Testing
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
+            DesktopFeature.chatBash,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let listed = try await mock.listBranches(projectId: "p-api")

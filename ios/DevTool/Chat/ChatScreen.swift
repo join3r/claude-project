@@ -397,7 +397,17 @@ struct ChatScreen: View {
 
     private var canSend: Bool {
         !readOnly && !model.sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && draft.count <= ChatOp.maxSendLength && (pictures.isEmpty || picturesSupported)
+            && draft.count <= ChatOp.maxSendLength && (pictures.isEmpty || picturesSupported || bashMode)
+    }
+
+    /// The desktop runs `!command`s (§8.17).
+    private var supportsBash: Bool {
+        app.supports(DesktopFeature.chatBash, on: route.desktopId)
+    }
+
+    /// The draft is a shell command, as the desktop composer's bash mode.
+    private var bashMode: Bool {
+        supportsBash && !readOnly && ChatBashMode.isOn(draft)
     }
 
     /// The desktop takes pictures with `chat.send`.
@@ -428,6 +438,11 @@ struct ChatScreen: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay {
+                    if bashMode {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 1)
+                    }
+                }
                 .disabled(readOnly)
             if model.busy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
@@ -453,13 +468,17 @@ struct ChatScreen: View {
                     }
                 }
                 .disabled(!canSend)
-                .accessibilityLabel("Send")
+                .accessibilityLabel(bashMode ? "Run shell command" : "Send")
             }
         }
     }
 
     private func send() {
         guard canSend else { return }
+        if supportsBash, let command = ChatBashMode.command(in: draft) {
+            runBash(command)
+            return
+        }
         if pictures.isEmpty, supportsCommands, runCommand(draft) { return }
         let text = draft
         let sent = pictures
@@ -476,6 +495,22 @@ struct ChatScreen: View {
                 draft = text // Give the text (and pictures) back so they aren't lost.
                 if pictures.isEmpty { pictures = sent }
             }
+        }
+    }
+}
+
+extension ChatScreen {
+    /// `!command`: the desktop runs it in the chat's shell and hands it to
+    /// Claude with the next message. Attached pictures stay for that message.
+    private func runBash(_ command: String) {
+        // A bare `!` does nothing, as on the desktop.
+        guard !command.isEmpty else { return }
+        let text = draft
+        draft = ""
+        atBottom = true
+        scrolledAway = false
+        Task {
+            if await !model.runBash(command), draft.isEmpty { draft = text }
         }
     }
 }

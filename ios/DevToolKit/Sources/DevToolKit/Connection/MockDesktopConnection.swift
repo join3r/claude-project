@@ -320,6 +320,16 @@ public actor MockDesktopConnection: DesktopConnection {
             // Claude takes a moment to think it over.
             try? await Task.sleep(for: streamStep * 8)
             return ChatBtwResult(response: MockChats.sideAnswer(parsed.question)).json
+        case ChatOp.bash:
+            let parsed: ChatBashParams
+            do {
+                parsed = try ChatBashParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard chats[parsed.tabId] != nil else { throw notFound() }
+            startBash(tabId: parsed.tabId, command: parsed.command)
+            return .object([:])
         case ChatOp.permissions:
             guard chats[try string("tabId")] != nil else { throw notFound() }
             return ChatPermissionsResult(sources: permissionSources).json
@@ -706,6 +716,24 @@ public actor MockDesktopConnection: DesktopConnection {
         }
     }
 
+    /// `!command`: a Bash row that runs a moment, as the desktop's bash mode shows it.
+    private func startBash(tabId: String, command: String) {
+        guard var chat = chats[tabId] else { return }
+        let id = chat.makeId("bash")
+        chats[tabId] = chat
+        let summary = "! " + (command.split(separator: "\n").first.map(String.init) ?? "")
+        let output = MockChats.bashOutput(command)
+        change(tabId, upserts: [ChatItem(id: id, .tool(ChatTool(name: "Bash", summary: summary, status: .running, hasDetail: true)))]) {
+            $0.details[id] = .tool(input: command, result: "")
+        }
+        run(tabId) { mock in
+            try await mock.pause(4)
+            await mock.change(tabId, upserts: [ChatItem(id: id, .tool(ChatTool(name: "Bash", summary: summary, status: .done, hasDetail: true)))]) {
+                $0.details[id] = .tool(input: command, result: output)
+            }
+        }
+    }
+
     private func resolve(_ prompt: ChatPrompt, answer: ChatAnswer, tabId: String) {
         guard let chat = chats[tabId] else { return }
         // The tool the prompt belongs to: the last one still waiting.
@@ -813,6 +841,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
+            DesktopFeature.chatBash,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

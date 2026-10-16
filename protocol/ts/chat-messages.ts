@@ -242,6 +242,17 @@ export interface ChatCommandEntry {
 export interface ChatCommandsResult { commands: ChatCommandEntry[] }
 
 export interface ChatBtwParams { tabId: string; question: string }
+
+/**
+ * `!command` in the composer (SPEC.md §8.17): the desktop runs it in the chat's
+ * shell, as its own composer's bash mode does, and hands command and output to
+ * Claude with the next message.
+ */
+export const CHAT_BASH_OP = 'chat.bash'
+/** The handshake feature (§8.1) a desktop lists when it answers `chat.bash`. */
+export const CHAT_BASH_FEATURE = 'chat.bash'
+
+export interface ChatBashParams { tabId: string; command: string }
 export interface ChatBtwResult {
   /** Null when Claude had nothing to say (the question was cancelled). */
   response: string | null
@@ -308,6 +319,8 @@ export const ChatLimits = {
   sentImageData: 3_000_000,
   /** `chat.btw` question (§8.14). */
   btwQuestion: 20_000,
+  /** `chat.bash` command (§8.17), as `chat.send`'s text. */
+  bashCommand: 32000,
   /** `chat.permissions.update` rule (§8.14). */
   permissionRule: 2000,
   /** A queued prompt's text (§8.16), as `chat.send`'s. */
@@ -459,6 +472,7 @@ export type ChatParams =
   | ChatSettingsParams
   | ChatImageParams
   | ChatBtwParams
+  | ChatBashParams
   | ChatPermissionsUpdateParams
 
 export interface ChatOpenResult { seq: number; view: ChatView }
@@ -1026,6 +1040,19 @@ export function parseChatBtwResult(value: unknown): ChatBtwResult {
   const result: ChatBtwResult = { response: optStr(o, 'response') ?? null }
   if (flag(o, 'synthetic')) result.synthetic = true
   return result
+}
+
+/**
+ * `chat.bash` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `tabId`, or a blank command or one over {@link ChatLimits.bashCommand} characters.
+ */
+export function parseChatBashParams(params: unknown): ChatBashParams {
+  const o = obj(params, 'params')
+  const tabId = str(o, 'tabId')
+  const command = str(o, 'command')
+  if (command.length > ChatLimits.bashCommand) fail(`command over ${ChatLimits.bashCommand} characters`)
+  if (!command.trim()) fail('command is empty')
+  return { tabId, command }
 }
 
 function oneOf<T extends string>(o: Obj, key: string, allowed: readonly T[]): T {

@@ -89,6 +89,7 @@ import { queuedPromptForRun, updateQueueInData } from '../mobile/queue'
 import {
   AppErrorCode,
   BRANCHES_LIST_FEATURE,
+  CHAT_BASH_FEATURE,
   CHAT_COMMANDS_FEATURE,
   CHAT_IMAGE_FEATURE,
   SEND_IMAGES_FEATURE,
@@ -507,7 +508,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),

@@ -349,6 +349,15 @@ extension DesktopConnection {
         return try decode(result, ChatBtwResult.parse)
     }
 
+    /// `chat.bash` (§8.17): runs `command` in the chat's shell. Answers once it
+    /// started; the command and its output arrive as a chat item.
+    public func runBash(tabId: String, command: String) async throws {
+        guard command.utf16.count <= ChatOp.maxBashLength else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "Commands are limited to \(ChatOp.maxBashLength) characters.")
+        }
+        _ = try await request(ChatOp.bash, params: ChatBashParams(tabId: tabId, command: command).json)
+    }
+
     /// `chat.permissions` (§8.14): the allow, ask and deny rules of the chat's
     /// settings files. A remote project answers `.remote(code: "unsupported")`.
     public func chatPermissions(tabId: String) async throws -> [ChatPermissionSource] {

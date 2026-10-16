@@ -42,6 +42,7 @@ import {
 import { fitImage, ImageTooLargeError, type ImageCodec } from './chat-image'
 import {
   AppErrorCode,
+  CHAT_BASH_OP,
   CHAT_BTW_OP,
   CHAT_COMMANDS_OP,
   CHAT_IMAGE_OP,
@@ -55,6 +56,7 @@ import type {
   AppMessage,
   ChatAnswer,
   ChatAnswerParams,
+  ChatBashParams,
   ChatBtwParams,
   ChatBtwResult,
   ChatCommandEntry,
@@ -96,6 +98,8 @@ export interface ChatBridgeChats {
   interrupt(tabId: string): Promise<void>
   /** `/btw` (`chat.btw`, §8.14); starts the process when it isn't running. */
   askSideQuestion?(tabId: string, question: string): Promise<ChatSideAnswer>
+  /** `!command` (`chat.bash`, §8.17); settles once the command has finished. */
+  runBash?(tabId: string, command: string): Promise<void>
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean
 }
 
@@ -319,6 +323,16 @@ export class ChatBridge {
         const result: ChatBtwResult = { response: answer.response }
         if (answer.synthetic) result.synthetic = true
         return result
+      }
+      case CHAT_BASH_OP: {
+        const runBash = this.deps.chats.runBash?.bind(this.deps.chats)
+        if (!runBash) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot run shell commands')
+        await this.ensureRuntime(resolved)
+        // Answer once it started: the row and its output reach the phone as chat events.
+        void runBash(params.tabId, (params as ChatBashParams).command).catch((err: unknown) => {
+          this.deps.log(`chat.bash tab=${params.tabId} failed: ${err instanceof Error ? err.message : String(err)}`)
+        })
+        return {}
       }
       case CHAT_PERMISSIONS_OP:
         return this.readPermissions(resolved)

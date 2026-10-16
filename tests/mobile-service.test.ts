@@ -614,6 +614,20 @@ describe('MobileService chat.commands, chat.btw and chat.permissions (SPEC.md §
   })
 })
 
+describe('MobileService chat.bash (SPEC.md §8.17)', () => {
+  it('hands parsed params to the bridge and rejects a blank command', () => {
+    const requests: { op: string; params: unknown }[] = []
+    const env = pairedSetup({
+      chat: { request: (_phone, _id, op, params) => { requests.push({ op, params }) }, dropPhone: () => {}, dropAll: () => {}, projectsChanged: () => {} }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'chat.bash', params: { tabId: 't', command: 'ls -la', extra: 1 } })
+    expect(requests).toEqual([{ op: 'chat.bash', params: { tabId: 't', command: 'ls -la' } }])
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'chat.bash', params: { tabId: 't', command: '  ' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'bad-request' } })
+    expect(requests).toHaveLength(1)
+  })
+})
+
 describe('MobileService chat.new (retired, SPEC.md §8.2)', () => {
   it('answers unsupported like any unknown op', () => {
     const env = pairedSetup()

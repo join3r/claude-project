@@ -302,6 +302,13 @@ extension MockChats {
         ChatCommand(name: "resume", description: "Resume a conversation", terminalOnly: true),
     ]
 
+    /// What a mock `!command` prints.
+    static func bashOutput(_ command: String) -> String {
+        if command.hasPrefix("git status") { return "On branch fix-auth\nnothing to commit, working tree clean" }
+        if command.hasPrefix("ls") { return "README.md\npackage.json\nsrc\ntests" }
+        return "ran: \(command)"
+    }
+
     static func sideAnswer(_ question: String) -> String {
         """
         Short answer: the middleware checks `exp` **before** the signature, so an expired token \

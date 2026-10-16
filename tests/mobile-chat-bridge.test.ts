@@ -453,6 +453,13 @@ describe('ChatBridge', () => {
     expect(await req('chat.btw', { tabId: 'tab-chat', question: 'x' })).toMatchObject({ ok: false, error: { code: 'internal', message: 'Claude is not running.' } })
   })
 
+  it('runs !commands in the chat\'s shell without sending into the chat (§8.17)', async () => {
+    expect(await req('chat.bash', { tabId: 'tab-chat', command: 'git status' })).toMatchObject({ ok: true, result: {} })
+    expect(chats.bashCommands).toEqual([{ tabId: 'tab-chat', command: 'git status' }])
+    expect(chats.sent).toEqual([])
+    expect(await req('chat.bash', { tabId: 'nope', command: 'ls' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+  })
+
   it('reads and edits /permissions rules in the chat\'s folder; remote projects are unsupported (§8.14)', async () => {
     expect(await req('chat.permissions', { tabId: 'tab-chat' })).toMatchObject({ ok: false, error: { code: 'unsupported' } })
     const rules: Record<string, string[]> = { allow: ['Read'], ask: [], deny: [] }
