@@ -189,6 +189,28 @@ final class PastingTextView: UITextView {
 
     func updatePlaceholder() { placeholder.isHidden = !text.isEmpty }
 
+    /// Going back from a pushed screen (the New task project picker), UIKit
+    /// gives the field its focus back mid-transition, and SwiftUI's keyboard
+    /// avoidance misses the keyboard that raises: the form can't scroll the
+    /// field above it. Take the focus once the transition is over instead.
+    override func becomeFirstResponder() -> Bool {
+        guard let transition = transitionInProgress else { return super.becomeFirstResponder() }
+        transition.animate(alongsideTransition: nil) { [weak self] context in
+            guard let self, !context.isCancelled, window != nil else { return }
+            _ = becomeFirstResponder()
+        }
+        return false
+    }
+
+    private var transitionInProgress: UIViewControllerTransitionCoordinator? {
+        var responder = next
+        while let current = responder {
+            if let controller = current as? UIViewController { return controller.transitionCoordinator }
+            responder = current.next
+        }
+        return nil
+    }
+
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteImages != nil, UIPasteboard.general.hasImages { return true }
         return super.canPerformAction(action, withSender: sender)
