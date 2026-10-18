@@ -3103,6 +3103,13 @@ var LinkSession = class {
     }
   }
   batch(client, key, text2, coalesce) {
+    if (this.batchTimer === null && this.batches.size === 0) {
+      for (const piece of pieces(text2, coalesce.maxChars)) {
+        this.writeMessage({ type: "event", client, ch: coalesce.channel, args: [key, piece] }, `event ${coalesce.channel}`);
+      }
+      this.armBatchTimer(coalesce);
+      return;
+    }
     const id2 = `${client}\0${key}`;
     let batch = this.batches.get(id2);
     if (!batch) {
@@ -3115,12 +3122,16 @@ var LinkSession = class {
       this.flush();
       return;
     }
-    if (this.batchTimer === null) {
-      this.batchTimer = this.timers.setTimeout(() => {
-        this.batchTimer = null;
-        this.flush();
-      }, coalesce.windowMs);
-    }
+    if (this.batchTimer === null) this.armBatchTimer(coalesce);
+  }
+  /** Opens a window: output until it ends is batched. One that ends with output pending sends it and opens the next. */
+  armBatchTimer(coalesce) {
+    this.batchTimer = this.timers.setTimeout(() => {
+      this.batchTimer = null;
+      if (this.batches.size === 0) return;
+      this.flush();
+      this.armBatchTimer(coalesce);
+    }, coalesce.windowMs);
   }
   // ---- streams -----------------------------------------------------------------------
   /**

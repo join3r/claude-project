@@ -38,7 +38,11 @@ export interface IncomingEvent {
 export interface CoalesceOptions {
   /** The event to batch: `[key, text]` events with the same client and key are concatenated. */
   channel: string
-  /** How long a batch may wait (plan: 16 ms for `pty-data`). */
+  /**
+   * How long a batch may wait (plan: 16 ms for `pty-data`). Output after a quiet
+   * window goes out at once, so a lone echo isn't held; the window then opens and
+   * batches whatever follows.
+   */
   windowMs: number
   /** Most characters in one message; a batch that grows past it goes out at once, in pieces. */
   maxChars: number
@@ -200,6 +204,13 @@ export class LinkSession implements StreamSession {
   }
 
   private batch(client: string, key: string, text: string, coalesce: CoalesceOptions): void {
+    if (this.batchTimer === null && this.batches.size === 0) {
+      for (const piece of pieces(text, coalesce.maxChars)) {
+        this.writeMessage({ type: 'event', client, ch: coalesce.channel, args: [key, piece] }, `event ${coalesce.channel}`)
+      }
+      this.armBatchTimer(coalesce)
+      return
+    }
     const id = `${client}\u0000${key}`
     let batch = this.batches.get(id)
     if (!batch) {
@@ -212,12 +223,17 @@ export class LinkSession implements StreamSession {
       this.flush()
       return
     }
-    if (this.batchTimer === null) {
-      this.batchTimer = this.timers.setTimeout(() => {
-        this.batchTimer = null
-        this.flush()
-      }, coalesce.windowMs)
-    }
+    if (this.batchTimer === null) this.armBatchTimer(coalesce)
+  }
+
+  /** Opens a window: output until it ends is batched. One that ends with output pending sends it and opens the next. */
+  private armBatchTimer(coalesce: CoalesceOptions): void {
+    this.batchTimer = this.timers.setTimeout(() => {
+      this.batchTimer = null
+      if (this.batches.size === 0) return
+      this.flush()
+      this.armBatchTimer(coalesce)
+    }, coalesce.windowMs)
   }
 
   // ---- streams -----------------------------------------------------------------------

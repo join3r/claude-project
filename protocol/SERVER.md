@@ -204,7 +204,7 @@ The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phon
 
 ## 8. Terminal output
 
-- The server batches `pty-data` per window and tab for up to 16 ms, at most 16384 characters per message (48 KiB of UTF-8, one Noise message). It never splits a surrogate pair.
+- The server batches `pty-data` per window and tab for up to 16 ms (output after a quiet 16 ms goes at once, then opens the window), at most 16384 characters per message (48 KiB of UTF-8, one Noise message). It never splits a surrogate pair.
 - Any other message to the same desktop flushes every batch first, the result of a call included. So `pty-exit` arrives after the output before it, and a reattach's result comes before the output that followed the snapshot.
 - Backpressure: when a `pty-data` event goes to a desktop whose relay socket has more than 512 KiB queued, the server holds that tab's output back. node-pty stops reading the PTY, so the program blocks on its writes. Once the socket is under 128 KiB, every tab that desktop held is released. A tab stays paused while any desktop holds it, and a desktop's holds go away with its session. No output is ever dropped while the session lasts. After a reconnect, `pty-spawn` on the running tab returns its scrollback.
 

@@ -153,15 +153,19 @@ describe('host link session (loopback)', () => {
     const events: IncomingEvent[] = []
     let release!: (value: unknown) => void
     const { server, desktop, wire } = loopback({ timers, onEvent: (e) => events.push(e), onCall: () => new Promise((resolve) => { release = resolve }) })
+    // The first output after a quiet spell goes at once; what follows in its window is batched.
+    server.sendEvent('win:1', 'pty-data', ['tab-a', 'first'])
+    expect(wire.sent.server).toHaveLength(1)
     for (let i = 0; i < 100; i++) server.sendEvent('win:1', 'pty-data', ['tab-a', `${i},`])
     server.sendEvent('win:2', 'pty-data', ['tab-a', 'other window'])
     server.sendEvent('win:1', 'pty-data', ['tab-b', 'other tab'])
-    expect(wire.sent.server).toHaveLength(0)
+    expect(wire.sent.server).toHaveLength(1)
     expect(timers.pending).toBe(1)
     timers.fire()
     await tick()
-    expect(events.map((e) => [e.client, e.args[0]])).toEqual([['win:1', 'tab-a'], ['win:2', 'tab-a'], ['win:1', 'tab-b']])
-    expect(events[0].args[1]).toBe(Array.from({ length: 100 }, (_, i) => `${i},`).join(''))
+    expect(events.map((e) => [e.client, e.args[0]])).toEqual([['win:1', 'tab-a'], ['win:1', 'tab-a'], ['win:2', 'tab-a'], ['win:1', 'tab-b']])
+    expect(events[0].args[1]).toBe('first')
+    expect(events[1].args[1]).toBe(Array.from({ length: 100 }, (_, i) => `${i},`).join(''))
 
     // pty-exit flushes the output before it, without waiting for the timer.
     events.length = 0
@@ -179,6 +183,31 @@ describe('host link session (loopback)', () => {
     release({ scrollback: '' })
     await result
     expect(events.map((e) => e.args[1])).toEqual(['before the result'])
+  })
+
+  it('sends a lone echo at once, and keeps batching while output keeps coming', async () => {
+    const timers = new ManualTimers()
+    const events: IncomingEvent[] = []
+    const { server, wire } = loopback({ timers, onEvent: (e) => events.push(e) })
+    server.sendEvent('win:1', 'pty-data', ['tab', 'a'])
+    expect(wire.sent.server).toHaveLength(1)
+
+    // Output in the window waits for its end, and the window after it is batched too.
+    server.sendEvent('win:1', 'pty-data', ['tab', 'b'])
+    timers.fire()
+    expect(wire.sent.server).toHaveLength(2)
+    server.sendEvent('win:1', 'pty-data', ['tab', 'c'])
+    expect(wire.sent.server).toHaveLength(2)
+    timers.fire()
+    expect(wire.sent.server).toHaveLength(3)
+
+    // A window that ends empty closes, so the next echo goes at once again.
+    timers.fire()
+    expect(timers.pending).toBe(0)
+    server.sendEvent('win:1', 'pty-data', ['tab', 'd'])
+    expect(wire.sent.server).toHaveLength(4)
+    await tick()
+    expect(events.map((e) => e.args[1])).toEqual(['a', 'b', 'c', 'd'])
   })
 
   it('splits a large batch into messages that fit one Noise message, without breaking characters', async () => {
