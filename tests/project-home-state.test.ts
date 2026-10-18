@@ -28,8 +28,8 @@ describe('streamTone', () => {
   it('is quiet for an empty stream or one whose finished tasks are put away', () => {
     expect(streamTone(stream('s', []), {}, {}, NOW)).toBe('quiet')
     const snoozed = fixtureTask({ id: 'z', tabs: { left: [tab('z1', 'claude')] }, inbox: { eventAt: NOW - 1000, snoozedUntil: NOW + 60_000 } })
-    const settled = fixtureTask({ id: 'y', tabs: { left: [tab('y1', 'claude')] }, inbox: { eventAt: NOW - 5000, settledAt: NOW - 1000 } })
-    expect(streamTone(stream('s', [snoozed, settled]), {}, {}, NOW)).toBe('quiet')
+    const untilAttention = fixtureTask({ id: 'y', tabs: { left: [tab('y1', 'claude')] }, inbox: { eventAt: NOW - 5000, snoozedAt: NOW - 1000, snoozeUntilAttention: true } })
+    expect(streamTone(stream('s', [snoozed, untilAttention]), {}, {}, NOW)).toBe('quiet')
   })
 })
 

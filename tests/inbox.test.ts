@@ -3,7 +3,6 @@ import {
   formatWaitTime,
   groupInboxByProject,
   inboxSources,
-  isSettled,
   isSnoozed,
   isUnread,
   isYourTurn,
@@ -54,20 +53,6 @@ describe('isUnread', () => {
 
   it('honours a manual mark-unread even with no newer event', () => {
     expect(isUnread(makeTask('t', { visitedAt: NOW, eventAt: NOW - 5000, forcedUnread: true }))).toBe(true)
-  })
-})
-
-describe('isSettled', () => {
-  it('is true right after settling', () => {
-    expect(isSettled(makeTask('t', { settledAt: NOW }))).toBe(true)
-  })
-
-  it('auto-unsettles when a later event arrives — settle is not a mute', () => {
-    expect(isSettled(makeTask('t', { settledAt: NOW - 60_000, eventAt: NOW }))).toBe(false)
-  })
-
-  it('stays settled when the only event predates the settle', () => {
-    expect(isSettled(makeTask('t', { settledAt: NOW, eventAt: NOW - 60_000 }))).toBe(true)
   })
 })
 
@@ -207,10 +192,9 @@ describe('partitionInbox', () => {
   const blockedShort = makeTask('blocked-short', undefined, { aiTabIds: ['bs'] })
   const recent = makeTask('recent', { eventAt: NOW - 1000 })
   const older = makeTask('older', { eventAt: NOW - 60_000 })
-  const settledTask = makeTask('settled', { settledAt: NOW - 1000 })
   const snoozedTask = makeTask('snoozed', { snoozedAt: NOW, snoozedUntil: NOW + 60_000 })
 
-  const project = makeProject('p', [blockedLong, blockedShort, recent, older, settledTask, snoozedTask])
+  const project = makeProject('p', [blockedLong, blockedShort, recent, older, snoozedTask])
   const stream = project.streams[0]
   const entries = inboxSources([project])
   const statuses: Record<string, TabStatusValue> = { bl: 'attention', bs: 'attention' }
@@ -221,7 +205,6 @@ describe('partitionInbox', () => {
     expect(result.needsYou.map(e => e.task.id)).toEqual(['blocked-long', 'blocked-short'])
     expect(result.ready.map(e => e.task.id)).toEqual(['recent', 'older'])
     expect(result.working).toEqual([])
-    expect(result.settled.map(e => e.task.id)).toEqual(['settled'])
     expect(result.snoozed.map(e => e.task.id)).toEqual(['snoozed'])
   })
 
@@ -252,17 +235,16 @@ describe('partitionInbox', () => {
     expect(result.snoozed.map(e => e.task.id)).toEqual(['snoozed-quiet'])
   })
 
-  it('flags your-turn rows, but never settled or snoozed ones', () => {
-    const settledAfterStop = makeTask('settled-stop', { eventAt: NOW - 5000, settledAt: NOW })
+  it('flags your-turn rows, but never snoozed ones', () => {
+    const snoozedAfterStop = makeTask('snoozed-stop', { eventAt: NOW - 5000, snoozedAt: NOW, snoozedUntil: NOW + 60_000 })
     const result = partitionInbox(
-      [...entries, { task: settledAfterStop, project, stream }],
+      [...entries, { task: snoozedAfterStop, project, stream }],
       statuses,
       since,
       NOW
     )
     expect(result.needsYou.every(e => e.yourTurn)).toBe(true)
     expect(result.ready.find(e => e.task.id === 'recent')?.yourTurn).toBe(true)
-    expect(result.settled.every(e => !e.yourTurn)).toBe(true)
     expect(result.snoozed.every(e => !e.yourTurn)).toBe(true)
   })
 
@@ -300,17 +282,15 @@ describe('partitionInbox', () => {
     expect(result.working.map(e => e.task.id)).toEqual(['late', 'early'])
   })
 
-  it('puts a working task you settled or snoozed under Working', () => {
-    const settled = makeTask('settled-busy', { eventAt: NOW - 5000, settledAt: NOW }, { aiTabIds: ['w1'] })
+  it('puts a working task you snoozed under Working', () => {
     const snoozed = makeTask('snoozed-busy', { snoozedAt: NOW, snoozedUntil: NOW + 60_000 }, { aiTabIds: ['w2'] })
     const result = partitionInbox(
-      [{ task: settled, project, stream }, { task: snoozed, project, stream }],
-      { w1: 'working', w2: 'working' },
+      [{ task: snoozed, project, stream }],
+      { w2: 'working' },
       {},
       NOW
     )
-    expect(result.working.map(e => e.task.id).sort()).toEqual(['settled-busy', 'snoozed-busy'])
-    expect(result.settled).toEqual([])
+    expect(result.working.map(e => e.task.id)).toEqual(['snoozed-busy'])
     expect(result.snoozed).toEqual([])
   })
 })

@@ -5,7 +5,7 @@ import type { Tab, Task, TabStatusValue, TaskInboxState, TaskLanding } from './t
 /**
  * The triage predicates the inbox is built on. They live in shared rather than
  * next to the inbox UI because main builds the phone's inbox and has to answer
- * "is this unread / snoozed / settled / busy?" exactly the way the window does —
+ * "is this unread / snoozed / busy?" exactly the way the window does —
  * a second implementation would be a silent blind spot the moment the two drift.
  *
  * `src/renderer/components/inbox.ts` re-exports every one of these.
@@ -29,19 +29,7 @@ export function isUnread(task: Task): boolean {
 }
 
 /**
- * Settled means "done for now", not "muted": any event that lands after the settle
- * un-settles the task so a live agent can never be buried by accident.
- */
-export function isSettled(task: Task): boolean {
-  const inbox = inboxState(task)
-  if (typeof inbox.settledAt !== 'number') return false
-  if (typeof inbox.eventAt === 'number' && inbox.eventAt > inbox.settledAt) return false
-  return true
-}
-
-/**
- * Snooze is the verb that survives plain events — otherwise it would be
- * indistinguishable from settle. An attention event (a question or permission
+ * Snooze survives plain events. An attention event (a question or permission
  * prompt) wakes any snooze, timed or "until it needs me"; a plain "agent
  * finished" does not.
  */
@@ -128,7 +116,7 @@ export function landingStatusLabel(landing: TaskLanding | undefined, streamName:
  * The ball is in your court: the agent is not running, and the last thing that
  * happened in the task was the agent (a Stop, a question, a bell, an exit) rather
  * than you. Unlike unread this survives a visit — looking at the reply is not
- * answering it. Typing into the task (or settling/snoozing it) hands it back.
+ * answering it. Typing into the task (or snoozing it) hands it back.
  * A stopped landing (`landingNeedsYou`) is your turn too, even while a tab
  * works: nothing lands until you retry or abort it.
  */

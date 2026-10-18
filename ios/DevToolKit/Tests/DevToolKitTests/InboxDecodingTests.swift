@@ -58,7 +58,8 @@ import Testing
         }
         """)
         let tasks = try #require(inbox.projects.first?.tasks)
-        #expect(tasks[0].eventAt == 5 && tasks[0].unread && tasks[0].settledAt == 7)
+        // An older desktop's `settledAt` (Done for now) is ignored.
+        #expect(tasks[0].eventAt == 5 && tasks[0].unread)
         #expect(tasks[1].snoozedUntil == 9 && !tasks[1].unread && !tasks[1].snoozeUntilAttention)
         #expect(!tasks[2].unread && tasks[2].snoozeUntilAttention)
     }

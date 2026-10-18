@@ -20,7 +20,7 @@ final class AppModel {
     var requestedChat: ChatRoute?
     /// A failed Pin / Unpin (§8.10); `RootView` shows it and clears it.
     var pinError: String?
-    /// A failed Settle, Snooze or Mark unread (§8.11); `RootView` shows it and clears it.
+    /// A failed Snooze or Mark read/unread (§8.11); `RootView` shows it and clears it.
     var triageError: String?
     /// A failed queue change or Run now (§8.16); `RootView` shows it and clears it.
     var queueError: String?

@@ -85,7 +85,6 @@ export interface TaskInboxState {
   eventAt?: number
   /** Question / permission / bell specifically — a subset of eventAt. */
   attentionAt?: number
-  settledAt?: number
   snoozedAt?: number
   /** Epoch ms wake time. Absent when snoozeUntilAttention is set. */
   snoozedUntil?: number

@@ -453,11 +453,29 @@ public actor MockDesktopConnection: DesktopConnection {
         for p in inbox.projects.indices {
             guard let t = inbox.projects[p].tasks.firstIndex(where: { $0.id == params.taskId }) else { continue }
             let task = inbox.projects[p].tasks[t]
-            if task.status == .working, !params.stopWorking {
+            let mode = task.branch == nil ? nil : params.mode
+            // The desktop's close question (§8.7), worded as its dialog words it.
+            if task.branch != nil, mode == nil, params.ask {
+                let stream = task.streamName
+                if task.landing?.state == .conflict || task.landing?.state == .fixing {
+                    let files = task.landing?.files.count ?? 0
+                    return .question(TaskCloseQuestion(
+                        message: "Landing into \(stream) stopped on conflicts in \(files) file\(files == 1 ? "" : "s"). Resolve them in the task to land it, or close it without landing.",
+                        landBlocked: "Resolve the conflicts first"))
+                }
+                if task.status == .working {
+                    return .question(TaskCloseQuestion(
+                        message: "“\(task.name)” is still working. Let it finish to land its work into \(stream), or close it without landing: its agent stops and its tabs close.",
+                        landBlocked: "Its agent is working"))
+                }
+                return .question(TaskCloseQuestion(message: "Squash 2 commits and uncommitted changes in 1 file into \(stream)."))
+            }
+            let withoutLanding = mode == .keep || mode == .discard
+            if task.status == .working, !params.stopWorking, !withoutLanding {
                 return .blocked(.working)
             }
             // A task with its own worktree lands first (§8.7); the demo's stops.
-            if task.branch != nil, task.landing != nil || conflicting.contains(task.id) {
+            if task.branch != nil, !withoutLanding, task.landing != nil || conflicting.contains(task.id) {
                 let landing = task.landing?.state == .blocked ? task.landing! : Self.conflict
                 setLanding(landing, taskId: task.id)
                 return .landing(landing)
@@ -837,7 +855,7 @@ public actor MockDesktopConnection: DesktopConnection {
         continuation.yield(.hostKind(hostKind))
         continuation.yield(.features([
             DesktopFeature.taskNew, DesktopFeature.chatSettings,
-            DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+            DesktopFeature.taskClose, DesktopFeature.taskCloseChoice, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
@@ -877,11 +895,10 @@ public actor MockDesktopConnection: DesktopConnection {
         case .working:
             tab.status = .attention
             tab.activity = "Wants to run npm test"
-            // An attention event, as the desktop records it: unread, un-settled,
-            // and an "until it needs me" snooze wakes.
+            // An attention event, as the desktop records it: unread, and an
+            // "until it needs me" snooze wakes.
             task.eventAt = now
             task.unread = true
-            task.settledAt = nil
             task.snoozeUntilAttention = false
         case .attention:
             tab.status = .working
@@ -960,11 +977,11 @@ public enum MockInbox {
         let web240 = InboxStream(id: "s-web-240", name: "2.4.0", branch: "2.4.0")
         let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
         func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
-                  eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil, snoozedUntil: Int64? = nil,
+                  eventAt: Int64? = nil, unread: Bool = false, snoozedUntil: Int64? = nil,
                   branch: String? = nil, landing: TaskLanding? = nil, tabs: [InboxTab]) -> InboxTask {
             var task = InboxTask(id: id, name: name, streamId: stream.id, streamName: stream.name,
                                  lastInteractedAt: lastInteractedAt, attentionAt: attentionAt, eventAt: eventAt, unread: unread,
-                                 settledAt: settledAt, snoozedUntil: snoozedUntil, branch: branch, landing: landing, tabs: tabs)
+                                 snoozedUntil: snoozedUntil, branch: branch, landing: landing, tabs: tabs)
             task.status = MockDesktopConnection.status(of: task)
             let statusTab = MockDesktopConnection.statusTabs(of: task).first { $0.status == task.status }
             task.since = statusTab?.since
@@ -977,7 +994,7 @@ public enum MockInbox {
             generatedAt: t,
             projects: [
                 InboxProject(id: "p-api", name: "api-server", emoji: "🚀", streams: [apiMain, api050, apiBugs], lastStreamId: api050.id, tasks: [
-                    task("t-docs", "openapi-docs", apiMain, lastInteractedAt: ago(180), eventAt: ago(170), settledAt: ago(160), tabs: [
+                    task("t-docs", "openapi-docs", apiMain, lastInteractedAt: ago(180), eventAt: ago(170), tabs: [
                         InboxTab(id: "tab-5", type: .terminal, title: "npm run docs", status: .exited, since: ago(170)),
                     ]),
                     // Task worktrees (§4.4): closing fix-auth stops on a conflict; cache-headers'

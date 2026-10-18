@@ -75,7 +75,7 @@ import Testing
         func task(_ state: TaskLanding.State, status: TabStatus = .working, snoozed: Bool = false) -> InboxTask {
             InboxTask(id: "t", name: "t", status: status, snoozeUntilAttention: snoozed, landing: TaskLanding(state: state), tabs: [working])
         }
-        // As the desktop's `partitionInbox`: ahead of working, snooze and settle; behind attention.
+        // As the desktop's `partitionInbox`: ahead of working and snooze; behind attention.
         #expect(task(.conflict).inboxGroup(now: now) == .yourTurn)
         #expect(task(.blocked, snoozed: true).inboxGroup(now: now) == .yourTurn)
         #expect(task(.conflict, status: .attention).inboxGroup(now: now) == .needsYou)

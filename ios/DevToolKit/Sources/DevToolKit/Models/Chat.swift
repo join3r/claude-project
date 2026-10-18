@@ -444,16 +444,33 @@ public struct TaskNewParams: Sendable, Equatable {
 /// `task.close` (§8.7) params: archive the task. Each flag accepts what a
 /// blocker reported.
 public struct TaskCloseParams: Sendable, Equatable {
+    /// How a task with a worktree of its own closes (`task.close.choice`).
+    public enum Mode: String, Sendable, Equatable, CaseIterable {
+        /// Land & close: into its stream, as one commit.
+        case land
+        /// Keep branch: close without landing, its branch kept.
+        case keep
+        /// Discard: close without landing, its branch and uncommitted work deleted.
+        case discard
+    }
+
     public var taskId: String
     /// Close even though its agent is working (`.working`).
     public var stopWorking: Bool
     /// Close even though an editor has unsaved changes (`.unsaved`).
     public var discardUnsaved: Bool
+    /// Answer with the desktop's close question (`.question`) rather than
+    /// landing straight away (`task.close.choice`).
+    public var ask: Bool
+    /// The answer to that question.
+    public var mode: Mode?
 
-    public init(taskId: String, stopWorking: Bool = false, discardUnsaved: Bool = false) {
+    public init(taskId: String, stopWorking: Bool = false, discardUnsaved: Bool = false, ask: Bool = false, mode: Mode? = nil) {
         self.taskId = taskId
         self.stopWorking = stopWorking
         self.discardUnsaved = discardUnsaved
+        self.ask = ask
+        self.mode = mode
     }
 }
 
@@ -474,8 +491,6 @@ public struct TaskTriageParams: Sendable, Equatable {
     public enum Action: Sendable, Equatable {
         case read
         case unread
-        case settle
-        case unsettle
         /// Until a Unix-ms time.
         case snooze(until: Int64)
         /// Until a tab next needs the user.
@@ -486,8 +501,6 @@ public struct TaskTriageParams: Sendable, Equatable {
             switch self {
             case .read: "read"
             case .unread: "unread"
-            case .settle: "settle"
-            case .unsettle: "unsettle"
             case .snooze, .snoozeUntilAttention: "snooze"
             case .unsnooze: "unsnooze"
             }
@@ -627,6 +640,22 @@ public enum TaskCloseResult: Sendable, Equatable {
     /// A task with a worktree of its own didn't land (version 3): it stays
     /// open with this landing, and `task.land` offers what to do.
     case landing(TaskLanding)
+    /// The desktop's close question for a task with a worktree of its own
+    /// (`ask`): resend with a `mode`.
+    case question(TaskCloseQuestion)
+}
+
+/// What the desktop's close dialog says for a task with a worktree of its own (§8.7).
+public struct TaskCloseQuestion: Sendable, Equatable {
+    /// What landing would take, or why the task can't land now.
+    public var message: String
+    /// Why Land & close can't run now; nil when it can.
+    public var landBlocked: String?
+
+    public init(message: String, landBlocked: String? = nil) {
+        self.message = message
+        self.landBlocked = landBlocked
+    }
 }
 
 /// `task.new` result: the new task and its claude-chat tab, already sent the prompt.
@@ -699,7 +728,7 @@ public enum TaskOp {
     public static let closeTab = "tab.close"
     /// `pin.set` (§8.10): pin or unpin a project or task.
     public static let setPin = "pin.set"
-    /// `task.triage` (§8.11): read, unread, settle, snooze and their undo.
+    /// `task.triage` (§8.11): read, unread, snooze and unsnooze.
     public static let triage = "task.triage"
     /// `stream.new` (§8.12): a stream on a new worktree or in the project folder.
     public static let newStream = "stream.new"
@@ -1152,16 +1181,24 @@ extension TaskNewParams {
 }
 
 extension TaskCloseParams {
-    /// The desktop's side: a missing `taskId` throws (`bad-request`).
+    /// The desktop's side: a missing `taskId` or an unknown `mode` throws (`bad-request`).
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> TaskCloseParams {
         let o = try Fields(value, "params")
-        return TaskCloseParams(taskId: try o.str("taskId"), stopWorking: o.flag("stopWorking"), discardUnsaved: o.flag("discardUnsaved"))
+        var mode: Mode?
+        if let raw = try o.optStr("mode") {
+            guard let known = Mode(rawValue: raw) else { throw ProtocolError("unknown mode \(raw)") }
+            mode = known
+        }
+        return TaskCloseParams(taskId: try o.str("taskId"), stopWorking: o.flag("stopWorking"), discardUnsaved: o.flag("discardUnsaved"),
+                               ask: o.flag("ask"), mode: mode)
     }
 
     public var json: JSONValue {
         var fields: JSONObject = ["taskId": .string(taskId)]
         if stopWorking { fields["stopWorking"] = .bool(true) }
         if discardUnsaved { fields["discardUnsaved"] = .bool(true) }
+        if ask { fields["ask"] = .bool(true) }
+        if let mode { fields["mode"] = .string(mode.rawValue) }
         return .object(fields)
     }
 }
@@ -1195,8 +1232,6 @@ extension TaskTriageParams {
         switch name {
         case "read": action = .read
         case "unread": action = .unread
-        case "settle": action = .settle
-        case "unsettle": action = .unsettle
         case "unsnooze": action = .unsnooze
         case "snooze":
             let until = try o.optInt("until")
@@ -1356,6 +1391,10 @@ extension TaskCloseResult {
         let o = try Fields(value, "result")
         if try o.bool("closed") { return .closed }
         if !o.isUnset("landing") { return .landing(try TaskLanding.parse(o["landing"])) }
+        if !o.isUnset("question") {
+            let q = try Fields(o["question"], "question")
+            return .question(TaskCloseQuestion(message: try q.str("message"), landBlocked: try q.optStr("landBlocked")))
+        }
         let raw = try o.str("blocker")
         guard let blocker = TaskCloseBlocker(rawValue: raw) else { throw ProtocolError("unknown blocker \(raw)") }
         return .blocked(blocker)
@@ -1369,6 +1408,10 @@ extension TaskCloseResult {
             return .object(["closed": .bool(false), "blocker": .string(blocker.rawValue)])
         case .landing(let landing):
             return .object(["closed": .bool(false), "landing": landing.json])
+        case .question(let question):
+            var q: JSONObject = ["message": .string(question.message)]
+            if let landBlocked = question.landBlocked { q["landBlocked"] = .string(landBlocked) }
+            return .object(["closed": .bool(false), "question": .object(q)])
         }
     }
 }

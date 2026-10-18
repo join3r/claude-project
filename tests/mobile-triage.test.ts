@@ -35,15 +35,8 @@ describe('triageTaskInData (SPEC.md §8.11)', () => {
     expect(inboxOf(cleared)).toEqual({ visitedAt: NOW })
   })
 
-  it('settles and unsettles', () => {
-    const settled = triageTaskInData(data({ eventAt: 10, snoozedAt: 1, snoozedUntil: NOW + 1 }), { taskId: 't1', action: 'settle' }, NOW)
-    expect(inboxOf(settled)).toEqual({ eventAt: 10, settledAt: NOW, visitedAt: NOW })
-    const unsettled = triageTaskInData(data({ eventAt: 10, settledAt: 20 }), { taskId: 't1', action: 'unsettle' }, NOW)
-    expect(inboxOf(unsettled)).toEqual({ eventAt: 10 })
-  })
-
   it('snoozes until a time or until attention, and unsnoozes', () => {
-    const timed = triageTaskInData(data({ settledAt: 5 }), { taskId: 't1', action: 'snooze', until: NOW + 3_600_000 }, NOW)
+    const timed = triageTaskInData(data({ forcedUnread: true }), { taskId: 't1', action: 'snooze', until: NOW + 3_600_000 }, NOW)
     expect(inboxOf(timed)).toEqual({ snoozedAt: NOW, visitedAt: NOW, snoozedUntil: NOW + 3_600_000 })
     const attention = triageTaskInData(data({ snoozedUntil: NOW + 5 }), { taskId: 't1', action: 'snooze', untilAttention: true }, NOW)
     expect(inboxOf(attention)).toEqual({ snoozedAt: NOW, visitedAt: NOW, snoozeUntilAttention: true })
@@ -55,7 +48,6 @@ describe('triageTaskInData (SPEC.md §8.11)', () => {
     for (const [inbox, action] of [
       [{ eventAt: 10, visitedAt: 20 }, 'read'],
       [{ eventAt: 10, visitedAt: 5 }, 'unread'],
-      [{ eventAt: 40, settledAt: 30 }, 'unsettle'],
       [{ snoozedAt: 1, snoozedUntil: NOW - 1 }, 'unsnooze'],
       [undefined, 'read']
     ] as const) {
@@ -66,7 +58,7 @@ describe('triageTaskInData (SPEC.md §8.11)', () => {
 
   it('touches only the task it names', () => {
     const start = data({ eventAt: 10 })
-    const result = triageTaskInData(start, { taskId: 't1', action: 'settle' }, NOW)
+    const result = triageTaskInData(start, { taskId: 't1', action: 'snooze', untilAttention: true }, NOW)
     if (!result.ok) throw new Error(result.code)
     expect(findTaskInProject(result.data.projects[0], 't2')).toBe(findTaskInProject(start.projects[0], 't2'))
     expect(result.data.projects[1]).toBe(start.projects[1])
@@ -75,6 +67,6 @@ describe('triageTaskInData (SPEC.md §8.11)', () => {
   it('answers not-found for what the phone cannot see', () => {
     const start = data()
     expect(triageTaskInData(start, { taskId: 'nope', action: 'read' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
-    expect(triageTaskInData(start, { taskId: 'h1', action: 'settle' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
+    expect(triageTaskInData(start, { taskId: 'h1', action: 'unread' }, NOW)).toMatchObject({ ok: false, code: 'not-found' })
   })
 })

@@ -16,8 +16,6 @@ public struct InboxEntry: Sendable, Equatable, Identifiable {
 }
 
 /// Which of the desktop inbox's groups a task is in (its `partitionInbox`).
-/// A snooze wins over a settle, and both win over the live split, so a task
-/// put away stays put away while its agent runs.
 public enum InboxGroup: Sendable, Equatable, CaseIterable {
     /// Blocked on you: a question, a permission prompt, a terminal bell.
     case needsYou
@@ -27,16 +25,10 @@ public enum InboxGroup: Sendable, Equatable, CaseIterable {
     case working
     /// Nothing pending either way: you had the last word, or nothing has happened yet.
     case quiet
-    case settled
     case snoozed
 
-    /// Still in the inbox: neither settled nor snoozed.
-    public var isOpen: Bool {
-        switch self {
-        case .needsYou, .yourTurn, .working, .quiet: true
-        case .settled, .snoozed: false
-        }
-    }
+    /// Still in the inbox: not snoozed.
+    public var isOpen: Bool { self != .snoozed }
 }
 
 extension InboxTask {
@@ -51,14 +43,13 @@ extension InboxTask {
         return eventAt > (lastInteractedAt ?? 0)
     }
 
-    /// A live agent wins over snooze and settle, as on the desktop.
+    /// A live agent wins over snooze, as on the desktop.
     public func inboxGroup(now: Date) -> InboxGroup {
         if status == .attention { return .needsYou }
-        // As the desktop's `partitionInbox`: ahead of working, snooze and settle.
+        // As the desktop's `partitionInbox`: ahead of working and snooze.
         if landing?.needsYou == true { return .yourTurn }
         if status == .working { return .working }
         if isSnoozed(now: now) { return .snoozed }
-        if settledAt != nil { return .settled }
         return isYourTurn ? .yourTurn : .quiet
     }
 }
@@ -72,8 +63,6 @@ public struct InboxPartition: Sendable, Equatable {
     public var ready: [InboxEntry] = []
     /// Most recent activity first; shown folded.
     public var working: [InboxEntry] = []
-    /// Newest settle first.
-    public var settled: [InboxEntry] = []
     /// Soonest wake first; "until it needs me" last.
     public var snoozed: [InboxEntry] = []
 
@@ -104,15 +93,14 @@ public struct InboxPartition: Sendable, Equatable {
         ready = sorted(.yourTurn, by: \.lastActivityAt, descending: true)
             + sorted(.quiet, by: \.lastActivityAt, descending: true)
         working = sorted(.working, by: \.lastActivityAt, descending: true)
-        settled = sorted(.settled, by: { $0.settledAt ?? 0 }, descending: true)
         snoozed = sorted(.snoozed, by: { $0.snoozeUntilAttention ? Int64.max : ($0.snoozedUntil ?? Int64.max) }, descending: false)
     }
 
     public var isEmpty: Bool {
-        needsYou.isEmpty && ready.isEmpty && working.isEmpty && settled.isEmpty && snoozed.isEmpty
+        needsYou.isEmpty && ready.isEmpty && working.isEmpty && snoozed.isEmpty
     }
 
-    /// The Inbox badge, as the desktop's: unread tasks that are neither snoozed nor settled.
+    /// The Inbox badge, as the desktop's: unread tasks that aren't snoozed.
     public var unreadCount: Int {
         (needsYou + ready + working).filter(\.task.unread).count
     }
@@ -120,7 +108,7 @@ public struct InboxPartition: Sendable, Equatable {
     /// The open, unfolded groups gathered by project for the grouped layout
     /// (the desktop's `groupInboxByProject`): Needs you and Ready.
     /// A project sits where its most urgent task sits in the flat list and
-    /// keeps that order inside. Working, Snoozed and Done for now stay folded rows.
+    /// keeps that order inside. Working and Snoozed stay folded rows.
     public var byProject: [InboxProjectGroup] {
         InboxProjectGroup.group(needsYou + ready)
     }
@@ -174,22 +162,13 @@ extension InboxTask {
             task.unread = false
         case .unread:
             task.unread = true
-        case .settle:
-            task.settledAt = now.unixMilliseconds
-            task.unread = false
-            task.snoozedUntil = nil
-            task.snoozeUntilAttention = false
-        case .unsettle:
-            task.settledAt = nil
         case .snooze(let until):
             task.snoozedUntil = until
             task.snoozeUntilAttention = false
-            task.settledAt = nil
             task.unread = false
         case .snoozeUntilAttention:
             task.snoozeUntilAttention = true
             task.snoozedUntil = nil
-            task.settledAt = nil
             task.unread = false
         case .unsnooze:
             task.snoozedUntil = nil

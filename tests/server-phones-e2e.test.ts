@@ -252,8 +252,10 @@ describe.skipIf(process.platform === 'win32')('phones on a DevTool server (real 
     expect(await call('pin.set', { projectId: 'p1', taskId: 't2', pinned: true })).toMatchObject({ ok: true })
     expect(s.server.host.getProjectsData().pinnedItems).toEqual([{ type: 'task', projectId: 'p1', streamId: 'main-p1', taskId: 't2' }])
     await waitFor(() => latest().pinned?.some((p) => p.taskId === 't2') === true, 'pin in the inbox', 5000)
-    expect(await call('task.triage', { taskId: 't2', action: 'settle' })).toMatchObject({ ok: true })
-    await waitFor(() => latest().projects[0].tasks.find((t) => t.id === 't2')?.settledAt !== undefined, 'settled in the inbox', 5000)
+    expect(await call('task.triage', { taskId: 't2', action: 'snooze', untilAttention: true })).toMatchObject({ ok: true })
+    await waitFor(() => latest().projects[0].tasks.find((t) => t.id === 't2')?.snoozeUntilAttention === true, 'snoozed in the inbox', 5000)
+    // Done for now is gone: closing a task replaced it.
+    expect(await call('task.triage', { taskId: 't2', action: 'settle' })).toMatchObject({ ok: false, error: { code: 'bad-request' } })
 
     // Close a tab, then a task (it goes to the server's archive).
     expect(await call('tab.close', { tabId: 'tab-term' })).toMatchObject({ ok: true })

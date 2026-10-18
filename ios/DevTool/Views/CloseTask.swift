@@ -10,25 +10,33 @@ struct CloseTaskRequest: Identifiable, Equatable {
     let streamName: String
     /// The task's own worktree branch: closing lands it into the stream (§8.7).
     let branch: String?
+    /// Remove task (the desktop Inbox's ✕): a task with a worktree of its own
+    /// closes without landing, its branch and uncommitted work deleted.
+    let remove: Bool
 
     var id: String { "\(desktopId)/\(taskId)" }
 
-    init(desktopId: String, task: InboxTask) {
+    init(desktopId: String, task: InboxTask, remove: Bool = false) {
         self.desktopId = desktopId
         self.taskId = task.id
         self.name = task.name
         self.streamName = task.streamName
         self.branch = task.branch
+        self.remove = remove
     }
 }
 
 extension View {
-    /// "Close task" (§8.3, §8.7): confirm, send `task.close`, which archives
-    /// the task, and turn each blocker the desktop reports into a second
-    /// confirmation that resends with the matching flag. `onClosed` runs once
-    /// the task is archived. A task with its own worktree lands first; when
-    /// the landing stops it stays open, and `onLanding` gets its state (a
-    /// screen showing the task's banner), or, without it, an alert says why.
+    /// "Close task" (§8.3, §8.7): send `task.close`, which archives the task,
+    /// asking what the desktop asks. For a desktop that lists
+    /// `task.close.choice` that is nothing for a quiet task, the working
+    /// blocker for a busy one, and for a task with its own worktree the
+    /// desktop's close question: Land & close, Keep branch or Discard. An
+    /// older desktop gets a confirmation first, then lands. Each blocker
+    /// becomes a confirmation that resends with the matching flag. `onClosed`
+    /// runs once the task is archived. When a landing stops the task stays
+    /// open, and `onLanding` gets its state (a screen showing the task's
+    /// banner), or, without it, an alert says why.
     func closeTaskFlow(
         _ request: Binding<CloseTaskRequest?>,
         onClosed: @escaping (CloseTaskRequest) -> Void = { _ in },
@@ -48,6 +56,7 @@ private struct CloseTaskFlow: ViewModifier {
     @State private var active: CloseTaskRequest?
     @State private var params = TaskCloseParams(taskId: "")
     @State private var blocked: TaskCloseBlocker?
+    @State private var question: TaskCloseQuestion?
     @State private var notice: Notice?
     @State private var running = false
 
@@ -59,23 +68,55 @@ private struct CloseTaskFlow: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .onChange(of: request) { _, target in
+                // What the desktop closes without a word goes straight out.
+                guard let target, !needsConfirmation(target) else { return }
+                request = nil
+                start(target, TaskCloseParams(taskId: target.taskId, ask: true))
+            }
             .confirmationDialog(
-                request.map { "Close “\($0.name)”?" } ?? "",
-                isPresented: Binding(get: { request != nil }, set: { if !$0 { request = nil } }),
+                request.map { $0.remove ? "Remove “\($0.name)”?" : "Close “\($0.name)”?" } ?? "",
+                isPresented: Binding(get: { request.map(needsConfirmation) ?? false }, set: { if !$0 { request = nil } }),
                 titleVisibility: .visible,
                 presenting: request
             ) { target in
-                Button("Close task", role: .destructive) {
-                    start(target)
+                if target.remove {
+                    Button("Remove task", role: .destructive) {
+                        start(target, TaskCloseParams(taskId: target.taskId, stopWorking: true, discardUnsaved: true, mode: .discard))
+                    }
+                } else {
+                    Button("Close task", role: .destructive) {
+                        start(target, TaskCloseParams(taskId: target.taskId))
+                    }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { target in
-                let done = target.streamName.isEmpty ? "Done" : "Done in \(target.streamName)"
-                if let branch = target.branch, !target.streamName.isEmpty {
-                    Text("Its work on \(branch) lands in \(target.streamName) as one commit. Then its tabs close and it moves to \(done), where it can be reopened.")
+                if target.remove {
+                    let branch = target.branch.map { " and branch “\($0)”" } ?? ""
+                    Text("Its worktree\(branch) are deleted, uncommitted work with them. Nothing is landed.")
                 } else {
-                    Text("Its tabs close on the desktop and it moves to \(done), where it can be reopened.")
+                    let done = target.streamName.isEmpty ? "Done" : "Done in \(target.streamName)"
+                    if let branch = target.branch, !target.streamName.isEmpty {
+                        Text("Its work on \(branch) lands in \(target.streamName) as one commit. Then its tabs close and it moves to \(done), where it can be reopened.")
+                    } else {
+                        Text("Its tabs close on the desktop and it moves to \(done), where it can be reopened.")
+                    }
                 }
+            }
+            .confirmationDialog(
+                active.map { "Close task “\($0.name)”?" } ?? "",
+                isPresented: Binding(get: { question != nil }, set: { if !$0 { question = nil } }),
+                titleVisibility: .visible,
+                presenting: question
+            ) { question in
+                if question.landBlocked == nil {
+                    Button("Land & close") { answer(.land) }
+                }
+                Button("Keep branch") { answer(.keep) }
+                Button("Discard", role: .destructive) { answer(.discard) }
+                Button("Cancel", role: .cancel) { active = nil }
+            } message: { question in
+                Text(Self.message(question, branch: active?.branch))
             }
             .confirmationDialog(
                 blocked.map(Self.title) ?? "",
@@ -98,9 +139,16 @@ private struct CloseTaskFlow: ViewModifier {
             }
     }
 
-    private func start(_ target: CloseTaskRequest) {
+    /// An older desktop lands without asking, so the phone asks first; Remove
+    /// of a task with its own worktree deletes work, so it always asks.
+    private func needsConfirmation(_ target: CloseTaskRequest) -> Bool {
+        if target.remove && target.branch != nil { return true }
+        return !model.supports(DesktopFeature.taskCloseChoice, on: target.desktopId)
+    }
+
+    private func start(_ target: CloseTaskRequest, _ first: TaskCloseParams) {
         active = target
-        params = TaskCloseParams(taskId: target.taskId)
+        params = first
         send()
     }
 
@@ -116,6 +164,8 @@ private struct CloseTaskFlow: ViewModifier {
                     onClosed(target)
                 case .blocked(let blocker):
                     blocked = blocker
+                case .question(let next):
+                    question = next
                 case .landing(let landing):
                     active = nil
                     if let onLanding {
@@ -133,11 +183,29 @@ private struct CloseTaskFlow: ViewModifier {
         }
     }
 
+    /// The close question's answer. Keep branch and Discard stop a working agent themselves.
+    private func answer(_ mode: TaskCloseParams.Mode) {
+        question = nil
+        params.mode = mode
+        send()
+    }
+
     /// Resend with what the user just agreed to.
     private func resend(_ edit: (inout TaskCloseParams) -> Void) {
         edit(&params)
         blocked = nil
         send()
+    }
+
+    /// The desktop dialog's text, its reason when Land & close is out, and what the other two do.
+    private static func message(_ question: TaskCloseQuestion, branch: String?) -> String {
+        var lines = [question.message]
+        if let landBlocked = question.landBlocked {
+            lines.append("Land & close isn’t available: \(landBlocked.prefix(1).lowercased() + landBlocked.dropFirst()).")
+        }
+        let kept = branch.map { "leaves \($0) in the repository" } ?? "keeps its branch"
+        lines.append("Keep branch commits what is uncommitted and \(kept), without landing it. Discard deletes the branch and the uncommitted work.")
+        return lines.joined(separator: "\n\n")
     }
 
     private static func title(_ blocker: TaskCloseBlocker) -> String {

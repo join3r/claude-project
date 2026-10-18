@@ -23,9 +23,8 @@ import Testing
     }
 
     @Test func activeProjectsNeedYouFirstThenByActivity() {
-        func task(_ id: String, _ status: TabStatus, since: Int64? = nil, last: Int64 = 0, settled: Bool = false) -> InboxTask {
-            InboxTask(id: id, name: id, status: status, since: since, lastInteractedAt: last,
-                      settledAt: settled ? last : nil, tabs: [])
+        func task(_ id: String, _ status: TabStatus, since: Int64? = nil, last: Int64 = 0) -> InboxTask {
+            InboxTask(id: id, name: id, status: status, since: since, lastInteractedAt: last, tabs: [])
         }
         let inbox = Inbox(
             desktop: InboxDesktop(id: "d", name: "d"), generatedAt: nowMs,
@@ -49,9 +48,9 @@ import Testing
         #expect(short.lead.id == "w2")
     }
 
-    @Test func leadPrefersWorkingOverSettled() throws {
+    @Test func leadPrefersWorkingOverSnoozed() throws {
         let project = InboxProject(id: "p", name: "p", tasks: [
-            InboxTask(id: "s", name: "s", status: .idle, lastInteractedAt: nowMs, settledAt: nowMs, tabs: []),
+            InboxTask(id: "s", name: "s", status: .idle, lastInteractedAt: nowMs, snoozeUntilAttention: true, tabs: []),
             InboxTask(id: "w", name: "w", status: .working, lastInteractedAt: nowMs - 100_000, unread: true, tabs: []),
         ])
         let summary = try #require(ProjectSummary(project, now: now))

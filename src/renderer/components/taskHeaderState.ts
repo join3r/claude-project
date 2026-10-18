@@ -1,7 +1,7 @@
 import { AI_TAB_META, CLAUDE_CHAT_LABEL, isAgentTabType } from '../../shared/types'
 import type { AiTabType, Tab, TabStatusValue, Task } from '../../shared/types'
 import { resolveMainTabId, taskTabs } from '../../shared/streams'
-import { formatWaitTime, isSettled, isSnoozed, isYourTurn, taskStatus, taskStatusSince } from './inbox'
+import { formatWaitTime, isSnoozed, isYourTurn, taskStatus, taskStatusSince } from './inbox'
 
 /** The task's agent tab: its main tab when that is an agent, else the first agent tab. */
 export function taskAgentTab(task: Task): Tab | undefined {
@@ -29,8 +29,8 @@ export interface TaskChip {
 /**
  * The header's status chip, in the Inbox's order: Needs you (with how long it has
  * waited), a stopped landing (Conflicts / Blocked), Working (Fixing conflicts
- * while the agent resolves a landing's), a running landing, then Snoozed /
- * Done for now, then Your turn; nothing for a quiet task.
+ * while the agent resolves a landing's), a running landing, then Snoozed,
+ * then Your turn; nothing for a quiet task.
  */
 export function taskStatusChip(
   task: Task,
@@ -50,7 +50,6 @@ export function taskStatusChip(
   if (status === 'working') return { label: 'Working', tone: 'working' }
   if (landing === 'landing') return { label: task.landing?.intent === 'update' ? 'Updating…' : 'Landing…', tone: 'working' }
   if (isSnoozed(task, now)) return { label: 'Snoozed', tone: 'quiet' }
-  if (isSettled(task)) return { label: 'Done for now', tone: 'quiet' }
   if (isYourTurn(task, status)) return { label: 'Your turn', tone: 'turn' }
   return null
 }

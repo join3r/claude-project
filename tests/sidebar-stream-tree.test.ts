@@ -34,11 +34,10 @@ describe('sidebarTaskState', () => {
     expect(sidebarTaskState(terminalTask, { sh: 'attention' }, NOW)).toBe('attention')
   })
 
-  it('is unread when something happened since the last visit, unless settled or snoozed', () => {
+  it('is unread when something happened since the last visit, unless snoozed', () => {
     const unread: Task = { ...task, inbox: { eventAt: NOW - 10, visitedAt: NOW - 20 } }
     expect(sidebarTaskState(unread, {}, NOW)).toBe('unread')
     expect(sidebarTaskState(unread, { agent: 'attention' }, NOW)).toBe('attention')
-    expect(sidebarTaskState({ ...unread, inbox: { ...unread.inbox, settledAt: NOW - 5 } }, {}, NOW)).toBeNull()
     expect(sidebarTaskState({ ...unread, inbox: { ...unread.inbox, snoozedUntil: NOW + 60_000 } }, {}, NOW)).toBeNull()
   })
 })

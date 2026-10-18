@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { closeTask, findClosableTab, landTask, landingErrorMessage, removeTabFromData, type CloseTaskDeps, type PhoneLanding } from '../src/main/mobile/close-task'
-import { type ProjectsData, type Stream, type TaskLanding, type TaskLandingResult } from '../src/shared/types'
+import { type ProjectsData, type Stream, type TaskLanding, type TaskLandingPreview, type TaskLandingResult } from '../src/shared/types'
 import { findTaskInProject, mapTaskInProject, removeTaskFromProject } from '../src/shared/streams'
 import { fixtureProject, fixtureTask, type FixtureTask, paneTabsAt } from './helpers/streams-fixtures'
 
@@ -96,7 +96,7 @@ const own = { worktreePath: '/src/api/.worktrees/fix--t1', branchName: 'fix--t1'
  * `Task.landing` for a stop and archiving (dropping the task) for a close that lands,
  * as main's does.
  */
-function landingEnv(next: TaskLandingResult, landing?: TaskLanding) {
+function landingEnv(next: TaskLandingResult, landing?: TaskLanding, options: { preview?: TaskLandingPreview | null; dirty?: string[] } = {}) {
   let projects = data({ workspace, ownWorkspace: own, ...(landing ? { landing } : {}) })
   const calls: string[] = []
   const setLanding = (value: TaskLanding | null) => {
@@ -126,10 +126,18 @@ function landingEnv(next: TaskLandingResult, landing?: TaskLanding) {
   const working = new Set<string>()
   const d: CloseTaskDeps = {
     peek: () => projects,
-    dirtyTabIds: () => [],
+    dirtyTabIds: () => options.dirty ?? [],
     statusOf: (tabId) => (working.has(tabId) ? 'working' : null),
     removeTask: async (_p, task) => { calls.push(`remove ${task.id}`) },
-    landing: landingCalls,
+    landing: {
+      landTask: landingCalls.landTask,
+      preview: async (projectId, taskId) => { calls.push(`preview ${projectId}/${taskId}`); return options.preview ?? null },
+      closeWorktree: async (projectId, taskId, mode) => {
+        calls.push(`${mode} ${projectId}/${taskId}`)
+        projects = { ...projects, projects: projects.projects.map(p => removeTaskFromProject(p, 't1')) }
+        return { status: 'removed' }
+      }
+    },
     stopTabs: async (_p, task) => { calls.push(`stop ${task.id}`); working.clear() }
   }
   return { d, calls, working, landing: landingCalls, peek: () => projects }
@@ -190,6 +198,78 @@ describe('closeTask on a task with its own worktree (SPEC.md §8.7, version 3)',
   it('cuts a long file list and message to the wire caps', () => {
     const files = Array.from({ length: 30 }, (_, i) => `f${i}.ts`)
     expect(landingErrorMessage({ state: 'conflict', files }, '0.5.0')).toBe('Conflicts with 0.5.0 in 30 files. Open the task on the desktop to resolve them.')
+  })
+})
+
+describe('closeTask with ask and mode (SPEC.md §8.7, task.close.choice)', () => {
+  it('asks the desktop dialog\'s question for a worktree task with work to land', async () => {
+    const env = landingEnv({ status: 'landed' }, undefined, { preview: { commits: 3, uncommitted: 2 } })
+    expect(await closeTask(env.d, { taskId: 't1', ask: true })).toEqual({
+      ok: true, result: { closed: false, question: { message: 'Squash 3 commits and uncommitted changes in 2 files into fix.' } }
+    })
+    expect(env.calls).toEqual(['preview p1/t1'])
+  })
+
+  it('lands straight away when there is nothing to land', async () => {
+    const env = landingEnv({ status: 'nothing' }, undefined, { preview: { commits: 0, uncommitted: 0 } })
+    expect(await closeTask(env.d, { taskId: 't1', ask: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(env.calls).toEqual(['preview p1/t1', 'land p1/t1'])
+  })
+
+  it('asks instead of the working blocker while its agent works, with landing blocked', async () => {
+    const env = landingEnv({ status: 'landed' }, undefined, { preview: { commits: 1, uncommitted: 0 } })
+    env.working.add('tab1')
+    expect(await closeTask(env.d, { taskId: 't1', ask: true })).toEqual({
+      ok: true,
+      result: {
+        closed: false,
+        question: {
+          message: '"fix" is still working. Let it finish to land its work into fix, or close it without landing: its agent stops and its tabs close.',
+          landBlocked: 'Its agent is working'
+        }
+      }
+    })
+    // No preview while it works: landing is off the table anyway.
+    expect(env.calls).toEqual([])
+  })
+
+  it('keeps the branch or discards it through closeWorktree, even while its agent works', async () => {
+    for (const mode of ['keep', 'discard'] as const) {
+      const env = landingEnv({ status: 'landed' })
+      env.working.add('tab1')
+      expect(await closeTask(env.d, { taskId: 't1', ask: true, mode })).toEqual({ ok: true, result: { closed: true } })
+      expect(env.calls).toEqual([`${mode} p1/t1`])
+      expect(findTaskInProject(env.peek().projects[0], 't1')).toBeUndefined()
+    }
+  })
+
+  it('still reports the working blocker for mode land while its agent works', async () => {
+    const env = landingEnv({ status: 'landed' })
+    env.working.add('tab1')
+    expect(await closeTask(env.d, { taskId: 't1', ask: true, mode: 'land' })).toEqual({ ok: true, result: { closed: false, blocker: 'working' } })
+    expect(env.calls).toEqual([])
+    expect(await closeTask(env.d, { taskId: 't1', mode: 'land', stopWorking: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(env.calls).toEqual(['stop t1', 'land p1/t1'])
+  })
+
+  it('still checks unsaved editors once the question is answered', async () => {
+    const env = landingEnv({ status: 'landed' }, undefined, { preview: { commits: 0, uncommitted: 0 }, dirty: ['ed1'] })
+    expect(await closeTask(env.d, { taskId: 't1', ask: true })).toEqual({ ok: true, result: { closed: false, blocker: 'unsaved' } })
+    expect(await closeTask(env.d, { taskId: 't1', mode: 'discard' })).toEqual({ ok: true, result: { closed: false, blocker: 'unsaved' } })
+    expect(env.calls).toEqual(['preview p1/t1'])
+    expect(await closeTask(env.d, { taskId: 't1', mode: 'discard', discardUnsaved: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(env.calls).toEqual(['preview p1/t1', 'discard p1/t1'])
+  })
+
+  it('ignores ask and mode for a task without a worktree of its own', async () => {
+    const env = landingEnv({ status: 'landed' }, undefined, { preview: { commits: 3, uncommitted: 0 } })
+    const shared = data({}, false, [sharedStream()])
+    const d: CloseTaskDeps = { ...env.d, peek: () => shared }
+    expect(await closeTask(d, { taskId: 't2', ask: true })).toEqual({ ok: true, result: { closed: true } })
+    expect(await closeTask(d, { taskId: 't3', mode: 'discard' })).toEqual({ ok: true, result: { closed: true } })
+    expect(env.calls).toEqual(['remove t2', 'remove t3'])
+    const plain = deps(data(), { working: ['tab1'] })
+    expect(await closeTask(plain.d, { taskId: 't1', mode: 'keep' })).toEqual({ ok: true, result: { closed: false, blocker: 'working' } })
   })
 })
 

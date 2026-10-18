@@ -24,7 +24,7 @@ import { setPendingCommand } from './terminalStartup'
 import { createTab } from './newTaskTabs'
 import { agentTakesMode, setPendingPrompt, taskNameFromPrompt } from './promptBox'
 import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from './taskRecency'
-import { isSettled, isSnoozed, isUnread, taskActivity } from './inbox'
+import { isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
 import { useResizeHandle } from '../hooks/useResizeHandle'
 import { Folders, GitBranch, List, Plus, Search, Settings as SettingsIcon, SquarePen, X, Cog } from 'lucide-react'
@@ -90,7 +90,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     effectiveTheme,
     sidebarWidth, setSidebarWidth,
     sidebarTab, setSidebarTab,
-    settleTask, unsettleTask, unsnoozeTask
+    unsnoozeTask
   } = useApp()
   const resizeHandle = useResizeHandle({ width: sidebarWidth, onWidthChange: setSidebarWidth, edge: 'right' })
   const allStatuses = useAllTabStatuses()
@@ -116,7 +116,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   // leaving the tree. Snoozed tasks are deliberately excluded — that's the point.
   const inboxUnreadCount = React.useMemo(
     () => projects.reduce((count, project) => count + projectTasks(project).filter(
-      task => isUnread(task) && !isSnoozed(task, now) && !isSettled(task)
+      task => isUnread(task) && !isSnoozed(task, now)
     ).length, 0),
     [projects, now]
   )
@@ -376,14 +376,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const findTask = useCallback((projectId: string, taskId: string): Task | undefined =>
     findTaskInProject(projects.find(p => p.id === projectId), taskId)
   , [projects])
-
-  /** The row's one-click gesture: settle if it isn't, put it back if it is. */
-  const handleToggleSettled = useCallback((projectId: string, taskId: string) => {
-    const task = findTask(projectId, taskId)
-    if (!task) return
-    if (isSettled(task)) unsettleTask(projectId, taskId)
-    else settleTask(projectId, taskId)
-  }, [findTask, settleTask, unsettleTask])
 
   const handleNewStream = (projectId: string) => {
     setNewStreamProjectId(projectId)
@@ -1110,7 +1102,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         closeContextMenu={closeContextMenu}
         setContextMenu={setContextMenu}
         findTask={findTask}
-        handleToggleSettled={handleToggleSettled}
         handleCloseTask={handleCloseTask}
         handleCloseStream={handleCloseStream}
         beginEdit={beginEdit}

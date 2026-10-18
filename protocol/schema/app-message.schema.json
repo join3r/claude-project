@@ -125,11 +125,23 @@
       "properties": { "taskId": { "type": "string" } }
     },
     "taskCloseResult": {
-      "description": "task.close result (SPEC.md §8.7): archived, a blocker to confirm, or (version 3) a task with a worktree of its own that didn't land.",
+      "description": "task.close result (SPEC.md §8.7): archived, a blocker to confirm, (version 3) a task with a worktree of its own that didn't land, or (task.close.choice, with ask) the desktop's close question.",
       "oneOf": [
         { "type": "object", "required": ["closed"], "properties": { "closed": { "const": true } } },
         { "type": "object", "required": ["closed", "blocker"], "properties": { "closed": { "const": false }, "blocker": { "enum": ["working", "unsaved"] } } },
-        { "type": "object", "required": ["closed", "landing"], "properties": { "closed": { "const": false }, "landing": { "$ref": "inbox.schema.json#/$defs/landing" } } }
+        { "type": "object", "required": ["closed", "landing"], "properties": { "closed": { "const": false }, "landing": { "$ref": "inbox.schema.json#/$defs/landing" } } },
+        {
+          "type": "object",
+          "required": ["closed", "question"],
+          "properties": {
+            "closed": { "const": false },
+            "question": {
+              "type": "object",
+              "required": ["message"],
+              "properties": { "message": { "type": "string" }, "landBlocked": { "type": "string" } }
+            }
+          }
+        }
       ]
     },
     "taskLandParams": {

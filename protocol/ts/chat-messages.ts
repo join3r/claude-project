@@ -53,19 +53,45 @@ export interface TaskNewResult { taskId: string; tabId: string }
 export const TASK_CLOSE_OP = 'task.close'
 /** The handshake feature (§8.1) a desktop lists when it answers `task.close`. */
 export const TASK_CLOSE_FEATURE = 'task.close'
+/**
+ * The handshake feature (§8.1) a desktop lists when `task.close` takes `ask` and
+ * `mode`: the desktop's close question and its Keep branch and Discard (§8.7).
+ */
+export const TASK_CLOSE_CHOICE_FEATURE = 'task.close.choice'
 /** Why `task.close` left a task open (§8.7), in the order the desktop checks. */
 export const TASK_CLOSE_BLOCKERS = ['working', 'unsaved'] as const
 export type TaskCloseBlocker = (typeof TASK_CLOSE_BLOCKERS)[number]
+/**
+ * How a task with a worktree of its own closes (§8.7): `land` lands it into its
+ * stream, `keep` keeps its branch without landing, `discard` deletes the branch
+ * and its uncommitted work.
+ */
+export const TASK_CLOSE_MODES = ['land', 'keep', 'discard'] as const
+export type TaskCloseMode = (typeof TASK_CLOSE_MODES)[number]
 
-export interface TaskCloseParams { taskId: string; stopWorking?: boolean; discardUnsaved?: boolean }
+export interface TaskCloseParams {
+  taskId: string
+  stopWorking?: boolean
+  discardUnsaved?: boolean
+  /** Answer with the desktop's close question instead of landing straight away. */
+  ask?: boolean
+  mode?: TaskCloseMode
+}
+/**
+ * The desktop's close question for a task with a worktree of its own (§8.7):
+ * what landing would take, and why Land & close can't run now when it can't.
+ */
+export interface TaskCloseQuestion { message: string; landBlocked?: string }
 /**
  * `landing` (version 3): a task with a worktree of its own didn't land into its
- * stream, so it stays open with that landing state (§8.7, §8.15).
+ * stream, so it stays open with that landing state (§8.7, §8.15). `question`
+ * answers `ask`.
  */
 export type TaskCloseResult =
   | { closed: true }
   | { closed: false; blocker: TaskCloseBlocker }
   | { closed: false; landing: TaskLanding }
+  | { closed: false; question: TaskCloseQuestion }
 
 /**
  * A task's landing into its stream (SPEC.md §4.4 `landing`, version 3): running, or
@@ -132,13 +158,13 @@ export const PIN_FEATURE = 'pin'
 export interface PinSetParams { projectId: string; streamId?: string; taskId?: string; pinned: boolean }
 
 /**
- * `task.triage` (SPEC.md §8.11): the desktop inbox's Mark read, Mark unread, Settle,
- * Unsettle, Snooze and Unsnooze, for one task.
+ * `task.triage` (SPEC.md §8.11): the desktop inbox's Mark read, Mark unread, Snooze
+ * and Unsnooze, for one task.
  */
 export const TASK_TRIAGE_OP = 'task.triage'
 /** The handshake feature (§8.1) a desktop lists when it answers `task.triage` and sends the triage fields (§4.4). */
 export const TASK_TRIAGE_FEATURE = 'task.triage'
-export const TASK_TRIAGE_ACTIONS = ['read', 'unread', 'settle', 'unsettle', 'snooze', 'unsnooze'] as const
+export const TASK_TRIAGE_ACTIONS = ['read', 'unread', 'snooze', 'unsnooze'] as const
 export type TaskTriageAction = (typeof TASK_TRIAGE_ACTIONS)[number]
 
 /** A `snooze` carries exactly one of `until` and `untilAttention`; the other actions carry neither. */
@@ -860,23 +886,40 @@ function sentImages(o: Obj): SentImage[] | undefined {
   return images.length > 0 ? images : undefined
 }
 
-/** `task.close` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `taskId`. */
+/**
+ * `task.close` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `taskId` or a `mode` outside {@link TASK_CLOSE_MODES}.
+ */
 export function parseTaskCloseParams(params: unknown): TaskCloseParams {
   const o = obj(params, 'params')
   const out: TaskCloseParams = { taskId: str(o, 'taskId') }
   if (flag(o, 'stopWorking')) out.stopWorking = true
   if (flag(o, 'discardUnsaved')) out.discardUnsaved = true
+  if (flag(o, 'ask')) out.ask = true
+  const mode = optStr(o, 'mode')
+  if (mode !== undefined) {
+    if (!(TASK_CLOSE_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
+    out.mode = mode as TaskCloseMode
+  }
   return out
 }
 
 /**
  * `task.close` result (the phone's side). A blocker outside {@link TASK_CLOSE_BLOCKERS}
- * throws. `closed: false` with a `landing` is a task that didn't land (version 3).
+ * throws. `closed: false` with a `landing` is a task that didn't land (version 3),
+ * with a `question` the desktop's close question (`ask`).
  */
 export function parseTaskCloseResult(value: unknown): TaskCloseResult {
   const o = obj(value, 'result')
   if (bool(o, 'closed')) return { closed: true }
   if (!absent(o, 'landing')) return { closed: false, landing: parseTaskLanding(o.landing) }
+  if (!absent(o, 'question')) {
+    const q = obj(o.question, 'question')
+    const question: TaskCloseQuestion = { message: str(q, 'message') }
+    const landBlocked = optStr(q, 'landBlocked')
+    if (landBlocked !== undefined) question.landBlocked = landBlocked
+    return { closed: false, question }
+  }
   const blocker = str(o, 'blocker')
   if (!(TASK_CLOSE_BLOCKERS as readonly string[]).includes(blocker)) fail(`unknown blocker ${blocker}`)
   return { closed: false, blocker: blocker as TaskCloseBlocker }

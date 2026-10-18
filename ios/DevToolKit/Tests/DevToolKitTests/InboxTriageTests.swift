@@ -20,33 +20,29 @@ import Testing
         let a = inbox("a", [
             InboxTask(id: "waiting-short", name: "", status: .attention, since: Self.nowMs - 1_000, tabs: [tab("1", .attention, since: Self.nowMs - 1_000)]),
             InboxTask(id: "recent", name: "", eventAt: Self.nowMs - 10, tabs: []),
-            InboxTask(id: "settled-old", name: "", settledAt: 100, tabs: []),
             InboxTask(id: "snoozed-attention", name: "", status: .attention, snoozeUntilAttention: true, tabs: [tab("2", .attention)]),
         ])
         let b = inbox("b", [
             InboxTask(id: "waiting-long", name: "", status: .attention, since: Self.nowMs - 9_000, tabs: [tab("3", .working, since: 1), tab("4", .attention, since: Self.nowMs - 9_000)]),
             InboxTask(id: "older", name: "", lastInteractedAt: Self.nowMs - 500, tabs: []),
-            InboxTask(id: "settled-new", name: "", settledAt: 200, tabs: []),
-            InboxTask(id: "snoozed-soon", name: "", settledAt: 300, snoozedUntil: Self.nowMs + 60_000, tabs: []),
+            InboxTask(id: "snoozed-soon", name: "", snoozedUntil: Self.nowMs + 60_000, tabs: []),
             InboxTask(id: "woke", name: "", snoozedUntil: Self.nowMs - 1, tabs: []),
-            InboxTask(id: "snoozed-busy", name: "", status: .working, settledAt: 400, snoozedUntil: Self.nowMs + 60_000, tabs: [tab("5", .working)]),
+            InboxTask(id: "snoozed-busy", name: "", status: .working, snoozedUntil: Self.nowMs + 60_000, tabs: [tab("5", .working)]),
             InboxTask(id: "snoozed-quiet", name: "", snoozeUntilAttention: true, tabs: []),
         ])
         let partition = InboxPartition([("a", a), ("b", b)], now: Self.now)
-        // A live agent wins over snooze and settle.
+        // A live agent wins over snooze.
         #expect(partition.needsYou.map(\.task.id) == ["waiting-long", "waiting-short", "snoozed-attention"])
         // Ready: "recent" had an event and no word since, so it leads; "older"
         // and "woke" had nothing happen after you.
         #expect(partition.ready.map(\.task.id) == ["recent", "older", "woke"])
         #expect(partition.working.map(\.task.id) == ["snoozed-busy"])
-        #expect(partition.settled.map(\.task.id) == ["settled-new", "settled-old"])
-        // A snooze wins over a settle; "until it needs me" sorts last.
+        // "Until it needs me" sorts last.
         #expect(partition.snoozed.map(\.task.id) == ["snoozed-soon", "snoozed-quiet"])
         #expect(partition.needsYou.first?.desktopId == "b")
         #expect(!partition.isEmpty && InboxPartition([], now: Self.now).isEmpty)
         let unread = InboxPartition([("a", inbox("a", [
             InboxTask(id: "u", name: "", unread: true, tabs: []),
-            InboxTask(id: "s", name: "", unread: true, settledAt: 1, tabs: []),
             InboxTask(id: "z", name: "", unread: true, snoozeUntilAttention: true, tabs: []),
             InboxTask(id: "r", name: "", tabs: []),
         ]))], now: Self.now)
@@ -100,13 +96,10 @@ import Testing
     }
 
     @Test func appliesActionsAsTheDesktopWould() {
-        let task = InboxTask(id: "t", name: "", unread: true, settledAt: 5, tabs: [])
+        let task = InboxTask(id: "t", name: "", unread: true, tabs: [])
         #expect(!task.applying(.read, now: Self.now).unread)
-        #expect(task.applying(.unsettle, now: Self.now).settledAt == nil)
-        let settled = InboxTask(id: "t", name: "", unread: true, snoozedUntil: 9, tabs: []).applying(.settle, now: Self.now)
-        #expect(settled.settledAt == Self.nowMs && !settled.unread && settled.snoozedUntil == nil)
         let snoozed = task.applying(.snooze(until: 42), now: Self.now)
-        #expect(snoozed.snoozedUntil == 42 && snoozed.settledAt == nil && !snoozed.unread)
+        #expect(snoozed.snoozedUntil == 42 && !snoozed.unread)
         let untilAttention = snoozed.applying(.snoozeUntilAttention, now: Self.now)
         #expect(untilAttention.snoozeUntilAttention && untilAttention.snoozedUntil == nil)
         #expect(!untilAttention.applying(.unsnooze, now: Self.now).isSnoozed(now: Self.now))

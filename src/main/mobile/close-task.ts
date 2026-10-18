@@ -1,8 +1,9 @@
 import { isAgentTabType, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue, type Task, type TaskLanding, type TaskLandingResult } from '../../shared/types'
 import { AppErrorCode, INBOX_TAB_TYPES, PROTOCOL_VERSION } from '../../../protocol/ts/index.ts'
-import type { TaskCloseParams, TaskCloseResult, TaskLandParams, TaskLandResult } from '../../../protocol/ts/index.ts'
+import type { TaskCloseParams, TaskCloseQuestion, TaskCloseResult, TaskLandParams, TaskLandResult } from '../../../protocol/ts/index.ts'
 import { findStreamOfTask, findTaskInProject, isMainTab, mapTaskInProject, projectTasks, taskTabs, taskWorktreesSupported } from '../../shared/streams'
 import { landingStatusLabel } from '../../shared/inbox-state'
+import { taskLandingCloseQuestion, type TaskLandingCloseQuestion } from '../../shared/task-close-question'
 import { removeTabFromTask } from '../../shared/panes'
 import type { TaskLandingManager } from '../task-landing'
 import { isVisibleOnMobile, wireLanding } from './inbox'
@@ -22,6 +23,11 @@ import { isVisibleOnMobile, wireLanding } from './inbox'
  * removes the worktree and archives it. A landing that stops (a conflict, the
  * stream's local changes) leaves the task open, and `task.land` (§8.15) offers
  * the banner's buttons.
+ *
+ * With `ask` (`task.close.choice`) such a task first gets the desktop's close
+ * dialog's question, which covers a working agent, and `mode` answers it as the
+ * dialog's buttons do: `land`, or `keep` / `discard` through the same
+ * `closeWorktree` as Keep branch and Discard (the Inbox's Remove task too).
  */
 
 type Outcome<T> = { ok: true; result: T } | { ok: false; code: string; message: string }
@@ -37,8 +43,11 @@ export interface CloseTaskDeps {
   statusOf(tabId: string): TabStatusValue
   /** Tear down the task's tabs and archive it. */
   removeTask(project: Project, task: Task): Promise<void>
-  /** Lands a task with a worktree of its own; without it such a task is archived as above. */
-  landing?: Pick<PhoneLanding, 'landTask'>
+  /**
+   * Lands a task with a worktree of its own, or closes it without landing; without
+   * it such a task is archived as above.
+   */
+  landing?: Pick<TaskLandingManager, 'landTask' | 'closeWorktree' | 'preview'>
   /** Ends the task's processes, keeping their scrollback: `stopWorking` before a landing. */
   stopTabs?(project: Project, task: Task): Promise<void>
 }
@@ -96,13 +105,28 @@ export function landingErrorMessage(landing: TaskLanding, streamName: string): s
     : `${line}. Open the task on the desktop to resolve them.`
 }
 
+function wireQuestion(question: TaskLandingCloseQuestion): TaskCloseQuestion {
+  return question.landBlocked === null ? { message: question.message } : { message: question.message, landBlocked: question.landBlocked }
+}
+
 /** `version` is the session's protocol version: below 3 a stopped landing is an error. */
 export async function closeTask(deps: CloseTaskDeps, params: TaskCloseParams, phone: { version: number } = { version: PROTOCOL_VERSION }): Promise<Outcome<TaskCloseResult>> {
   const found = findTask(deps.peek(), params.taskId)
   if (!found) return { ok: false, code: AppErrorCode.NotFound, message: 'No such task' }
   const { project, stream, task } = found
   const working = agentWorking(task, deps.statusOf)
-  if (!params.stopWorking && working) {
+  const landing = deps.landing && landsIntoStream(found) ? deps.landing : null
+  let mode = landing ? params.mode : undefined
+  if (landing && !mode && params.ask) {
+    // The desktop's close dialog, asked the same way (`useCloseTask`).
+    const preview = working || task.landing ? null : await landing.preview(project.id, task.id).catch(() => null)
+    const question = taskLandingCloseQuestion(task, stream?.name ?? 'its stream', preview, working)
+    if (question) return { ok: true, result: { closed: false, question: wireQuestion(question) } }
+    mode = 'land'
+  }
+  // Keep branch and Discard stop a working agent themselves, as on the desktop.
+  const withoutLanding = mode === 'keep' || mode === 'discard'
+  if (!params.stopWorking && working && !withoutLanding) {
     return { ok: true, result: { closed: false, blocker: 'working' } }
   }
   if (!params.discardUnsaved) {
@@ -111,14 +135,19 @@ export async function closeTask(deps: CloseTaskDeps, params: TaskCloseParams, ph
       return { ok: true, result: { closed: false, blocker: 'unsaved' } }
     }
   }
-  if (!deps.landing || !landsIntoStream(found)) {
+  if (!landing) {
     await deps.removeTask(project, task)
     return { ok: true, result: { closed: true } }
+  }
+  if (mode === 'keep' || mode === 'discard') {
+    const result = await landing.closeWorktree(project.id, task.id, mode)
+    if (result.status === 'removed') return { ok: true, result: { closed: true } }
+    return { ok: false, code: AppErrorCode.Internal, message: result.status === 'failed' ? result.error : `Unexpected close result ${result.status}` }
   }
 
   // Landing refuses a working agent, so "Stop it and close" stops it first.
   if (working) await deps.stopTabs?.(project, task)
-  const result = await deps.landing.landTask(project.id, task.id)
+  const result = await landing.landTask(project.id, task.id)
   switch (result.status) {
     case 'landed':
     case 'nothing':

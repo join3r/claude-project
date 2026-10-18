@@ -915,6 +915,37 @@
         "expected": {
           "taskId": "t1"
         }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"ask\":true}",
+        "expected": {
+          "taskId": "t1",
+          "ask": true
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"ask\":true,\"mode\":\"land\",\"stopWorking\":true}",
+        "expected": {
+          "taskId": "t1",
+          "stopWorking": true,
+          "ask": true,
+          "mode": "land"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"mode\":\"keep\"}",
+        "expected": {
+          "taskId": "t1",
+          "mode": "keep"
+        }
+      },
+      {
+        "json": "{\"taskId\":\"t1\",\"mode\":\"discard\",\"discardUnsaved\":true,\"ask\":\"yes\"}",
+        "expected": {
+          "taskId": "t1",
+          "discardUnsaved": true,
+          "mode": "discard"
+        }
       }
     ],
     "results": [
@@ -967,17 +998,49 @@
             "message": "error: Your local changes would be overwritten"
           }
         }
+      },
+      {
+        "json": "{\"closed\":false,\"question\":{\"message\":\"Squash 3 commits and uncommitted changes in 2 files into 0.5.0.\"}}",
+        "expected": {
+          "closed": false,
+          "question": {
+            "message": "Squash 3 commits and uncommitted changes in 2 files into 0.5.0."
+          }
+        }
+      },
+      {
+        "json": "{\"closed\":false,\"question\":{\"message\":\"\\\"fix-auth\\\" is still working. Let it finish to land its work into 0.5.0, or close it without landing: its agent stops and its tabs close.\",\"landBlocked\":\"Its agent is working\",\"extra\":1}}",
+        "expected": {
+          "closed": false,
+          "question": {
+            "message": "\"fix-auth\" is still working. Let it finish to land its work into 0.5.0, or close it without landing: its agent stops and its tabs close.",
+            "landBlocked": "Its agent is working"
+          }
+        }
+      },
+      {
+        "json": "{\"closed\":false,\"question\":{\"message\":\"Squash 1 commit into 0.5.0.\",\"landBlocked\":null}}",
+        "expected": {
+          "closed": false,
+          "question": {
+            "message": "Squash 1 commit into 0.5.0."
+          }
+        }
       }
     ],
     "invalid": {
       "params": [
         "{}",
         "{\"taskId\":7}",
+        "{\"taskId\":\"t1\",\"mode\":\"squash\"}",
+        "{\"taskId\":\"t1\",\"mode\":1}",
         "null"
       ],
       "results": [
         "{}",
         "{\"closed\":false}",
+        "{\"closed\":false,\"question\":{}}",
+        "{\"closed\":false,\"question\":\"Land?\"}",
         "{\"closed\":\"yes\"}",
         "{\"closed\":false,\"blocker\":\"unmerged\"}",
         "{\"closed\":false,\"landing\":{\"files\":[]}}",
@@ -1194,20 +1257,6 @@
         }
       },
       {
-        "json": "{\"taskId\":\"t1\",\"action\":\"settle\"}",
-        "expected": {
-          "taskId": "t1",
-          "action": "settle"
-        }
-      },
-      {
-        "json": "{\"taskId\":\"t1\",\"action\":\"unsettle\"}",
-        "expected": {
-          "taskId": "t1",
-          "action": "unsettle"
-        }
-      },
-      {
         "json": "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":1790003600000}",
         "expected": {
           "taskId": "t1",
@@ -1236,6 +1285,8 @@
         "{\"action\":\"read\"}",
         "{\"taskId\":\"t1\"}",
         "{\"taskId\":\"t1\",\"action\":\"archive\"}",
+        "{\"taskId\":\"t1\",\"action\":\"settle\"}",
+        "{\"taskId\":\"t1\",\"action\":\"unsettle\"}",
         "{\"taskId\":\"t1\",\"action\":\"snooze\"}",
         "{\"taskId\":\"t1\",\"action\":\"snooze\",\"untilAttention\":false}",
         "{\"taskId\":\"t1\",\"action\":\"snooze\",\"until\":1790003600000,\"untilAttention\":true}",

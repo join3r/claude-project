@@ -41,7 +41,7 @@ function mapProject(data: ProjectsData, projectId: string, update: (project: Pro
  *
  * Each stream is its own queue: with its auto-run on, it starts its next prompt
  * whenever nothing it started is still running — the watched task went from
- * working to idle, was put away with Done for now, or was closed. Needing you
+ * working to idle, or was closed. Needing you
  * (`attention`) is not finished, and an agent that died (`exited`) switches the
  * stream's auto-run off, as does a start that fails. Streams don't wait on each
  * other: each works on its own branch.

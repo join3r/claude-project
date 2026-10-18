@@ -206,6 +206,9 @@ public enum DesktopFeature {
     public static let chatSettings = "chat.settings"
     /// The desktop answers `task.close` (§8.7).
     public static let taskClose = "task.close"
+    /// `task.close` takes `ask` and `mode`: the desktop's close question, with
+    /// its Keep branch and Discard (§8.7).
+    public static let taskCloseChoice = "task.close.choice"
     /// The desktop answers `tab.close` (§8.8).
     public static let tabClose = "tab.close"
     /// The desktop answers `chat.image` and counts tool items' `images` (§8.9).
@@ -397,7 +400,6 @@ extension Inbox {
             attentionAt: try optInt(o, "attentionAt"),
             eventAt: try optInt(o, "eventAt"),
             unread: o["unread"] == .bool(true),
-            settledAt: try optInt(o, "settledAt"),
             snoozedUntil: try optInt(o, "snoozedUntil"),
             snoozeUntilAttention: o["snoozeUntilAttention"] == .bool(true),
             branch: try optStr(o, "branch"),
@@ -480,7 +482,6 @@ extension InboxTask {
         if let attentionAt { o["attentionAt"] = .int(attentionAt) }
         if let eventAt { o["eventAt"] = .int(eventAt) }
         if unread { o["unread"] = .bool(true) }
-        if let settledAt { o["settledAt"] = .int(settledAt) }
         if let snoozedUntil { o["snoozedUntil"] = .int(snoozedUntil) }
         if snoozeUntilAttention { o["snoozeUntilAttention"] = .bool(true) }
         if let branch { o["branch"] = .string(branch) }

@@ -1,5 +1,5 @@
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
-import { isSettled, isSnoozed, isUnread, statusTabs, taskStatus } from '../../shared/inbox-state'
+import { isSnoozed, isUnread, statusTabs, taskStatus } from '../../shared/inbox-state'
 import {
   isSpentEphemeralProject,
   type Project,
@@ -66,8 +66,7 @@ function buildTab(tab: Tab & { type: MobileTabType }, lookup: InboxTabLookup): M
 
 /**
  * The task's triage state as the desktop inbox reads it (SPEC.md §4.4), through the
- * same predicates, so the phone groups it the way the window does. A snooze wins over
- * a settle, as in `partitionInbox`.
+ * same predicates, so the phone groups it the way the window does.
  */
 function addTriage(out: Omit<MobileInboxTask, 'tabs'>, task: Task, now: number): void {
   const inbox = task.inbox
@@ -77,8 +76,6 @@ function addTriage(out: Omit<MobileInboxTask, 'tabs'>, task: Task, now: number):
   if (isSnoozed(task, now)) {
     if (inbox.snoozeUntilAttention) out.snoozeUntilAttention = true
     else if (inbox.snoozedUntil !== undefined) out.snoozedUntil = inbox.snoozedUntil
-  } else if (isSettled(task) && inbox.settledAt !== undefined) {
-    out.settledAt = inbox.settledAt
   }
 }
 

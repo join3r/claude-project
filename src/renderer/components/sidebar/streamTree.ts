@@ -5,7 +5,7 @@
  */
 import type { Stream, TabStatusValue, Task } from '../../../shared/types'
 import { taskTabs } from '../../../shared/streams'
-import { isSettled, isSnoozed, isUnread, lastActivityAt, statusTabs } from '../../../shared/inbox-state'
+import { isSnoozed, isUnread, lastActivityAt, statusTabs } from '../../../shared/inbox-state'
 
 /** What a task's dot shows, strongest first. `null` is a quiet task. */
 export type SidebarTaskState = 'attention' | 'working' | 'unread' | 'exited' | null
@@ -24,7 +24,7 @@ function stateRank(state: SidebarTaskState): number {
 /**
  * The task's state: the live status of its status tabs (`statusTabs`: main tab
  * and agent tabs, so a terminal task's bell counts), else unread when something happened since you
- * last looked. A settled or snoozed task is not unread here: you put it away.
+ * last looked. A snoozed task is not unread here: you put it away.
  */
 export function sidebarTaskState(
   task: Task,
@@ -37,7 +37,7 @@ export function sidebarTaskState(
     if (stateRank(status) > stateRank(live)) live = status
   }
   if (live === 'attention' || live === 'working') return live
-  if (isUnread(task) && !isSettled(task) && !isSnoozed(task, now)) return 'unread'
+  if (isUnread(task) && !isSnoozed(task, now)) return 'unread'
   return live
 }
 

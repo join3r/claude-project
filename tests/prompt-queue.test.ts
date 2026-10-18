@@ -3,7 +3,7 @@ import { adoptStreamPromptQueue, applyPromptQueueOp, nextAutoRunPrompt, promptQu
 import { PromptQueueRunner, type PromptQueueRunnerDeps } from '../src/main/prompt-queue-runner'
 import { mainStreamId, type Project, type ProjectsData, type QueuedPrompt, type Stream, type TabStatusValue } from '../src/shared/types'
 import { findStreamOfTask, findTaskInProject, mapTaskInProject, projectTasks, removeTaskFromProject } from '../src/shared/streams'
-import { inboxSettled } from '../src/shared/inbox-transitions'
+import { inboxSnoozed } from '../src/shared/inbox-transitions'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 const q = (id: string, text = id, streamId?: string): QueuedPrompt => ({ id, text, ...(streamId ? { streamId } : {}) })
@@ -57,12 +57,15 @@ describe('applyPromptQueueOp', () => {
     expect(streamPromptQueue(p, 's-ui').map(i => i.id)).toEqual(['a'])
   })
 
-  it('a watch holds the stream only while its task is there and not Done for now', () => {
+  it('a watch holds the stream until its task is closed, even while it is snoozed', () => {
     const task = { id: 't1', name: 't1', panes: [] }
     let p = project({ promptQueue: [q('a', 'a', 's-ui')] }, { promptQueueAutoRun: true, tasks: [task], promptQueueWatch: { taskId: 't1', tabId: 'tab' } })
     expect(promptQueueWatchedTask(stream(p, 's-ui'))).not.toBeNull()
     expect(nextAutoRunPrompt(p, stream(p, 's-ui'))).toBeUndefined()
-    p = mapTaskInProject(p, 't1', t => ({ ...t, inbox: inboxSettled({}, 1) }))
+    p = mapTaskInProject(p, 't1', t => ({ ...t, inbox: inboxSnoozed({}, 1, { untilAttention: true }) }))
+    expect(promptQueueWatchedTask(stream(p, 's-ui'))).not.toBeNull()
+    expect(nextAutoRunPrompt(p, stream(p, 's-ui'))).toBeUndefined()
+    p = removeTaskFromProject(p, 't1')
     expect(promptQueueWatchedTask(stream(p, 's-ui'))).toBeNull()
     expect(nextAutoRunPrompt(p, stream(p, 's-ui'))?.id).toBe('a')
     expect(nextAutoRunPrompt(p, stream(p, MAIN))).toBeUndefined()
@@ -159,12 +162,15 @@ describe('PromptQueueRunner', () => {
     expect(stream(h.project(), MAIN).promptQueueWatch?.tabId).not.toBe(firstTab)
   })
 
-  it('Done for now on the watched task, or closing it, starts the next prompt', async () => {
+  it('closing the watched task starts the next prompt; snoozing it does not', async () => {
     const h = harness(project({ promptQueue: [q('a'), q('b'), q('c')] }, {}, { promptQueueAutoRun: true }))
     await vi.waitFor(() => expect(h.sent).toHaveLength(1))
     const first = stream(h.project(), MAIN).promptQueueWatch!.taskId
     h.setStatus(stream(h.project(), MAIN).promptQueueWatch!.tabId, 'attention')
-    h.update(p => mapTaskInProject(p, first, t => ({ ...t, inbox: inboxSettled(t.inbox ?? {}, Date.now()) })))
+    h.update(p => mapTaskInProject(p, first, t => ({ ...t, inbox: inboxSnoozed(t.inbox ?? {}, Date.now(), { untilAttention: true }) })))
+    await Promise.resolve()
+    expect(h.sent).toHaveLength(1)
+    h.update(p => removeTaskFromProject(p, first))
     await vi.waitFor(() => expect(h.sent.map(s => s.prompt)).toEqual(['a', 'b']))
     const second = stream(h.project(), MAIN).promptQueueWatch!.taskId
     h.update(p => removeTaskFromProject(p, second))

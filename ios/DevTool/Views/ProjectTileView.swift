@@ -179,8 +179,6 @@ enum TaskText {
         switch task.inboxGroup(now: now) {
         case .snoozed:
             parts.append("Snoozed")
-        case .settled:
-            parts.append(InboxClock.activity(task) ?? "Done for now")
         case .needsYou, .yourTurn, .working, .quiet:
             if let activity = InboxClock.activity(task) {
                 parts.append(activity)

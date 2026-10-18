@@ -2,7 +2,7 @@ import DevToolKit
 import SwiftUI
 
 /// Every task of every paired desktop in the desktop inbox's groups (§8.3):
-/// Needs you and Ready open; Working, Snoozed and Done for now folded
+/// Needs you and Ready open; Working and Snoozed folded
 /// into one-line summaries. The toolbar switches to cards by project.
 struct InboxView: View {
     @Environment(AppModel.self) private var model
@@ -10,7 +10,6 @@ struct InboxView: View {
     /// A row's long-press Open project (its queue lives there).
     var onOpenProject: (ProjectRef) -> Void = { _ in }
     @State private var showWorking = false
-    @State private var showSettled = false
     @State private var showSnoozed = false
     /// The row whose Snooze swipe is asking for a preset.
     @State private var snoozing: InboxEntry?
@@ -45,6 +44,9 @@ struct InboxView: View {
         .closeTaskFlow($closing) { closed in
             if selection == TaskRef(desktopId: closed.desktopId, taskId: closed.taskId) { selection = nil }
         }
+        #if DEBUG
+        .task { await demoClose() }
+        #endif
         .confirmationDialog(
             snoozing.map { "Snooze “\($0.task.name)”" } ?? "",
             isPresented: Binding(get: { snoozing != nil }, set: { if !$0 { snoozing = nil } }),
@@ -129,11 +131,11 @@ struct InboxView: View {
         return count == 0 ? "By project" : "By project · \(count) need\(count == 1 ? "s" : "") you"
     }
 
-    /// Working, Snoozed and Done for now: a row each with a one-line summary,
+    /// Working and Snoozed: a row each with a one-line summary,
     /// opening in place.
     @ViewBuilder
     private func folded(_ partition: InboxPartition, now: Date) -> some View {
-        if !partition.working.isEmpty || !partition.settled.isEmpty || !partition.snoozed.isEmpty {
+        if !partition.working.isEmpty || !partition.snoozed.isEmpty {
             Section {
                 if !partition.working.isEmpty {
                     FoldedGroupRow(kind: .working, entries: partition.working, expanded: $showWorking)
@@ -145,12 +147,6 @@ struct InboxView: View {
                     FoldedGroupRow(kind: .snoozed, entries: partition.snoozed, expanded: $showSnoozed)
                     if showSnoozed {
                         ForEach(partition.snoozed) { row($0, group: .snoozed, now: now) }
-                    }
-                }
-                if !partition.settled.isEmpty {
-                    FoldedGroupRow(kind: .settled, entries: partition.settled, expanded: $showSettled)
-                    if showSettled {
-                        ForEach(partition.settled) { row($0, group: .settled, now: now) }
                     }
                 }
             }
@@ -172,11 +168,15 @@ struct InboxView: View {
     }
 
     /// A task row: selects the task. Swipe right to mark it read or unread,
-    /// left to settle or snooze it; long-press for the rest.
+    /// left to close, snooze or remove it (the desktop Inbox row's ✓, Snooze
+    /// and ✕); long-press for the rest.
     private func row(_ entry: InboxEntry, group: InboxGroup, now: Date, inProject: Bool = false) -> some View {
         let ref = TaskRef(desktopId: entry.desktopId, taskId: entry.task.id)
         let offline = model.isOffline(entry.desktopId)
         let canTriage = model.supports(DesktopFeature.taskTriage, on: entry.desktopId) && !offline
+        let canClose = model.supports(DesktopFeature.taskClose, on: entry.desktopId) && !offline
+        // Remove asks the desktop to discard a worktree, which an older one can't.
+        let canRemove = model.supports(DesktopFeature.taskCloseChoice, on: entry.desktopId) && !offline
         let unread = entry.task.unread
         return InboxRow(
             entry: entry,
@@ -200,28 +200,38 @@ struct InboxView: View {
             }
         }
         .swipeActions(edge: .trailing) {
+            if canClose {
+                Button {
+                    closing = CloseTaskRequest(desktopId: entry.desktopId, task: entry.task)
+                } label: {
+                    Label("Close", systemImage: "checkmark")
+                }
+                .tint(.green)
+            }
             if canTriage {
-                switch group {
-                case .settled:
-                    Button {
-                        triage(.unsettle, entry)
-                    } label: {
-                        Label("Back to Inbox", systemImage: "arrow.uturn.backward")
-                    }
-                    .tint(.gray)
-                    snoozeButton(entry)
-                case .snoozed:
+                if group == .snoozed {
                     Button {
                         triage(.unsnooze, entry)
                     } label: {
                         Label("Unsnooze", systemImage: "bell")
                     }
                     .tint(.indigo)
-                    settleButton(entry)
-                case .needsYou, .yourTurn, .working, .quiet:
-                    settleButton(entry)
-                    snoozeButton(entry)
+                } else {
+                    Button {
+                        snoozing = entry
+                    } label: {
+                        Label("Snooze", systemImage: "moon.zzz")
+                    }
+                    .tint(.indigo)
                 }
+            }
+            if canRemove {
+                Button {
+                    closing = CloseTaskRequest(desktopId: entry.desktopId, task: entry.task, remove: true)
+                } label: {
+                    Label("Remove", systemImage: "xmark")
+                }
+                .tint(.red)
             }
         }
         .contextMenu {
@@ -238,7 +248,15 @@ struct InboxView: View {
                 Button(role: .destructive) {
                     closing = CloseTaskRequest(desktopId: entry.desktopId, task: entry.task)
                 } label: {
-                    Label("Close task", systemImage: "xmark.circle")
+                    Label("Close task", systemImage: "checkmark.circle")
+                }
+                .disabled(offline)
+            }
+            if model.supports(DesktopFeature.taskCloseChoice, on: entry.desktopId) {
+                Button(role: .destructive) {
+                    closing = CloseTaskRequest(desktopId: entry.desktopId, task: entry.task, remove: true)
+                } label: {
+                    Label("Remove task", systemImage: "xmark.circle")
                 }
                 .disabled(offline)
             }
@@ -255,23 +273,23 @@ struct InboxView: View {
         }
     }
 
-    private func settleButton(_ entry: InboxEntry) -> some View {
-        Button {
-            triage(.settle, entry)
-        } label: {
-            Label("Done for now", systemImage: "checkmark")
+    #if DEBUG
+    /// `-demoInboxClose <taskId>`: swipes that row's Close (Remove with `-demoInboxRemove`) once it shows.
+    private func demoClose() async {
+        guard let taskId = LaunchOptions.current.demoInboxClose else { return }
+        for _ in 0..<50 {
+            for (desktopId, inbox) in model.inboxes {
+                if let task = inbox.projects.flatMap(\.tasks).first(where: { $0.id == taskId }),
+                   model.supports(DesktopFeature.taskClose, on: desktopId) {
+                    try? await Task.sleep(for: .seconds(1))
+                    closing = CloseTaskRequest(desktopId: desktopId, task: task, remove: LaunchOptions.current.demoInboxRemove)
+                    return
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(100))
         }
-        .tint(.green)
     }
-
-    private func snoozeButton(_ entry: InboxEntry) -> some View {
-        Button {
-            snoozing = entry
-        } label: {
-            Label("Snooze", systemImage: "moon.zzz")
-        }
-        .tint(.indigo)
-    }
+    #endif
 
     private func triage(_ action: TaskTriageParams.Action, _ entry: InboxEntry) {
         let ref = TaskRef(desktopId: entry.desktopId, taskId: entry.task.id)
@@ -290,11 +308,6 @@ struct TriageMenuItems: View {
         let group = task.inboxGroup(now: now)
         Button(task.unread ? "Mark as read" : "Mark as unread", systemImage: task.unread ? "envelope.open" : "envelope.badge") {
             run(task.unread ? .read : .unread)
-        }
-        if group == .settled {
-            Button("Back to Inbox", systemImage: "arrow.uturn.backward") { run(.unsettle) }
-        } else {
-            Button("Done for now", systemImage: "checkmark") { run(.settle) }
         }
         if group == .snoozed {
             Button("Unsnooze", systemImage: "bell") { run(.unsnooze) }
@@ -494,17 +507,16 @@ struct ProjectCardHeader: View {
     }
 }
 
-/// Working, Snoozed or Done for now folded to one row: its name, count and a
+/// Working or Snoozed folded to one row: its name, count and a
 /// one-line summary ("claude-project · DevTool Streams Redesign, …"). Tap to
 /// open the group in place.
 struct FoldedGroupRow: View {
     enum Kind {
-        case working, settled, snoozed
+        case working, snoozed
 
         var title: String {
             switch self {
             case .working: "Working"
-            case .settled: "Done for now"
             case .snoozed: "Snoozed"
             }
         }
@@ -556,8 +568,6 @@ struct FoldedGroupRow: View {
         switch kind {
         case .working:
             Circle().fill(Color.accentColor.opacity(0.6)).frame(width: 8, height: 8)
-        case .settled:
-            Image(systemName: "checkmark").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
         case .snoozed:
             Image(systemName: "moon.zzz").font(.footnote).foregroundStyle(.secondary)
         }

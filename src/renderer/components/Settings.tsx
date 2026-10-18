@@ -527,7 +527,7 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                   value={config.inboxLayout}
                   onChange={(inboxLayout) => updateConfig({ inboxLayout })}
                 />
-                <HelperText>By project puts open tasks under a header per project, pinned projects first, each row naming its stream; Snoozed and Done for now stay folded at the bottom. The button in the Inbox header switches it too.</HelperText>
+                <HelperText>By project puts open tasks under a header per project, pinned projects first, each row naming its stream; Snoozed stays folded at the bottom. The button in the Inbox header switches it too.</HelperText>
               </SetBlock>
             </FormGroup>
 

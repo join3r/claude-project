@@ -15,9 +15,8 @@ export type TaskEventKind = 'event' | 'attention'
  * exit. 'attention' additionally records the moment something started waiting on
  * the user, which is what "snooze until it needs me" wakes on.
  *
- * Also resolves triage state that the event supersedes: a settle is undone (settle
- * means "done for now", not "muted"), and on 'attention' any snooze is woken: an
- * agent that needs you overrides a snooze, timed or not. `watching`
+ * On 'attention' it also wakes any snooze: an agent that needs you overrides a
+ * snooze, timed or not. `watching`
  * marks it read on arrival, for the task on screen.
  */
 export function inboxWithEvent(
@@ -29,7 +28,6 @@ export function inboxWithEvent(
   const next: TaskInboxState = { ...inbox, eventAt: now }
   if (kind === 'attention') next.attentionAt = now
   if (watching) next.visitedAt = now
-  if (typeof next.settledAt === 'number') delete next.settledAt
   if (kind === 'attention') {
     delete next.snoozedUntil
     delete next.snoozeUntilAttention
@@ -48,22 +46,6 @@ export function inboxUnread(inbox: TaskInboxState): TaskInboxState {
   return { ...inbox, forcedUnread: true }
 }
 
-/** Settling is also an acknowledgement, so it clears unread and any snooze. */
-export function inboxSettled(inbox: TaskInboxState, now: number): TaskInboxState {
-  const next: TaskInboxState = { ...inbox, settledAt: now, visitedAt: now }
-  delete next.forcedUnread
-  delete next.snoozedUntil
-  delete next.snoozeUntilAttention
-  delete next.snoozedAt
-  return next
-}
-
-export function inboxUnsettled(inbox: TaskInboxState): TaskInboxState {
-  const next = { ...inbox }
-  delete next.settledAt
-  return next
-}
-
 export interface SnoozeOptions {
   until?: number
   untilAttention?: boolean
@@ -72,7 +54,6 @@ export interface SnoozeOptions {
 export function inboxSnoozed(inbox: TaskInboxState, now: number, options: SnoozeOptions): TaskInboxState {
   const next: TaskInboxState = { ...inbox, snoozedAt: now, visitedAt: now }
   delete next.forcedUnread
-  delete next.settledAt
   if (options.untilAttention) {
     next.snoozeUntilAttention = true
     delete next.snoozedUntil

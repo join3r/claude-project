@@ -228,8 +228,8 @@ describe('buildInbox', () => {
       { id: 'q3', text: 'closed', streamId: mainStreamId('p1') }
     ])
     expect(wire.streams[1]).toEqual({ id: 's-bugs', name: 'bugfixes', queueAutoRun: true, queueTaskId: 't1' })
-    // A finished (settled) watched task no longer holds the queue up.
-    p.streams[1].tasks[0].inbox = { settledAt: NOW }
+    // A closed watched task no longer holds the queue up.
+    p.streams[1].tasks = []
     expect(buildInbox(data([p]), lookup(), DESKTOP, NOW).projects[0].streams[1]).toEqual({ id: 's-bugs', name: 'bugfixes', queueAutoRun: true })
     expect('queue' in buildInbox(data([project('p2', [])]), lookup(), DESKTOP, NOW).projects[0]).toBe(false)
   })
@@ -262,23 +262,18 @@ describe('buildInbox', () => {
       task('unread', [], { inbox: { eventAt: 10, visitedAt: 5 } }),
       task('read', [], { inbox: { eventAt: 10, visitedAt: 20 } }),
       task('forced', [], { inbox: { visitedAt: 20, forcedUnread: true } }),
-      task('settled', [], { inbox: { eventAt: 10, settledAt: 30, visitedAt: 30 } }),
-      task('unsettled', [], { inbox: { eventAt: 40, settledAt: 30, visitedAt: 30 } }),
-      task('timed', [], { inbox: { snoozedAt: 1, snoozedUntil: NOW + 60_000, settledAt: 30 } }),
+      task('timed', [], { inbox: { snoozedAt: 1, snoozedUntil: NOW + 60_000 } }),
       task('expired', [], { inbox: { snoozedAt: 1, snoozedUntil: NOW - 1 } }),
       task('attention', [], { inbox: { snoozedAt: 50, snoozeUntilAttention: true } }),
       task('woken', [], { inbox: { snoozedAt: 50, snoozeUntilAttention: true, attentionAt: 60 } })
     ]
     const inbox = buildInbox(data([project('p1', tasks)]), lookup(), DESKTOP, NOW)
-    const triage = Object.fromEntries(inbox.projects[0].tasks.map(({ id, eventAt, unread, settledAt, snoozedUntil, snoozeUntilAttention }) =>
-      [id, JSON.parse(JSON.stringify({ eventAt, unread, settledAt, snoozedUntil, snoozeUntilAttention }))]))
+    const triage = Object.fromEntries(inbox.projects[0].tasks.map(({ id, eventAt, unread, snoozedUntil, snoozeUntilAttention }) =>
+      [id, JSON.parse(JSON.stringify({ eventAt, unread, snoozedUntil, snoozeUntilAttention }))]))
     expect(triage).toEqual({
       unread: { eventAt: 10, unread: true },
       read: { eventAt: 10 },
       forced: { unread: true },
-      settled: { eventAt: 10, settledAt: 30 },
-      unsettled: { eventAt: 40, unread: true },
-      // Snooze wins over settle, as in the window's partitionInbox.
       timed: { snoozedUntil: NOW + 60_000 },
       expired: {},
       attention: { snoozeUntilAttention: true },

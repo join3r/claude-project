@@ -11,7 +11,6 @@
  */
 import type { Project, QueuedPrompt, Stream } from './types'
 import { findMainStream } from './streams'
-import { isSettled } from './inbox-state'
 
 export type PromptQueueOp =
   | { op: 'add'; item: QueuedPrompt }
@@ -132,13 +131,13 @@ export function stopPromptQueueAutoRun(project: Project, streamId: string): Proj
 
 /**
  * The queue-started task a stream is waiting on, while it still runs: a task
- * closed since, or put away with Done for now, no longer holds the queue up.
+ * closed since no longer holds the queue up.
  */
 export function promptQueueWatchedTask(stream: Stream): { taskId: string; tabId: string } | null {
   const watch = stream.promptQueueWatch
   if (!watch) return null
   const task = stream.tasks.find(t => t.id === watch.taskId)
-  return task && !isSettled(task) ? watch : null
+  return task ? watch : null
 }
 
 /** The prompt a stream's auto-run starts now, if it may start one. */

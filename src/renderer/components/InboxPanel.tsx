@@ -51,7 +51,7 @@ type Props = {
   pinnedProjectIds?: readonly string[]
 }
 
-type GroupKey = 'needsYou' | 'ready' | 'working' | 'settled' | 'snoozed'
+type GroupKey = 'needsYou' | 'ready' | 'working' | 'snoozed'
 
 /**
  * Third line of a row: what the task needs or is doing, or when it wakes. Blocked
@@ -312,11 +312,10 @@ export default function InboxPanel({
   showIcons = false,
   pinnedProjectIds = NO_PINS
 }: Props): React.ReactElement {
-  // Fold state lives with the panel, as it always has for Snoozed and Done for now.
+  // Fold state lives with the panel, as it always has for Snoozed.
   // Ready and Working are never folded: Ready holds the replies you owe, and the
   // task you just sent a prompt to moves to Working and must stay in sight.
-  const [folded, setFolded] = useState<Record<'settled' | 'snoozed', boolean>>({
-    settled: true,
+  const [folded, setFolded] = useState<Record<'snoozed', boolean>>({
     snoozed: true
   })
   const toggle = (key: keyof typeof folded) => setFolded(prev => ({ ...prev, [key]: !prev[key] }))
@@ -326,8 +325,8 @@ export default function InboxPanel({
     [projects, allStatuses, statusSince, now]
   )
   const grouped = layout === 'grouped'
-  // Grouped: the open groups by project. Snoozed and Done for now stay folded sections
-  // below, as in the flat list.
+  // Grouped: the open groups by project. Snoozed stays a folded section below, as
+  // in the flat list.
   const projectGroups = useMemo(
     () => (grouped
       ? groupInboxByProject([...partition.needsYou, ...partition.ready, ...partition.working], pinnedProjectIds)
@@ -423,8 +422,6 @@ export default function InboxPanel({
           <span>{partition.snoozed.length} hidden until they wake</span>
         </div>
       )}
-
-      {section('Done for now', 'settled', partition.settled, 'settled')}
     </div>
   )
 }

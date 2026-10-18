@@ -22,7 +22,7 @@ extension InboxTask {
         return tabs.filter { $0.id != agent.id }
     }
 
-    /// Needs the user now: attention, and not snoozed or settled away.
+    /// Needs the user now: attention, and not snoozed away.
     public func needsYou(now: Date) -> Bool {
         inboxGroup(now: now) == .needsYou
     }
@@ -36,7 +36,7 @@ public struct ProjectSummary: Sendable, Equatable, Identifiable {
     public var needsYou: Int
     /// Tasks whose agent is working.
     public var working: Int
-    /// Any task unread (and not snoozed or settled).
+    /// Any task unread (and not snoozed).
     public var unread: Bool
     /// The most urgent task: the longest waiting one that needs you, else
     /// one that is working, else the most recently active.
@@ -61,14 +61,13 @@ public struct ProjectSummary: Sendable, Equatable, Identifiable {
         }
     }
 
-    /// 0 needs you, 1 working, 2 the rest, 3 settled, 4 snoozed.
+    /// 0 needs you, 1 working, 2 the rest, 3 snoozed.
     static func rank(_ task: InboxTask, now: Date) -> Int {
         switch task.inboxGroup(now: now) {
         case .needsYou: 0
         case .working: 1
         case .yourTurn, .quiet: 2
-        case .settled: 3
-        case .snoozed: 4
+        case .snoozed: 3
         }
     }
 

@@ -91,8 +91,6 @@ export interface InboxTask {
   eventAt?: number
   /** Present while the desktop counts the task unread (§4.4). */
   unread?: true
-  /** Present while the task is settled (§4.4). */
-  settledAt?: number
   /** Present while a timed snooze hasn't passed at `generatedAt` (§4.4). */
   snoozedUntil?: number
   /** Present while the task is snoozed until it needs the user (§4.4). */
@@ -406,8 +404,6 @@ function parseTask(value: unknown): InboxTask {
   const eventAt = optInt(o, 'eventAt')
   if (eventAt !== undefined) task.eventAt = eventAt
   if (o.unread === true) task.unread = true
-  const settledAt = optInt(o, 'settledAt')
-  if (settledAt !== undefined) task.settledAt = settledAt
   const snoozedUntil = optInt(o, 'snoozedUntil')
   if (snoozedUntil !== undefined) task.snoozedUntil = snoozedUntil
   if (o.snoozeUntilAttention === true) task.snoozeUntilAttention = true

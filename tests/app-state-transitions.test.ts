@@ -33,7 +33,6 @@ import {
   togglePinnedItemInData
 } from '../src/renderer/hooks/appState/projectsData'
 import {
-  inboxSettled,
   inboxSnoozed,
   inboxUnsnoozed,
   inboxVisited,
@@ -230,8 +229,8 @@ describe('projectsData', () => {
 })
 
 describe('inbox transitions', () => {
-  it('an attention event wakes an attention-snooze and undoes a settle', () => {
-    const next = inboxWithEvent({ settledAt: 1, snoozeUntilAttention: true, snoozedAt: 2 }, 10, 'attention', false)
+  it('an attention event wakes an attention-snooze', () => {
+    const next = inboxWithEvent({ snoozeUntilAttention: true, snoozedAt: 2 }, 10, 'attention', false)
     expect(next).toEqual({ eventAt: 10, attentionAt: 10 })
   })
 
@@ -250,13 +249,12 @@ describe('inbox transitions', () => {
     expect(next).toEqual({ snoozeUntilAttention: true, snoozedAt: 2, eventAt: 10, visitedAt: 10 })
   })
 
-  it('visiting clears forced unread; settling clears snooze too', () => {
+  it('visiting clears forced unread', () => {
     expect(inboxVisited({ forcedUnread: true }, 5)).toEqual({ visitedAt: 5 })
-    expect(inboxSettled({ forcedUnread: true, snoozedUntil: 9, snoozedAt: 1 }, 5)).toEqual({ settledAt: 5, visitedAt: 5 })
   })
 
   it('snoozing switches between timed and until-attention', () => {
-    const timed = inboxSnoozed({ snoozeUntilAttention: true, settledAt: 1 }, 5, { until: 100 })
+    const timed = inboxSnoozed({ snoozeUntilAttention: true, forcedUnread: true }, 5, { until: 100 })
     expect(timed).toEqual({ snoozedAt: 5, visitedAt: 5, snoozedUntil: 100 })
     const attention = inboxSnoozed(timed, 6, { untilAttention: true })
     expect(attention).toEqual({ snoozedAt: 6, visitedAt: 6, snoozeUntilAttention: true })

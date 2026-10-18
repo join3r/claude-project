@@ -226,6 +226,13 @@ actor FakeRelay: WebSocketConnector {
                         let landing = TaskLanding(state: .conflict, intent: .close, files: ["a.ts"], fileCount: 1)
                         return app(.resOk(id: id, result: TaskCloseResult.landing(landing).json), to: from)
                     }
+                    // "q" has a worktree of its own: `ask` gets the close question, a `mode` closes it.
+                    if parsed.taskId == "q" && features.contains(DesktopFeature.taskCloseChoice) {
+                        let result: TaskCloseResult = parsed.mode == nil && parsed.ask
+                            ? .question(TaskCloseQuestion(message: "Squash 2 commits into 0.5.0.", landBlocked: "Its agent is working"))
+                            : .closed
+                        return app(.resOk(id: id, result: result.json), to: from)
+                    }
                     // "t" has a working agent until the phone says to stop it.
                     let result: TaskCloseResult = parsed.stopWorking ? .closed : .blocked(.working)
                     return app(.resOk(id: id, result: result.json), to: from)

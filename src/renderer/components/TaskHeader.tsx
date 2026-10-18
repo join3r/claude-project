@@ -8,7 +8,7 @@ import type { PinnedItem, Project, Stream, Task } from '../../shared/types'
 import { ContextMenu, type ContextMenuItem } from './ui'
 import type { MenuAnchor } from '../hooks/useMenuPosition'
 import ProjectTileBadge from './ProjectTileBadge'
-import { isSettled, isSnoozed, snoozePresets, taskActivity } from './inbox'
+import { isSnoozed, snoozePresets, taskActivity } from './inbox'
 import { taskAgentTab, taskStatusChip, type TaskChipTone } from './taskHeaderState'
 import { useCloseTask } from './sidebar/useCloseTask'
 import { landingActionBlocker } from './sidebar/closeRules'
@@ -50,7 +50,7 @@ export default function TaskHeader({
 }): React.ReactElement {
   const {
     config, effectiveTheme, renameTask, convertClaudeTab, pinnedItems, togglePinnedItem,
-    settleTask, unsettleTask, snoozeTask, unsnoozeTask, setSelectedTaskId
+    snoozeTask, unsnoozeTask, setSelectedTaskId
   } = useApp()
   const allStatuses = useAllTabStatuses()
   const statusSince = useAllTabStatusSince()
@@ -135,16 +135,10 @@ export default function TaskHeader({
     const pin: PinnedItem = { type: 'task', projectId: project.id, streamId: stream?.id ?? '', taskId: task.id }
     const pinned = (pinnedItems ?? []).some(item => pinnedItemKey(item) === pinnedItemKey(pin))
     items.push({ label: pinned ? 'Unpin' : 'Pin', onSelect: () => togglePinnedItem(pin) })
-    const settled = isSettled(task)
-    items.push({
-      label: settled ? 'Back to Inbox' : 'Done for now',
-      dividerBefore: true,
-      onSelect: () => (settled ? unsettleTask : settleTask)(project.id, task.id)
-    })
     if (isSnoozed(task, Date.now())) {
-      items.push({ label: 'Wake now', onSelect: () => unsnoozeTask(project.id, task.id) })
+      items.push({ label: 'Wake now', dividerBefore: true, onSelect: () => unsnoozeTask(project.id, task.id) })
     } else {
-      items.push({ label: 'Snooze…', onSelect: () => setMenu({ ...menu, page: 'snooze' }) })
+      items.push({ label: 'Snooze…', dividerBefore: true, onSelect: () => setMenu({ ...menu, page: 'snooze' }) })
     }
     items.push({
       label: 'Close task',

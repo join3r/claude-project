@@ -2,7 +2,6 @@ import type { Project, Stream, Task } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import {
   inboxState,
-  isSettled,
   isSnoozed,
   isStatusTab,
   isUnread,
@@ -19,7 +18,7 @@ import { describeActivity, type AgentActivity } from '../../shared/agent-activit
 // cleanup moved into main — both processes must answer them identically. They
 // are re-exported here because this module is the inbox's façade.
 export {
-  inboxState, isSettled, isSnoozed, isStatusTab, isUnread, isYourTurn, landingNeedsYou, landingStatusLabel, lastActivityAt, statusTabs, taskStatus
+  inboxState, isSnoozed, isStatusTab, isUnread, isYourTurn, landingNeedsYou, landingStatusLabel, lastActivityAt, statusTabs, taskStatus
 }
 
 /** Oldest `since` stamp across the task's status tabs — how long it has been waiting. */
@@ -91,7 +90,7 @@ export interface InboxEntry extends InboxSource {
   /** When the current status began — null when unknown (e.g. after a restart). */
   since: number | null
   unread: boolean
-  /** Waiting on you rather than the agent — see isYourTurn. Never set on quiet settled or snoozed rows. */
+  /** Waiting on you rather than the agent — see isYourTurn. Never set on quiet snoozed rows. */
   yourTurn: boolean
 }
 
@@ -106,16 +105,14 @@ export interface InboxPartition {
   ready: InboxEntry[]
   /** The agent is running: nothing for you to do yet. */
   working: InboxEntry[]
-  settled: InboxEntry[]
   snoozed: InboxEntry[]
 }
 
 /**
- * Splits tasks into the inbox groups. A live agent wins over snooze and settle:
- * a task that needs you or is working shows there, the same as its header chip,
- * and drops back to Snoozed / Done for now once the agent goes quiet. So does a
- * landing stopped on a conflict or a blocked stream (Ready). Snooze wins over
- * settle (an explicitly snoozed task stays hidden even if it was settled earlier).
+ * Splits tasks into the inbox groups. A live agent wins over snooze: a task
+ * that needs you or is working shows there, the same as its header chip, and
+ * drops back to Snoozed once the agent goes quiet. So does a landing stopped on
+ * a conflict or a blocked stream (Ready).
  */
 export function partitionInbox(
   entries: readonly InboxSource[],
@@ -123,7 +120,7 @@ export function partitionInbox(
   statusSince: Record<string, number>,
   now: number
 ): InboxPartition {
-  const partition: InboxPartition = { needsYou: [], ready: [], working: [], settled: [], snoozed: [] }
+  const partition: InboxPartition = { needsYou: [], ready: [], working: [], snoozed: [] }
   const yourTurn: InboxEntry[] = []
   const idle: InboxEntry[] = []
 
@@ -147,7 +144,6 @@ export function partitionInbox(
       yourTurn.push(entry)
     } else if (status === 'working') partition.working.push(entry)
     else if (isSnoozed(task, now)) partition.snoozed.push(entry)
-    else if (isSettled(task)) partition.settled.push(entry)
     else {
       entry.yourTurn = isYourTurn(task, status)
       if (entry.yourTurn) yourTurn.push(entry)
@@ -161,7 +157,6 @@ export function partitionInbox(
   partition.ready = [...yourTurn.sort(byRecency), ...idle.sort(byRecency)]
   // Newest start first, so a task you just sent a prompt to lands at the top.
   partition.working.sort((a, b) => (b.since ?? lastActivityAt(b.task)) - (a.since ?? lastActivityAt(a.task)))
-  partition.settled.sort((a, b) => (inboxState(b.task).settledAt ?? 0) - (inboxState(a.task).settledAt ?? 0))
   partition.snoozed.sort((a, b) => wakeAt(a.task) - wakeAt(b.task))
 
   return partition

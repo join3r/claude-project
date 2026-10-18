@@ -258,8 +258,6 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var eventAt: Int64?
     /// The desktop counts the task unread (§4.4).
     public var unread: Bool
-    /// Unix milliseconds. Set while the task is settled.
-    public var settledAt: Int64?
     /// Unix milliseconds. A timed snooze; it ends on the phone's clock.
     public var snoozedUntil: Int64?
     /// Snoozed until the task next needs the user.
@@ -275,7 +273,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         id: String, name: String, streamId: String = "", streamName: String = "",
         status: TabStatus = .idle, since: Int64? = nil, activity: String? = nil,
         lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
-        eventAt: Int64? = nil, unread: Bool = false, settledAt: Int64? = nil,
+        eventAt: Int64? = nil, unread: Bool = false,
         snoozedUntil: Int64? = nil, snoozeUntilAttention: Bool = false,
         branch: String? = nil, landing: TaskLanding? = nil,
         tabs: [InboxTab]
@@ -291,7 +289,6 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         self.attentionAt = attentionAt
         self.eventAt = eventAt
         self.unread = unread
-        self.settledAt = settledAt
         self.snoozedUntil = snoozedUntil
         self.snoozeUntilAttention = snoozeUntilAttention
         self.branch = branch
@@ -313,7 +310,6 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         attentionAt = try c.decodeIfPresent(Int64.self, forKey: .attentionAt)
         eventAt = try c.decodeIfPresent(Int64.self, forKey: .eventAt)
         unread = (try? c.decodeIfPresent(Bool.self, forKey: .unread)) == true
-        settledAt = try c.decodeIfPresent(Int64.self, forKey: .settledAt)
         snoozedUntil = try c.decodeIfPresent(Int64.self, forKey: .snoozedUntil)
         snoozeUntilAttention = (try? c.decodeIfPresent(Bool.self, forKey: .snoozeUntilAttention)) == true
         branch = try c.decodeIfPresent(String.self, forKey: .branch)

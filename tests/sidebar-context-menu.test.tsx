@@ -82,20 +82,21 @@ function renderSidebar() {
 }
 
 describe('Sidebar context menu', () => {
-  it('opens on a task row and settles the task', async () => {
+  it('opens on a task row and snoozes the task until it needs you', async () => {
     renderSidebar()
     const row = await screen.findByText('Fix the thing')
 
     fireEvent.contextMenu(row)
-    // By text: the row's own hover action is also a button titled 'Done for now'.
-    const settle = await screen.findByText('Done for now', { selector: 'button' })
-    act(() => { fireEvent.click(settle) })
+    fireEvent.click(await screen.findByRole('button', { name: /Snooze/ }))
+    // Done for now is gone: closing a task replaced it.
+    expect(screen.queryByText('Done for now', { selector: 'button' })).toBeNull()
+    act(() => { fireEvent.click(screen.getByText('Until it needs me')) })
 
     await waitFor(() => {
       const task = projectTasks(saved[saved.length - 1]?.projects[0]).find(t => t.id === 't1')
-      expect(task?.inbox?.settledAt).toBeTypeOf('number')
+      expect(task?.inbox?.snoozeUntilAttention).toBe(true)
     })
-    expect(screen.queryByText('Done for now', { selector: 'button' })).toBeNull()
+    expect(screen.queryByText('Until it needs me')).toBeNull()
   })
 
   it('pages to the snooze presets and back out on dismiss', async () => {

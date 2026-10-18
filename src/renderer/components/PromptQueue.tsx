@@ -146,7 +146,7 @@ function autoRunHint(project: Project, stream: Stream, count: number, blocked: s
   const watch = promptQueueWatchedTask(stream)
   const watchedTask = watch ? findTaskInProject(project, watch.taskId) : undefined
   if (count === 0) return watchedTask ? null : 'A prompt added here starts right away.'
-  if (watchedTask) return `The next prompt starts when "${watchedTask.name}" finishes or you mark it Done for now.`
+  if (watchedTask) return `The next prompt starts when "${watchedTask.name}" finishes or you close it.`
   return blocked
 }
 

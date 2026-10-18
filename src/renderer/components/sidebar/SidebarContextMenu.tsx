@@ -6,7 +6,7 @@ import { featureAvailable, revealAvailable } from '../../../shared/project-featu
 import { canMoveToServer } from '../../../shared/project-move'
 import type { PinnedItem, Project, Task } from '../../../shared/types'
 import { useMenuPosition } from '../../hooks/useMenuPosition'
-import { isSettled, isSnoozed, isUnread, snoozePresets } from '../inbox'
+import { isSnoozed, isUnread, snoozePresets } from '../inbox'
 import { menuCls, menuItemCls } from '../ui'
 import { revealInFolderLabel } from '../../utils/revealLabel'
 import { joinWorkspaceDir } from '../../../shared/workspace-path'
@@ -61,7 +61,6 @@ export default function SidebarContextMenu({
   closeContextMenu,
   setContextMenu,
   findTask,
-  handleToggleSettled,
   handleCloseTask,
   handleCloseStream,
   beginEdit,
@@ -79,7 +78,6 @@ export default function SidebarContextMenu({
   closeContextMenu: () => void
   setContextMenu: (menu: null) => void
   findTask: (projectId: string, taskId: string) => Task | undefined
-  handleToggleSettled: (projectId: string, taskId: string) => void
   handleCloseTask: (projectId: string, taskId: string) => void | Promise<void>
   handleCloseStream: (projectId: string, streamId: string) => void | Promise<void>
   /** Rename inline; `streamId` opens that stream so the row is on screen. */
@@ -157,14 +155,9 @@ export default function SidebarContextMenu({
             {contextMenu.type === 'task' && (() => {
               const task = findTask(contextMenu.projectId, contextMenu.taskId!)
               if (!task) return null
-              const settled = isSettled(task)
               const snoozed = isSnoozed(task, Date.now())
               return (
                 <div className="border-b border-hair pb-1 mb-1">
-                  <button className={menuItemCls} onClick={() => {
-                    handleToggleSettled(contextMenu.projectId, contextMenu.taskId!)
-                    closeContextMenu()
-                  }}>{settled ? 'Back to Inbox' : 'Done for now'}</button>
                   {snoozed ? (
                     <button className={menuItemCls} onClick={() => {
                       unsnoozeTask(contextMenu.projectId, contextMenu.taskId!)

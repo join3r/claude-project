@@ -18,7 +18,7 @@ export const STREAM_TONE_LABEL: Record<TaskChipTone, string> = {
 
 /**
  * The strongest status among the stream's tasks, as their header chips read:
- * needs you, else working, else your turn, else quiet. A snoozed or settled task
+ * needs you, else working, else your turn, else quiet. A snoozed task
  * adds nothing unless its agent is live again.
  */
 export function streamTone(

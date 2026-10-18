@@ -104,21 +104,21 @@ describe('useTaskInbox', () => {
     expect(inbox?.visitedAt).toBe(inbox?.eventAt)
   })
 
-  it('settle is saved once persistence is mounted', async () => {
+  it('snooze is saved once persistence is mounted', async () => {
     const hook = renderHook(() => {
       const core = useAppStateCore()
       usePersistence(core)
       return { core, inbox: useTaskInbox(core) }
     })
     await loaded(hook)
-    act(() => { hook.result.current.inbox.settleTask('p1', 't1') })
+    act(() => { hook.result.current.inbox.snoozeTask('p1', 't1', { untilAttention: true }) })
     await waitFor(() => expect(saved.length).toBeGreaterThan(0))
-    expect(workTask(saved[saved.length - 1]).inbox?.settledAt).toBeTypeOf('number')
+    expect(workTask(saved[saved.length - 1]).inbox?.snoozeUntilAttention).toBe(true)
   })
 })
 
 describe('useLeaveOnPutAway', () => {
-  it('leaves the task on screen for its project Home when it is settled or snoozed', async () => {
+  it('leaves the task on screen for its project Home when it is snoozed', async () => {
     const selectProjectHome = vi.fn()
     const hook = renderHook(() => {
       const core = useAppStateCore()
@@ -128,9 +128,9 @@ describe('useLeaveOnPutAway', () => {
     await loaded(hook)
 
     // Not on screen: the view stays.
-    act(() => { hook.result.current.putAway.settleTask('p1', 't1') })
+    act(() => { hook.result.current.putAway.snoozeTask('p1', 't1', { untilAttention: true }) })
     expect(selectProjectHome).not.toHaveBeenCalled()
-    expect(workTask(hook.result.current.core.projectsData).inbox?.settledAt).toBeTypeOf('number')
+    expect(workTask(hook.result.current.core.projectsData).inbox?.snoozeUntilAttention).toBe(true)
 
     act(() => {
       hook.result.current.core.updateWindowViewState(prev => ({ ...prev, selectedProjectId: 'p1', selectedTaskId: 't1' }))

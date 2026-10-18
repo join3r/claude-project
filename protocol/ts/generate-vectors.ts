@@ -237,7 +237,7 @@ function appMessages(): unknown {
           ]
         }, {
           id: 't2', name: 'Fix the login redirect', streamId: 's-050', streamName: '0.5.0', status: 'idle',
-          settledAt: 1789990000000, branch: '0.5.0--fix-the-login-redirect',
+          branch: '0.5.0--fix-the-login-redirect',
           landing: { state: 'conflict', files: ['src/auth.ts', 'src/login.ts'], fileCount: 2 },
           tabs: [{ id: 'tab3', type: 'claude-chat', title: 'Claude', status: 'idle' }]
         }, {
@@ -274,7 +274,8 @@ function appMessages(): unknown {
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'thinking', since: null,
         activity: null, notes: 'x', attentionAt: null, branch: null,
-        unread: false, settledAt: null, snoozeUntilAttention: 'yes',
+        // An older desktop's `settledAt` (Done for now, gone) is dropped.
+        unread: false, settledAt: 1789990000000, snoozeUntilAttention: 'yes',
         // A newer desktop's landing state is kept; an unknown intent is dropped.
         landing: { state: 'queued', intent: 'squash', files: null, fileCount: null, message: null, eta: 5 },
         tabs: [
@@ -670,7 +671,12 @@ function chatMessages(): unknown {
       params: [
         text({ taskId: 't1' }),
         text({ taskId: 't1', stopWorking: true, discardUnsaved: true }),
-        text({ taskId: 't1', stopWorking: 1, discardUnsaved: null, discardWorkspace: true, extra: true })
+        text({ taskId: 't1', stopWorking: 1, discardUnsaved: null, discardWorkspace: true, extra: true }),
+        // `task.close.choice`: the close question, then the user's answer.
+        text({ taskId: 't1', ask: true }),
+        text({ taskId: 't1', ask: true, mode: 'land', stopWorking: true }),
+        text({ taskId: 't1', mode: 'keep' }),
+        text({ taskId: 't1', mode: 'discard', discardUnsaved: true, ask: 'yes' })
       ].map((json) => ({ json, expected: parseTaskCloseParams(JSON.parse(json)) })),
       results: [
         text({ closed: true }),
@@ -679,13 +685,18 @@ function chatMessages(): unknown {
         text({ closed: false, blocker: 'unsaved', extra: 1 }),
         // Version 3: a task with its own worktree that didn't land stays open.
         text({ closed: false, landing: { state: 'conflict', intent: 'close', files: ['src/auth.ts'], fileCount: 3 } }),
-        text({ closed: false, landing: { state: 'blocked', files: [], message: 'error: Your local changes would be overwritten' }, blocker: null })
+        text({ closed: false, landing: { state: 'blocked', files: [], message: 'error: Your local changes would be overwritten' }, blocker: null }),
+        text({ closed: false, question: { message: 'Squash 3 commits and uncommitted changes in 2 files into 0.5.0.' } }),
+        text({ closed: false, question: { message: '"fix-auth" is still working. Let it finish to land its work into 0.5.0, or close it without landing: its agent stops and its tabs close.', landBlocked: 'Its agent is working', extra: 1 } }),
+        text({ closed: false, question: { message: 'Squash 1 commit into 0.5.0.', landBlocked: null } })
       ].map((json) => ({ json, expected: parseTaskCloseResult(JSON.parse(json)) })),
       invalid: {
-        params: [text({}), text({ taskId: 7 }), 'null'],
+        params: [text({}), text({ taskId: 7 }), text({ taskId: 't1', mode: 'squash' }), text({ taskId: 't1', mode: 1 }), 'null'],
         results: [
           text({}),
           text({ closed: false }),
+          text({ closed: false, question: {} }),
+          text({ closed: false, question: 'Land?' }),
           text({ closed: 'yes' }),
           text({ closed: false, blocker: 'unmerged' }),
           text({ closed: false, landing: { files: [] } }),
@@ -732,13 +743,11 @@ function chatMessages(): unknown {
       ].map((json) => ({ json, expected: parsePinSetParams(JSON.parse(json)) })),
       invalid: { params: [text({ pinned: true }), text({ projectId: 'p1' }), text({ projectId: 'p1', pinned: 'yes' }), text({ projectId: 'p1', taskId: 7, pinned: true }), text({ projectId: 'p1', streamId: 7, pinned: true }), 'null'] }
     },
-    // §8.11: `task.triage` marks a task read or unread, settles, snoozes or undoes either; its result is `{}`.
+    // §8.11: `task.triage` marks a task read or unread, snoozes or unsnoozes it; its result is `{}`.
     taskTriage: {
       params: [
         text({ taskId: 't1', action: 'read' }),
         text({ taskId: 't1', action: 'unread', until: 5 }),
-        text({ taskId: 't1', action: 'settle' }),
-        text({ taskId: 't1', action: 'unsettle' }),
         text({ taskId: 't1', action: 'snooze', until: 1790003600000 }),
         text({ taskId: 't1', action: 'snooze', untilAttention: true, until: null }),
         text({ taskId: 't1', action: 'unsnooze', untilAttention: true, extra: 1 })
@@ -748,6 +757,9 @@ function chatMessages(): unknown {
           text({ action: 'read' }),
           text({ taskId: 't1' }),
           text({ taskId: 't1', action: 'archive' }),
+          // Done for now is gone: closing a task replaced it.
+          text({ taskId: 't1', action: 'settle' }),
+          text({ taskId: 't1', action: 'unsettle' }),
           text({ taskId: 't1', action: 'snooze' }),
           text({ taskId: 't1', action: 'snooze', untilAttention: false }),
           text({ taskId: 't1', action: 'snooze', until: 1790003600000, untilAttention: true }),

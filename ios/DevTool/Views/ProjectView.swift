@@ -325,7 +325,7 @@ struct ProjectView: View {
         let waiting = project.queueWaitingTask(in: stream)
         if prompts.isEmpty { return waiting == nil ? "A prompt added here starts right away." : nil }
         guard let waiting else { return nil }
-        return "The next prompt starts when \u{201C}\(waiting.name)\u{201D} finishes or you mark it Done for now."
+        return "The next prompt starts when \u{201C}\(waiting.name)\u{201D} finishes or you close it."
     }
 
     private func queueRow(_ item: InboxQueuedPrompt, number: Int, next: Bool, project: InboxProject) -> some View {

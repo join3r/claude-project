@@ -341,6 +341,28 @@ import Testing
         await connection.stop()
     }
 
+    @Test func closeQuestionWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        let features = [DesktopFeature.taskClose, DesktopFeature.taskCloseChoice]
+        desktop.features = features
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features(Set(features)) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        let asked = try await connection.closeTask(TaskCloseParams(taskId: "q", ask: true))
+        #expect(asked == .question(TaskCloseQuestion(message: "Squash 2 commits into 0.5.0.", landBlocked: "Its agent is working")))
+        #expect(desktop.requests.last?.params == .object(["taskId": "q", "ask": true]))
+        let kept = try await connection.closeTask(TaskCloseParams(taskId: "q", ask: true, mode: .keep))
+        #expect(kept == .closed)
+        #expect(desktop.requests.last?.params == .object(["taskId": "q", "ask": true, "mode": "keep"]))
+        #expect(desktop.taskCloseParams.map(\.mode) == [nil, .keep])
+        await connection.stop()
+    }
+
     @Test func pinSetWhenListed() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
@@ -503,7 +525,7 @@ import Testing
         await mock.start()
         try await events.waitFor { $0 == .features([
             DesktopFeature.taskNew, DesktopFeature.chatSettings,
-            DesktopFeature.taskClose, DesktopFeature.tabClose, DesktopFeature.chatImage,
+            DesktopFeature.taskClose, DesktopFeature.taskCloseChoice, DesktopFeature.tabClose, DesktopFeature.chatImage,
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,

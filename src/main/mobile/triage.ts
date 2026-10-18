@@ -1,10 +1,8 @@
 import type { ProjectsData, Task, TaskInboxState } from '../../shared/types'
-import { isSettled, isSnoozed, isUnread } from '../../shared/inbox-state'
+import { isSnoozed, isUnread } from '../../shared/inbox-state'
 import {
-  inboxSettled,
   inboxSnoozed,
   inboxUnread,
-  inboxUnsettled,
   inboxUnsnoozed,
   inboxVisited
 } from '../../shared/inbox-transitions'
@@ -30,10 +28,6 @@ function nextInbox(task: Task, params: TaskTriageParams, now: number): TaskInbox
       return isUnread(task) ? inboxVisited(inbox, now) : null
     case 'unread':
       return isUnread(task) ? null : inboxUnread(inbox)
-    case 'settle':
-      return inboxSettled(inbox, now)
-    case 'unsettle':
-      return isSettled(task) ? inboxUnsettled(inbox) : null
     case 'snooze':
       return inboxSnoozed(inbox, now, params.untilAttention ? { untilAttention: true } : { until: params.until })
     case 'unsnooze':

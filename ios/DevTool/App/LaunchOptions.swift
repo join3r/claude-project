@@ -18,6 +18,9 @@ import Foundation
 ///   (the first task without `-demoTask`); `-demoCloseTask` then sends it
 ///   `task.close`, so a worktree task's landing banner shows (mock: `t-auth`
 ///   conflicts, `t-cache` is blocked).
+/// - `-demoInboxClose <taskId> [-demoInboxRemove]` (Debug builds, Inbox): that row's Close
+///   (or Remove) swipe, through the real close flow: a worktree task gets the
+///   desktop's close question (mock: `t-cache`).
 /// - `-demoRoute chat [-demoTab <tabId>]` (Debug builds): open a claude-chat tab
 ///   (the first one that needs attention when `-demoTab` is absent). Works
 ///   against mock and real desktops. With `-demoToolDetail <itemId>` the item's
@@ -78,6 +81,9 @@ struct LaunchOptions: Sendable {
     var demoTab: String?
     var demoTask: String?
     var demoCloseTask = false
+    /// `-demoInboxClose <taskId>` (or `-demoInboxRemove`): the Inbox row's Close (or Remove) swipe, as tapped.
+    var demoInboxClose: String?
+    var demoInboxRemove = false
     var demoProject: String?
     var demoToolDetail: String?
     var demoChatScript = false
@@ -117,6 +123,8 @@ struct LaunchOptions: Sendable {
         demoTab = value("-demoTab")
         demoTask = value("-demoTask")
         demoCloseTask = args.contains("-demoCloseTask")
+        demoInboxClose = value("-demoInboxClose")
+        demoInboxRemove = args.contains("-demoInboxRemove")
         demoProject = value("-demoProject")
         demoToolDetail = value("-demoToolDetail")
         demoChatScript = args.contains("-demoChatScript")

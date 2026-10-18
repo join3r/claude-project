@@ -271,8 +271,8 @@ extension DesktopConnection {
         _ = try await request(TaskOp.setPin, params: PinSetParams(pin: pin, pinned: pinned).json)
     }
 
-    /// `task.triage` (§8.11): mark a task read or unread, settle or snooze it,
-    /// or undo either. The new state comes back in the next inbox.
+    /// `task.triage` (§8.11): mark a task read or unread, snooze or unsnooze
+    /// it. The new state comes back in the next inbox.
     public func triage(taskId: String, _ action: TaskTriageParams.Action) async throws {
         _ = try await request(TaskOp.triage, params: TaskTriageParams(taskId: taskId, action: action).json)
     }
