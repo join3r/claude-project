@@ -222,6 +222,7 @@ struct ChatScreen: View {
             .modifier(ScrollPhaseTracker { interacting in
                 scrolledAway = interacting || !atBottom
             })
+            .modifier(PastEndGuard { proxy.scrollTo(Self.bottomID, anchor: .bottom) })
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: model.view?.items.last) { _, _ in follow(proxy) }
             .onChange(of: model.view?.items.count) { _, _ in follow(proxy) }
@@ -593,6 +594,37 @@ private struct ScrollPhaseTracker: ViewModifier {
                 default: break
                 }
             }
+        } else {
+            content
+        }
+    }
+}
+
+/// Pulls the transcript back when it rests past its end, which shows a blank
+/// chat. The bottom bar shrinking (a card answered, the keyboard going down)
+/// or rows measured during an animated scroll can leave it there, and the
+/// content height doesn't change, so the re-pin on it never runs.
+private struct PastEndGuard: ViewModifier {
+    let repin: () -> Void
+    @State private var pastEnd = false
+    @State private var moving = false
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    let end = geometry.contentSize.height + geometry.contentInsets.bottom
+                    let overflows = end + geometry.contentInsets.top > geometry.containerSize.height
+                    return overflows && geometry.visibleRect.maxY > end + 1
+                } action: { _, past in
+                    pastEnd = past
+                    if past && !moving { repin() }
+                }
+                // Past the end while dragging is the rubber band; it settles on release.
+                .onScrollPhaseChange { _, phase in
+                    moving = phase != .idle
+                    if phase == .idle && pastEnd { repin() }
+                }
         } else {
             content
         }
