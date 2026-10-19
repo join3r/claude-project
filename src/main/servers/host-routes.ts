@@ -194,6 +194,7 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-update-from-stream': project0,
   'task-stream-ahead': project0,
   'task-landing-preview': project0,
+  'stream-merge': project0,
   // Project Home's queue (ipc/prompt-queue.ts)
   'prompt-queue-run': project0,
   'task-worktree-close': project0,

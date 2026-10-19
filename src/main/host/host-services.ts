@@ -17,6 +17,7 @@ import { WorkspaceManager } from '../workspace-manager'
 import { FileSetupApprovals } from '../worktree-setup-approvals'
 import { TaskWorktreeManager } from '../task-worktree'
 import { recordSetupArtifacts, TaskLandingManager } from '../task-landing'
+import { mergeStream } from '../stream-merge'
 import { LocalGitRunner } from '../git-runner'
 import { bracketedPaste } from '../pty-paste'
 import { NotesStorage } from '../notes-storage'
@@ -232,6 +233,7 @@ export class HostServices {
   private readonly taskWorktrees: TaskWorktreeManager
   /** Tasks' worktrees landing back into their streams. */
   private readonly taskLanding: TaskLandingManager
+  private readonly gitRunner = new LocalGitRunner()
   private readonly promptQueue: PromptQueueRunner
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
@@ -291,7 +293,7 @@ export class HostServices {
       persist: (data) => this.notesStorage.save(data),
       broadcast: (envelope) => this.clients.broadcast('notes-updated', envelope)
     })
-    const gitRunner = new LocalGitRunner()
+    const gitRunner = this.gitRunner
     this.taskWorktrees = new TaskWorktreeManager({
       projects: {
         peek: () => this.projectsStore.peek(),
@@ -1099,7 +1101,14 @@ export class HostServices {
     registerMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerHostMobileHandlers(ipc, { mobile: () => this.mobileService })
     registerTaskWorktreeHandlers(ipc, { taskWorktrees: this.taskWorktrees })
-    registerTaskLandingHandlers(ipc, { taskLanding: this.taskLanding })
+    registerTaskLandingHandlers(ipc, {
+      taskLanding: this.taskLanding,
+      mergeStream: (projectId, streamId) => mergeStream({
+        projects: this.projectsStore,
+        runner: this.gitRunner,
+        log: (message) => this.logDebug(message)
+      }, projectId, streamId)
+    })
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
     registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })
     registerHostFsHandlers(ipc, {

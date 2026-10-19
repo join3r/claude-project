@@ -28,6 +28,7 @@ import type {
   StreamSetupResult,
   TaskLanding,
   TaskLandingPreview,
+  StreamMergeResult,
   TaskLandingResult,
   TaskWorktreeResult,
   TaskWorktreeState,
@@ -515,6 +516,9 @@ const api = {
    */
   taskWorktreeClose: (projectId: string, taskId: string, mode: 'keep' | 'discard', options?: { archive?: boolean }): Promise<TaskLandingResult> =>
     ipcRenderer.invoke('task-worktree-close', projectId, taskId, mode, options),
+  /** Merge a closing stream's branch into its base branch (a merge commit); nothing changes on a conflict. */
+  streamMerge: (projectId: string, streamId: string): Promise<StreamMergeResult> =>
+    ipcRenderer.invoke('stream-merge', projectId, streamId),
   onTaskLandingState: (callback: (taskId: string, landing: TaskLanding | null) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, taskId: string, landing: TaskLanding | null) => callback(taskId, landing)
     ipcRenderer.on('task-landing-state', handler)

@@ -163,6 +163,20 @@ export interface TaskLandingPreview {
 }
 
 /**
+ * Merging a closing stream's branch into the branch it was cut from
+ * (`WorkspaceConfig.baseBranch`) with a merge commit. Only committed work is
+ * merged. A conflict or a blocked fast-forward changes nothing.
+ */
+export type StreamMergeResult =
+  | { status: 'merged' }
+  /** The base branch already has every commit of the stream. */
+  | { status: 'nothing' }
+  | { status: 'conflict'; files: string[] }
+  /** The base branch's checkout has local changes in files the merge touches. */
+  | { status: 'blocked'; files: string[]; message: string }
+  | { status: 'failed'; error: string }
+
+/**
  * One agent session (or one terminal) and the tabs that came with it. Lives in a
  * stream. In a worktree stream it gets a worktree of its own, on a branch off the
  * stream's, and closing it lands that branch back into the stream.

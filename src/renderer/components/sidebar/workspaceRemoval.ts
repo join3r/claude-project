@@ -19,12 +19,22 @@ function deleteRequest(project: Project, workspace: WorkspaceConfig) {
   }
 }
 
-export type AskWorktreeChoice = (question: { title: string; message: string; branch: string }) => Promise<WorktreeChoice>
+export type AskWorktreeChoice = (question: {
+  title: string
+  message: string
+  branch: string
+  /** Offer the merge into this branch. */
+  mergeInto?: string
+  /** The branch has to stay (task branches kept off it). */
+  mustKeepBranch?: boolean
+}) => Promise<WorktreeChoice>
 
 /**
  * Run the pre-flight and ask about whatever it found. Null means cancel; `done`
  * means the pre-flight already removed the worktree; otherwise the forced pass
- * still has to run, keeping the branch or not. `keepBranch`: a clean, merged
+ * still has to run, keeping the branch or not, after the merge into the base
+ * branch when `merge` (offered when `canMerge` and the branch has commits the
+ * base lacks). `keepBranch`: a clean, merged
  * worktree goes but its branch stays (its tasks kept branches off it, which a
  * reopen restores on top of it).
  */
@@ -33,8 +43,8 @@ export async function confirmWorktreeRemoval(
   streamName: string,
   workspace: WorkspaceConfig,
   ask: AskWorktreeChoice,
-  options: { keepBranch?: boolean } = {}
-): Promise<{ done: true } | { done: false; keepBranch: boolean } | null> {
+  options: { keepBranch?: boolean; canMerge?: boolean } = {}
+): Promise<{ done: true } | { done: false; keepBranch: boolean; merge: boolean } | null> {
   let result: WorkspaceDeleteResult
   try {
     result = await window.api.workspaceDelete({ ...deleteRequest(project, workspace), ...(options.keepBranch ? { keepBranch: true } : {}) })
@@ -44,10 +54,16 @@ export async function confirmWorktreeRemoval(
   }
   const outcome = worktreePreflight(result, workspace)
   if (outcome.kind === 'removed') return { done: true }
-  if (outcome.kind === 'force') return { done: false, keepBranch: true }
-  const choice = await ask({ title: `Close stream "${streamName}"?`, message: outcome.message, branch: workspace.branchName })
+  if (outcome.kind === 'force') return { done: false, keepBranch: true, merge: false }
+  const choice = await ask({
+    title: `Close stream "${streamName}"?`,
+    message: outcome.message,
+    branch: workspace.branchName,
+    ...(outcome.mergeable && options.canMerge ? { mergeInto: workspace.baseBranch } : {}),
+    ...(options.keepBranch ? { mustKeepBranch: true } : {})
+  })
   const removal = worktreeRemovalFor(choice)
-  return removal ? { done: false, ...removal } : null
+  return removal ? { done: false, ...removal, keepBranch: removal.keepBranch || !!options.keepBranch } : null
 }
 
 /** The forced pass, once no process holds the worktree any more. */

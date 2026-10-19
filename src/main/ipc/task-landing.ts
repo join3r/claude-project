@@ -1,3 +1,4 @@
+import type { StreamMergeResult } from '../../shared/types'
 import type { TaskLandingManager } from '../task-landing'
 import type { IpcRegistrar } from './registrar'
 import { safeId } from './schemas'
@@ -5,6 +6,8 @@ import { v } from './validate'
 
 export interface TaskLandingIpcDeps {
   taskLanding: TaskLandingManager
+  /** A closing stream's branch into its base branch (`stream-merge.ts`). */
+  mergeStream(projectId: string, streamId: string): Promise<StreamMergeResult>
 }
 
 const landOptions = v.object({
@@ -44,4 +47,7 @@ export function registerTaskLandingHandlers(ipc: IpcRegistrar, deps: TaskLanding
 
   ipc.handle('task-worktree-close', [safeId, safeId, v.literal('keep', 'discard'), v.optional(closeOptions)], (_event, projectId, taskId, mode, options) =>
     deps.taskLanding.closeWorktree(projectId, taskId, mode, options ?? {}))
+
+  ipc.handle('stream-merge', [safeId, safeId], (_event, projectId, streamId) =>
+    deps.mergeStream(projectId, streamId))
 }

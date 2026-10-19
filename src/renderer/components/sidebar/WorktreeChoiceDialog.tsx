@@ -6,15 +6,21 @@ interface Question {
   title: string
   message: string
   branch: string
+  /** Offer Merge into this branch (the default, Enter). */
+  mergeInto?: string
+  /** Task branches were kept off this one: merging can't delete it. */
+  mustKeepBranch?: boolean
 }
 
 /**
- * The stream-close question for a worktree with work in it: keep the branch
- * (the worktree folder goes, its commits stay), discard both, or cancel.
- * `ask` resolves with the choice; `dialog` is rendered by the caller.
+ * The stream-close question for a worktree with work in it: merge into the
+ * base branch (when offered; deleting the branch after, or not), keep the
+ * branch (the worktree folder goes, its commits stay), discard both, or
+ * cancel. `ask` resolves with the choice; `dialog` is rendered by the caller.
  */
 export function useWorktreeChoice(): { ask: (question: Question) => Promise<WorktreeChoice>; dialog: React.ReactElement | null } {
   const [question, setQuestion] = useState<Question | null>(null)
+  const [deleteBranch, setDeleteBranch] = useState(true)
   const resolveRef = useRef<((choice: WorktreeChoice) => void) | null>(null)
 
   const settle = useCallback((choice: WorktreeChoice) => {
@@ -28,18 +34,26 @@ export function useWorktreeChoice(): { ask: (question: Question) => Promise<Work
     resolveRef.current?.('cancel')
     return new Promise<WorktreeChoice>(resolve => {
       resolveRef.current = resolve
+      setDeleteBranch(true)
       setQuestion(next)
     })
   }, [])
 
+  const merging = !!question?.mergeInto
+  const mergeChoice: WorktreeChoice = deleteBranch && !question?.mustKeepBranch ? 'merge' : 'merge-keep-branch'
   useEffect(() => {
     if (!question) return
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') settle('cancel')
+      // Enter on a focused button or the checkbox is that control's own.
+      else if (e.key === 'Enter' && merging && !(e.target instanceof HTMLButtonElement) && !(e.target instanceof HTMLInputElement)) {
+        e.preventDefault()
+        settle(mergeChoice)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [question, settle])
+  }, [question, merging, mergeChoice, settle])
 
   const dialog = question && (
     <Modal
@@ -49,12 +63,41 @@ export function useWorktreeChoice(): { ask: (question: Question) => Promise<Work
         <>
           <LinkBtn onClick={() => settle('cancel')}>Cancel</LinkBtn>
           <LinkBtn danger onClick={() => settle('discard')}>Discard branch</LinkBtn>
-          <PrimaryButton onClick={() => settle('keep-branch')}>Keep branch</PrimaryButton>
+          {merging ? (
+            <>
+              <LinkBtn onClick={() => settle('keep-branch')}>Keep branch</LinkBtn>
+              <PrimaryButton onClick={() => settle(mergeChoice)}>Merge into {question.mergeInto}</PrimaryButton>
+            </>
+          ) : (
+            <PrimaryButton onClick={() => settle('keep-branch')}>Keep branch</PrimaryButton>
+          )}
         </>
       }
     >
       <HelperText>{question.message}</HelperText>
+      {merging && (
+        <label className={`flex items-center gap-2 text-base ${question.mustKeepBranch ? 'text-text-subtle' : 'text-text cursor-pointer'}`}>
+          <input
+            type="checkbox"
+            className="accent-(--color-accent) shrink-0"
+            disabled={question.mustKeepBranch}
+            checked={deleteBranch && !question.mustKeepBranch}
+            onChange={e => setDeleteBranch(e.target.checked)}
+            data-testid="stream-merge-delete-branch"
+          />
+          <span>
+            Delete <span className="font-mono">{question.branch}</span> after merging
+            {question.mustKeepBranch && ' (kept: task branches start from it)'}
+          </span>
+        </label>
+      )}
       <HelperText>
+        {merging && (
+          <>
+            Merge adds the stream&apos;s committed work to <span className="font-mono">{question.mergeInto}</span> as
+            a merge commit; on a conflict nothing is merged and the stream stays open.{' '}
+          </>
+        )}
         Keep branch removes the worktree folder and leaves <span className="font-mono">{question.branch}</span> in
         the repository. Discard branch deletes both.
       </HelperText>

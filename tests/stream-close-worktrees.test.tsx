@@ -256,4 +256,47 @@ describe('closing a stream whose tasks have worktrees of their own', () => {
     expect(screen.queryByTestId('stream-close-tasks')).toBeNull()
     expect(api.taskWorktreeClose.mock.calls.map(call => call[2])).toEqual(['discard', 'discard', 'discard'])
   })
+
+  describe('merging the stream into its base branch', () => {
+    beforeEach(() => {
+      previews = { t1: { commits: 0, uncommitted: 0 }, t2: { commits: 0, uncommitted: 0 }, t3: { commits: 0, uncommitted: 0 } }
+      // The stream's branch has commits main lacks; the forced pass then goes.
+      api.workspaceDelete.mockImplementation(async (request: { force?: boolean }) => (
+        request.force ? { status: 'ok' } : { status: 'unmerged', baseBranch: 'main' }
+      ))
+      api.streamMerge = vi.fn().mockResolvedValue({ status: 'merged' })
+    })
+
+    it('offers Merge into main; it merges, then the worktree and branch go', async () => {
+      renderSidebar()
+      await closeStream()
+      fireEvent.click(await screen.findByRole('button', { name: 'Merge into main' }))
+
+      await waitFor(() => expect(api.archiveAddStream).toHaveBeenCalled())
+      expect(api.streamMerge).toHaveBeenCalledWith('p1', 'stream-rel')
+      expect(api.workspaceDelete).toHaveBeenLastCalledWith(expect.objectContaining({ branchName: 'rel', force: true, keepBranch: false }))
+    })
+
+    it('keeps the branch when Delete after merging is unticked', async () => {
+      renderSidebar()
+      await closeStream()
+      fireEvent.click(await screen.findByTestId('stream-merge-delete-branch'))
+      fireEvent.click(screen.getByRole('button', { name: 'Merge into main' }))
+
+      await waitFor(() => expect(api.archiveAddStream).toHaveBeenCalled())
+      expect(api.workspaceDelete).toHaveBeenLastCalledWith(expect.objectContaining({ force: true, keepBranch: true }))
+    })
+
+    it('a conflict leaves the stream open and says why', async () => {
+      api.streamMerge.mockResolvedValue({ status: 'conflict', files: ['a.txt'] })
+      renderSidebar()
+      await closeStream()
+      fireEvent.click(await screen.findByRole('button', { name: 'Merge into main' }))
+
+      await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('a.txt')))
+      expect(api.archiveAddStream).not.toHaveBeenCalled()
+      expect(api.workspaceDelete).not.toHaveBeenCalledWith(expect.objectContaining({ force: true }))
+      expect(lastStreams()).toContain('stream-rel')
+    })
+  })
 })

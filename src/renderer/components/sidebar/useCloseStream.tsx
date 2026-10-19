@@ -1,13 +1,13 @@
 import React, { useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
-import type { Project, TaskLandingResult } from '../../../shared/types'
-import { findTaskInProject } from '../../../shared/streams'
+import type { Project, StreamMergeResult, TaskLandingResult } from '../../../shared/types'
+import { findTaskInProject, taskWorktreesSupported } from '../../../shared/streams'
 import { tabIdsOfTask } from '../../hooks/appState/projectsData'
 import { canLandTask, getLandingOp, markTaskClosing, runLandingOp, setLandingNotice } from '../../taskLanding'
 import { landingResultNotice } from '../useTaskLandingActions'
 import { confirmWorktreeRemoval, forceRemoveWorktree } from './workspaceRemoval'
-import { isTaskWorking, streamCloseQuestion, streamTasksCloseQuestion, type StreamTaskCheck } from './closeRules'
+import { isTaskWorking, streamCloseQuestion, streamMergeFailure, streamTasksCloseQuestion, type StreamTaskCheck } from './closeRules'
 import { useStreamTasksChoice, useWorktreeChoice, type StreamTasksChoice } from './WorktreeChoiceDialog'
 
 /** How long to wait for main's archive of a landed task to reach this window. */
@@ -31,7 +31,9 @@ const LANDED_WAIT_MS = 2000
  *
  * Then the stream's own worktree runs its pre-flight: clean and merged goes
  * quietly (its branch too, unless the tasks kept theirs, which branch off it),
- * anything else asks keep branch / discard / cancel.
+ * anything else asks keep branch / discard / cancel, plus Merge into the base
+ * branch when the branch has commits it lacks. A merge that conflicts, is
+ * blocked or fails leaves the stream open.
  */
 export function useCloseStream(): {
   closeStream: (projectId: string, streamId: string) => Promise<void>
@@ -103,9 +105,21 @@ export function useCloseStream(): {
       // After landing, which moved the stream's branch. Kept task branches need theirs to come back on.
       const workspace = stream.workspace
       const answer = workspace
-        ? await confirmWorktreeRemoval(project, stream.name, workspace, askWorktree, { keepBranch: choice === 'keep-branch' })
+        ? await confirmWorktreeRemoval(project, stream.name, workspace, askWorktree, {
+          keepBranch: choice === 'keep-branch',
+          canMerge: taskWorktreesSupported(project)
+        })
         : { done: true as const }
       if (!answer) return
+      if (workspace && !answer.done && answer.merge) {
+        const merged = await window.api.streamMerge(project.id, stream.id)
+          .catch((err: unknown): StreamMergeResult => ({ status: 'failed', error: err instanceof Error ? err.message : String(err) }))
+        const failure = streamMergeFailure(merged, workspace.branchName, workspace.baseBranch)
+        if (failure) {
+          window.alert(failure)
+          return
+        }
+      }
 
       const failures = await removeTaskWorktrees(project, own.filter(task => choice !== 'land' || !withWork.has(task.id)), taskId => (
         choice === 'keep-branch' && withWork.has(taskId) ? 'keep' : 'discard'

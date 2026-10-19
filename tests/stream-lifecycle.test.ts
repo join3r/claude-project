@@ -56,17 +56,20 @@ describe('close confirm rules', () => {
   it('maps the worktree pre-flight to remove quietly, force, or ask', () => {
     expect(worktreePreflight({ status: 'ok' }, workspace)).toEqual({ kind: 'removed' })
     expect(worktreePreflight({ status: 'invalid-worktree', reason: 'x' }, workspace)).toEqual({ kind: 'force' })
-    expect(worktreePreflight({ status: 'uncommitted' }, workspace)).toMatchObject({ kind: 'ask', message: expect.stringMatching(/uncommitted/) })
+    // Merged already: nothing to merge, so no Merge on offer.
+    expect(worktreePreflight({ status: 'uncommitted' }, workspace)).toMatchObject({ kind: 'ask', message: expect.stringMatching(/uncommitted/), mergeable: false })
     expect(worktreePreflight({ status: 'unmerged', baseBranch: 'develop' }, workspace))
-      .toMatchObject({ kind: 'ask', message: expect.stringMatching(/"rel-0\.5" has commits not merged into "develop"/) })
+      .toMatchObject({ kind: 'ask', message: expect.stringMatching(/"rel-0\.5" has commits not merged into "develop"/), mergeable: true })
     expect(worktreePreflight({ status: 'uncommitted-and-unmerged' }, workspace)).toMatchObject({ kind: 'ask' })
     expect(worktreePreflight({ status: 'check-failed', reason: 'ssh down' }, workspace))
       .toMatchObject({ kind: 'ask', message: expect.stringMatching(/ssh down/) })
   })
 
   it('turns the choice into the forced removal', () => {
-    expect(worktreeRemovalFor('keep-branch')).toEqual({ keepBranch: true })
-    expect(worktreeRemovalFor('discard')).toEqual({ keepBranch: false })
+    expect(worktreeRemovalFor('keep-branch')).toEqual({ keepBranch: true, merge: false })
+    expect(worktreeRemovalFor('discard')).toEqual({ keepBranch: false, merge: false })
+    expect(worktreeRemovalFor('merge')).toEqual({ keepBranch: false, merge: true })
+    expect(worktreeRemovalFor('merge-keep-branch')).toEqual({ keepBranch: true, merge: true })
     expect(worktreeRemovalFor('cancel')).toBeNull()
   })
 })

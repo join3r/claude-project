@@ -19,7 +19,7 @@
  *   comes after.
  */
 import { isAgentTabType } from '../../../shared/types'
-import type { Stream, TabStatusValue, Task, TaskLandingPreview, WorkspaceConfig, WorkspaceDeleteResult } from '../../../shared/types'
+import type { Stream, StreamMergeResult, TabStatusValue, Task, TaskLandingPreview, WorkspaceConfig, WorkspaceDeleteResult } from '../../../shared/types'
 import { taskTabs } from '../../../shared/streams'
 import { plural } from '../../../shared/task-close-question'
 
@@ -62,8 +62,12 @@ export type WorktreePreflight =
   | { kind: 'removed' }
   /** Not a registered worktree: the forced pass reports it, nothing to ask. */
   | { kind: 'force' }
-  /** Work would be lost: ask keep branch / discard / cancel. */
-  | { kind: 'ask'; message: string }
+  /**
+   * Work would be lost: ask keep branch / discard / cancel, and offer the
+   * merge into the base branch when the branch has commits it lacks
+   * (`mergeable`).
+   */
+  | { kind: 'ask'; message: string; mergeable: boolean }
 
 export function worktreePreflight(result: WorkspaceDeleteResult, workspace: WorkspaceConfig): WorktreePreflight {
   const branch = `"${workspace.branchName}"`
@@ -74,22 +78,43 @@ export function worktreePreflight(result: WorkspaceDeleteResult, workspace: Work
     case 'invalid-worktree':
       return { kind: 'force' }
     case 'uncommitted':
-      return { kind: 'ask', message: `The worktree has uncommitted changes. They are lost either way; keeping the branch keeps its commits.` }
+      return { kind: 'ask', message: `The worktree has uncommitted changes. They are lost either way; keeping the branch keeps its commits.`, mergeable: false }
     case 'unmerged':
-      return { kind: 'ask', message: `Branch ${branch} has commits not merged into ${base}.` }
+      return { kind: 'ask', message: `Branch ${branch} has commits not merged into ${base}.`, mergeable: true }
     case 'uncommitted-and-unmerged':
-      return { kind: 'ask', message: `The worktree has uncommitted changes, and branch ${branch} has commits not merged into ${base}. The uncommitted changes are lost either way.` }
+      return { kind: 'ask', message: `The worktree has uncommitted changes, and branch ${branch} has commits not merged into ${base}. The uncommitted changes are lost either way.`, mergeable: true }
     case 'check-failed':
-      return { kind: 'ask', message: `DevTool could not check the worktree for unsaved work${result.reason ? ` (${result.reason})` : ''}. Uncommitted or unmerged work may be lost.` }
+      return { kind: 'ask', message: `DevTool could not check the worktree for unsaved work${result.reason ? ` (${result.reason})` : ''}. Uncommitted or unmerged work may be lost.`, mergeable: true }
   }
 }
 
-export type WorktreeChoice = 'keep-branch' | 'discard' | 'cancel'
+/** `merge` and `merge-keep-branch` merge into the base branch first, then remove the worktree (and the branch, or not). */
+export type WorktreeChoice = 'merge' | 'merge-keep-branch' | 'keep-branch' | 'discard' | 'cancel'
 
 /** The forced removal a choice asks for, or null for cancel. */
-export function worktreeRemovalFor(choice: WorktreeChoice): { keepBranch: boolean } | null {
+export function worktreeRemovalFor(choice: WorktreeChoice): { keepBranch: boolean; merge: boolean } | null {
   if (choice === 'cancel') return null
-  return { keepBranch: choice === 'keep-branch' }
+  return {
+    keepBranch: choice === 'keep-branch' || choice === 'merge-keep-branch',
+    merge: choice === 'merge' || choice === 'merge-keep-branch'
+  }
+}
+
+/** Why a stream's merge into its base branch didn't happen, for an alert; null when it did (or had nothing to do). */
+export function streamMergeFailure(result: StreamMergeResult, branch: string, base: string): string | null {
+  switch (result.status) {
+    case 'merged':
+    case 'nothing':
+      return null
+    case 'conflict':
+      return `Merging "${branch}" into "${base}" conflicts${result.files.length ? ` in:\n\n${result.files.join('\n')}` : ''}.\n\n`
+        + `Nothing was merged and the stream stays open. Merge "${base}" into the stream and resolve the conflicts there, then close it again.`
+    case 'blocked':
+      return `"${base}" has local changes in files the merge touches${result.files.length ? `:\n\n${result.files.join('\n')}` : ''}.\n\n`
+        + `Nothing was merged and the stream stays open. Commit or stash them, then close the stream again.`
+    case 'failed':
+      return `Merging "${branch}" into "${base}" failed: ${result.error}\n\nThe stream stays open.`
+  }
 }
 
 
