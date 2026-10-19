@@ -614,7 +614,9 @@ private struct PastEndGuard: ViewModifier {
             content
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     let end = geometry.contentSize.height + geometry.contentInsets.bottom
-                    let overflows = end + geometry.contentInsets.top > geometry.containerSize.height
+                    // A short transcript sits at the bottom on a top inset that grows to fit,
+                    // so only the content against the viewport says it overflows.
+                    let overflows = geometry.contentSize.height > geometry.containerSize.height
                     return overflows && geometry.visibleRect.maxY > end + 1
                 } action: { _, past in
                     pastEnd = past
