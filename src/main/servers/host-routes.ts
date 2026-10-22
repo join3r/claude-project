@@ -209,6 +209,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'project-dirs:set-folder': { by: [{ host: 0 }] },
   'project-dirs:create': { by: [{ host: 0 }] },
   'project-dirs:trash': project0,
+  'project-dirs:rename-check': project0,
+  'project-dirs:rename': project0,
   'server-discover-repos': { by: [{ host: 0 }] },
   'server-clone-repo': { by: [{ host: 0 }] },
 

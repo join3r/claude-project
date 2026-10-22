@@ -140,6 +140,11 @@ const api = {
   createProjectDir: (host: string, name: string): Promise<string> => ipcRenderer.invoke('project-dirs:create', host, name),
   projectsFolder: (host: string): Promise<string> => ipcRenderer.invoke('project-dirs:folder', host),
   setProjectsFolder: (host: string, dir: string): Promise<string> => ipcRenderer.invoke('project-dirs:set-folder', host, dir),
+  /** Rename a project with its folder (`folder: false`: the name only); `check` changes nothing. */
+  renameProjectCheck: (projectId: string, options: { name: string; folder: boolean }): Promise<{ target: string; blockers: string[]; running: { terminals: number; agents: number; chats: number } }> =>
+    ipcRenderer.invoke('project-dirs:rename-check', projectId, options),
+  renameProjectFolder: (projectId: string, options: { name: string; folder: boolean; stop?: boolean }): Promise<{ directory: string; warnings: string[] }> =>
+    ipcRenderer.invoke('project-dirs:rename', projectId, options),
   trashProjectDir: (projectId: string, checkOnly?: boolean): Promise<void> => ipcRenderer.invoke('project-dirs:trash', projectId, checkOnly),
 
   // File picker

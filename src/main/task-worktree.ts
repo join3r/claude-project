@@ -98,6 +98,11 @@ export class TaskWorktreeManager {
 
   constructor(private readonly deps: TaskWorktreeDeps) {}
 
+  /** A worktree is being made or set up for the task right now. */
+  isBusy(taskId: string): boolean {
+    return this.inflight.has(taskId)
+  }
+
   /**
    * Makes the task's worktree if it is still to get one, and records it as
    * `Task.workspace`. Safe to call for any task: one that has a worktree, or

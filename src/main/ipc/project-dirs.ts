@@ -1,6 +1,7 @@
 import type { Project } from '../../shared/types'
 import type { GitRunner } from '../git-runner'
 import { createProjectDir, missingProjectDirs, trashProjectDir } from '../project-dirs'
+import type { RenameCheck, RenameOptions, RenameResult } from '../project-rename'
 import type { IpcRegistrar } from './registrar'
 import { safeId } from './schemas'
 import { v } from './validate'
@@ -13,6 +14,8 @@ export interface ProjectDirsDeps {
   setProjectsDir: (dir: string) => void
   git: GitRunner
   trashItem: (fullPath: string) => Promise<void>
+  checkRename: (projectId: string, options: RenameOptions) => Promise<RenameCheck>
+  rename: (projectId: string, options: RenameOptions) => Promise<RenameResult>
 }
 
 /**
@@ -33,6 +36,15 @@ export function registerProjectDirsHandlers(ipc: IpcRegistrar, deps: ProjectDirs
 
   ipc.handle('project-dirs:create', [safeId, v.string({ nonEmpty: true, max: 255 })], (_ctx, _host, name) =>
     createProjectDir(deps.projectsDir(), name, deps.git))
+
+  // Rename a project with its folder: `check` says what it would stop or why it can't, without changing anything.
+  const renameOptions = v.object({
+    name: v.string({ nonEmpty: true, max: 255 }),
+    folder: v.boolean(),
+    stop: v.optional(v.boolean())
+  })
+  ipc.handle('project-dirs:rename-check', [safeId, renameOptions], (_ctx, projectId, options) => deps.checkRename(projectId, options))
+  ipc.handle('project-dirs:rename', [safeId, renameOptions], (_ctx, projectId, options) => deps.rename(projectId, options))
 
   // `checkOnly` runs the refusals without trashing, so a refused folder can stop the delete before anything is torn down.
   ipc.handle('project-dirs:trash', [safeId, v.optional(v.boolean())], async (_ctx, projectId, checkOnly) => {

@@ -83,6 +83,7 @@ export default function SidebarContextMenu({
   onAddTask,
   onNewStream,
   onMoveToServer,
+  onRenameProject,
   missingDirs
 }: {
   contextMenu: SidebarContextMenuState | null
@@ -104,8 +105,10 @@ export default function SidebarContextMenu({
   onNewStream: (projectId: string) => void
   /** Move to a DevTool server… (SSH projects only). */
   onMoveToServer?: (projectId: string) => void
-  /** Local projects whose folder is gone. */
+  /** Projects whose folder is gone. */
   missingDirs?: ReadonlySet<string>
+  /** Rename… for a project with a folder (the dialog that can rename the folder too). */
+  onRenameProject?: (projectId: string) => void
 }): React.ReactElement {
   const {
     projects, togglePinnedItem, updateProject, setProjectExpanded, connectSsh, removeProject,
@@ -231,7 +234,10 @@ export default function SidebarContextMenu({
             })()}
             <button className={menuItemCls} onClick={() => {
                 const project = projects.find((p) => p.id === contextMenu.projectId)
-                if (contextMenu.type === 'project') {
+                if (contextMenu.type === 'project' && project && onRenameProject && !isRemoteProject(project) && !isShellCommandProject(project) && project.directory) {
+                  // A project with a folder: the dialog, which can rename the folder too.
+                  onRenameProject(project.id)
+                } else if (contextMenu.type === 'project') {
                   beginEdit(contextMenu.projectId, project?.name ?? '')
                 } else if (contextMenu.type === 'stream') {
                   const stream = project?.streams.find(s => s.id === contextMenu.streamId)
@@ -242,7 +248,10 @@ export default function SidebarContextMenu({
                   beginEdit(contextMenu.taskId!, task?.name ?? '', contextMenu.projectId, stream?.id)
                 }
                 setContextMenu(null)
-              }}>Rename</button>
+              }}>{contextMenu.type === 'project' && onRenameProject && (() => {
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                return !!project && !isRemoteProject(project) && !isShellCommandProject(project) && !!project.directory
+              })() ? 'Rename…' : 'Rename'}</button>
               {(() => {
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 let item: PinnedItem

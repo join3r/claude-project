@@ -139,12 +139,15 @@ describe('Sidebar context menu', () => {
     const menuFor = async (projectId: string) => {
       act(() => { window.dispatchEvent(new MouseEvent('mousedown')) })
       fireEvent.contextMenu(document.querySelector(`[data-drag-type="project"][data-drag-id="${projectId}"]`)!)
-      await screen.findByRole('button', { name: 'Rename' })
+      await screen.findByRole('button', { name: /^Rename/ })
       return screen.queryByRole('button', { name: 'Move to a DevTool server…' })
     }
     expect(await menuFor('p1')).toBeNull()
+    // A folder project renames through the dialog (folder too); an SSH one inline.
+    expect(screen.getByRole('button', { name: 'Rename…' })).toBeTruthy()
     expect(await menuFor('p-srv')).toBeNull()
     const move = await menuFor('p-ssh')
+    expect(screen.getByRole('button', { name: 'Rename' })).toBeTruthy()
     expect(move).toBeTruthy()
     fireEvent.click(move!)
     expect(await screen.findByText('Move Remote Repo to a DevTool server')).toBeTruthy()
@@ -181,6 +184,23 @@ describe('Sidebar context menu', () => {
     fireEvent.contextMenu(row)
     fireEvent.click(await screen.findByRole('button', { name: /Reveal in Finder|Show in/ }))
     expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha', undefined, 'p1')
+  })
+
+  it('opens Rename… for a folder project and renames it with its folder', async () => {
+    const check = vi.fn().mockResolvedValue({ target: '/tmp/beta', blockers: [], running: { terminals: 0, agents: 0, chats: 0 } })
+    const rename = vi.fn().mockResolvedValue({ directory: '/tmp/beta', warnings: [] })
+    ;(window.api as unknown as Record<string, unknown>).renameProjectCheck = check
+    ;(window.api as unknown as Record<string, unknown>).renameProjectFolder = rename
+    renderSidebar()
+    await screen.findByText('Alpha Project')
+    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename…' }))
+    expect(await screen.findByText('Rename Project')).toBeTruthy()
+    // "Alpha Project" isn't the folder's name (alpha), so the folder stays unless switched on.
+    fireEvent.change(screen.getByDisplayValue('Alpha Project'), { target: { value: 'Beta' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect(saved[saved.length - 1]?.projects[0].name).toBe('Beta'))
+    expect(rename).not.toHaveBeenCalled()
   })
 
   it('marks a project whose folder is gone, and opens its settings from the mark', async () => {

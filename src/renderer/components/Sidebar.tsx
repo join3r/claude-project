@@ -7,6 +7,7 @@ import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
 import NewProjectModal from './NewProjectModal'
+import RenameProjectModal from './RenameProjectModal'
 import AddServerProject, { type AddServerProjectMode } from './servers/AddServerProject'
 import AddServerDialog from './servers/AddServerDialog'
 import MoveToServerDialog from './servers/MoveToServerDialog'
@@ -171,6 +172,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [addServerOpen, setAddServerOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+  const [renameProjectId, setRenameProjectId] = useState<string | null>(null)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [serverProjectOpen, setServerProjectOpen] = useState(false)
   /** Add server's "Choose a folder…" opens Server project on that server's folder browser. */
@@ -1106,6 +1108,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       <SidebarContextMenu
         contextMenu={contextMenu}
         missingDirs={missingDirs}
+        onRenameProject={setRenameProjectId}
         snoozeSubmenu={snoozeSubmenu}
         setSnoozeSubmenu={setSnoozeSubmenu}
         closeContextMenu={closeContextMenu}
@@ -1192,6 +1195,19 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onCancel={() => setShellCommandModalOpen(false)}
         />
       )}
+
+      {renameProjectId && (() => {
+        const project = projects.find(p => p.id === renameProjectId)
+        if (!project) return null
+        return (
+          <RenameProjectModal
+            project={project}
+            folderMissing={missingDirs.has(project.id)}
+            onRenameOnly={(name) => renameProject(project.id, name)}
+            onClose={() => setRenameProjectId(null)}
+          />
+        )
+      })()}
 
       {projectSettingsId && (() => {
         const project = projects.find(p => p.id === projectSettingsId)

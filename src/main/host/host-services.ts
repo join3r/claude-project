@@ -22,6 +22,8 @@ import { mergeStream } from '../stream-merge'
 import { LocalGitRunner } from '../git-runner'
 import { MissingFolderWatch, ProjectDirError, appendNewProject, createProjectDir } from '../project-dirs'
 import { registerProjectDirsHandlers } from '../ipc/project-dirs'
+import { checkProjectRename, renameProject, type ProjectRenameDeps } from '../project-rename'
+import { moveAgentHistory } from '../agent-history-move'
 import { freedesktopTrash } from '../trash'
 import { bracketedPaste } from '../pty-paste'
 import { NotesStorage } from '../notes-storage'
@@ -1105,7 +1107,9 @@ export class HostServices {
       projectsDir: () => this.projectsDir(),
       setProjectsDir: (projectsDir) => this.applyConfig({ projectsDir }),
       git: this.gitRunner,
-      trashItem: (fullPath) => (this.env.trashItem ?? freedesktopTrash)(fullPath)
+      trashItem: (fullPath) => (this.env.trashItem ?? freedesktopTrash)(fullPath),
+      checkRename: (projectId, options) => checkProjectRename(this.renameDeps(), projectId, options),
+      rename: (projectId, options) => renameProject(this.renameDeps(), projectId, options)
     })
 
     registerWorkspaceHandlers(ipc, {
@@ -1191,6 +1195,37 @@ export class HostServices {
     }
     for (const id of this.clients.clientIds()) {
       if (id !== clientId) this.clients.send(id, 'tabs-restart', { tabIds })
+    }
+  }
+
+  /** What renaming a project with its folder reads and does on this host (project-rename.ts). */
+  private renameDeps(): ProjectRenameDeps {
+    return {
+      peek: () => this.projectsStore.peek(),
+      commit: (data) => { this.commitProjects(data) },
+      statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+      isLive: (tabId) => this.ptySessions.has(tabId) || this.chatManager.has(tabId),
+      dirtyTabIds: () => this.getDirtyTabIds(),
+      taskBusy: (taskId) => this.taskLanding.isBusy(taskId) || this.taskWorktrees.isBusy(taskId),
+      stopTabs: (tabIds) => {
+        for (const tabId of tabIds) {
+          if (this.ptySessions.has(tabId)) this.ptySessions.kill(tabId)
+          this.chatManager.close(tabId)
+        }
+      },
+      announceRestart: (tabIds) => {
+        if (tabIds.length > 0) this.clients.broadcast('tabs-restart', { tabIds: [...tabIds] })
+      },
+      archive: {
+        load: (projectId) => this.archiveStorage.load(projectId),
+        update: (projectId, fn) => {
+          const next = this.archiveStorage.update(projectId, fn)
+          this.clients.broadcast('archive-changed', projectId)
+          return next
+        }
+      },
+      git: this.gitRunner,
+      moveAgentHistory: (from, to, known) => moveAgentHistory(from, to, known)
     }
   }
 
