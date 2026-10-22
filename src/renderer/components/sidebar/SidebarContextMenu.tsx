@@ -49,16 +49,16 @@ export function projectDeletePrompt(project: Project): string {
   return lines.join('\n\n')
 }
 
-/** Whether "Delete with folder…" applies: a local project (not SSH, server or shell) whose folder is there. */
+/** Whether "Delete with folder…" applies: a folder project on this computer or a DevTool server (not SSH or shell) whose folder is there. */
 export function canTrashProjectFolder(project: Project, folderMissing: boolean): boolean {
-  return !folderMissing && !!project.directory && !project.host && !isRemoteProject(project) && !isShellCommandProject(project)
+  return !folderMissing && !!project.directory && !isRemoteProject(project) && !isShellCommandProject(project)
     && !isEphemeralProject(project)
 }
 
 /** The confirmation for deleting a project together with its folder. */
 export function projectDeleteWithFolderPrompt(project: Project): string {
   const lines = projectDeletePrompt(project).split('\n\n').filter(line => line !== 'The project folder itself is not touched.')
-  lines.push(`Its folder ${project.directory} is moved to the Trash, with everything in it.`)
+  lines.push(`Its folder ${project.directory}${project.host ? ' on its server' : ''} is moved to the Trash, with everything in it.`)
   return lines.join('\n\n')
 }
 

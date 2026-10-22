@@ -21,6 +21,8 @@ import { recordSetupArtifacts, TaskLandingManager } from '../task-landing'
 import { mergeStream } from '../stream-merge'
 import { LocalGitRunner } from '../git-runner'
 import { MissingFolderWatch, ProjectDirError, appendNewProject, createProjectDir } from '../project-dirs'
+import { registerProjectDirsHandlers } from '../ipc/project-dirs'
+import { freedesktopTrash } from '../trash'
 import { bracketedPaste } from '../pty-paste'
 import { NotesStorage } from '../notes-storage'
 import { RevisionStore } from '../revision-store'
@@ -606,7 +608,7 @@ export class HostServices {
       newProject: async ({ name }) => {
         let directory: string
         try {
-          directory = await createProjectDir(this.config.projectsDir, name, this.gitRunner)
+          directory = await createProjectDir(this.projectsDir(), name, this.gitRunner)
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           if (!(err instanceof ProjectDirError) || err.kind === 'failed') return { ok: false, code: AppErrorCode.Internal, message }
@@ -1098,6 +1100,14 @@ export class HostServices {
 
     registerTerminalHandlers(ipc, { ptySessions: this.ptySessions, log })
 
+    registerProjectDirsHandlers(ipc, {
+      getProjects: () => this.projectsStore.peek().projects,
+      projectsDir: () => this.projectsDir(),
+      setProjectsDir: (projectsDir) => this.applyConfig({ projectsDir }),
+      git: this.gitRunner,
+      trashItem: (fullPath) => (this.env.trashItem ?? freedesktopTrash)(fullPath)
+    })
+
     registerWorkspaceHandlers(ipc, {
       ...this.workspaceGit(),
       deleteWorkspace: (request) => this.deleteWorkspace(request)
@@ -1182,6 +1192,14 @@ export class HostServices {
     for (const id of this.clients.clientIds()) {
       if (id !== clientId) this.clients.send(id, 'tabs-restart', { tabIds })
     }
+  }
+
+  /**
+   * Settings → Projects folder, where New project makes folders. A server has
+   * no Settings screen of its own to start from, so it falls back to `~/code`.
+   */
+  private projectsDir(): string {
+    return this.config.projectsDir || (this.isServer ? path.join(os.homedir(), 'code') : '')
   }
 
   private applyConfig(patch: Partial<AppConfig>): void {

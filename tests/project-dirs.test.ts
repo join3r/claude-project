@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MissingFolderWatch, ProjectDirError, appendNewProject, createProjectDir, missingProjectDirs, trashProjectDir, validateFolderName } from '../src/main/project-dirs'
 import { LocalGitRunner, type GitRunner } from '../src/main/git-runner'
+import { freedesktopTrash } from '../src/main/trash'
 import { createMainStream, type Project } from '../src/shared/types'
 
 const tmpDirs: string[] = []
@@ -160,5 +161,25 @@ describe('MissingFolderWatch', () => {
     await watch.refresh()
     expect(watch.peek().size).toBe(0)
     expect(calls).toBe(2)
+  })
+})
+
+describe('freedesktopTrash', () => {
+  it('moves the folder into the Trash with a .trashinfo, numbering a second one', async () => {
+    const root = tmp('pd-fdtrash-')
+    const env = { XDG_DATA_HOME: path.join(root, 'share') }
+    for (let i = 0; i < 2; i++) {
+      const dir = path.join(root, 'my app')
+      fs.mkdirSync(dir)
+      fs.writeFileSync(path.join(dir, 'f.txt'), String(i))
+      await freedesktopTrash(dir, env, root)
+      expect(fs.existsSync(dir)).toBe(false)
+    }
+    const trash = path.join(root, 'share', 'Trash')
+    expect(fs.readdirSync(path.join(trash, 'files')).sort()).toEqual(['my app', 'my app.2'])
+    expect(fs.readFileSync(path.join(trash, 'files', 'my app.2', 'f.txt'), 'utf8')).toBe('1')
+    const info = fs.readFileSync(path.join(trash, 'info', 'my app.trashinfo'), 'utf8')
+    expect(info).toContain(`Path=${path.join(root, 'my%20app')}`)
+    expect(info).toMatch(/DeletionDate=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d/)
   })
 })

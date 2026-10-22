@@ -19,6 +19,8 @@ export interface HostEnv {
   powerSave: PowerSaveApi
   /** Decodes and re-encodes images phones attach to chats. */
   images: ImageCodec
+  /** Moves a file or folder to the system Trash. Absent: the freedesktop.org Trash in the home folder. */
+  trashItem?(fullPath: string): Promise<void>
   /** The debug log (`<configDir>/debug.log`). */
   log(message: string): void
 }

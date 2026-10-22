@@ -12,7 +12,7 @@ import AddServerDialog from './servers/AddServerDialog'
 import MoveToServerDialog from './servers/MoveToServerDialog'
 import ServerNotices from './servers/ServerNotices'
 import { knownSshTargets } from './servers/sshTargets'
-import { useServersState } from '../serversState'
+import { serverName, useServersState } from '../serversState'
 import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
@@ -83,7 +83,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId,
     switchToTask, selectProjectHome, showArchived,
-    addProject, addRemoteProject, addShellCommandProject, addServerProjects, addTag, renameProject, updateProject,
+    addProject, addRemoteProject, addShellCommandProject, addServerProjects, addTag, setProjectTags, renameProject, updateProject,
     addTask, addTaskInDirectory, addStream, renameTask, titleTaskFromPrompt,
     moveTask, renameStream, reopenTask, reopenStream, deleteArchived,
     reorderProjects, getProjectDir,
@@ -1267,15 +1267,23 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         )
       })()}
 
-      {newProjectOpen && config && (
+      {newProjectOpen && (
         <NewProjectModal
-          projectsDir={config.projectsDir}
-          onChangeProjectsDir={(projectsDir) => updateConfig({ projectsDir })}
+          hosts={[
+            { id: 'local', label: 'This computer' },
+            ...pairedServers.filter(s => s.state === 'online').map(s => ({ id: s.id, label: serverName(s.id, serversState) }))
+          ]}
           allTags={tags}
           onEnsureTag={addTag}
-          onCreated={(name, directory, tagIds) => {
+          onCreated={(host, name, directory, tagIds) => {
             setNewProjectOpen(false)
-            const project = addProject(name, directory, tagIds)
+            let project: Project
+            if (host === 'local') {
+              project = addProject(name, directory, tagIds)
+            } else {
+              project = addServerProjects(host, [{ name, directory }])[0]
+              if (tagIds) setProjectTags(project.id, tagIds)
+            }
             setProjectExpanded(project.id, true)
           }}
           onCancel={() => setNewProjectOpen(false)}

@@ -684,7 +684,7 @@ Project Home's queue (§4.4 `queue`), as the desktop's Queue block edits and run
 |---|---|---|
 | `project.new` | `{ name }` | `{ projectId }` |
 
-What the desktop's + → New project… does: the desktop makes a folder named `name` (trimmed, at most 255 characters) in its projects folder (Settings → Sidebar → Projects folder), runs `git init` in it and adds a local project of that name for it, saved as a main-side projects commit at the end of the project list. It appears in the next `inbox` event with only its `main` stream; no window switches to it. The desktop answers once the project is saved.
+What the desktop's + → New project… does: the desktop makes a folder named `name` (trimmed, at most 255 characters) in its projects folder (a desktop's Settings → Sidebar → Projects folder; a DevTool server's is set from a paired desktop's Settings → Servers and is `~/code` until then), runs `git init` in it and adds a local project of that name for it, saved as a main-side projects commit at the end of the project list. It appears in the next `inbox` event with only its `main` stream; no window switches to it. The desktop answers once the project is saved.
 
 - A desktop that implements this op lists `"project.new"` in its features (§8.1). A phone offers New project only for such a desktop.
 - Errors: no projects folder set on the desktop → `unsupported`, with a `message` saying where to set it. A blank or too-long `name`, a name that can't be a folder name (`/`, `\`, `<`, `>`, `:`, `"`, `|`, `?`, `*`, control characters, `.` or `..`), or a folder of that name already there → `bad-request`, with the reason as the `message`. `git init` or the file system failing → `internal`; the empty folder is removed again and nothing is saved.

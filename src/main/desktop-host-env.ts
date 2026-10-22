@@ -1,4 +1,4 @@
-import { app, powerSaveBlocker, safeStorage } from 'electron'
+import { app, powerSaveBlocker, safeStorage, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { CONFIG_DIR } from './config-dir'
@@ -47,6 +47,7 @@ export function createDesktopHostEnv(): HostEnv {
     },
     powerSave: powerSaveBlocker,
     images: nativeImageCodec,
+    trashItem: (fullPath) => shell.trashItem(fullPath),
     log: logDebug
   }
 }

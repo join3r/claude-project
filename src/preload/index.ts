@@ -135,8 +135,11 @@ const api = {
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('pick-directory'),
 
   // A local project's own folder
-  missingProjectDirs: (): Promise<string[]> => ipcRenderer.invoke('project-dirs:missing'),
-  createProjectDir: (name: string): Promise<string> => ipcRenderer.invoke('project-dirs:create', name),
+  // `host` is `local` or a DevTool server's id: each host has its own projects folder.
+  missingProjectDirs: (host: string): Promise<string[]> => ipcRenderer.invoke('project-dirs:missing', host),
+  createProjectDir: (host: string, name: string): Promise<string> => ipcRenderer.invoke('project-dirs:create', host, name),
+  projectsFolder: (host: string): Promise<string> => ipcRenderer.invoke('project-dirs:folder', host),
+  setProjectsFolder: (host: string, dir: string): Promise<string> => ipcRenderer.invoke('project-dirs:set-folder', host, dir),
   trashProjectDir: (projectId: string, checkOnly?: boolean): Promise<void> => ipcRenderer.invoke('project-dirs:trash', projectId, checkOnly),
 
   // File picker

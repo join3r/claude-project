@@ -5,7 +5,8 @@ import { useServersState } from '../../serversState'
 import { formatCountdown, formatLastSeen, useNow } from '../../hooks/useMobileState'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { showToast } from '../../toasts'
-import { Field, Group, GrpHead, HelperText, LinkBtn } from '../ui'
+import { Field, Group, GrpHead, HelperText, LinkBtn, PrimaryButton } from '../ui'
+import ServerFolderList from '../servers/ServerFolderList'
 import { describePlatform } from '../servers/addServerFlow'
 import RemoveServerDialog, { OFFLINE_UNINSTALL_COMMAND } from '../servers/RemoveServerDialog'
 import { PairedPhones, PhonePairingPanel, useServerPhones } from '../servers/ServerPhones'
@@ -196,6 +197,7 @@ function ServerRow({ server, now, onRemove }: { server: ServerStatus; now: numbe
           )}
         </div>
       )}
+      {online && <ServerProjectsFolder serverId={server.id} />}
       <PairedPhones online={online} phones={phones} now={now} />
       <PhonePairingPanel serverName={server.name} online={online} phones={phones} now={now} />
       {message && <div className={`pl-3.5 text-sm ${message.bad ? 'text-danger' : 'text-text-muted'}`}>{message.text}</div>}
@@ -223,6 +225,50 @@ function ServerRow({ server, now, onRemove }: { server: ServerStatus; now: numbe
         >{busy === 'update' ? 'Checking…' : 'Update now'}</LinkBtn>
         <span className="ml-auto"><LinkBtn danger onClick={onRemove}>Remove…</LinkBtn></span>
       </div>
+    </div>
+  )
+}
+
+/** Where New project makes folders on this server (its own setting; `~/code` until changed). */
+function ServerProjectsFolder({ serverId }: { serverId: string }): React.ReactElement {
+  const [dir, setDir] = useState<string | null>(null)
+  const [browsing, setBrowsing] = useState(false)
+  const [pick, setPick] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.projectsFolder(serverId)
+      .then(folder => { if (!cancelled) setDir(folder) })
+      .catch((err: unknown) => { if (!cancelled) setError(errorText(err)) })
+    return () => { cancelled = true }
+  }, [serverId])
+
+  return (
+    <div className="pl-3.5 flex flex-col gap-1 text-sm text-text-muted" data-testid="server-projects-folder">
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="shrink-0">New projects in</span>
+        <span className="font-mono text-xs truncate" title={dir ?? ''}>{dir ?? '…'}</span>
+        <LinkBtn disabled={dir === null} onClick={() => setBrowsing(open => !open)}>Change…</LinkBtn>
+      </div>
+      {browsing && (
+        <div className="flex flex-col gap-2">
+          <ServerFolderList serverId={serverId} initialDir={dir ?? ''} onListing={(listing) => setPick(listing.path)} />
+          <div className="flex items-center justify-end gap-3">
+            <LinkBtn onClick={() => setBrowsing(false)}>Cancel</LinkBtn>
+            <PrimaryButton
+              disabled={!pick}
+              onClick={() => {
+                setBrowsing(false)
+                window.api.setProjectsFolder(serverId, pick)
+                  .then(saved => { setDir(saved); setError(null) })
+                  .catch((err: unknown) => setError(errorText(err)))
+              }}
+            >Use this folder</PrimaryButton>
+          </div>
+        </div>
+      )}
+      {error && <div className="text-danger">{error}</div>}
     </div>
   )
 }

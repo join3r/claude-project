@@ -34,8 +34,6 @@ import { TCP_STREAM_KIND, connectTcpStream, type TcpTarget } from './host/link/t
 import type { LinkStream } from './host/link/stream'
 import { openRemoteFolderInEditor } from './external-ide'
 import { registerUpdateHandlers } from './ipc/updates'
-import { registerProjectDirsHandlers } from './ipc/project-dirs'
-import { LocalGitRunner } from './git-runner'
 import { createUpdates, type Updates } from './updates'
 import { probeRedirect } from './release-redirect'
 import { decideUpdateMode } from '../shared/updates'
@@ -504,13 +502,6 @@ export class AppRuntime {
         if (!serverId || !this.serverIde) throw new Error('This project is not on a DevTool server')
         await this.serverIde.open(editor, serverId, folder)
       }
-    })
-
-    registerProjectDirsHandlers(ipc, {
-      getProjects: () => this.host.getProjectsData().projects,
-      getConfig: () => this.host.getConfig(),
-      git: new LocalGitRunner(),
-      trashItem: (fullPath) => shell.trashItem(fullPath)
     })
 
     registerSocksProxyHandlers(ipc, {

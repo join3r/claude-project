@@ -203,6 +203,12 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
 
   // adding a server project (ipc/host-fs.ts): the first argument names the host
   'server-list-dirs': { by: [{ host: 0 }] },
+  // a project's own folder (ipc/project-dirs.ts)
+  'project-dirs:missing': { by: [{ host: 0 }] },
+  'project-dirs:folder': { by: [{ host: 0 }] },
+  'project-dirs:set-folder': { by: [{ host: 0 }] },
+  'project-dirs:create': { by: [{ host: 0 }] },
+  'project-dirs:trash': project0,
   'server-discover-repos': { by: [{ host: 0 }] },
   'server-clone-repo': { by: [{ host: 0 }] },
 

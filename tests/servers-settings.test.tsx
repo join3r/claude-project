@@ -30,6 +30,8 @@ const mobile = (over: Partial<MobileState> = {}): MobileState => ({
 } as MobileState)
 
 const api = {
+  projectsFolder: vi.fn(async () => '/home/me/code'),
+  setProjectsFolder: vi.fn(async (_server: string, dir: string) => dir),
   serversRename: vi.fn(),
   serversRemove: vi.fn(),
   serversRestart: vi.fn(),
@@ -75,6 +77,8 @@ beforeEach(() => {
   api.serversRemove.mockResolvedValue({ uninstalled: true })
   api.serversRename.mockImplementation(async (_id: string, name: string) => server({ name }))
   api.serversRestart.mockResolvedValue(undefined)
+  api.projectsFolder.mockResolvedValue('/home/me/code')
+  api.setProjectsFolder.mockImplementation(async (_server: string, dir: string) => dir)
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
 })
 
@@ -118,6 +122,10 @@ describe('Settings › Servers', () => {
     expect((offline.getByRole('button', { name: 'Add another device' }) as HTMLButtonElement).disabled).toBe(true)
     expect((offline.getByRole('button', { name: 'Update now' }) as HTMLButtonElement).disabled).toBe(true)
     expect(rows[2].textContent).toContain('Update DevTool here to use it.')
+    // New project's folder on the server: only an online server is asked.
+    expect(within(rows[0]).getByTestId('server-projects-folder').textContent).toContain('/home/me/code')
+    expect(within(rows[1]).queryByTestId('server-projects-folder')).toBeNull()
+    expect(api.projectsFolder).toHaveBeenCalledWith(rows[0].getAttribute('data-server'))
     expect(screen.getByTestId('relay-line').textContent).toContain('This relay is too old for servers')
   })
 
