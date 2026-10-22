@@ -205,3 +205,14 @@ enum TaskText {
         }
     }
 }
+
+/// A project whose folder is gone from its desktop (§4.4 `missingFolder`):
+/// a red warning sign beside its name. New task there would fail.
+struct MissingFolderMark: View {
+    var body: some View {
+        Image(systemName: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
+            .accessibilityLabel("Folder missing")
+    }
+}

@@ -87,6 +87,7 @@ actor FakeRelay: WebSocketConnector {
         /// Tabs added with `task.new`, at the end of task `t`.
         var newTabs: [String] = []
         var streamNewParams: [StreamNewParams] = []
+        var projectNewParams: [ProjectNewParams] = []
         var taskNewParams: [TaskNewParams] = []
         var taskCloseParams: [TaskCloseParams] = []
         var taskLandParams: [TaskLandParams] = []
@@ -159,6 +160,23 @@ actor FakeRelay: WebSocketConnector {
                         pushRegistration = nil
                     }
                     return app(.resOk(id: id, result: .object([:])), to: from)
+                }
+                if op == TaskOp.newProject {
+                    guard features.contains(DesktopFeature.projectNew) else {
+                        return app(.resError(id: id, code: AppErrorCode.unsupported, message: "Unknown op \(op)"), to: from)
+                    }
+                    let parsed: ProjectNewParams
+                    do {
+                        parsed = try ProjectNewParams.parse(params)
+                    } catch {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: error.message), to: from)
+                    }
+                    // "taken" is a folder the projects folder already has.
+                    guard parsed.name != "taken" else {
+                        return app(.resError(id: id, code: AppErrorCode.badRequest, message: "/code/taken already exists."), to: from)
+                    }
+                    projectNewParams.append(parsed)
+                    return app(.resOk(id: id, result: ProjectNewResult(projectId: "p-new-\(projectNewParams.count)").json), to: from)
                 }
                 if op == TaskOp.newStream || op == TaskOp.listBranches {
                     let feature = op == TaskOp.newStream ? DesktopFeature.streamNew : DesktopFeature.branchesList

@@ -235,6 +235,7 @@ Desktop rules (a server follows them too):
 ```
 - `streams` lists the project's open streams in sidebar order, `main` first (`main: true`, exactly one, the project folder), empty ones included. `branch` is present only on a worktree stream: the branch its worktree is on. `lastStreamId` is the stream the project was last used in, present only while that stream is open.
 - `queue` is Project Home's prompt queue (§8.16), first to run first: prompts planned ahead, each to become a new Claude chat task in stream `streamId`, always one of the project's `streams` (a prompt whose stream was closed runs in `main`). `text` is the whole prompt. The field is absent when the queue is empty. On a stream, `queueAutoRun: true` is present while it starts its next queued prompt by itself, and `queueTaskId` names the task its queue started last while that task still holds the queue up (it hasn't finished or been closed); a receiver ignores a `queueTaskId` it can't find in `tasks`.
+- `missingFolder: true` is present while the project's folder is gone from the desktop's disk (moved, renamed or deleted outside DevTool). The desktop rechecks about once a minute and whenever its projects change. New task in such a project fails on the desktop, so a phone flags the project and doesn't offer New task there; the user repoints the folder in the desktop's Project settings. SSH, server and shell-command projects never carry it.
 - `tasks` lists every open task, stream by stream. A task is one agent session or one terminal task (its main tab is a terminal). `streamId` and `streamName` name the stream holding it (the phone's `Project · Stream` line); `streamId` is always one of the project's `streams`.
 - A task's `status` is its one status: the strongest of its **status tabs** (its main tab, plus any agent tab) in the order `attention`, `working`, `exited`, else `idle`. An extra terminal's bell or exit lights only its own tab, never the task. `since` is when the task entered `status` (the oldest change among the status tabs in it), and `activity` the label of the first such tab that has one. The desktop Inbox and sidebar read the same status.
 - Only agent/terminal tab types are included in `tabs`: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. A tab's `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
@@ -453,7 +454,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"` and §8.17 `"chat.bash"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"` and §8.18 `"project.new"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -676,6 +677,17 @@ Project Home's queue (§4.4 `queue`), as the desktop's Queue block edits and run
 - The chat need not be open on this phone. When it has no runtime yet, the desktop attaches one first, as for `chat.detail`.
 - A desktop that implements this op lists `"chat.bash"` in its features (§8.1). A phone against a desktop without it sends `!` text like any other.
 - Errors: unknown tab, as §6.3 → `not-found`. Missing or malformed params, or a blank or too-long `command` → `bad-request`. A command that fails reports that in its item, not as an error.
+
+### 8.18 `project.new` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `project.new` | `{ name }` | `{ projectId }` |
+
+What the desktop's + → New project… does: the desktop makes a folder named `name` (trimmed, at most 255 characters) in its projects folder (Settings → Sidebar → Projects folder), runs `git init` in it and adds a local project of that name for it, saved as a main-side projects commit at the end of the project list. It appears in the next `inbox` event with only its `main` stream; no window switches to it. The desktop answers once the project is saved.
+
+- A desktop that implements this op lists `"project.new"` in its features (§8.1). A phone offers New project only for such a desktop.
+- Errors: no projects folder set on the desktop → `unsupported`, with a `message` saying where to set it. A blank or too-long `name`, a name that can't be a folder name (`/`, `\`, `<`, `>`, `:`, `"`, `|`, `?`, `*`, control characters, `.` or `..`), or a folder of that name already there → `bad-request`, with the reason as the `message`. `git init` or the file system failing → `internal`; the empty folder is removed again and nothing is saved.
 
 ## 9. Version 2: streams
 

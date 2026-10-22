@@ -123,10 +123,12 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
     public var tasks: [InboxTask]
     /// Project Home's queued prompts, first to run first (§4.4, §8.16).
     public var queue: [InboxQueuedPrompt]
+    /// The project's folder is gone from the desktop (§4.4): New task there would fail.
+    public var missingFolder: Bool
 
     public init(id: String, name: String, emoji: String? = nil, remote: Bool = false,
                 streams: [InboxStream] = [], lastStreamId: String? = nil, tasks: [InboxTask],
-                queue: [InboxQueuedPrompt] = []) {
+                queue: [InboxQueuedPrompt] = [], missingFolder: Bool = false) {
         self.id = id
         self.name = name
         self.emoji = emoji
@@ -135,6 +137,7 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
         self.lastStreamId = lastStreamId
         self.tasks = tasks
         self.queue = queue
+        self.missingFolder = missingFolder
     }
 
     public init(from decoder: any Decoder) throws {
@@ -147,6 +150,7 @@ public struct InboxProject: Codable, Sendable, Equatable, Identifiable {
         lastStreamId = try c.decodeIfPresent(String.self, forKey: .lastStreamId)
         tasks = try c.decodeIfPresent([InboxTask].self, forKey: .tasks) ?? []
         queue = try c.decodeIfPresent([InboxQueuedPrompt].self, forKey: .queue) ?? []
+        missingFolder = (try? c.decodeIfPresent(Bool.self, forKey: .missingFolder)) == true
     }
 
     /// The queued prompts that run in `stream`, in queue order.

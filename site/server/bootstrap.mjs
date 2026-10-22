@@ -618,6 +618,7 @@ var TAB_CLOSE_OP = "tab.close";
 var PIN_SET_OP = "pin.set";
 var TASK_TRIAGE_OP = "task.triage";
 var STREAM_NEW_OP = "stream.new";
+var PROJECT_NEW_OP = "project.new";
 var QUEUE_UPDATE_OP = "queue.update";
 var QUEUE_RUN_OP = "queue.run";
 var BRANCHES_LIST_OP = "branches.list";
@@ -648,6 +649,7 @@ var AppOp = {
   TaskTriage: TASK_TRIAGE_OP,
   TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,
+  ProjectNew: PROJECT_NEW_OP,
   BranchesList: BRANCHES_LIST_OP,
   ChatSettings: CHAT_SETTINGS_OP,
   ChatImage: CHAT_IMAGE_OP,

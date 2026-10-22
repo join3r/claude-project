@@ -20,7 +20,7 @@
         "t": { "const": "req" },
         "id": { "$ref": "#/$defs/id" },
         "op": { "type": "string", "description": "inbox.get, a chat.* op (SPEC.md §6.3), or a §7.4/§8 op such as task.new or stream.new" },
-        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams." }
+        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams." }
       }
     },
     "resOk": {
@@ -30,7 +30,7 @@
         "t": { "const": "res" },
         "id": { "$ref": "#/$defs/id" },
         "ok": { "const": true },
-        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run." }
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run." }
       }
     },
     "resErr": {
@@ -71,6 +71,18 @@
         "branch": { "type": "string", "pattern": "\\S" },
         "baseBranch": { "type": "string", "pattern": "\\S" }
       }
+    },
+    "projectNewParams": {
+      "description": "project.new params (SPEC.md §8.18).",
+      "type": "object",
+      "required": ["name"],
+      "properties": { "name": { "type": "string", "pattern": "\\S", "maxLength": 255 } }
+    },
+    "projectNewResult": {
+      "description": "project.new result (SPEC.md §8.18).",
+      "type": "object",
+      "required": ["projectId"],
+      "properties": { "projectId": { "type": "string" } }
     },
     "streamNewResult": {
       "description": "stream.new result (SPEC.md §8.12).",

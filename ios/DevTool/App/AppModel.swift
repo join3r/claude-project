@@ -157,6 +157,13 @@ final class AppModel {
         return ChatRoute(desktopId: desktopId, tabId: result.tabId)
     }
 
+    /// `project.new` (§8.18): a folder `name` in the desktop's projects folder,
+    /// `git init` in it, and a project for it. Returns its ID; it shows up with the next inbox.
+    func newProject(desktopId: String, name: String) async throws -> String {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.newProject(name: name)
+    }
+
     /// `stream.new` (§8.12): a new stream in the project, on a new worktree
     /// or in the project folder. Returns its ID; it shows up with the next inbox.
     func newStream(desktopId: String, projectId: String, name: String, worktree: Bool, branch: String?, baseBranch: String?) async throws -> String {

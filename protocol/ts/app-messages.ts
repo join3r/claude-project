@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
 import type { ChatViewEvent, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -136,6 +136,8 @@ export interface InboxProject {
   tasks: InboxTask[]
   /** Project Home's queued prompts, first to run first; absent when the queue is empty. */
   queue?: InboxQueuedPrompt[]
+  /** The project's folder is gone from the desktop (moved, renamed or deleted); New task there fails (§4.4). */
+  missingFolder?: true
 }
 
 /**
@@ -217,6 +219,7 @@ export const AppOp = {
   TaskTriage: TASK_TRIAGE_OP,
   TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,
+  ProjectNew: PROJECT_NEW_OP,
   BranchesList: BRANCHES_LIST_OP,
   ChatSettings: CHAT_SETTINGS_OP,
   ChatImage: CHAT_IMAGE_OP,
@@ -447,6 +450,7 @@ function parseProject(value: unknown): InboxProject {
     const queue = arr(o, 'queue').map(parseQueuedPrompt)
     if (queue.length > 0) project.queue = queue
   }
+  if (o.missingFolder === true) project.missingFolder = true
   return project
 }
 

@@ -483,6 +483,7 @@ struct ProjectCardHeader: View {
             Text(group.project.name)
                 .font(.headline)
                 .lineLimit(1)
+            if group.project.missingFolder { MissingFolderMark() }
             if let desktopName {
                 Text(desktopName)
                     .font(.subheadline)

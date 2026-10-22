@@ -1,4 +1,5 @@
 import os from 'os'
+import { randomUUID } from 'crypto'
 import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -19,6 +20,7 @@ import { TaskWorktreeManager } from '../task-worktree'
 import { recordSetupArtifacts, TaskLandingManager } from '../task-landing'
 import { mergeStream } from '../stream-merge'
 import { LocalGitRunner } from '../git-runner'
+import { MissingFolderWatch, ProjectDirError, appendNewProject, createProjectDir } from '../project-dirs'
 import { bracketedPaste } from '../pty-paste'
 import { NotesStorage } from '../notes-storage'
 import { RevisionStore } from '../revision-store'
@@ -97,6 +99,7 @@ import {
   CHAT_SETTINGS_FEATURE,
   PIN_FEATURE,
   STREAM_NEW_FEATURE,
+  PROJECT_NEW_FEATURE,
   TAB_CLOSE_FEATURE,
   TASK_CLOSE_FEATURE,
   TASK_CLOSE_CHOICE_FEATURE,
@@ -234,6 +237,9 @@ export class HostServices {
   /** Tasks' worktrees landing back into their streams. */
   private readonly taskLanding: TaskLandingManager
   private readonly gitRunner = new LocalGitRunner()
+  /** Local projects whose folder is gone, for the phone's inbox (SPEC.md §4.4). */
+  private readonly missingFolders = new MissingFolderWatch(() => this.projectsStore.peek().projects)
+  private missingFoldersUnsub: (() => void) | null = null
   private readonly promptQueue: PromptQueueRunner
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
@@ -449,6 +455,8 @@ export class HostServices {
     this.registerEventForwarders()
     void this.taskLanding.reconcile()
     this.promptQueue.start()
+    this.missingFolders.start()
+    this.missingFoldersUnsub = this.projectsStore.subscribe(() => { void this.missingFolders.refresh() })
     this.mobileService.start()
   }
 
@@ -511,7 +519,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -523,6 +531,9 @@ export class HostServices {
         // A server has no Claude switch: its desktops' settings are theirs.
         if (!this.isServer && !this.config.enableClaude) {
           return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
+        }
+        if (this.missingFolders.peek().has(projectId)) {
+          return { ok: false, code: AppErrorCode.Unsupported, message: 'This project\'s folder is gone. Point it at its new place in DevTool\'s Project settings.' }
         }
         const added = addTaskWithChat(this.projectsStore.peek(), projectId, prompt, streamId)
         if (!added.ok) return added
@@ -590,6 +601,20 @@ export class HostServices {
         // The runner's refusals (Claude off, a start in flight, the worktree) are messages to show.
         const result = await this.promptQueue.run(params.projectId, params.itemId)
         return result.ok ? result : { ok: false, code: AppErrorCode.Internal, message: result.error }
+      },
+      missingFolders: this.missingFolders,
+      newProject: async ({ name }) => {
+        let directory: string
+        try {
+          directory = await createProjectDir(this.config.projectsDir, name, this.gitRunner)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          if (!(err instanceof ProjectDirError) || err.kind === 'failed') return { ok: false, code: AppErrorCode.Internal, message }
+          return { ok: false, code: err.kind === 'no-projects-dir' ? AppErrorCode.Unsupported : AppErrorCode.BadRequest, message }
+        }
+        const projectId = randomUUID()
+        this.commitProjects(appendNewProject(this.projectsStore.peek(), projectId, name.trim(), directory))
+        return { ok: true, projectId }
       },
       newStream: (params) => createStream({
         ...this.streamGit(),
@@ -862,6 +887,8 @@ export class HostServices {
 
   async shutdown(): Promise<void> {
     this.mobileService?.stop()
+    this.missingFoldersUnsub?.()
+    this.missingFolders.stop()
     this.promptQueue.dispose()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()

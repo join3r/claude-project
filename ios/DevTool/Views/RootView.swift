@@ -223,7 +223,7 @@ struct RootView: View {
             try? await Task.sleep(for: .milliseconds(600))
             columnVisibility = .all
             preferredColumn = .sidebar
-        case .projects, .desktop:
+        case .projects, .desktop, .compose:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first { sidebar = .desktop(first.id) }
         case .project, .newStream, .newTask:

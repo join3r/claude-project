@@ -21,8 +21,10 @@ import {
   constantTimeEqual,
   deviceId,
   parseStreamNewParams,
+  parseProjectNewParams,
   parseBranchesListParams,
   type StreamNewParams,
+  type ProjectNewParams,
   type BranchesListResult,
   parseTaskNewParams,
   parseTaskCloseParams,
@@ -234,6 +236,10 @@ export interface MobileServiceDeps {
   triageTask?(params: TaskTriageParams): { ok: true } | { ok: false; code: string; message: string }
   /** `stream.new` (SPEC.md §8.12). Without it the op answers `unsupported`. */
   newStream?(params: StreamNewParams): Promise<{ ok: true; streamId: string } | { ok: false; code: string; message: string }>
+  /** `project.new` (SPEC.md §8.18). Without it the op answers `unsupported`. */
+  newProject?(params: ProjectNewParams): Promise<{ ok: true; projectId: string } | { ok: false; code: string; message: string }>
+  /** Local projects whose folder is gone (§4.4 `missingFolder`); a change sends a fresh inbox. */
+  missingFolders?: { peek(): ReadonlySet<string>; subscribe(listener: () => void): () => void }
   /** `branches.list` (SPEC.md §8.13). Without it the op answers `unsupported`. */
   listBranches?(projectId: string): Promise<({ ok: true } & BranchesListResult) | { ok: false; code: string; message: string }>
   /** `queue.update` (SPEC.md §8.16). Without it (or `runQueued`) both queue ops answer `unsupported`. */
@@ -353,7 +359,8 @@ export class MobileService {
         this.deps.chat?.projectsChanged()
         this.scheduleInbox()
       }),
-      this.deps.activity.subscribe(() => this.scheduleInbox())
+      this.deps.activity.subscribe(() => this.scheduleInbox()),
+      ...(this.deps.missingFolders ? [this.deps.missingFolders.subscribe(() => this.scheduleInbox())] : [])
     ]
     if (this.deps.getConfig().enabled) this.connect()
     this.emitState()
@@ -928,6 +935,14 @@ export class MobileService {
       })
       return
     }
+    if (message.op === AppOp.ProjectNew && this.deps.newProject) {
+      const newProject = this.deps.newProject
+      this.answerLater(session, id, message.op, () => parseProjectNewParams(message.params), async (params) => {
+        const outcome = await newProject(params)
+        return outcome.ok ? { ok: true, result: { projectId: outcome.projectId }, log: `project=${outcome.projectId}` } : outcome
+      })
+      return
+    }
     if (message.op === AppOp.StreamNew && this.deps.newStream) {
       const newStream = this.deps.newStream
       this.answerLater(session, id, message.op, () => parseStreamNewParams(message.params), async (params) => {
@@ -1058,7 +1073,8 @@ export class MobileService {
         sinceOf: (tabId) => activity.getSince(tabId)
       },
       { id: this.deps.getDesktopId() ?? '', name: this.desktopName() },
-      this.timers.now()
+      this.timers.now(),
+      this.deps.missingFolders?.peek()
     )
   }
 

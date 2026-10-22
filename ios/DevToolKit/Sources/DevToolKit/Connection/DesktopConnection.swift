@@ -305,6 +305,16 @@ extension DesktopConnection {
         return try decode(result, StreamNewResult.parse).streamId
     }
 
+    /// `project.new` (§8.18): a folder `name` in the desktop's projects folder,
+    /// `git init` in it, and a project for it. Returns its ID; the project
+    /// shows up in the next inbox. Throws `.remote(code: "unsupported")` when
+    /// the desktop has no projects folder set, `bad-request` for a name that
+    /// can't be a new folder there (the message says why).
+    public func newProject(name: String) async throws -> String {
+        let result = try await request(TaskOp.newProject, params: ProjectNewParams(name: name).json, timeout: .seconds(30))
+        return try decode(result, ProjectNewResult.parse).projectId
+    }
+
     /// `branches.list` (§8.13): the project's local branches for the From
     /// picker, and the one to pick first. Throws `.remote(code: "unsupported")`
     /// for a project that can't have worktrees (a shell-command project).

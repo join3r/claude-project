@@ -217,6 +217,14 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             return StreamNewResult(streamId: try addStream(parsed)).json
+        case TaskOp.newProject:
+            let parsed: ProjectNewParams
+            do {
+                parsed = try ProjectNewParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return ProjectNewResult(projectId: try addProject(parsed)).json
         case TaskOp.listBranches:
             return try branchList(projectId: try string("projectId")).json
         case TaskOp.new:
@@ -379,6 +387,25 @@ public actor MockDesktopConnection: DesktopConnection {
         var branches = ["main"]
         for branch in project.streams.compactMap(\.branch) where !branches.contains(branch) { branches.append(branch) }
         return BranchesListResult(branches: branches, defaultBase: "main")
+    }
+
+    /// `project.new`: a project with only `main`, at the end of the list, as
+    /// the desktop's `~/code/<name>`. A name already taken is the desktop's
+    /// "already exists". The inbox with it goes out right away.
+    private func addProject(_ params: ProjectNewParams) throws -> String {
+        if params.name.contains("/") || params.name == "." || params.name == ".." {
+            throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "A folder name can't contain / \\ < > : \" | ? or *.")
+        }
+        guard !inbox.projects.contains(where: { $0.name == params.name }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "~/code/\(params.name) already exists.")
+        }
+        newCount += 1
+        let projectId = "p-new-\(newCount)"
+        let main = InboxStream(id: "s-main-\(projectId)", name: "main", isMain: true)
+        inbox.projects.append(InboxProject(id: projectId, name: params.name, streams: [main], tasks: []))
+        inbox.generatedAt = Date().unixMilliseconds
+        continuation.yield(.inbox(inbox))
+        return projectId
     }
 
     /// `stream.new`: an empty stream at the end of the project's list, with a
@@ -859,7 +886,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
-            DesktopFeature.chatBash,
+            DesktopFeature.chatBash, DesktopFeature.projectNew,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -1046,7 +1073,8 @@ public enum MockInbox {
                 ]),
                 // No open task: the desktop screen's Quiet projects.
                 InboxProject(id: "p-dotfiles", name: "dotfiles", streams: [InboxStream(id: "s-dot-main", name: "main", isMain: true)], tasks: []),
-                InboxProject(id: "p-blog", name: "blog", emoji: "📚", streams: [InboxStream(id: "s-blog-main", name: "main", isMain: true)], tasks: []),
+                // Its folder was moved on the desktop (§4.4 `missingFolder`).
+                InboxProject(id: "p-blog", name: "blog", emoji: "📚", streams: [InboxStream(id: "s-blog-main", name: "main", isMain: true)], tasks: [], missingFolder: true),
             ],
             pinned: [
                 InboxPin(projectId: "p-web", streamId: webMain.id, taskId: "t-charts"),

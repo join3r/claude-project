@@ -63,7 +63,8 @@
         "streams": { "type": "array", "items": { "$ref": "#/$defs/stream" }, "description": "Open streams in sidebar order, main first." },
         "lastStreamId": { "type": "string", "description": "The stream the project was last used in." },
         "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" }, "description": "Open tasks, stream by stream." },
-        "queue": { "type": "array", "items": { "$ref": "#/$defs/queuedPrompt" }, "description": "Project Home's queued prompts, first to run first (SPEC.md §4.4). Absent when empty." }
+        "queue": { "type": "array", "items": { "$ref": "#/$defs/queuedPrompt" }, "description": "Project Home's queued prompts, first to run first (SPEC.md §4.4). Absent when empty." },
+        "missingFolder": { "const": true, "description": "The project's folder is gone from the desktop (SPEC.md §4.4). Absent otherwise." }
       }
     },
     "task": {

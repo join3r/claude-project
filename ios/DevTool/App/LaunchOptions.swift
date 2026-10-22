@@ -13,6 +13,9 @@ import Foundation
 /// - `-demoRoute project|newStream|newTask [-demoProject <projectId>]`: the first
 ///   desktop's first project (or `-demoProject`), with the New stream sheet or
 ///   (on its last stream) the New task sheet up.
+/// - `-demoRoute compose [-demoNewProject <name>]`: the first desktop's screen with
+///   the toolbar's New task sheet up; `-demoNewProject` then makes that project
+///   through its New project… (`project.new`) and picks it.
 /// - `-demoRoute taskInfo [-demoTab <tabId>]`: as `chat`, with the task info sheet up.
 /// - `-demoRoute task [-demoTask <taskId>] [-demoCloseTask]`: that task's screen
 ///   (the first task without `-demoTask`); `-demoCloseTask` then sends it
@@ -51,6 +54,8 @@ struct LaunchOptions: Sendable {
         case desktop
         /// Same as `desktop` (its name before the project screen).
         case projects
+        /// `desktop` with the toolbar's New task sheet up (`-demoNewProject`).
+        case compose
         /// The first desktop's first project.
         case project
         /// `project` with the New stream sheet up.
@@ -85,6 +90,7 @@ struct LaunchOptions: Sendable {
     var demoInboxClose: String?
     var demoInboxRemove = false
     var demoProject: String?
+    var demoNewProject: String?
     var demoToolDetail: String?
     var demoChatScript = false
     var demoMessage: String?
@@ -126,6 +132,7 @@ struct LaunchOptions: Sendable {
         demoInboxClose = value("-demoInboxClose")
         demoInboxRemove = args.contains("-demoInboxRemove")
         demoProject = value("-demoProject")
+        demoNewProject = value("-demoNewProject")
         demoToolDetail = value("-demoToolDetail")
         demoChatScript = args.contains("-demoChatScript")
         demoMessage = value("-demoMessage")

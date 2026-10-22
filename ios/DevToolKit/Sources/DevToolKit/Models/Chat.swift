@@ -539,6 +539,28 @@ public struct StreamNewParams: Sendable, Equatable {
     }
 }
 
+/// `project.new` (§8.18) params: a project in a new folder `name` in the
+/// desktop's projects folder, with `git init` run in it.
+public struct ProjectNewParams: Sendable, Equatable {
+    /// Non-blank, at most `ProjectNewParams.maxName` characters; sent and parsed trimmed.
+    public var name: String
+
+    public static let maxName = 255
+
+    public init(name: String) {
+        self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// `project.new` result: the new project, which shows up in the next inbox.
+public struct ProjectNewResult: Sendable, Equatable {
+    public var projectId: String
+
+    public init(projectId: String) {
+        self.projectId = projectId
+    }
+}
+
 /// `stream.new` result: the new stream, which shows up in the next inbox.
 public struct StreamNewResult: Sendable, Equatable {
     public var streamId: String
@@ -734,6 +756,8 @@ public enum TaskOp {
     public static let newStream = "stream.new"
     /// `branches.list` (§8.13): a project's branches for the New stream sheet.
     public static let listBranches = "branches.list"
+    /// `project.new` (§8.18): a new folder in the desktop's projects folder, git init, a project.
+    public static let newProject = "project.new"
     /// `task.land` (§8.15): a stopped landing's Ask agent to fix, Abort and Retry.
     public static let land = "task.land"
     /// `queue.update` (§8.16): add, edit, remove or move a queued prompt, or switch auto-run.
@@ -1359,6 +1383,26 @@ extension QueueRunResult {
     }
 
     public var json: JSONValue { .object(["taskId": .string(taskId)]) }
+}
+
+extension ProjectNewParams {
+    /// The desktop's side: a missing, blank or too-long `name` throws (`bad-request`).
+    public static func parse(_ value: JSONValue?) throws(ProtocolError) -> ProjectNewParams {
+        let name = try Fields(value, "params").str("name").trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { throw ProtocolError("name is empty") }
+        if name.count > maxName { throw ProtocolError("name over \(maxName) characters") }
+        return ProjectNewParams(name: name)
+    }
+
+    public var json: JSONValue { .object(["name": .string(name)]) }
+}
+
+extension ProjectNewResult {
+    public static func parse(_ value: JSONValue) throws(ProtocolError) -> ProjectNewResult {
+        ProjectNewResult(projectId: try Fields(value, "result").str("projectId"))
+    }
+
+    public var json: JSONValue { .object(["projectId": .string(projectId)]) }
 }
 
 extension StreamNewResult {

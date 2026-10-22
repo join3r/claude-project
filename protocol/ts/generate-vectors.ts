@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -255,7 +255,9 @@ function appMessages(): unknown {
           { id: 'q2', text: 'Bump the version to 0.5.1\nand tag it', streamId: 's-050' }
         ]
       },
-      { id: 'p2', name: 'remote-box', remote: true, streams: [{ id: 's-main-2', name: 'main', main: true }], tasks: [] }
+      { id: 'p2', name: 'remote-box', remote: true, streams: [{ id: 's-main-2', name: 'main', main: true }], tasks: [] },
+      // §4.4: a project whose folder is gone from the desktop.
+      { id: 'p3', name: 'moved-away', remote: false, streams: [{ id: 's-main-3', name: 'main', main: true }], tasks: [], missingFolder: true }
     ],
     pinned: [
       { projectId: 'p1', streamId: 's-050', taskId: 't2' },
@@ -268,7 +270,8 @@ function appMessages(): unknown {
     generatedAt: 1790000000000,
     layout: 'grid',
     projects: [{
-      id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true, lastStreamId: null,
+      // `missingFolder` counts only as `true`.
+      id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true, lastStreamId: null, missingFolder: 'yes',
       streams: [{ id: 's-main', name: 'main', main: 'yes', branch: null, color: 'green', queueAutoRun: 'yes', queueTaskId: null }],
       queue: [{ id: 'q1', text: 'Add rate limiting', streamId: 's-main', author: 'me' }],
       tasks: [{
@@ -791,6 +794,17 @@ function chatMessages(): unknown {
           'null'
         ],
         results: [text({}), text({ streamId: 7 }), '[]']
+      }
+    },
+    // §8.18: `project.new` makes a folder in the projects folder, runs git init, adds the project.
+    projectNew: {
+      params: [text({ name: 'api-server' }), text({ name: '  my app  ', extra: true })]
+        .map((json) => ({ json, expected: parseProjectNewParams(JSON.parse(json)) })),
+      results: [text({ projectId: 'p-new' }), text({ projectId: 'p-new', directory: '/code/x' })]
+        .map((json) => ({ json, expected: parseProjectNewResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), text({ name: '   ' }), text({ name: 7 }), text({ name: 'x'.repeat(256) }), 'null'],
+        results: [text({}), text({ projectId: 7 }), '[]']
       }
     },
     // §8.16: `queue.update` edits Project Home's queue; `queue.run` starts a queued prompt now.

@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -159,6 +159,10 @@ describe('M2 vectors', () => {
     for (const s of file.streamNew.results) expect(parseStreamNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.streamNew.invalid.params) expect(() => parseStreamNewParams(JSON.parse(s)), s).toThrow()
     for (const s of file.streamNew.invalid.results) expect(() => parseStreamNewResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.projectNew.params) expect(parseProjectNewParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.projectNew.results) expect(parseProjectNewResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.projectNew.invalid.params) expect(() => parseProjectNewParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.projectNew.invalid.results) expect(() => parseProjectNewResult(JSON.parse(s)), s).toThrow()
     for (const s of file.branchesList.params) expect(parseBranchesListParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.branchesList.results) expect(parseBranchesListResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.branchesList.invalid.params) expect(() => parseBranchesListParams(JSON.parse(s)), s).toThrow()

@@ -119,6 +119,15 @@ import Testing
         #expect(inbox.projects[0].tasks[0].tabs.isEmpty)
     }
 
+    @Test func missingFolderCountsOnlyAsTrue() throws {
+        let inbox = try decode(#"{ "desktop": { "id": "d", "name": "n" }, "projects": [{ "id": "a", "name": "a", "missingFolder": true }, { "id": "b", "name": "b", "missingFolder": "yes" }, { "id": "c", "name": "c" }] }"#)
+        #expect(inbox.projects.map(\.missingFolder) == [true, false, false])
+        let parsed = try Inbox.parse(try JSONValue.parse(#"{ "desktop": { "id": "d", "name": "n" }, "generatedAt": 1, "projects": [{ "id": "a", "name": "a", "remote": false, "streams": [], "tasks": [], "missingFolder": true }] }"#))
+        #expect(parsed.projects[0].missingFolder)
+        guard case .array(let projects)? = parsed.json.objectValue?["projects"] else { Issue.record("no projects"); return }
+        #expect(projects.first?.objectValue?["missingFolder"] == .bool(true))
+    }
+
     @Test func roundTripsUnknownEnumsAsRawStrings() throws {
         let tab = InboxTab(id: "1", type: .unknown("browser"), title: "B", status: .unknown("sleeping"))
         let data = try JSONEncoder().encode(tab)

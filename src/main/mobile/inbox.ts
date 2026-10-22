@@ -171,7 +171,7 @@ export function isVisibleOnMobile(project: Project): boolean {
  * Archived streams and tasks live outside `project.streams` (`archive/<id>.json`),
  * so only open ones are ever sent.
  */
-function buildProject(project: Project, lookup: InboxTabLookup, now: number): MobileInboxProject {
+function buildProject(project: Project, lookup: InboxTabLookup, now: number, missingFolder: boolean): MobileInboxProject {
   const lastStream = project.streams.find((stream) => stream.id === project.lastStreamId)
   const queue = buildQueue(project)
   return {
@@ -182,7 +182,8 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number): Mo
     streams: project.streams.map(buildStream),
     ...(lastStream ? { lastStreamId: lastStream.id } : {}),
     tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now))),
-    ...(queue.length > 0 ? { queue } : {})
+    ...(queue.length > 0 ? { queue } : {}),
+    ...(missingFolder ? { missingFolder: true as const } : {})
   }
 }
 
@@ -246,13 +247,15 @@ export function buildInbox(
   data: ProjectsData,
   lookup: InboxTabLookup,
   desktop: { id: string; name: string },
-  now: number
+  now: number,
+  /** Local projects whose folder is gone (§4.4 `missingFolder`). */
+  missingFolders: ReadonlySet<string> = new Set()
 ): MobileInbox {
   const visible = orderedProjects(data).filter(isVisibleOnMobile)
   const inbox: MobileInbox = {
     desktop: { id: desktop.id, name: desktop.name },
     generatedAt: now,
-    projects: visible.map((project) => buildProject(project, lookup, now))
+    projects: visible.map((project) => buildProject(project, lookup, now, missingFolders.has(project.id)))
   }
   const pinned = buildPinned(data, visible)
   if (pinned.length > 0) inbox.pinned = pinned

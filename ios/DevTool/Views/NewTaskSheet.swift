@@ -106,6 +106,10 @@ struct NewTaskSheet: View {
     @State private var sending = false
     @State private var error: String?
     @State private var focused = false
+    /// New project…: the desktop it goes to while its name is asked for, and the name.
+    @State private var newProjectDesktopId: String?
+    @State private var newProjectName = ""
+    @State private var creatingProject = false
 
     init(target: NewTaskTarget) {
         self.target = target
@@ -120,6 +124,7 @@ struct NewTaskSheet: View {
                 Form {
                     Section {
                         projectRow(desktops)
+                        newProjectRow(desktops)
                         let streams = selectedProject?.streams ?? []
                         if streams.count > 1 {
                             Picker("Stream", selection: $streamId) {
@@ -136,6 +141,9 @@ struct NewTaskSheet: View {
                     } footer: {
                         if let selection, model.isOffline(selection.desktopId) {
                             Text("\(model.desktop(selection.desktopId)?.name ?? "This desktop") is offline.")
+                        } else if let selection, selectedProject?.missingFolder == true {
+                            Text("This project's folder is gone from \(model.desktop(selection.desktopId)?.name ?? "the desktop"). Point the project at its new place in DevTool's Project settings to start tasks in it.")
+                                .foregroundStyle(.red)
                         } else if let stream = selectedStream, let branch = stream.branch {
                             Text("Works in the \(stream.name) worktree, on \(branch).")
                         }
@@ -203,15 +211,35 @@ struct NewTaskSheet: View {
                         ProgressView()
                     } else {
                         Button("Start") { Task { await start() } }
-                            .disabled(trimmed.isEmpty || selection == nil || offline || (imagesUnsupported != nil && !images.isEmpty))
+                            .disabled(trimmed.isEmpty || selection == nil || offline || selectedProject?.missingFolder == true
+                                      || creatingProject || (imagesUnsupported != nil && !images.isEmpty))
                     }
                 }
             }
-            .interactiveDismissDisabled(sending)
+            .interactiveDismissDisabled(sending || creatingProject)
+            .alert("New project", isPresented: Binding(
+                get: { newProjectDesktopId != nil },
+                set: { if !$0 { newProjectDesktopId = nil } }
+            ), presenting: newProjectDesktopId) { desktopId in
+                TextField("Name", text: $newProjectName)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Cancel", role: .cancel) {}
+                Button("Create") { Task { await createProject(on: desktopId) } }
+                    .disabled(newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } message: { desktopId in
+                Text("\(model.desktop(desktopId)?.name ?? "The desktop") makes a folder with this name in its projects folder and runs git init in it.")
+            }
             .onAppear {
                 if selection == nil { selection = defaultProject(desktops) }
                 if streamId == nil || selectedStream == nil { streamId = selectedProject?.defaultStream?.id }
                 focused = true
+                #if DEBUG
+                if let name = LaunchOptions.current.demoNewProject, let desktop = newProjectDesktop(desktops) {
+                    newProjectName = name
+                    Task { await createProject(on: desktop.id) }
+                }
+                #endif
             }
             .onChange(of: selection) {
                 // Another project: its own most recently used stream.
@@ -247,6 +275,55 @@ struct NewTaskSheet: View {
             }
             .pickerStyle(.navigationLink)
             .disabled(sending)
+        }
+    }
+
+    /// "New project…" under the picker, for a desktop that answers `project.new`
+    /// (§8.18): the picked project's desktop, else the first online one.
+    @ViewBuilder
+    private func newProjectRow(_ desktops: [(desktop: DesktopRecord, projects: [InboxProject])]) -> some View {
+        if target.project == nil, let desktop = newProjectDesktop(desktops) {
+            Button {
+                newProjectName = ""
+                newProjectDesktopId = desktop.id
+            } label: {
+                HStack {
+                    Label(desktops.count > 1 ? "New project on \(desktop.name)…" : "New project…", systemImage: "folder.badge.plus")
+                    if creatingProject {
+                        Spacer()
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(sending || creatingProject || model.isOffline(desktop.id))
+        }
+    }
+
+    private func newProjectDesktop(_ desktops: [(desktop: DesktopRecord, projects: [InboxProject])]) -> DesktopRecord? {
+        let able = desktops.map(\.desktop).filter { model.supports(DesktopFeature.projectNew, on: $0.id) }
+        if let selection, let picked = able.first(where: { $0.id == selection.desktopId }) { return picked }
+        return able.first { !model.isOffline($0.id) } ?? able.first
+    }
+
+    /// Makes the project, waits for the inbox that lists it, and picks it.
+    private func createProject(on desktopId: String) async {
+        let name = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !creatingProject else { return }
+        creatingProject = true
+        error = nil
+        defer { creatingProject = false }
+        do {
+            let projectId = try await model.newProject(desktopId: desktopId, name: name)
+            // The inbox with it follows the answer; give it a moment so the picker can show it.
+            var waited = 0
+            while waited < 50, model.inboxes[desktopId]?.projects.contains(where: { $0.id == projectId }) != true {
+                try? await Task.sleep(for: .milliseconds(100))
+                waited += 1
+            }
+            selection = NewTaskProject(desktopId: desktopId, projectId: projectId)
+            focused = true
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 
@@ -338,6 +415,7 @@ struct ProjectNameLabel: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Remote")
             }
+            if project.missingFolder { MissingFolderMark() }
         }
         .lineLimit(1)
     }

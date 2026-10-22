@@ -96,6 +96,21 @@ struct ProjectView: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
             }
             .listSectionSpacing(.compact)
+            if project.missingFolder {
+                Section {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Folder not found on \(model.desktop(ref.desktopId)?.name ?? "the desktop")")
+                                .font(.subheadline.weight(.semibold))
+                            Text("It was moved, renamed or deleted. Point the project at its new place in DevTool's Project settings to start tasks here again.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    }
+                }
+            }
             queueSections(project)
             ForEach(streams(project)) { stream in
                 streamSection(stream, project: project, inbox: inbox, now: now)
@@ -109,9 +124,12 @@ struct ProjectView: View {
         HStack(spacing: 14) {
             ProjectTileView(tile: project.tile, size: 52)
             VStack(alignment: .leading, spacing: 2) {
-                Text(project.name)
-                    .font(.title.weight(.bold))
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(project.name)
+                        .font(.title.weight(.bold))
+                        .lineLimit(2)
+                    if project.missingFolder { MissingFolderMark() }
+                }
                 Text(subtitle(project))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -196,7 +214,7 @@ struct ProjectView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
-                .disabled(offline)
+                .disabled(offline || project.missingFolder)
                 .accessibilityLabel("New task in \(stream.name)")
             }
         }

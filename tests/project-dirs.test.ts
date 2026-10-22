@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProjectDir, missingProjectDirs, trashProjectDir, validateFolderName } from '../src/main/project-dirs'
+import { MissingFolderWatch, ProjectDirError, appendNewProject, createProjectDir, missingProjectDirs, trashProjectDir, validateFolderName } from '../src/main/project-dirs'
 import { LocalGitRunner, type GitRunner } from '../src/main/git-runner'
 import { createMainStream, type Project } from '../src/shared/types'
 
@@ -65,13 +65,21 @@ describe('createProjectDir', () => {
   })
 
   it('needs a projects folder', async () => {
-    await expect(createProjectDir('', 'app', new LocalGitRunner())).rejects.toThrow(/projects folder/)
+    await expect(createProjectDir('', 'app', new LocalGitRunner())).rejects.toMatchObject({ kind: 'no-projects-dir' })
+  })
+
+  it('tells a bad name from a failure', async () => {
+    const root = tmp('pd-kinds-')
+    await expect(createProjectDir(root, 'a/b', new LocalGitRunner())).rejects.toMatchObject({ kind: 'invalid' })
+    fs.mkdirSync(path.join(root, 'app'))
+    await expect(createProjectDir(root, 'app', new LocalGitRunner())).rejects.toBeInstanceOf(ProjectDirError)
+    await expect(createProjectDir(root, 'app', new LocalGitRunner())).rejects.toMatchObject({ kind: 'invalid' })
   })
 
   it('removes the empty folder when git init fails', async () => {
     const root = tmp('pd-gitfail-')
     const failing: GitRunner = { kind: 'local', run: async () => ({ stdout: '', stderr: 'boom', code: 1 }) }
-    await expect(createProjectDir(root, 'app', failing)).rejects.toThrow(/boom/)
+    await expect(createProjectDir(root, 'app', failing)).rejects.toMatchObject({ kind: 'failed', message: expect.stringMatching(/boom/) })
     expect(fs.existsSync(path.join(root, 'app'))).toBe(false)
   })
 })
@@ -121,5 +129,36 @@ describe('trashProjectDir', () => {
     await expect(trashProjectDir([project('s', { directory: '/x', host: 'srv' })], 's', deps)).rejects.toThrow(/local/)
     await expect(trashProjectDir([], 'nope', deps)).rejects.toThrow(/gone/)
     expect(trashed).toEqual([])
+  })
+})
+
+describe('appendNewProject', () => {
+  it('adds a local project with only main, at the end of the order', () => {
+    const data = appendNewProject({ projects: [], tags: [], projectOrder: ['x'], pinnedItems: [] }, 'p-new', 'app', '/code/app')
+    expect(data.projectOrder).toEqual(['x', 'p-new'])
+    expect(data.projects[0]).toMatchObject({ id: 'p-new', name: 'app', directory: '/code/app' })
+    expect(data.projects[0].streams.map(s => s.isMain)).toEqual([true])
+  })
+})
+
+describe('MissingFolderWatch', () => {
+  it('tells listeners only when the set changes', async () => {
+    const root = tmp('pd-watch-')
+    const dir = path.join(root, 'app')
+    fs.mkdirSync(dir)
+    const watch = new MissingFolderWatch(() => [project('p', { directory: dir })])
+    let calls = 0
+    watch.subscribe(() => { calls++ })
+    await watch.refresh()
+    expect(calls).toBe(0)
+    fs.rmSync(dir, { recursive: true })
+    await watch.refresh()
+    await watch.refresh()
+    expect([...watch.peek()]).toEqual(['p'])
+    expect(calls).toBe(1)
+    fs.mkdirSync(dir)
+    await watch.refresh()
+    expect(watch.peek().size).toBe(0)
+    expect(calls).toBe(2)
   })
 })

@@ -33,6 +33,13 @@ struct DesktopView: View {
         .sheet(item: $newTask) { target in
             NewTaskSheet(target: target)
         }
+        #if DEBUG
+        .task {
+            guard LaunchOptions.current.demoRoute == .compose else { return }
+            try? await Task.sleep(for: .milliseconds(800))
+            newTask = NewTaskTarget(desktopIds: scopeDesktops.map(\.id))
+        }
+        #endif
         .closeTaskFlow($closing) { closed in
             if selection == TaskRef(desktopId: closed.desktopId, taskId: closed.taskId) { selection = nil }
         }
@@ -210,6 +217,7 @@ struct DesktopView: View {
                             ProjectTileView(tile: project.tile, size: 30)
                             Text(project.name)
                                 .lineLimit(1)
+                            if project.missingFolder { MissingFolderMark() }
                         }
                     }
                     .opacity(model.isOffline(desktop.id) ? 0.55 : 1)
@@ -326,6 +334,7 @@ struct ActiveProjectRow: View {
                             .foregroundStyle(.secondary)
                             .accessibilityLabel("Remote")
                     }
+                    if summary.project.missingFolder { MissingFolderMark() }
                 }
                 .lineLimit(1)
                 Text(line)

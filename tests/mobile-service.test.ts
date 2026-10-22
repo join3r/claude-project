@@ -141,7 +141,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -190,6 +190,8 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?
     log: () => {},
     timers,
     newStream: options.newStream,
+    newProject: options.newProject,
+    missingFolders: options.missingFolders,
     listBranches: options.listBranches,
     newTask: options.newTask,
     closeTask: options.closeTask,
@@ -217,7 +219,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newStream?
   }
 }
 
-function pairedSetup(options: { newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -684,6 +686,50 @@ describe('MobileService stream.new and branches.list (SPEC.md §8.12, §8.13)', 
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
     env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'branches.list', params: { projectId: 'p1' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService project.new and missingFolder (SPEC.md §8.18, §4.4)', () => {
+  it('passes the trimmed name through and answers with the project, or the error', async () => {
+    const calls: unknown[] = []
+    const env = pairedSetup({
+      newProject: async (params) => {
+        calls.push(params)
+        return params.name === 'taken' ? { ok: false, code: 'bad-request', message: '/code/taken already exists.' } : { ok: true, projectId: 'p-new' }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'project.new', params: { name: ' app ' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: { projectId: 'p-new' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'project.new', params: { name: 'taken' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'bad-request', message: '/code/taken already exists.' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'project.new', params: { name: '  ' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([{ name: 'app' }, { name: 'taken' }])
+  })
+
+  it('is unsupported without the dependency', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'project.new', params: { name: 'app' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+  })
+
+  it('flags a project whose folder is gone, and sends the inbox again when that changes', () => {
+    let missing: ReadonlySet<string> = new Set()
+    const listeners = new Set<() => void>()
+    const env = pairedSetup({
+      missingFolders: { peek: () => missing, subscribe: (l) => { listeners.add(l); return () => listeners.delete(l) } }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'inbox.get' })
+    const first = env.channel.sent.at(-1) as { result: { projects: Record<string, unknown>[] } }
+    expect('missingFolder' in first.result.projects[0]).toBe(false)
+    missing = new Set(['p1'])
+    for (const l of listeners) l()
+    env.timers.advance(INBOX_THROTTLE_MS)
+    expect(env.channel.inboxEvents().at(-1)?.inbox.projects[0].missingFolder).toBe(true)
+    env.service.stop()
+    expect(listeners.size).toBe(0)
   })
 })
 

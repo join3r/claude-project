@@ -71,6 +71,12 @@ describe('buildInbox', () => {
     expect(Object.keys(inbox.projects[0].tasks[0])).toEqual(['id', 'name', 'streamId', 'streamName', 'status', 'since', 'lastInteractedAt', 'attentionAt', 'tabs'])
   })
 
+  it('marks only the projects whose folder is gone', () => {
+    const inbox = buildInbox(data([project('p1', []), project('p2', [])]), lookup(), DESKTOP, NOW, new Set(['p2']))
+    expect(inbox.projects.map(p => p.missingFolder)).toEqual([undefined, true])
+    expect('missingFolder' in inbox.projects[0]).toBe(false)
+  })
+
   it('omits optional fields that are absent', () => {
     const inbox = buildInbox(data([project('p1', [task('t1', [tab('a', 'terminal')])])]), lookup(), DESKTOP, NOW)
     const [p] = inbox.projects

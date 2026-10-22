@@ -233,6 +233,8 @@ public enum DesktopFeature {
     public static let queue = "queue"
     /// The desktop answers `chat.bash` (§8.17).
     public static let chatBash = "chat.bash"
+    /// The desktop answers `project.new` (§8.18).
+    public static let projectNew = "project.new"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.
@@ -383,7 +385,8 @@ extension Inbox {
             streams: try o.array("streams").map { (v) throws(ProtocolError) in try parseStream(v) },
             lastStreamId: try optStr(o, "lastStreamId"),
             tasks: try o.array("tasks").map { (v) throws(ProtocolError) in try parseTask(v) },
-            queue: o.isUnset("queue") ? [] : try o.array("queue").map { (v) throws(ProtocolError) in try parseQueuedPrompt(v) }
+            queue: o.isUnset("queue") ? [] : try o.array("queue").map { (v) throws(ProtocolError) in try parseQueuedPrompt(v) },
+            missingFolder: o["missingFolder"] == .bool(true)
         )
     }
 
@@ -451,6 +454,7 @@ extension InboxProject {
         if let lastStreamId { o["lastStreamId"] = .string(lastStreamId) }
         o["tasks"] = .array(tasks.map(\.json))
         if !queue.isEmpty { o["queue"] = .array(queue.map(\.json)) }
+        if missingFolder { o["missingFolder"] = .bool(true) }
         return .object(o)
     }
 }

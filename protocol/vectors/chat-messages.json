@@ -1366,6 +1366,50 @@
       ]
     }
   },
+  "projectNew": {
+    "params": [
+      {
+        "json": "{\"name\":\"api-server\"}",
+        "expected": {
+          "name": "api-server"
+        }
+      },
+      {
+        "json": "{\"name\":\"  my app  \",\"extra\":true}",
+        "expected": {
+          "name": "my app"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"projectId\":\"p-new\"}",
+        "expected": {
+          "projectId": "p-new"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p-new\",\"directory\":\"/code/x\"}",
+        "expected": {
+          "projectId": "p-new"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{}",
+        "{\"name\":\"   \"}",
+        "{\"name\":7}",
+        "{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+        "null"
+      ],
+      "results": [
+        "{}",
+        "{\"projectId\":7}",
+        "[]"
+      ]
+    }
+  },
   "queueUpdate": {
     "params": [
       {

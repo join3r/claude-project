@@ -24,6 +24,25 @@ import Testing
         }
     }
 
+    @Test func projectNewParamsAndResults() throws {
+        let new = try #require(try Vectors.load("chat-messages.json")["projectNew"])
+        #expect(!new["params"].array.isEmpty && !new["results"].array.isEmpty)
+        for sample in new["params"].array {
+            let parsed = try ProjectNewParams.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for sample in new["results"].array {
+            let parsed = try ProjectNewResult.parse(try JSONValue.parse(sample["json"].str))
+            #expect(parsed.json == sample["expected"], "\(sample["json"].str)")
+        }
+        for json in new["invalid"]["params"].array {
+            #expect(throws: (any Error).self, "\(json.str.prefix(80))") { _ = try ProjectNewParams.parse(try JSONValue.parse(json.str)) }
+        }
+        for json in new["invalid"]["results"].array {
+            #expect(throws: (any Error).self, "\(json.str)") { _ = try ProjectNewResult.parse(try JSONValue.parse(json.str)) }
+        }
+    }
+
     @Test func branchesListParamsAndResults() throws {
         let list = try #require(try Vectors.load("chat-messages.json")["branchesList"])
         #expect(!list["results"].array.isEmpty)
@@ -433,6 +452,27 @@ import Testing
         await connection.stop()
     }
 
+    @Test func projectNewWorksWhenListed() async throws {
+        let rig = RelayConnectionTests.Rig()
+        let desktop = await rig.desktop()
+        desktop.features = [DesktopFeature.projectNew]
+        desktop.pairings[rig.phone.deviceId] = rig.phone.x25519.pub
+        let connection = rig.factory.connection(for: rig.record(for: desktop))
+        let events = EventRecorder(connection)
+        await connection.start()
+        try await events.waitFor { $0 == .features([DesktopFeature.projectNew]) }
+        try await events.waitFor(RelayConnectionTests.isInbox)
+
+        let projectId = try await connection.newProject(name: "  my app ")
+        #expect(projectId == "p-new-1")
+        #expect(desktop.requests.last?.op == TaskOp.newProject)
+        #expect(desktop.requests.last?.params == .object(["name": "my app"]))
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "/code/taken already exists.")) {
+            _ = try await connection.newProject(name: "taken")
+        }
+        await connection.stop()
+    }
+
     @Test func olderDesktopListsNoFeatures() async throws {
         let rig = RelayConnectionTests.Rig()
         let desktop = await rig.desktop()
@@ -445,6 +485,9 @@ import Testing
         try await events.waitFor(RelayConnectionTests.isInbox)
         await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Unknown op stream.new")) {
             _ = try await connection.newStream(projectId: "p", name: "x", worktree: false)
+        }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Unknown op project.new")) {
+            _ = try await connection.newProject(name: "x")
         }
         await connection.stop()
     }
@@ -529,7 +572,7 @@ import Testing
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
-            DesktopFeature.chatBash,
+            DesktopFeature.chatBash, DesktopFeature.projectNew,
         ]) }
         try await events.waitFor(RelayConnectionTests.isInbox)
         let listed = try await mock.listBranches(projectId: "p-api")
@@ -559,6 +602,25 @@ import Testing
             _ = try await mock.listBranches(projectId: MockDesktopConnection.shellProjectId)
         }
         _ = try await mock.newStream(projectId: MockDesktopConnection.shellProjectId, name: "Notes", worktree: false)
+        await mock.stop()
+    }
+
+    @Test func makesProjectsAndFlagsAMissingFolder() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event else { return false }
+            return inbox.projects.first { $0.id == "p-blog" }?.missingFolder == true
+        }
+        let projectId = try await mock.newProject(name: " my-app ")
+        try await events.waitFor { event in
+            guard case .inbox(let inbox) = event, let project = inbox.projects.last else { return false }
+            return project.id == projectId && project.name == "my-app" && project.streams.map(\.isMain) == [true] && !project.missingFolder
+        }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: "~/code/my-app already exists.")) {
+            _ = try await mock.newProject(name: "my-app")
+        }
         await mock.stop()
     }
 

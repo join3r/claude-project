@@ -179,6 +179,17 @@ export const STREAM_NEW_OP = 'stream.new'
 /** The handshake feature (§8.1) a desktop lists when it answers `stream.new`. */
 export const STREAM_NEW_FEATURE = 'stream.new'
 
+/**
+ * `project.new` (SPEC.md §8.18): the desktop's + → New project…: a folder named
+ * `name` in its projects folder, `git init` in it, and a project for it.
+ */
+export const PROJECT_NEW_OP = 'project.new'
+/** The handshake feature (§8.1) a desktop lists when it answers `project.new`. */
+export const PROJECT_NEW_FEATURE = 'project.new'
+
+export interface ProjectNewParams { name: string }
+export interface ProjectNewResult { projectId: string }
+
 /** `branch` and `baseBranch` are only kept with `worktree: true`. */
 export interface StreamNewParams { projectId: string; name: string; worktree: boolean; branch?: string; baseBranch?: string }
 export interface StreamNewResult { streamId: string }
@@ -345,6 +356,8 @@ export const ChatLimits = {
   sentImageData: 3_000_000,
   /** `chat.btw` question (§8.14). */
   btwQuestion: 20_000,
+  /** `project.new` name (§8.18): it becomes a folder name. */
+  projectName: 255,
   /** `chat.bash` command (§8.17), as `chat.send`'s text. */
   bashCommand: 32000,
   /** `chat.permissions.update` rule (§8.14). */
@@ -1182,6 +1195,23 @@ export function parseStreamNewParams(params: unknown): StreamNewParams {
 /** `stream.new` result (the phone's side). */
 export function parseStreamNewResult(value: unknown): StreamNewResult {
   return { streamId: str(obj(value, 'result'), 'streamId') }
+}
+
+/**
+ * `project.new` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * blank `name` or one over {@link ChatLimits.projectName} characters. `name` comes back
+ * trimmed; whether it makes a valid folder name is the desktop's call.
+ */
+export function parseProjectNewParams(params: unknown): ProjectNewParams {
+  const name = str(obj(params, 'params'), 'name').trim()
+  if (!name) fail('name is empty')
+  if (name.length > ChatLimits.projectName) fail(`name over ${ChatLimits.projectName} characters`)
+  return { name }
+}
+
+/** `project.new` result (the phone's side). */
+export function parseProjectNewResult(value: unknown): ProjectNewResult {
+  return { projectId: str(obj(value, 'result'), 'projectId') }
 }
 
 /** A queued prompt's text: not blank, at most {@link ChatLimits.queueText} characters, trimmed. */
