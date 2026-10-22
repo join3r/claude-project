@@ -1,6 +1,6 @@
 /** Small presentational pieces and status helpers shared by the sidebar tree. */
 import React, { useState } from 'react'
-import { Server } from 'lucide-react'
+import { Server, TriangleAlert } from 'lucide-react'
 import type { Project, Task } from '../../../shared/types'
 import type { ServerConnectionKind } from '../../../shared/servers'
 import { serverName, useServersState } from '../../serversState'
@@ -144,6 +144,25 @@ export function ServerBadge({ serverId }: { serverId: string }): React.ReactElem
       <span className="truncate max-w-[72px]">{name}</span>
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${SERVER_DOT[kind]}`} aria-label={SERVER_STATE_LABEL[kind]} />
     </span>
+  )
+}
+
+/**
+ * A local project whose folder is gone: a red warning mark that opens Project
+ * settings, where the folder can be pointed somewhere else.
+ */
+export function MissingDirBadge({ directory, onClick }: { directory: string; onClick: () => void }): React.ReactElement {
+  return (
+    <button
+      className="flex items-center shrink-0 p-0 bg-transparent border-0 cursor-pointer text-danger hover:opacity-80"
+      title={`Folder not found: ${directory}\nClick to pick its new location.`}
+      aria-label="Project folder not found"
+      data-testid="missing-dir-badge"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+    >
+      <TriangleAlert size={12} aria-hidden />
+    </button>
   )
 }
 

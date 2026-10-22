@@ -134,6 +134,11 @@ const api = {
   // Directory picker
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('pick-directory'),
 
+  // A local project's own folder
+  missingProjectDirs: (): Promise<string[]> => ipcRenderer.invoke('project-dirs:missing'),
+  createProjectDir: (name: string): Promise<string> => ipcRenderer.invoke('project-dirs:create', name),
+  trashProjectDir: (projectId: string, checkOnly?: boolean): Promise<void> => ipcRenderer.invoke('project-dirs:trash', projectId, checkOnly),
+
   // File picker
   pickFile: (title?: string): Promise<string | null> =>
     ipcRenderer.invoke('pick-file', title),

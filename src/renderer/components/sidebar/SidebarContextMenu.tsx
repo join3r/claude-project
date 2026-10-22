@@ -49,6 +49,19 @@ export function projectDeletePrompt(project: Project): string {
   return lines.join('\n\n')
 }
 
+/** Whether "Delete with folder…" applies: a local project (not SSH, server or shell) whose folder is there. */
+export function canTrashProjectFolder(project: Project, folderMissing: boolean): boolean {
+  return !folderMissing && !!project.directory && !project.host && !isRemoteProject(project) && !isShellCommandProject(project)
+    && !isEphemeralProject(project)
+}
+
+/** The confirmation for deleting a project together with its folder. */
+export function projectDeleteWithFolderPrompt(project: Project): string {
+  const lines = projectDeletePrompt(project).split('\n\n').filter(line => line !== 'The project folder itself is not touched.')
+  lines.push(`Its folder ${project.directory} is moved to the Trash, with everything in it.`)
+  return lines.join('\n\n')
+}
+
 /**
  * The right-click menu for a project or task row, and the snooze presets that
  * replace its body rather than fly out sideways — a nested flyout would run off
@@ -69,7 +82,8 @@ export default function SidebarContextMenu({
   setProjectSettingsId,
   onAddTask,
   onNewStream,
-  onMoveToServer
+  onMoveToServer,
+  missingDirs
 }: {
   contextMenu: SidebarContextMenuState | null
   snoozeSubmenu: boolean
@@ -90,6 +104,8 @@ export default function SidebarContextMenu({
   onNewStream: (projectId: string) => void
   /** Move to a DevTool server… (SSH projects only). */
   onMoveToServer?: (projectId: string) => void
+  /** Local projects whose folder is gone. */
+  missingDirs?: ReadonlySet<string>
 }): React.ReactElement {
   const {
     projects, togglePinnedItem, updateProject, setProjectExpanded, connectSsh, removeProject,
@@ -322,6 +338,17 @@ export default function SidebarContextMenu({
                 void removeProject(project.id)
               }}>{contextMenu.type === 'project' ? 'Delete…' : contextMenu.type === 'task' ? 'Close task' : 'Close stream'}</button>
               )}
+              {contextMenu.type === 'project' && (() => {
+                const project = projects.find(p => p.id === contextMenu.projectId)
+                if (!project || !canTrashProjectFolder(project, !!missingDirs?.has(project.id))) return null
+                return (
+                  <button className={`${menuItemCls} text-danger`} onClick={() => {
+                    setContextMenu(null)
+                    if (!window.confirm(projectDeleteWithFolderPrompt(project))) return
+                    void removeProject(project.id, { trashDirectory: true })
+                  }}>Delete with folder…</button>
+                )
+              })()}
               {contextMenu.type === 'project' && (() => {
                 const project = projects.find(p => p.id === contextMenu.projectId)
                 if (!project) return null

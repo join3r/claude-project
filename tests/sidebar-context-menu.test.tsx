@@ -182,6 +182,50 @@ describe('Sidebar context menu', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Reveal in Finder|Show in/ }))
     expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha', undefined, 'p1')
   })
+
+  it('marks a project whose folder is gone, and opens its settings from the mark', async () => {
+    ;(window.api as unknown as Record<string, unknown>).missingProjectDirs = vi.fn().mockResolvedValue(['p1'])
+    renderSidebar()
+    const badge = await screen.findByTestId('missing-dir-badge')
+    expect(badge.getAttribute('title')).toContain('/tmp/alpha')
+    fireEvent.click(badge)
+    expect(await screen.findByText('Project Settings')).toBeTruthy()
+    // No folder, nothing to trash.
+    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    await screen.findByRole('button', { name: 'Delete…' })
+    expect(screen.queryByRole('button', { name: 'Delete with folder…' })).toBeNull()
+  })
+
+  it('deletes a project with its folder after asking, trashing the folder last', async () => {
+    const confirm = vi.fn((_message: string) => true)
+    vi.stubGlobal('confirm', confirm)
+    const trash = vi.fn().mockResolvedValue(undefined)
+    ;(window.api as unknown as Record<string, unknown>).trashProjectDir = trash
+    renderSidebar()
+    await screen.findByText('Alpha Project')
+    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete with folder…' }))
+    expect(confirm.mock.calls[0][0]).toMatch(/\/tmp\/alpha is moved to the Trash/)
+    expect(confirm.mock.calls[0][0]).not.toMatch(/not touched/)
+    await waitFor(() => expect(trash).toHaveBeenCalledTimes(2))
+    expect(trash.mock.calls).toEqual([['p1', true], ['p1']])
+    await waitFor(() => expect(saved[saved.length - 1]?.projects.some(p => p.id === 'p1')).toBe(false))
+  })
+
+  it('keeps the project when main refuses to trash its folder', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const alert = vi.fn()
+    vi.stubGlobal('alert', alert)
+    const trash = vi.fn().mockRejectedValue(new Error('Refusing to trash /tmp/alpha: project "B" lives in it too.'))
+    ;(window.api as unknown as Record<string, unknown>).trashProjectDir = trash
+    renderSidebar()
+    await screen.findByText('Alpha Project')
+    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete with folder…' }))
+    await waitFor(() => expect(alert).toHaveBeenCalledWith(expect.stringMatching(/^Nothing was deleted\. Refusing/)))
+    expect(trash).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Alpha Project')).toBeTruthy()
+  })
 })
 
 describe('Sidebar pins', () => {

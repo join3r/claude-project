@@ -518,6 +518,29 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
             </FormGroup>
 
             <FormGroup>
+              <SetBlock label="Projects folder">
+                <div className="flex items-center gap-2.5">
+                  <Field
+                    className="flex-1"
+                    value={config.projectsDir}
+                    onChange={(e) => updateConfig({ projectsDir: e.target.value })}
+                    placeholder="/path/to/projects"
+                  />
+                  <LinkBtn
+                    onClick={() => {
+                      void window.api.pickDirectory().then((picked) => {
+                        if (picked) updateConfig({ projectsDir: picked })
+                      })
+                    }}
+                  >
+                    Browse
+                  </LinkBtn>
+                </div>
+                <HelperText>+ → New project… makes a folder here and runs git init in it.</HelperText>
+              </SetBlock>
+            </FormGroup>
+
+            <FormGroup>
               <SetBlock label="Inbox layout">
                 <SegCtl
                   options={[

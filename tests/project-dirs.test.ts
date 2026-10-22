@@ -1,0 +1,125 @@
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createProjectDir, missingProjectDirs, trashProjectDir, validateFolderName } from '../src/main/project-dirs'
+import { LocalGitRunner, type GitRunner } from '../src/main/git-runner'
+import { createMainStream, type Project } from '../src/shared/types'
+
+const tmpDirs: string[] = []
+
+function tmp(prefix: string): string {
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)))
+  tmpDirs.push(dir)
+  return dir
+}
+
+afterEach(() => {
+  for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+})
+
+function project(id: string, overrides: Partial<Project>): Project {
+  return { id, name: id, directory: '', streams: [createMainStream(id)], ...overrides }
+}
+
+describe('missingProjectDirs', () => {
+  it('lists local projects whose folder is gone, and only those', async () => {
+    const root = tmp('pd-missing-')
+    const file = path.join(root, 'a-file')
+    fs.writeFileSync(file, '')
+    const projects = [
+      project('here', { directory: root }),
+      project('gone', { directory: path.join(root, 'nope') }),
+      project('file', { directory: file }),
+      project('ssh', { directory: '/nope', ssh: { host: 'h', port: 22, username: 'u', remoteDir: '/nope' } as Project['ssh'] }),
+      project('server', { directory: '/nope', host: 'srv' }),
+      project('shell', { directory: '', shellCommand: { command: 'htop' } })
+    ]
+    expect(await missingProjectDirs(projects)).toEqual(['gone', 'file'])
+  })
+})
+
+describe('validateFolderName', () => {
+  it('trims and accepts an ordinary name', () => {
+    expect(validateFolderName('  my-app ')).toBe('my-app')
+  })
+
+  it.each(['', '  ', '.', '..', 'a/b', 'a\\b', 'a:b', 'x'.repeat(256)])('refuses %j', (name) => {
+    expect(() => validateFolderName(name)).toThrow()
+  })
+})
+
+describe('createProjectDir', () => {
+  it('makes the folder and runs git init in it', async () => {
+    const root = tmp('pd-create-')
+    const projectsDir = path.join(root, 'code')
+    const dir = await createProjectDir(projectsDir, 'app', new LocalGitRunner())
+    expect(dir).toBe(path.join(projectsDir, 'app'))
+    expect(fs.existsSync(path.join(dir, '.git'))).toBe(true)
+  })
+
+  it('refuses a folder that already exists', async () => {
+    const root = tmp('pd-exists-')
+    fs.mkdirSync(path.join(root, 'app'))
+    await expect(createProjectDir(root, 'app', new LocalGitRunner())).rejects.toThrow(/already exists/)
+  })
+
+  it('needs a projects folder', async () => {
+    await expect(createProjectDir('', 'app', new LocalGitRunner())).rejects.toThrow(/projects folder/)
+  })
+
+  it('removes the empty folder when git init fails', async () => {
+    const root = tmp('pd-gitfail-')
+    const failing: GitRunner = { kind: 'local', run: async () => ({ stdout: '', stderr: 'boom', code: 1 }) }
+    await expect(createProjectDir(root, 'app', failing)).rejects.toThrow(/boom/)
+    expect(fs.existsSync(path.join(root, 'app'))).toBe(false)
+  })
+})
+
+describe('trashProjectDir', () => {
+  function setup() {
+    const root = tmp('pd-trash-')
+    const home = path.join(root, 'home')
+    const dir = path.join(home, 'code', 'app')
+    fs.mkdirSync(dir, { recursive: true })
+    const trashed: string[] = []
+    return { root, home, dir, trashed, deps: { homeDir: home, trashItem: async (p: string) => { trashed.push(p) } } }
+  }
+
+  it('trashes a local project folder', async () => {
+    const { dir, trashed, deps } = setup()
+    await trashProjectDir([project('p', { directory: dir })], 'p', deps)
+    expect(trashed).toEqual([dir])
+  })
+
+  it('refuses the home folder and what holds it', async () => {
+    const { root, home, trashed, deps } = setup()
+    await expect(trashProjectDir([project('p', { directory: home })], 'p', deps)).rejects.toThrow(/home folder/)
+    await expect(trashProjectDir([project('p', { directory: root })], 'p', deps)).rejects.toThrow(/home folder/)
+    expect(trashed).toEqual([])
+  })
+
+  it('refuses a folder another project lives in', async () => {
+    const { dir, trashed, deps } = setup()
+    const sub = path.join(dir, 'pkg')
+    fs.mkdirSync(sub)
+    const projects = [project('p', { directory: dir }), project('q', { name: 'Q', directory: sub })]
+    await expect(trashProjectDir(projects, 'p', deps)).rejects.toThrow(/"Q"/)
+    const same = [project('p', { directory: dir }), project('q', { name: 'Q', directory: dir })]
+    await expect(trashProjectDir(same, 'p', deps)).rejects.toThrow(/"Q"/)
+    expect(trashed).toEqual([])
+  })
+
+  it('refuses the projects folder itself', async () => {
+    const { dir, trashed, deps } = setup()
+    await expect(trashProjectDir([project('p', { directory: dir })], 'p', { ...deps, projectsDir: dir })).rejects.toThrow(/projects folder/)
+    expect(trashed).toEqual([])
+  })
+
+  it('refuses non-local projects and unknown ids', async () => {
+    const { trashed, deps } = setup()
+    await expect(trashProjectDir([project('s', { directory: '/x', host: 'srv' })], 's', deps)).rejects.toThrow(/local/)
+    await expect(trashProjectDir([], 'nope', deps)).rejects.toThrow(/gone/)
+    expect(trashed).toEqual([])
+  })
+})

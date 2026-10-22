@@ -26,6 +26,7 @@ import {
   togglePinnedItemInData
 } from './projectsData'
 import { removeProjectView } from './viewState'
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage'
 import { applyPromptQueueOp, type PromptQueueOp } from '../../../shared/prompt-queue'
 
 export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral' | 'hideFromMobile'>>
@@ -46,7 +47,8 @@ export interface ProjectsActions {
   addServerProjects: (serverId: string, items: Array<{ name: string; directory: string }>) => Project[]
   connectSsh: ConnectSsh
   getProjectDir: (project: Project) => string
-  removeProject: (id: string) => Promise<void>
+  /** `trashDirectory`: also move a local project's folder to the Trash, after its worktrees are gone. */
+  removeProject: (id: string, options?: { trashDirectory?: boolean }) => Promise<void>
   renameProject: (id: string, name: string) => void
   updateProject: (id: string, updates: ProjectUpdate) => void
   /** Project Home's queue: add, edit, remove or reorder a prompt, or switch auto-run. */
@@ -150,7 +152,17 @@ export function useProjects(
     return project
   }, [includePendingTags, mutateProjects, selectProject])
 
-  const removeProject = useCallback(async (id: string) => {
+  const removeProject = useCallback(async (id: string, options?: { trashDirectory?: boolean }) => {
+    const trashDirectory = !!options?.trashDirectory
+    if (trashDirectory) {
+      // A folder main won't trash (shared with another project, your home folder, …) stops the delete here, with nothing torn down yet.
+      try {
+        await window.api.trashProjectDir(id, true)
+      } catch (err) {
+        window.alert(`Nothing was deleted. ${ipcErrorMessage(err)}`)
+        return
+      }
+    }
     const doomed = projectsRef.current.find(p => p.id === id)
     // One dialog for the whole project, asked before anything is torn down.
     if (doomed) {
@@ -183,6 +195,12 @@ export function useProjects(
       }
       if (project.ssh) {
         await window.api.sshDisconnect(id, project.ssh).catch(() => {})
+      }
+      // Last, while main still has the project: its worktrees above needed the repo.
+      if (trashDirectory) {
+        await window.api.trashProjectDir(id).catch((err: unknown) => {
+          window.alert(`The project is deleted, but its folder couldn't be moved to the Trash. ${ipcErrorMessage(err)}`)
+        })
       }
     }
 

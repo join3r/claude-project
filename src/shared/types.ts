@@ -650,6 +650,8 @@ export interface AppConfig {
    * Prepended to PATH for new local terminal and Pi tabs. Empty means do not prepend.
    */
   portableNodeDir: string
+  /** Settings → Projects folder: where "New project…" makes a folder and runs `git init`. Empty until picked. */
+  projectsDir: string
   copyOnSelect: boolean
   editorFontFamily: string
   editorFontSize: number
@@ -872,6 +874,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   defaultShell: '',
   windowsTerminal: 'git-bash',
   portableNodeDir: '',
+  projectsDir: '',
   copyOnSelect: false,
   editorFontFamily: 'monospace',
   editorFontSize: 14,

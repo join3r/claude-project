@@ -6,6 +6,7 @@ import type { Task, Project, PinnedItem, PendingWorktreeSetup, Stream } from '..
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
 import AddLocalProject from './AddLocalProject'
+import NewProjectModal from './NewProjectModal'
 import AddServerProject, { type AddServerProjectMode } from './servers/AddServerProject'
 import AddServerDialog from './servers/AddServerDialog'
 import MoveToServerDialog from './servers/MoveToServerDialog'
@@ -27,6 +28,7 @@ import { buildRecencyStyle, computeTaskRecencyOpacity, sortTasksByRecency } from
 import { isSnoozed, isUnread, taskActivity } from './inbox'
 import { useAllAgentActivity } from '../agentActivity'
 import { useResizeHandle } from '../hooks/useResizeHandle'
+import { useMissingProjectDirs } from '../hooks/useMissingProjectDirs'
 import { Folders, GitBranch, List, Plus, Search, Settings as SettingsIcon, SquarePen, X, Cog } from 'lucide-react'
 import { RowActions, RowAction, menuCls, menuItemCls } from './ui'
 import { paletteEvents } from '../palette/paletteEvents'
@@ -37,6 +39,7 @@ import {
   TASK_ROW_ML,
   TASK_ROW_PL,
   LandingBadges,
+  MissingDirBadge,
   ProjectIconSlot,
   ServerBadge,
   SidebarTabButton,
@@ -167,6 +170,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [settingsTab, setSettingsTab] = useState<string | null>(null)
   const [addServerOpen, setAddServerOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [serverProjectOpen, setServerProjectOpen] = useState(false)
   /** Add server's "Choose a folder…" opens Server project on that server's folder browser. */
@@ -197,6 +201,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const closeStreamFlow = useCloseStream()
   useStreamAheadPolling(projects, selectedProjectId, selectedTaskId)
   const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
+  const missingDirs = useMissingProjectDirs(projects)
   const [switcherActive, setSwitcherActive] = useState(false)
   const expandedProjects = new Set(expandedProjectIds)
   const projectsById = React.useMemo(() => new Map(projects.map(p => [p.id, p])), [projects])
@@ -789,8 +794,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               <TreeChevron open={isExpanded} />
             </button>
             <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} show={showIcons} />
-            <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
+            <span className={`overflow-hidden text-ellipsis whitespace-nowrap font-semibold${missingDirs.has(project.id) ? ' text-text-subtle' : ''}`}>{project.name}</span>
             {project.host && <ServerBadge serverId={project.host} />}
+            {missingDirs.has(project.id) && <MissingDirBadge directory={project.directory} onClick={() => setProjectSettingsId(project.id)} />}
             <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {!isExpanded && <StateDot state={rollUpState(projectTasks(project).map(stateOf))} hideOnHover />}
               <RowActions>
@@ -908,8 +914,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} show={showIcons} />
           {isProjectPin ? (
             <>
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{project.name}</span>
+              <span className={`overflow-hidden text-ellipsis whitespace-nowrap font-semibold${missingDirs.has(project.id) ? ' text-text-subtle' : ''}`}>{project.name}</span>
               {project.host && <ServerBadge serverId={project.host} />}
+              {missingDirs.has(project.id) && <MissingDirBadge directory={project.directory} onClick={() => setProjectSettingsId(project.id)} />}
             </>
           ) : (
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">
@@ -1027,6 +1034,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               <div className={`absolute top-full right-0 mt-1 z-(--z-menu) whitespace-nowrap ${menuCls}`} onMouseDown={(e) => e.stopPropagation()}>
                 <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setNewTaskOpen(true) }}>New task</button>
                 <div className="border-t border-hair mt-1 pt-1">
+                  <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setNewProjectOpen(true) }}>New project…</button>
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); handleAddProject() }}>Local project</button>
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setRemoteModalOpen(true) }}>Remote project (SSH)</button>
                   <button className={menuItemCls} onClick={() => { setAddMenuOpen(false); setServerProjectStart(null); setServerProjectOpen(true) }}>Server project…</button>
@@ -1097,6 +1105,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
       <SidebarContextMenu
         contextMenu={contextMenu}
+        missingDirs={missingDirs}
         snoozeSubmenu={snoozeSubmenu}
         setSnoozeSubmenu={setSnoozeSubmenu}
         closeContextMenu={closeContextMenu}
@@ -1257,6 +1266,21 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           />
         )
       })()}
+
+      {newProjectOpen && config && (
+        <NewProjectModal
+          projectsDir={config.projectsDir}
+          onChangeProjectsDir={(projectsDir) => updateConfig({ projectsDir })}
+          allTags={tags}
+          onEnsureTag={addTag}
+          onCreated={(name, directory, tagIds) => {
+            setNewProjectOpen(false)
+            const project = addProject(name, directory, tagIds)
+            setProjectExpanded(project.id, true)
+          }}
+          onCancel={() => setNewProjectOpen(false)}
+        />
+      )}
 
       {newStreamProjectId && (() => {
         const project = projects.find(p => p.id === newStreamProjectId)

@@ -36,6 +36,7 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
     return 'git-bash'
   },
   portableNodeDir: str,
+  projectsDir: str,
   copyOnSelect: bool,
   editorFontFamily: str,
   editorFontSize: num,
