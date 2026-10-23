@@ -20,7 +20,7 @@
         "t": { "const": "req" },
         "id": { "$ref": "#/$defs/id" },
         "op": { "type": "string", "description": "inbox.get, a chat.* op (SPEC.md §6.3), or a §7.4/§8 op such as task.new or stream.new" },
-        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams." }
+        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams, stream.run #/$defs/streamRunParams, stream.logs #/$defs/streamLogsParams." }
       }
     },
     "resOk": {
@@ -30,7 +30,7 @@
         "t": { "const": "res" },
         "id": { "$ref": "#/$defs/id" },
         "ok": { "const": true },
-        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run." }
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run, #/$defs/streamRunResult and #/$defs/streamLogsResult for stream.run and stream.logs." }
       }
     },
     "resErr": {
@@ -89,6 +89,35 @@
       "type": "object",
       "required": ["streamId"],
       "properties": { "streamId": { "type": "string" } }
+    },
+    "streamRunParams": {
+      "description": "stream.run params (SPEC.md §8.19).",
+      "type": "object",
+      "required": ["projectId", "streamId", "action"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "streamId": { "type": "string" },
+        "action": { "enum": ["start", "stop", "restart"] }
+      }
+    },
+    "streamRunResult": {
+      "description": "stream.run result (SPEC.md §8.19): empty; the run's state arrives in the next inbox.",
+      "type": "object"
+    },
+    "streamLogsParams": {
+      "description": "stream.logs params (SPEC.md §8.19).",
+      "type": "object",
+      "required": ["projectId", "streamId"],
+      "properties": { "projectId": { "type": "string" }, "streamId": { "type": "string" } }
+    },
+    "streamLogsResult": {
+      "description": "stream.logs result (SPEC.md §8.19): the end of the run's output as plain text, at most 200000 characters; truncated when the start was cut off.",
+      "type": "object",
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string", "maxLength": 200000 },
+        "truncated": { "const": true }
+      }
     },
     "branchesListParams": {
       "description": "branches.list params (SPEC.md §8.13).",

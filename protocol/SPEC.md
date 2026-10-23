@@ -205,7 +205,10 @@ Desktop rules (a server follows them too):
     "id": "…", "name": "api-server", "emoji": "🚀", "remote": false,
     "streams": [
       { "id": "…", "name": "main", "main": true },
-      { "id": "…", "name": "0.5.0", "branch": "0.5.0", "queueAutoRun": true, "queueTaskId": "…" }
+      { "id": "…", "name": "0.5.0", "branch": "0.5.0", "queueAutoRun": true, "queueTaskId": "…",
+        "runCommand": "npm run dev",
+        "run": { "status": "running" | "exited" | "stopped", "startedAt": 1790000000000,
+                 "endedAt": 1790000000000, "exitCode": 1 } }
     ],
     "lastStreamId": "…",
     "queue": [{ "id": "…", "text": "Add rate limiting to the login route", "streamId": "…" }],
@@ -235,6 +238,7 @@ Desktop rules (a server follows them too):
 ```
 - `streams` lists the project's open streams in sidebar order, `main` first (`main: true`, exactly one, the project folder), empty ones included. `branch` is present only on a worktree stream: the branch its worktree is on. `lastStreamId` is the stream the project was last used in, present only while that stream is open.
 - `queue` is Project Home's prompt queue (§8.16), first to run first: prompts planned ahead, each to become a new Claude chat task in stream `streamId`, always one of the project's `streams` (a prompt whose stream was closed runs in `main`). `text` is the whole prompt. The field is absent when the queue is empty. On a stream, `queueAutoRun: true` is present while it starts its next queued prompt by itself, and `queueTaskId` names the task its queue started last while that task still holds the queue up (it hasn't finished or been closed); a receiver ignores a `queueTaskId` it can't find in `tasks`.
+- `runCommand` and `run` (§8.19) are a stream's app run. `runCommand` is the command it runs: the stream's own, else the project's, trimmed; absent when neither is set and always absent on a shell-command project. `run` is present once the stream's command has run since the desktop started: `status` is `running` until the process ends, then `exited` when it ended by itself or `stopped` when Stop or Restart ended it. `startedAt` and `endedAt` (present once it ended) are Unix ms. `exitCode` is present only with `exited` and may be negative (the process was killed). A `run` whose `status` the phone doesn't know is ignored (the stream shows no run), not an inbox error. A stream can have a `run` and no `runCommand` (the command was removed while it ran).
 - `missingFolder: true` is present while the project's folder is gone from the desktop's disk (moved, renamed or deleted outside DevTool). The desktop rechecks about once a minute and whenever its projects change. New task in such a project fails on the desktop, so a phone flags the project and doesn't offer New task there; the user repoints the folder in the desktop's Project settings. SSH, server and shell-command projects never carry it.
 - `tasks` lists every open task, stream by stream. A task is one agent session or one terminal task (its main tab is a terminal). `streamId` and `streamName` name the stream holding it (the phone's `Project · Stream` line); `streamId` is always one of the project's `streams`.
 - A task's `status` is its one status: the strongest of its **status tabs** (its main tab, plus any agent tab) in the order `attention`, `working`, `exited`, else `idle`. An extra terminal's bell or exit lights only its own tab, never the task. `since` is when the task entered `status` (the oldest change among the status tabs in it), and `activity` the label of the first such tab that has one. The desktop Inbox and sidebar read the same status.
@@ -454,7 +458,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"` and §8.18 `"project.new"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"` and §8.19 `"stream.run"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -482,6 +486,7 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 - **Pinned:** a "Pinned" section above the projects lists the desktop's `pinned` entries in order: a project as a row that opens its tasks, a stream as a row (`Project › Stream`) that opens its tasks, and a task as a task row. For a desktop that lists `pin`, a project's header menu, a stream group's header menu and a task row's swipe and context menu offer Pin or Unpin, disabled while the desktop is offline. Against a desktop without the feature the section is still shown, read-only.
 - **Inbox:** an Inbox entry above the desktops, and the screen the app opens to, lists every task of every paired desktop in the desktop inbox's groups: **Needs you** (the task's `status` is `attention`, longest wait first), **Your turn**, **Working**, **Quiet**, then **Snoozed**, collapsed. A live agent wins over snooze: a snoozed task whose `status` is `attention` or `working` is shown under Needs you or Working, and returns to Snoozed once the agent is quiet. A timed snooze ends on the phone's clock at `snoozedUntil`. Unread tasks are marked. For a desktop that lists `task.triage`, a task row offers Snooze with the desktop's presets (until it needs you, 1 hour, this evening at 18:00, tomorrow at 9:00, Monday at 9:00, in the phone's time zone), Unsnooze, and Mark read or unread, disabled while the desktop is offline. Opening an unread task, or a task's screen staying open while it turns unread, sends `read`. Against a desktop without the feature the groups are still shown, read-only.
 - **Commands:** for a desktop that lists `chat.commands`, typing `/` and a word in a chat's composer shows the matching commands above it, ranked as the desktop does (names starting with the word first, then, from two characters on, names containing it, each by name). Tapping one puts `/name ` in the composer. Terminal-only commands are shown disabled. `/btw <question>` opens the answer in a sheet instead of sending, and `/permissions` opens a rules editor (§8.14), read-only while the desktop is offline. Sending a terminal-only command is refused on the phone. For a desktop that lists `chat.bash`, a message starting with `!` runs the rest as a shell command (§8.17) instead of sending, and the composer is outlined while it does; against one without it, `!` is plain text.
+- **App run:** for a desktop that lists `stream.run`, a stream with a `runCommand` shows its run in the project's stream group header: a status dot and line from `run` (running since `startedAt`, exited with `exitCode`, stopped, or not started), and **Run** (no run, or one that ended), **Stop** and **Restart** (while running), disabled while the desktop is offline. **Logs** opens the run's output (§8.19), monospaced, scrolled to the end, with a note when it is `truncated`; the screen asks `stream.logs` again about every 2 seconds while it is open and the desktop is online, and stops when it closes. A stream without `runCommand` shows no run controls (a `run` left over is still shown, with Logs).
 - **Require Face ID for approvals:** an app setting, off by default. When it is on, every answer to a permission, question or plan in the app asks for device-owner authentication first (Face ID, with the passcode as fallback), and the notification's Allow and Deny open the app, authenticate and then answer instead of answering in the background.
 - **Offline:** the phone keeps the last transcript of each chat it has opened (the view items it holds, at most the §6.4 window) next to the cached inbox, and shows it read-only under the offline banner when the desktop is offline. Returning to the foreground reconnects at once rather than waiting out the relay backoff. Nothing is queued, as before.
 
@@ -688,6 +693,25 @@ What the desktop's + → New project… does: the desktop makes a folder named `
 
 - A desktop that implements this op lists `"project.new"` in its features (§8.1). A phone offers New project only for such a desktop.
 - Errors: no projects folder set on the desktop → `unsupported`, with a `message` saying where to set it. A blank or too-long `name`, a name that can't be a folder name (`/`, `\`, `<`, `>`, `:`, `"`, `|`, `?`, `*`, control characters, `.` or `..`), or a folder of that name already there → `bad-request`, with the reason as the `message`. `git init` or the file system failing → `internal`; the empty folder is removed again and nothing is saved.
+
+### 8.19 `stream.run`, `stream.logs` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `stream.run` | `{ projectId, streamId, action }` | `{}` |
+| `stream.logs` | `{ projectId, streamId }` | `{ text, truncated? }` |
+
+A stream's app run, as the desktop's Run / Stop / Restart and its logs view. The run is the stream's `runCommand` (§4.4) started in the stream's folder (its worktree, or the project folder) in a terminal of its own that no task owns, through the user's login shell (`-l -c`), or `/bin/sh -c` over SSH for a remote project. A stream has at most one run. `stream.run`'s `action` is one of:
+- `start`: starts the command. On a stream whose run is `running` it does nothing and answers `{}`.
+- `stop`: sends Ctrl-C, and ends the process outright when it hasn't exited 3 seconds later. The run becomes `stopped`. On a stream with no running run it does nothing and answers `{}`.
+- `restart`: `stop`, then `start` once the process has ended.
+
+The desktop answers once the action is done (the process started, or ended for `stop`); the new `run` arrives in the next `inbox` event. Archiving or deleting a stream stops its run, and its `run` goes away.
+
+`stream.logs` returns the run's output so far, or the last run's once it ended: terminal escapes (colours, cursor moves, titles) removed, `\r\n` as `\n`, a line redrawn with `\r` (a progress bar) as it was last drawn, other control characters dropped. `text` is at most 200000 characters, the end of the output; `truncated: true` is present when the start was cut off. A stream that never ran answers `{ "text": "" }`. A phone asks again to follow the output; there is no event for it.
+
+- A desktop that implements these ops lists `"stream.run"` in its features (§8.1) and sends `runCommand` and `run` (§4.4).
+- Errors: unknown `projectId` or `streamId`, or a project hidden from mobile (§4.4) → `not-found`. Missing `projectId` or `streamId`, or an unknown `action` → `bad-request`. `start` or `restart` failing (no run command set, the stream gone meanwhile, the shell or SSH connection failing) → `internal`, with the reason as the `message`.
 
 ## 9. Version 2: streams
 

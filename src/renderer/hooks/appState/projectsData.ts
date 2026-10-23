@@ -237,6 +237,19 @@ export function renameStreamInData(data: ProjectsData, projectId: string, stream
   }))
 }
 
+/** Set (or, blank, clear) a stream's own app command, which takes the place of the project's. */
+export function setStreamRunCommandInData(data: ProjectsData, projectId: string, streamId: string, command: string): ProjectsData {
+  const trimmed = command.trim()
+  return mapProject(data, projectId, project => ({
+    ...project,
+    streams: project.streams.map(stream => {
+      if (stream.id !== streamId) return stream
+      const { runCommand: _old, ...rest } = stream
+      return trimmed ? { ...rest, runCommand: trimmed } : rest
+    })
+  }))
+}
+
 /**
  * Tags minted by `addTag` live outside the data until something references them;
  * this folds the referenced ones in.

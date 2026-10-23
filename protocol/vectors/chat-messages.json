@@ -1410,6 +1410,104 @@
       ]
     }
   },
+  "streamRun": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-main\",\"action\":\"start\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-main",
+          "action": "start"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-main\",\"action\":\"stop\",\"extra\":1}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-main",
+          "action": "stop"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"restart\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-050",
+          "action": "restart"
+        }
+      }
+    ],
+    "results": [
+      "{}"
+    ],
+    "invalid": {
+      "params": [
+        "{\"streamId\":\"s-main\",\"action\":\"start\"}",
+        "{\"projectId\":\"p1\",\"action\":\"start\"}",
+        "{\"projectId\":\"p1\",\"streamId\":\"s-main\"}",
+        "{\"projectId\":\"p1\",\"streamId\":\"s-main\",\"action\":\"pause\"}",
+        "{\"projectId\":\"p1\",\"streamId\":7,\"action\":\"start\"}",
+        "null"
+      ]
+    }
+  },
+  "streamLogs": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-main\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-main"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-main\",\"since\":100}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-main"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"text\":\"\"}",
+        "expected": {
+          "text": ""
+        }
+      },
+      {
+        "json": "{\"text\":\"> vite\\n\\n  Local: http://localhost:5173/\\n\"}",
+        "expected": {
+          "text": "> vite\n\n  Local: http://localhost:5173/\n"
+        }
+      },
+      {
+        "json": "{\"text\":\"ready\\n\",\"truncated\":true}",
+        "expected": {
+          "text": "ready\n",
+          "truncated": true
+        }
+      },
+      {
+        "json": "{\"text\":\"x\",\"truncated\":false}",
+        "expected": {
+          "text": "x"
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"projectId\":\"p1\"}",
+        "{\"streamId\":\"s-main\"}",
+        "null"
+      ],
+      "results": [
+        "{}",
+        "{\"text\":7}",
+        "[]"
+      ]
+    }
+  },
   "queueUpdate": {
     "params": [
       {

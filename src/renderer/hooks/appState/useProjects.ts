@@ -29,7 +29,7 @@ import { removeProjectView } from './viewState'
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage'
 import { applyPromptQueueOp, type PromptQueueOp } from '../../../shared/prompt-queue'
 
-export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral' | 'hideFromMobile'>>
+export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral' | 'hideFromMobile' | 'runCommand'>>
 
 export interface ProjectsActions {
   addProject: (name: string, directory: string, tagIds?: string[]) => Project

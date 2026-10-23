@@ -13,6 +13,9 @@ import Foundation
 /// - `-demoRoute project|newStream|newTask [-demoProject <projectId>]`: the first
 ///   desktop's first project (or `-demoProject`), with the New stream sheet or
 ///   (on its last stream) the New task sheet up.
+/// - `-demoRoute streamLogs [-demoProject <projectId>] [-demoStream <streamId>]`: that
+///   project with the stream's app run logs open (§8.19); the first stream with a
+///   run command without `-demoStream`.
 /// - `-demoRoute compose [-demoNewProject <name>]`: the first desktop's screen with
 ///   the toolbar's New task sheet up; `-demoNewProject` then makes that project
 ///   through its New project… (`project.new`) and picks it.
@@ -62,6 +65,9 @@ struct LaunchOptions: Sendable {
         case newStream
         /// `project` with the New task sheet up, on the project's last stream.
         case newTask
+        /// `project` with a stream's app run logs pushed (`-demoStream`, else
+        /// the first stream with a run command).
+        case streamLogs
         /// The first task of the first desktop.
         case task
         /// The first terminal agent's task: its status screen.
@@ -90,6 +96,7 @@ struct LaunchOptions: Sendable {
     var demoInboxClose: String?
     var demoInboxRemove = false
     var demoProject: String?
+    var demoStream: String?
     var demoNewProject: String?
     var demoToolDetail: String?
     var demoChatScript = false
@@ -132,6 +139,7 @@ struct LaunchOptions: Sendable {
         demoInboxClose = value("-demoInboxClose")
         demoInboxRemove = args.contains("-demoInboxRemove")
         demoProject = value("-demoProject")
+        demoStream = value("-demoStream")
         demoNewProject = value("-demoNewProject")
         demoToolDetail = value("-demoToolDetail")
         demoChatScript = args.contains("-demoChatScript")

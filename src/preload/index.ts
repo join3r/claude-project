@@ -1,3 +1,4 @@
+import type { StreamRunAction, StreamRunState } from '../shared/stream-run'
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppConfig,
@@ -352,6 +353,25 @@ const api = {
   },
   onPtyExit: (callback: (id: string, exitCode: number) => void): void => {
     ipcRenderer.on('pty-exit', (_e, id, exitCode) => callback(id, exitCode))
+  },
+
+  // A stream's app run (main's stream-runs.ts)
+  streamRunControl: (projectId: string, streamId: string, action: StreamRunAction): Promise<{ ok: true } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('stream-run-control', projectId, streamId, action),
+  streamRunStates: (projectId: string): Promise<Record<string, StreamRunState>> => ipcRenderer.invoke('stream-run-states', projectId),
+  /** Starts showing a run's PTY (never spawns one); null when it has no output at all. */
+  streamRunAttach: (projectId: string, tabId: string): Promise<{ cols: number; rows: number; scrollback: string; exitCode: number | null; state: StreamRunState | null } | null> =>
+    ipcRenderer.invoke('stream-run-attach', projectId, tabId),
+  streamRunDetach: (tabId: string): void => ipcRenderer.send('stream-run-detach', tabId),
+  onStreamRunState: (callback: (projectId: string, streamId: string, state: StreamRunState | null) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, projectId: string, streamId: string, state: StreamRunState | null) => callback(projectId, streamId, state)
+    ipcRenderer.on('stream-run-state', handler)
+    return () => ipcRenderer.removeListener('stream-run-state', handler)
+  },
+  subscribePtyData: (callback: (id: string, data: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, id: string, data: string) => callback(id, data)
+    ipcRenderer.on('pty-data', handler)
+    return () => ipcRenderer.removeListener('pty-data', handler)
   },
 
   // Menu shortcuts

@@ -113,6 +113,28 @@ import Testing
         #expect(inbox.projects[0].tasks[0].attentionAt == nil)
     }
 
+    @Test func decodesStreamRuns() throws {
+        let inbox = try decode(#"""
+        { "desktop": { "id": "d", "name": "n" }, "projects": [{ "id": "p", "name": "n", "streams": [
+          { "id": "a", "name": "main", "runCommand": "npm run dev", "run": { "status": "running", "startedAt": 5 } },
+          { "id": "b", "name": "x", "runCommand": "make", "run": { "status": "exited", "startedAt": 5, "endedAt": 9, "exitCode": -15 } },
+          { "id": "c", "name": "y", "run": { "status": "stopped", "startedAt": 5, "endedAt": 7 } },
+          { "id": "d", "name": "z", "runCommand": "make", "run": { "status": "paused", "startedAt": 5 } },
+          { "id": "e", "name": "w" }
+        ] }] }
+        """#)
+        let streams = inbox.projects[0].streams
+        #expect(streams[0].runCommand == "npm run dev" && streams[0].run == InboxStreamRun(status: .running, startedAt: 5))
+        #expect(streams[1].run == InboxStreamRun(status: .exited, startedAt: 5, endedAt: 9, exitCode: -15))
+        #expect(streams[2].runCommand == nil && streams[2].run?.status == .stopped)
+        // An unknown status drops the run, not the stream.
+        #expect(streams[3].runCommand == "make" && streams[3].run == nil)
+        #expect(streams[4].runCommand == nil && streams[4].run == nil)
+        // The cache round trip keeps them.
+        let again = try JSONDecoder().decode(Inbox.self, from: JSONEncoder().encode(inbox))
+        #expect(again == inbox)
+    }
+
     @Test func missingArraysDecodeEmpty() throws {
         let inbox = try decode(#"{ "desktop": { "id": "d", "name": "n" }, "projects": [{ "id": "p", "name": "n", "tasks": [{ "id": "t", "name": "n" }] }] }"#)
         #expect(inbox.generatedAt == 0)

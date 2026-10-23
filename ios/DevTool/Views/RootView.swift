@@ -71,6 +71,11 @@ struct RootView: View {
         } message: {
             Text(model.triageError ?? "")
         }
+        .alert("Couldn't run the app", isPresented: Binding(get: { model.runError != nil }, set: { if !$0 { model.runError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.runError ?? "")
+        }
         .alert("Couldn't change the queue", isPresented: Binding(get: { model.queueError != nil }, set: { if !$0 { model.queueError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -113,7 +118,7 @@ struct RootView: View {
                 }
                 .navigationDestination(for: ProjectRef.self) { ref in
                     ProjectView(ref: ref, selection: $taskSelection,
-                                demoSheet: demoRoute == .newStream || demoRoute == .newTask ? demoRoute : nil)
+                                demoSheet: demoRoute == .newStream || demoRoute == .newTask || demoRoute == .streamLogs ? demoRoute : nil)
                 }
             }
         } detail: {
@@ -226,7 +231,7 @@ struct RootView: View {
         case .projects, .desktop, .compose:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first { sidebar = .desktop(first.id) }
-        case .project, .newStream, .newTask:
+        case .project, .newStream, .newTask, .streamLogs:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first {
                 sidebar = .desktop(first.id)

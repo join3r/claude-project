@@ -8,6 +8,7 @@ import { Palette } from './palette/Palette'
 import MobilePairingPrompt from './components/MobilePairingPrompt'
 import ServerIdeConsentModal from './components/servers/ServerIdeConsentModal'
 import Toasts from './components/Toasts'
+import StreamRunHost from './components/StreamRunHost'
 import { paletteEvents } from './palette/paletteEvents'
 
 function AppInner(): React.ReactElement {
@@ -99,6 +100,7 @@ function AppInner(): React.ReactElement {
       <Palette />
       <MobilePairingPrompt />
       <ServerIdeConsentModal />
+      <StreamRunHost />
       <Toasts />
     </div>
   )

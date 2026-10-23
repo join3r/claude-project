@@ -151,6 +151,17 @@ describe('JSON Schema', () => {
     for (const text of chat.branchesList.invalid.results) expect(check('branchesListResult', JSON.parse(text)), text).not.toEqual([])
   })
 
+  it('accepts the stream.run and stream.logs samples and rejects the invalid ones (§8.19)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
+    for (const s of chat.streamRun.params) expect(check('streamRunParams', s.expected), s.json).toEqual([])
+    for (const json of chat.streamRun.results) expect(check('streamRunResult', JSON.parse(json)), json).toEqual([])
+    for (const s of chat.streamLogs.params) expect(check('streamLogsParams', s.expected), s.json).toEqual([])
+    for (const s of chat.streamLogs.results) expect(check('streamLogsResult', s.expected), s.json).toEqual([])
+    for (const text of chat.streamRun.invalid.params) expect(check('streamRunParams', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.streamLogs.invalid.params) expect(check('streamLogsParams', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.streamLogs.invalid.results) expect(check('streamLogsResult', JSON.parse(text)), text).not.toEqual([])
+  })
+
   it('accepts the queue.update and queue.run samples and rejects the invalid ones (§8.16)', () => {
     const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
     for (const s of chat.queueUpdate.params) expect(check('queueUpdateParams', s.expected), s.json).toEqual([])

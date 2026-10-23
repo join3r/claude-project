@@ -4,6 +4,7 @@ import { mainStreamId, type Project, type ProjectsData, type Stream, type Tab, t
 import { findTaskInProject } from '../src/shared/streams'
 import { fixtureProject, fixtureTask, type FixtureTask, paneTabsAt } from './helpers/streams-fixtures'
 import { emptyActivity, type AgentActivity } from '../src/shared/agent-activity'
+import type { StreamRunState } from '../src/shared/stream-run'
 
 const DESKTOP = { id: 'd'.repeat(32), name: 'join3r-mbp' }
 const NOW = 1_790_000_000_000
@@ -238,6 +239,42 @@ describe('buildInbox', () => {
     p.streams[1].tasks = []
     expect(buildInbox(data([p]), lookup(), DESKTOP, NOW).projects[0].streams[1]).toEqual({ id: 's-bugs', name: 'bugfixes', queueAutoRun: true })
     expect('queue' in buildInbox(data([project('p2', [])]), lookup(), DESKTOP, NOW).projects[0]).toBe(false)
+  })
+
+  it('sends each stream\'s run command, the stream\'s own over the project\'s (SPEC.md §8.19)', () => {
+    const own: Stream = { id: 's-own', name: 'own', tasks: [], runCommand: '  make serve  ' }
+    const blank: Stream = { id: 's-blank', name: 'blank', tasks: [], runCommand: '   ' }
+    const p = project('p1', [], { streams: [own, blank], runCommand: ' npm run dev ' })
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW).projects
+    expect(wire.streams.map(s => s.runCommand)).toEqual(['npm run dev', 'make serve', 'npm run dev'])
+    // Neither set: no field at all.
+    const none = buildInbox(data([project('p2', [], { streams: [{ id: 's-x', name: 'x', tasks: [] }] })]), lookup(), DESKTOP, NOW).projects[0]
+    expect(none.streams.every(s => !('runCommand' in s))).toBe(true)
+    // A shell-command project has no folder to run in.
+    const shell = project('p3', [], { runCommand: 'npm run dev', shellCommand: { command: 'top' }, streams: [{ ...own, id: 's-own-3' }] })
+    expect(buildInbox(data([shell]), lookup(), DESKTOP, NOW).projects[0].streams.every(s => !('runCommand' in s))).toBe(true)
+  })
+
+  it('sends each stream\'s run, with exitCode only once it exited (SPEC.md §8.19)', () => {
+    const streams: Stream[] = ['s-run', 's-exit', 's-stop', 's-none'].map(id => ({ id, name: id, tasks: [] }))
+    const p = project('p1', [], { streams, runCommand: 'npm run dev' })
+    const runs: Record<string, StreamRunState> = {
+      's-run': { status: 'running', command: 'npm run dev', startedAt: 10 },
+      's-exit': { status: 'exited', command: 'npm run dev', startedAt: 10, endedAt: 20, exitCode: -15 },
+      // A stopped run's exit code (Ctrl-C) is not sent.
+      's-stop': { status: 'stopped', command: 'npm run dev', startedAt: 10, endedAt: 30, exitCode: 130 }
+    }
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW, new Set(), (id) => runs[id] ?? null).projects
+    const byId = Object.fromEntries(wire.streams.map(s => [s.id, s.run]))
+    expect(byId['s-run']).toEqual({ status: 'running', startedAt: 10 })
+    expect(byId['s-exit']).toEqual({ status: 'exited', startedAt: 10, endedAt: 20, exitCode: -15 })
+    expect(byId['s-stop']).toEqual({ status: 'stopped', startedAt: 10, endedAt: 30 })
+    expect(byId['s-none']).toBeUndefined()
+    expect(wire.streams.find(s => s.id === 's-none')).not.toHaveProperty('run')
+    // The wire never carries the command a run started with.
+    expect(JSON.stringify(byId)).not.toContain('command')
+    // Without a lookup no stream has a run.
+    expect(buildInbox(data([p]), lookup(), DESKTOP, NOW).projects[0].streams.every(s => !('run' in s))).toBe(true)
   })
 
   it('carries the Pinned list in its order, leaving out what the phone cannot see', () => {

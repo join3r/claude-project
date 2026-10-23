@@ -49,6 +49,8 @@ export interface PtySpawnRequest {
   extraEnv?: Record<string, string>
   projectId?: string
   sshConfig?: SshConfig
+  /** No status heuristics on its output (a stream's app run is no task's activity). */
+  quiet?: boolean
 }
 
 export interface PtySessionsDeps {
@@ -72,6 +74,8 @@ export interface PtySessionsDeps {
   onKill?: (tabId: string) => void
   /** Esc was typed into a Claude tab (see `KeyInterrupts`). */
   onInterruptKey?: (tabId: string) => void
+  /** A tab's process ended by itself or was terminated (not after `kill`/`discard`, which drop it). */
+  onExit?: (tabId: string, exitCode: number) => void
   /**
    * Host-side status (a DevTool server): output of the tabs no hook reports on
    * (shells, Codex), and the end of any tab's process. Unset on a desktop, whose
@@ -233,6 +237,78 @@ export class PtySessions {
     this.deps.broadcastAgentActivity(id)
   }
 
+  /**
+   * Main's own process (a stream's app run): a fresh PTY with empty scrollback.
+   * Whatever ran under `id` before is dropped; the clients watching it stay
+   * attached (and keep its size), so a restart shows up in their view.
+   */
+  spawnDetached(request: PtySpawnRequest): void {
+    const { id } = request
+    const previous = this.runtimes.get(id)
+    if (previous) this.discard(id)
+    this.deps.scrollbackStorage.delete(id)
+    this.deps.log(`ptySpawnDetached id=${id} viewers=${previous?.attachedClientIds.size ?? 0}`)
+    const cols = previous?.controllerClientId ? previous.cols : request.cols
+    const rows = previous?.controllerClientId ? previous.rows : request.rows
+    this.runtimes.set(id, {
+      attachedClientIds: new Set(previous?.attachedClientIds ?? []),
+      controllerClientId: previous?.controllerClientId ?? null,
+      outputHolds: new Set<string>(),
+      cols,
+      rows,
+      scrollback: '',
+      exitCode: null,
+      claudeHooks: false
+    })
+    try {
+      this.spawn({ ...request, cols, rows })
+    } catch (err) {
+      this.runtimes.delete(id)
+      throw err
+    }
+  }
+
+  /**
+   * A client starts seeing an existing PTY (never spawns one): its output from
+   * here on, plus the scrollback so far. A process that is gone answers its saved
+   * scrollback with exit code -1; null when there is nothing at all.
+   */
+  attachExisting(clientId: string, id: string): PtyAttachResult | null {
+    const runtime = this.runtimes.get(id)
+    if (runtime) {
+      runtime.attachedClientIds.add(clientId)
+      if (runtime.controllerClientId === null) runtime.controllerClientId = clientId
+      return { cols: runtime.cols, rows: runtime.rows, scrollback: runtime.scrollback, exitCode: runtime.exitCode }
+    }
+    const saved = this.deps.scrollbackStorage.load(id)
+    return saved === null ? null : { cols: 80, rows: 24, scrollback: saved, exitCode: -1 }
+  }
+
+  /** One client stops seeing one PTY; the process keeps running. */
+  detach(clientId: string, id: string): void {
+    const runtime = this.runtimes.get(id)
+    if (!runtime || !runtime.attachedClientIds.delete(clientId)) return
+    if (runtime.controllerClientId === clientId) {
+      runtime.controllerClientId = runtime.attachedClientIds.values().next().value ?? null
+    }
+  }
+
+  /**
+   * Ends a tab's process but keeps its runtime, so viewers see the exit and the
+   * scrollback stays readable (unlike `kill`, which drops both).
+   */
+  terminate(id: string): void {
+    if (!this.runtimes.has(id)) return
+    this.deps.log(`ptyTerminate id=${id}`)
+    this.deps.ptyManager.kill(id)
+  }
+
+  /** Whether the tab's process is still running. */
+  isRunning(id: string): boolean {
+    const runtime = this.runtimes.get(id)
+    return !!runtime && runtime.exitCode === null
+  }
+
   attachOrCreate(clientId: string, request: PtySpawnRequest): PtyAttachResult {
     const { id, cols, rows, projectId, sshConfig } = request
     let runtime = this.runtimes.get(id)
@@ -278,7 +354,7 @@ export class PtySessions {
     }
   }
 
-  private spawn({ id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig }: PtySpawnRequest): void {
+  private spawn({ id, shell, cwd, cols, rows, args, extraEnv, projectId, sshConfig, quiet }: PtySpawnRequest): void {
     const { deps } = this
     deps.log(`ptySpawn start id=${id} shell=${shell} cwd=${cwd}`)
     // A fresh process for this tab: whatever the old one was doing (including
@@ -286,7 +362,7 @@ export class PtySessions {
     deps.activityRegistry.reset(id)
     deps.broadcastAgentActivity(id)
     deps.terminalStatus?.forget(id)
-    const statusOutput = deps.terminalStatus && !hasStatusHooks(shell, extraEnv) ? deps.terminalStatus.output : null
+    const statusOutput = deps.terminalStatus && !quiet && !hasStatusHooks(shell, extraEnv) ? deps.terminalStatus.output : null
 
     // Capture the current runtime so callbacks can verify they belong to the
     // right generation.  After a kill+respawn cycle the same `id` maps to a
@@ -320,6 +396,7 @@ export class PtySessions {
         deps.broadcastAgentActivity(id)
         deps.log(`ptyExit id=${id} exitCode=${exitCode}`)
         this.broadcastToAttached(id, 'pty-exit', id, exitCode)
+        deps.onExit?.(id, exitCode)
       }
     }
 

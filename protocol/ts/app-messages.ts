@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_NEW_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
 import type { ChatViewEvent, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -114,6 +114,19 @@ export interface InboxStream {
   queueAutoRun?: true
   /** The task its queue started last, while it still runs: the next prompt waits for it. */
   queueTaskId?: string
+  /** The command the stream's app run starts (§8.19); absent when it has none. */
+  runCommand?: string
+  /** The stream's app run since the desktop started (§8.19); absent when it hasn't run. */
+  run?: InboxStreamRun
+}
+
+/** A stream's app run (§4.4, §8.19). `exitCode` only with `exited`. */
+export interface InboxStreamRun {
+  status: 'running' | 'exited' | 'stopped'
+  /** Unix ms. */
+  startedAt: number
+  endedAt?: number
+  exitCode?: number
 }
 
 /** A prompt in a project's queue (§4.4), waiting to become a task in stream `streamId`. */
@@ -219,6 +232,8 @@ export const AppOp = {
   TaskTriage: TASK_TRIAGE_OP,
   TaskLand: TASK_LAND_OP,
   StreamNew: STREAM_NEW_OP,
+  StreamRun: STREAM_RUN_OP,
+  StreamLogs: STREAM_LOGS_OP,
   ProjectNew: PROJECT_NEW_OP,
   BranchesList: BRANCHES_LIST_OP,
   ChatSettings: CHAT_SETTINGS_OP,
@@ -425,7 +440,32 @@ function parseStream(value: unknown): InboxStream {
   if (o.queueAutoRun === true) stream.queueAutoRun = true
   const queueTaskId = optStr(o, 'queueTaskId')
   if (queueTaskId !== undefined) stream.queueTaskId = queueTaskId
+  const runCommand = optStr(o, 'runCommand')
+  if (runCommand !== undefined) stream.runCommand = runCommand
+  // A status from a newer desktop: no run to show, rather than no inbox.
+  if (o.run !== undefined && o.run !== null && !(isObj(o.run) && typeof o.run.status === 'string' && !RUN_STATUSES.includes(o.run.status))) {
+    stream.run = parseStreamRun(o.run)
+  }
   return stream
+}
+
+const RUN_STATUSES: readonly string[] = ['running', 'exited', 'stopped']
+
+function isObj(value: unknown): value is Obj {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseStreamRun(value: unknown): InboxStreamRun {
+  const o = obj(value, 'run')
+  const run: InboxStreamRun = { status: oneOf(o, 'status', RUN_STATUSES), startedAt: int(o, 'startedAt') }
+  const endedAt = optInt(o, 'endedAt')
+  if (endedAt !== undefined) run.endedAt = endedAt
+  const exitCode = o.exitCode
+  if (exitCode !== undefined && exitCode !== null) {
+    if (typeof exitCode !== 'number' || !Number.isSafeInteger(exitCode)) fail('exitCode must be an integer')
+    run.exitCode = exitCode
+  }
+  return run
 }
 
 function parseQueuedPrompt(value: unknown): InboxQueuedPrompt {

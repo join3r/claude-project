@@ -305,6 +305,22 @@ extension DesktopConnection {
         return try decode(result, StreamNewResult.parse).streamId
     }
 
+    /// `stream.run` (§8.19): start, stop or restart the stream's app run.
+    /// Answers once the process started (or ended, for `stop`); the new `run`
+    /// arrives in the next inbox. Stop waits up to the desktop's grace period
+    /// and a remote project may have to connect over SSH first, so this waits
+    /// longer than other ops.
+    public func controlRun(projectId: String, streamId: String, action: StreamRunParams.Action) async throws {
+        let params = StreamRunParams(projectId: projectId, streamId: streamId, action: action)
+        _ = try await request(TaskOp.streamRun, params: params.json, timeout: .seconds(60))
+    }
+
+    /// `stream.logs` (§8.19): the end of the stream's app run output, as plain text.
+    public func runLogs(projectId: String, streamId: String) async throws -> StreamLogsResult {
+        let result = try await request(TaskOp.streamLogs, params: StreamLogsParams(projectId: projectId, streamId: streamId).json, timeout: .seconds(20))
+        return try decode(result, StreamLogsResult.parse)
+    }
+
     /// `project.new` (§8.18): a folder `name` in the desktop's projects folder,
     /// `git init` in it, and a project for it. Returns its ID; the project
     /// shows up in the next inbox. Throws `.remote(code: "unsupported")` when

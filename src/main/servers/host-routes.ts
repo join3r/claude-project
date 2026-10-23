@@ -123,6 +123,12 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'pty-resize': tab0,
   'pty-kill': { by: [{ tab: 0 }], pin: 'clear' },
 
+  // a stream's app run (ipc/stream-runs.ts)
+  'stream-run-control': project0,
+  'stream-run-states': project0,
+  'stream-run-attach': { by: [{ project: 0 }, { tab: 1 }], pin: 'set' },
+  'stream-run-detach': tab0,
+
   // workspaces (ipc/workspaces.ts)
   'workspace-list-branches': workspaceRequest,
   'workspace-create': workspaceRequest,
@@ -273,6 +279,7 @@ export const SERVER_EVENTS: Readonly<Record<string, ServerEventScope>> = {
   'task-worktree-state': 'server-task',
   'task-landing-state': 'server-task',
   'archive-changed': 'server-project',
+  'stream-run-state': 'server-project',
   'tasks-removed': 'removal',
   'tabs-removed': 'removal',
   'tabs-restart': 'tab-list',

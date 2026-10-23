@@ -44,6 +44,7 @@ import {
   mapTask,
   moveTaskInData,
   renameStreamInData,
+  setStreamRunCommandInData,
   tabIdsOfTask
 } from './projectsData'
 import { removeTaskView, selectNewTaskView } from './viewState'
@@ -120,6 +121,7 @@ export interface TasksActions {
   deleteArchived: (projectId: string, ids: { tasks?: string[]; streams?: string[] }) => Promise<void>
   /** Rename a stream. Its branch keeps its name. */
   renameStream: (projectId: string, streamId: string, name: string) => void
+  setStreamRunCommand: (projectId: string, streamId: string, command: string) => void
   /**
    * The task a tab opened with no task selected (the project's Home page) lands in:
    * `taskId` when it is one of the project's tasks, else the `main` stream's task
@@ -467,6 +469,10 @@ export function useTasks(
     mutateProjects(prev => renameStreamInData(prev, projectId, streamId, name))
   }, [mutateProjects])
 
+  const setStreamRunCommand = useCallback((projectId: string, streamId: string, command: string) => {
+    mutateProjects(prev => setStreamRunCommandInData(prev, projectId, streamId, command))
+  }, [mutateProjects])
+
   const taskForTab = useCallback((projectId: string, taskId: string | null, makeTab: () => Tab, name: string) => {
     const project = projectsRef.current.find(candidate => candidate.id === projectId)
     if (!project) return null
@@ -481,7 +487,7 @@ export function useTasks(
   }, [addTask, switchToTask])
 
   return {
-    addTask, addTaskInDirectory, addStream, archiveTask, renameTask, titleTaskFromPrompt, moveTask, archiveStream, renameStream, taskForTab,
+    addTask, addTaskInDirectory, addStream, archiveTask, renameTask, titleTaskFromPrompt, moveTask, archiveStream, renameStream, setStreamRunCommand, taskForTab,
     reopenTask, reopenStream, deleteArchived
   }
 }

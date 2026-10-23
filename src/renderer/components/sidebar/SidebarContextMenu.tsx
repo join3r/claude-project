@@ -16,6 +16,8 @@ import { useTabStatusStore } from '../../context/TabStatusContext'
 import { canLandTask, getLandingOp } from '../../taskLanding'
 import { useTaskLandingActions } from '../useTaskLandingActions'
 import { landingActionBlocker } from './closeRules'
+import { streamRunCommand } from '../../../shared/stream-run'
+import { controlStreamRun, openStreamRunCommand, openStreamRunLogs, useStreamRun } from '../../streamRuns'
 
 /**
  * The local folder a project, stream or task works in, for "Reveal in Finder":
@@ -171,6 +173,11 @@ export default function SidebarContextMenu({
                 }}>New task</button>
               </div>
             )}
+            {contextMenu.type === 'stream' && contextMenu.streamId && (() => {
+              const project = projects.find(p => p.id === contextMenu.projectId)
+              if (!project || isShellCommandProject(project)) return null
+              return <StreamRunMenuItems project={project} streamId={contextMenu.streamId} onDone={closeContextMenu} />
+            })()}
             {contextMenu.type === 'task' && (() => {
               const task = findTask(contextMenu.projectId, contextMenu.taskId!)
               if (!task) return null
@@ -384,5 +391,35 @@ export default function SidebarContextMenu({
         </div>
       )}
     </>
+  )
+}
+
+/** A stream's app run in its menu: Run (or Restart and Stop), Show logs, and its own command. */
+function StreamRunMenuItems({ project, streamId, onDone }: { project: Project; streamId: string; onDone: () => void }): React.ReactElement {
+  const stream = project.streams.find(s => s.id === streamId)
+  const run = useStreamRun(project.id, streamId)
+  const command = streamRunCommand(project, stream)
+  const running = run?.status === 'running'
+  const act = (fn: () => void) => () => { onDone(); fn() }
+  return (
+    <div className="border-b border-hair pb-1 mb-1">
+      {running ? (
+        <>
+          <button className={menuItemCls} onClick={act(() => void controlStreamRun(project.id, streamId, 'restart'))}>Restart app</button>
+          <button className={menuItemCls} onClick={act(() => void controlStreamRun(project.id, streamId, 'stop'))}>Stop app</button>
+        </>
+      ) : (
+        <button
+          className={`${menuItemCls} disabled:opacity-50 disabled:cursor-default`}
+          disabled={!command}
+          title={command ? `$ ${command}` : 'Set a run command first'}
+          onClick={act(() => void controlStreamRun(project.id, streamId, 'start'))}
+        >Run app</button>
+      )}
+      {(run || command) && (
+        <button className={menuItemCls} onClick={act(() => openStreamRunLogs({ projectId: project.id, streamId }))}>Show app logs</button>
+      )}
+      <button className={menuItemCls} onClick={act(() => openStreamRunCommand({ projectId: project.id, streamId }))}>Run command…</button>
+    </div>
   )
 }

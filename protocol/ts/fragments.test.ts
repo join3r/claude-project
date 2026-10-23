@@ -19,6 +19,9 @@ import {
   parseBranchesListParams,
   parseBranchesListResult,
   parseStreamNewParams,
+  parseStreamRunParams,
+  parseStreamLogsParams,
+  parseStreamLogsResult,
   parseTaskNewParams,
   parseChatParams,
   parseChatResult,
@@ -186,6 +189,20 @@ describe('chat parsers', () => {
     expect(() => parseStreamNewParams({ projectId: 'p1', name: 'x', worktree: 'yes' })).toThrow(ProtocolError)
     expect(() => parseStreamNewParams({ projectId: 'p1', name: 'x', worktree: true, branch: ' ' })).toThrow(ProtocolError)
     expect(parseChatParams('stream.new', { projectId: 'p1', name: 'x', worktree: false })).toBeNull()
+  })
+
+  it('parses stream.run and stream.logs (§8.19), which name no tab', () => {
+    expect(parseStreamRunParams({ projectId: 'p1', streamId: 's1', action: 'restart', extra: 1 })).toEqual({ projectId: 'p1', streamId: 's1', action: 'restart' })
+    expect(() => parseStreamRunParams({ projectId: 'p1', streamId: 's1', action: 'pause' })).toThrow(ProtocolError)
+    expect(() => parseStreamRunParams({ projectId: 'p1', action: 'start' })).toThrow(ProtocolError)
+    expect(parseStreamLogsParams({ projectId: 'p1', streamId: 's1' })).toEqual({ projectId: 'p1', streamId: 's1' })
+    expect(() => parseStreamLogsParams({ streamId: 's1' })).toThrow(ProtocolError)
+    expect(parseStreamLogsResult({ text: 'ok', truncated: true })).toEqual({ text: 'ok', truncated: true })
+    expect(parseStreamLogsResult({ text: '', truncated: 'yes' })).toEqual({ text: '' })
+    expect(() => parseStreamLogsResult({ truncated: true })).toThrow(ProtocolError)
+    expect(ChatLimits.runLogs).toBe(200_000)
+    expect(parseChatParams('stream.run', { projectId: 'p1', streamId: 's1', action: 'start' })).toBeNull()
+    expect(parseChatParams('stream.logs', { projectId: 'p1', streamId: 's1' })).toBeNull()
   })
 
   it('parses branches.list (§8.13)', () => {

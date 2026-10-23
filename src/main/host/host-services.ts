@@ -8,6 +8,10 @@ import { ScrollbackStorage } from '../scrollback-storage'
 import { ArchiveStorage } from '../archive-storage'
 import { PtyManager } from '../pty-manager'
 import { PtySessions } from '../pty-sessions'
+import { StreamRuns } from '../stream-runs'
+import { plainRunLog } from '../../shared/stream-run'
+import { isVisibleOnMobile } from '../mobile/inbox'
+import { resolveLocalTerminalSpawn } from '../resolve-local-terminal'
 import { HookServer } from '../hook-server'
 import { HookInjector, hookEndpointFor } from '../hook-injector'
 import { ClaudeChatManager } from '../claude-chat/chat-manager'
@@ -44,6 +48,7 @@ import { registerAppStateHandlers } from '../ipc/app-state'
 import { registerSshHandlers } from '../ipc/ssh'
 import { registerAgentHandlers } from '../ipc/agents'
 import { registerTerminalHandlers } from '../ipc/terminals'
+import { registerStreamRunHandlers } from '../ipc/stream-runs'
 import { createWorkspace, listWorkspaceBranches, registerWorkspaceHandlers } from '../ipc/workspaces'
 import { registerArchiveHandlers } from '../ipc/archive'
 import { readLocalTranscript, readRemoteTranscript } from '../claude-chat/transcript'
@@ -103,6 +108,8 @@ import {
   CHAT_SETTINGS_FEATURE,
   PIN_FEATURE,
   STREAM_NEW_FEATURE,
+  STREAM_RUN_FEATURE,
+  ChatLimits,
   PROJECT_NEW_FEATURE,
   TAB_CLOSE_FEATURE,
   TASK_CLOSE_FEATURE,
@@ -208,6 +215,8 @@ export class HostServices {
   private readonly workspaceManager: WorkspaceManager
   private readonly remoteWorkspaceManager = new RemoteWorkspaceManager()
   private readonly ptySessions: PtySessions
+  private readonly streamRuns: StreamRuns
+  private streamRunsUnsub: (() => void) | null = null
   /** Esc in a Claude terminal tab, standing in for the Stop the CLI skips. */
   private readonly keyInterrupts = new KeyInterrupts()
   /** Main's authoritative view of what every tab's agent is doing. */
@@ -399,6 +408,7 @@ export class HostServices {
       piExtensionPath: () => env.resourcePath(PI_EXTENSION_RESOURCE),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
       onKill: (tabId) => this.shutdownNotebookKernel(tabId),
+      onExit: (tabId, exitCode) => this.streamRuns.handleExit(tabId, exitCode),
       onInterruptKey: (tabId) => {
         this.keyInterrupts.pressed(tabId, this.activityRegistry.getStatus(tabId), () => {
           this.logDebug(`interruptKey tab=${tabId}`)
@@ -406,6 +416,14 @@ export class HostServices {
         })
       },
       terminalStatus: terminalStatus === 'host' ? this.hostTerminalStatus() : undefined
+    })
+    this.streamRuns = new StreamRuns({
+      ptys: this.ptySessions,
+      projects: () => this.projectsStore.peek(),
+      localShell: () => resolveLocalTerminalSpawn(this.config).file,
+      ensureSsh: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
+      onState: (projectId, streamId, state) => this.clients.broadcast('stream-run-state', projectId, streamId, state),
+      log: (message) => this.logDebug(message)
     })
   }
 
@@ -461,6 +479,7 @@ export class HostServices {
     this.promptQueue.start()
     this.missingFolders.start()
     this.missingFoldersUnsub = this.projectsStore.subscribe(() => { void this.missingFolders.refresh() })
+    this.streamRunsUnsub = this.projectsStore.subscribe(() => this.streamRuns.reconcile())
     this.mobileService.start()
   }
 
@@ -523,7 +542,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -628,12 +647,34 @@ export class HostServices {
       listBranches: (projectId) => listProjectBranches({
         ...this.streamGit(),
         peek: () => this.projectsStore.peek()
-      }, projectId)
+      }, projectId),
+      streamRuns: {
+        state: (streamId) => this.streamRuns.state(streamId),
+        subscribe: (listener) => this.streamRuns.subscribe(listener),
+        control: async ({ projectId, streamId, action }) => {
+          if (!this.mobileStreamExists(projectId, streamId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
+          const outcome = await this.streamRuns.control(projectId, streamId, action)
+          return outcome.ok ? outcome : { ok: false, code: AppErrorCode.Internal, message: outcome.error }
+        },
+        logs: ({ projectId, streamId }) => {
+          if (!this.mobileStreamExists(projectId, streamId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
+          const text = plainRunLog(this.streamRuns.logs(streamId))
+          return text.length > ChatLimits.runLogs
+            ? { ok: true, result: { text: text.slice(-ChatLimits.runLogs), truncated: true } }
+            : { ok: true, result: { text } }
+        }
+      }
     })
     return service
   }
 
   /** The Mobile setting; a server's phones take the relay and name from its own settings. */
+  /** A stream the phone may see: open, in a project that isn't hidden from it. */
+  private mobileStreamExists(projectId: string, streamId: string): boolean {
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    return !!project && isVisibleOnMobile(project) && project.streams.some(s => s.id === streamId)
+  }
+
   private mobileConfig(): MobileConfig {
     const config = normalizeMobileConfig(this.config.mobile)
     if (!this.phones) return config
@@ -893,6 +934,7 @@ export class HostServices {
     this.mobileService?.stop()
     this.missingFoldersUnsub?.()
     this.missingFolders.stop()
+    this.streamRunsUnsub?.()
     this.promptQueue.dispose()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
@@ -1101,6 +1143,7 @@ export class HostServices {
     })
 
     registerTerminalHandlers(ipc, { ptySessions: this.ptySessions, log })
+    registerStreamRunHandlers(ipc, { streamRuns: this.streamRuns, ptySessions: this.ptySessions })
 
     registerProjectDirsHandlers(ipc, {
       getProjects: () => this.projectsStore.peek().projects,

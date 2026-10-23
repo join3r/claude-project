@@ -1,3 +1,4 @@
+import type { StreamRunState } from '../../shared/stream-run'
 import type { AgentActivity } from '../../shared/agent-activity'
 import {
   normalizeRelayUrl,
@@ -21,9 +22,14 @@ import {
   constantTimeEqual,
   deviceId,
   parseStreamNewParams,
+  parseStreamRunParams,
+  parseStreamLogsParams,
   parseProjectNewParams,
   parseBranchesListParams,
   type StreamNewParams,
+  type StreamRunParams,
+  type StreamLogsParams,
+  type StreamLogsResult,
   type ProjectNewParams,
   type BranchesListResult,
   parseTaskNewParams,
@@ -240,6 +246,13 @@ export interface MobileServiceDeps {
   newProject?(params: ProjectNewParams): Promise<{ ok: true; projectId: string } | { ok: false; code: string; message: string }>
   /** Local projects whose folder is gone (§4.4 `missingFolder`); a change sends a fresh inbox. */
   missingFolders?: { peek(): ReadonlySet<string>; subscribe(listener: () => void): () => void }
+  /** Streams' app runs (§8.19): the inbox's `run` fields, `stream.run` and `stream.logs`. A change sends a fresh inbox. */
+  streamRuns?: {
+    state(streamId: string): StreamRunState | null
+    subscribe(listener: () => void): () => void
+    control(params: StreamRunParams): Promise<{ ok: true } | { ok: false; code: string; message: string }>
+    logs(params: StreamLogsParams): { ok: true; result: StreamLogsResult } | { ok: false; code: string; message: string }
+  }
   /** `branches.list` (SPEC.md §8.13). Without it the op answers `unsupported`. */
   listBranches?(projectId: string): Promise<({ ok: true } & BranchesListResult) | { ok: false; code: string; message: string }>
   /** `queue.update` (SPEC.md §8.16). Without it (or `runQueued`) both queue ops answer `unsupported`. */
@@ -360,7 +373,8 @@ export class MobileService {
         this.scheduleInbox()
       }),
       this.deps.activity.subscribe(() => this.scheduleInbox()),
-      ...(this.deps.missingFolders ? [this.deps.missingFolders.subscribe(() => this.scheduleInbox())] : [])
+      ...(this.deps.missingFolders ? [this.deps.missingFolders.subscribe(() => this.scheduleInbox())] : []),
+      ...(this.deps.streamRuns ? [this.deps.streamRuns.subscribe(() => this.scheduleInbox())] : [])
     ]
     if (this.deps.getConfig().enabled) this.connect()
     this.emitState()
@@ -953,6 +967,22 @@ export class MobileService {
       })
       return
     }
+    if (message.op === AppOp.StreamRun && this.deps.streamRuns) {
+      const runs = this.deps.streamRuns
+      this.answerLater(session, id, message.op, () => parseStreamRunParams(message.params), async (params) => {
+        const outcome = await runs.control(params)
+        return outcome.ok ? { ok: true, result: {}, log: `stream=${params.streamId} action=${params.action}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.StreamLogs && this.deps.streamRuns) {
+      const runs = this.deps.streamRuns
+      this.answerLater(session, id, message.op, () => parseStreamLogsParams(message.params), async (params) => {
+        const outcome = runs.logs(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `stream=${params.streamId} chars=${outcome.result.text.length}` } : outcome
+      })
+      return
+    }
     if (message.op === AppOp.BranchesList && this.deps.listBranches) {
       const listBranches = this.deps.listBranches
       this.answerLater(session, id, message.op, () => parseBranchesListParams(message.params), async ({ projectId }) => {
@@ -1074,7 +1104,8 @@ export class MobileService {
       },
       { id: this.deps.getDesktopId() ?? '', name: this.desktopName() },
       this.timers.now(),
-      this.deps.missingFolders?.peek()
+      this.deps.missingFolders?.peek(),
+      (streamId) => this.deps.streamRuns?.state(streamId) ?? null
     )
   }
 

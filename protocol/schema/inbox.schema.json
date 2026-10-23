@@ -39,7 +39,20 @@
         "main": { "const": true, "description": "The project's default stream (its folder); exactly one per project." },
         "branch": { "type": "string", "description": "Present on a worktree stream: the git branch of its worktree (SPEC.md §4.4)." },
         "queueAutoRun": { "const": true, "description": "The stream starts its next queued prompt by itself (SPEC.md §4.4, §8.16)." },
-        "queueTaskId": { "type": "string", "description": "The task the stream's queue started last, while it still runs." }
+        "queueTaskId": { "type": "string", "description": "The task the stream's queue started last, while it still runs." },
+        "runCommand": { "type": "string", "description": "The command the stream's app run starts; absent when it has none (SPEC.md §8.19)." },
+        "run": { "$ref": "#/$defs/streamRun" }
+      }
+    },
+    "streamRun": {
+      "type": "object",
+      "required": ["status", "startedAt"],
+      "description": "The stream's app run since the desktop started (SPEC.md §8.19).",
+      "properties": {
+        "status": { "enum": ["running", "exited", "stopped"] },
+        "startedAt": { "type": "integer", "minimum": 0 },
+        "endedAt": { "type": "integer", "minimum": 0 },
+        "exitCode": { "type": "integer", "description": "Only with `exited`." }
       }
     },
     "queuedPrompt": {

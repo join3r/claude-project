@@ -205,15 +205,22 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
     public var queueAutoRun: Bool
     /// The task its queue started last, while that task holds the queue up.
     public var queueTaskId: String?
+    /// The command its app run starts (§8.19); nil when it has none.
+    public var runCommand: String?
+    /// Its app run since the desktop started (§8.19); nil when it hasn't run.
+    public var run: InboxStreamRun?
 
     public init(id: String, name: String, isMain: Bool = false, branch: String? = nil,
-                queueAutoRun: Bool = false, queueTaskId: String? = nil) {
+                queueAutoRun: Bool = false, queueTaskId: String? = nil,
+                runCommand: String? = nil, run: InboxStreamRun? = nil) {
         self.id = id
         self.name = name
         self.isMain = isMain
         self.branch = branch
         self.queueAutoRun = queueAutoRun
         self.queueTaskId = queueTaskId
+        self.runCommand = runCommand
+        self.run = run
     }
 
     public init(from decoder: any Decoder) throws {
@@ -224,6 +231,9 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
         queueAutoRun = (try? c.decodeIfPresent(Bool.self, forKey: .queueAutoRun)) == true
         queueTaskId = try c.decodeIfPresent(String.self, forKey: .queueTaskId)
+        runCommand = try? c.decodeIfPresent(String.self, forKey: .runCommand)
+        // A status this build doesn't know drops the run, not the stream.
+        run = (try? c.decodeIfPresent(InboxStreamRun.self, forKey: .run)) ?? nil
     }
 }
 

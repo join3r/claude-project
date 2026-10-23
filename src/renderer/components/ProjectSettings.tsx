@@ -34,6 +34,7 @@ interface Props {
     condaEnvName?: string
     condaEnvPrefix?: string
     hideFromMobile?: true
+    runCommand?: string
   }) => void
   onClose: () => void
   /** An SSH project: Move to a DevTool server… */
@@ -63,6 +64,7 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
   const [condaError, setCondaError] = useState<string | null>(null)
   const [condaLoading, setCondaLoading] = useState(false)
   const [hideFromMobile, setHideFromMobile] = useState(!!project.hideFromMobile)
+  const [runCommand, setRunCommand] = useState(project.runCommand ?? '')
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const canEditDirectory = !isRemoteProject(project) && !isShellCommandProject(project)
     && featureAvailable(project, 'project-settings-local')
@@ -135,6 +137,7 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
       tagIds,
       // Explicit undefined so turning it back off clears the stored flag.
       hideFromMobile: hideFromMobile ? true : undefined,
+      runCommand: isShellCommandProject(project) ? project.runCommand : runCommand.trim() || undefined,
     }
     if (canEditDirectory) updates.directory = cleanedDirectory
     if (canPickConda) {
@@ -336,6 +339,18 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
         </div>
         <HelperText>Extra CLI arguments passed when the tool starts in this project.</HelperText>
       </SetBlock>
+
+      {!isShellCommandProject(project) && (
+        <SetBlock label="Run command">
+          <Field
+            className="font-mono"
+            value={runCommand}
+            onChange={(e) => setRunCommand(e.target.value)}
+            placeholder="e.g. npm run dev"
+          />
+          <HelperText>Starts the app from a stream&apos;s folder: Run in the stream&apos;s menu or on its row. A stream can set its own.</HelperText>
+        </SetBlock>
+      )}
 
       <SetBlock label="Hide from mobile" divider>
         <div className="flex items-center justify-between gap-3">

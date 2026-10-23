@@ -190,6 +190,23 @@ export const PROJECT_NEW_FEATURE = 'project.new'
 export interface ProjectNewParams { name: string }
 export interface ProjectNewResult { projectId: string }
 
+/**
+ * `stream.run` and `stream.logs` (SPEC.md §8.19): a stream's app run, as the desktop's
+ * Run / Stop / Restart and its logs view. The stream's `runCommand` and `run` (§4.4)
+ * say whether it has one and how it is doing.
+ */
+export const STREAM_RUN_OP = 'stream.run'
+export const STREAM_LOGS_OP = 'stream.logs'
+/** The handshake feature (§8.1) a desktop lists when it answers `stream.run` and `stream.logs` and sends the run fields. */
+export const STREAM_RUN_FEATURE = 'stream.run'
+export const STREAM_RUN_ACTIONS = ['start', 'stop', 'restart'] as const
+export type StreamRunAction = (typeof STREAM_RUN_ACTIONS)[number]
+
+export interface StreamRunParams { projectId: string; streamId: string; action: StreamRunAction }
+export interface StreamLogsParams { projectId: string; streamId: string }
+/** The run's output, terminal escapes stripped, at most {@link ChatLimits.runLogs} characters from its end. */
+export interface StreamLogsResult { text: string; truncated?: true }
+
 /** `branch` and `baseBranch` are only kept with `worktree: true`. */
 export interface StreamNewParams { projectId: string; name: string; worktree: boolean; branch?: string; baseBranch?: string }
 export interface StreamNewResult { streamId: string }
@@ -363,7 +380,9 @@ export const ChatLimits = {
   /** `chat.permissions.update` rule (§8.14). */
   permissionRule: 2000,
   /** A queued prompt's text (§8.16), as `chat.send`'s. */
-  queueText: 32000
+  queueText: 32000,
+  /** `stream.logs` text (§8.19): the end of the run's output. */
+  runLogs: 200_000
 } as const
 
 export type ChatViewToolStatus = 'pending' | 'running' | 'waiting' | 'done' | 'error' | 'denied'
@@ -1207,6 +1226,29 @@ export function parseProjectNewParams(params: unknown): ProjectNewParams {
   if (!name) fail('name is empty')
   if (name.length > ChatLimits.projectName) fail(`name over ${ChatLimits.projectName} characters`)
   return { name }
+}
+
+/**
+ * `stream.run` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `projectId` or `streamId`, or an unknown `action`.
+ */
+export function parseStreamRunParams(params: unknown): StreamRunParams {
+  const o = obj(params, 'params')
+  return { projectId: str(o, 'projectId'), streamId: str(o, 'streamId'), action: oneOf(o, 'action', STREAM_RUN_ACTIONS) }
+}
+
+/** `stream.logs` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `projectId` or `streamId`. */
+export function parseStreamLogsParams(params: unknown): StreamLogsParams {
+  const o = obj(params, 'params')
+  return { projectId: str(o, 'projectId'), streamId: str(o, 'streamId') }
+}
+
+/** `stream.logs` result (the phone's side). */
+export function parseStreamLogsResult(value: unknown): StreamLogsResult {
+  const o = obj(value, 'result')
+  const out: StreamLogsResult = { text: str(o, 'text') }
+  if (o.truncated === true) out.truncated = true
+  return out
 }
 
 /** `project.new` result (the phone's side). */

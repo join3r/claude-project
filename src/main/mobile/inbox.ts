@@ -1,3 +1,4 @@
+import { streamRunCommand, type StreamRunState } from '../../shared/stream-run'
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
 import { isSnoozed, isUnread, statusTabs, taskStatus } from '../../shared/inbox-state'
 import {
@@ -142,13 +143,27 @@ function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: numb
   return { ...out, tabs }
 }
 
-function buildStream(stream: Stream): MobileInboxStream {
+/** A stream's app run as this host has it (`StreamRuns.state`). */
+export type StreamRunLookup = (streamId: string) => StreamRunState | null
+
+function buildStream(project: Project, stream: Stream, runs: StreamRunLookup): MobileInboxStream {
   const out: MobileInboxStream = { id: stream.id, name: stream.name }
   if (stream.isMain) out.main = true
   if (stream.workspace) out.branch = stream.workspace.branchName
   if (stream.promptQueueAutoRun) out.queueAutoRun = true
   const watched = promptQueueWatchedTask(stream)
   if (watched) out.queueTaskId = watched.taskId
+  const runCommand = streamRunCommand(project, stream)
+  if (runCommand) out.runCommand = runCommand
+  const run = runs(stream.id)
+  if (run) {
+    out.run = {
+      status: run.status,
+      startedAt: run.startedAt,
+      ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
+      ...(run.status === 'exited' && run.exitCode !== undefined ? { exitCode: run.exitCode } : {})
+    }
+  }
   return out
 }
 
@@ -171,7 +186,7 @@ export function isVisibleOnMobile(project: Project): boolean {
  * Archived streams and tasks live outside `project.streams` (`archive/<id>.json`),
  * so only open ones are ever sent.
  */
-function buildProject(project: Project, lookup: InboxTabLookup, now: number, missingFolder: boolean): MobileInboxProject {
+function buildProject(project: Project, lookup: InboxTabLookup, now: number, missingFolder: boolean, runs: StreamRunLookup): MobileInboxProject {
   const lastStream = project.streams.find((stream) => stream.id === project.lastStreamId)
   const queue = buildQueue(project)
   return {
@@ -179,7 +194,7 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number, mis
     name: project.name,
     ...(project.emoji ? { emoji: project.emoji } : {}),
     remote: !!project.ssh,
-    streams: project.streams.map(buildStream),
+    streams: project.streams.map((stream) => buildStream(project, stream, runs)),
     ...(lastStream ? { lastStreamId: lastStream.id } : {}),
     tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now))),
     ...(queue.length > 0 ? { queue } : {}),
@@ -249,13 +264,15 @@ export function buildInbox(
   desktop: { id: string; name: string },
   now: number,
   /** Local projects whose folder is gone (§4.4 `missingFolder`). */
-  missingFolders: ReadonlySet<string> = new Set()
+  missingFolders: ReadonlySet<string> = new Set(),
+  /** Streams' app runs (§8.19). */
+  runs: StreamRunLookup = () => null
 ): MobileInbox {
   const visible = orderedProjects(data).filter(isVisibleOnMobile)
   const inbox: MobileInbox = {
     desktop: { id: desktop.id, name: desktop.name },
     generatedAt: now,
-    projects: visible.map((project) => buildProject(project, lookup, now, missingFolders.has(project.id)))
+    projects: visible.map((project) => buildProject(project, lookup, now, missingFolders.has(project.id), runs))
   }
   const pinned = buildPinned(data, visible)
   if (pinned.length > 0) inbox.pinned = pinned

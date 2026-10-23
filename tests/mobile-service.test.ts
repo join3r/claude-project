@@ -17,7 +17,8 @@ import {
 import type { MobilePairing, MobilePushRegistration } from '../src/main/mobile/pairings-store'
 import { b64uEncode, deviceId, type PhoneHello } from '../protocol/ts/index.ts'
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig, type MobileState } from '../src/shared/mobile'
-import type { ProjectsData, TabStatusValue } from '../src/shared/types'
+import { mainStreamId, type ProjectsData, type TabStatusValue } from '../src/shared/types'
+import type { StreamRunState } from '../src/shared/stream-run'
 import { fixtureProject } from './helpers/streams-fixtures'
 
 // ---- fakes -------------------------------------------------------------------
@@ -141,7 +142,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -192,6 +193,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject
     newStream: options.newStream,
     newProject: options.newProject,
     missingFolders: options.missingFolders,
+    streamRuns: options.streamRuns,
     listBranches: options.listBranches,
     newTask: options.newTask,
     closeTask: options.closeTask,
@@ -219,7 +221,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject
   }
 }
 
-function pairedSetup(options: { newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -730,6 +732,85 @@ describe('MobileService project.new and missingFolder (SPEC.md §8.18, §4.4)', 
     expect(env.channel.inboxEvents().at(-1)?.inbox.projects[0].missingFolder).toBe(true)
     env.service.stop()
     expect(listeners.size).toBe(0)
+  })
+})
+
+describe('MobileService stream.run and stream.logs (SPEC.md §8.19)', () => {
+  function runs(overrides: Partial<NonNullable<MobileServiceDeps['streamRuns']>> = {}) {
+    const listeners = new Set<() => void>()
+    const states: Record<string, StreamRunState> = {}
+    const calls: unknown[] = []
+    const streamRuns: NonNullable<MobileServiceDeps['streamRuns']> = {
+      state: (streamId) => states[streamId] ?? null,
+      subscribe: (l) => { listeners.add(l); return () => listeners.delete(l) },
+      control: async (params) => {
+        calls.push(params)
+        return params.projectId === 'p1' ? { ok: true } : { ok: false, code: 'not-found', message: 'No such stream' }
+      },
+      logs: (params) => params.projectId === 'p1'
+        ? { ok: true, result: { text: 'ready\n' } }
+        : { ok: false, code: 'not-found', message: 'No such stream' },
+      ...overrides
+    }
+    return { streamRuns, listeners, states, calls }
+  }
+
+  it('passes the parsed params through, answers {} for stream.run and the text for stream.logs, and rejects bad params', async () => {
+    const r = runs()
+    const env = pairedSetup({ streamRuns: r.streamRuns })
+    const stream = mainStreamId('p1')
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'stream.run', params: { projectId: 'p1', streamId: stream, action: 'restart', extra: 1 } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result: {} })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'stream.run', params: { projectId: 'nope', streamId: stream, action: 'stop' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such stream' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'stream.run', params: { projectId: 'p1', streamId: stream, action: 'pause' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(r.calls).toEqual([
+      { projectId: 'p1', streamId: stream, action: 'restart' },
+      { projectId: 'nope', streamId: stream, action: 'stop' }
+    ])
+
+    env.channel.hooks.onAppMessage({ t: 'req', id: 4, op: 'stream.logs', params: { projectId: 'p1', streamId: stream } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 4, ok: true, result: { text: 'ready\n' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 5, op: 'stream.logs', params: { projectId: 'nope', streamId: stream } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 5, ok: false, error: { code: 'not-found', message: 'No such stream' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 6, op: 'stream.logs', params: { projectId: 'p1' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 6, ok: false, error: { code: 'bad-request' } })
+  })
+
+  it('answers internal when starting the run fails', async () => {
+    const r = runs({ control: async () => ({ ok: false, code: 'internal', message: 'No run command is set for this project or stream' }) })
+    const env = pairedSetup({ streamRuns: r.streamRuns })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'stream.run', params: { projectId: 'p1', streamId: mainStreamId('p1'), action: 'start' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: false, error: { code: 'internal', message: 'No run command is set for this project or stream' } })
+  })
+
+  it('is unsupported without the dependency', () => {
+    const env = pairedSetup()
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'stream.run', params: { projectId: 'p1', streamId: 's', action: 'start' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'stream.logs', params: { projectId: 'p1', streamId: 's' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
+  })
+
+  it('sends the run in the inbox, and the inbox again when a run changes', () => {
+    const r = runs()
+    const env = pairedSetup({ streamRuns: r.streamRuns })
+    const stream = mainStreamId('p1')
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'inbox.get' })
+    const first = env.channel.sent.at(-1) as { result: { projects: { streams: Record<string, unknown>[] }[] } }
+    expect('run' in first.result.projects[0].streams[0]).toBe(false)
+    r.states[stream] = { status: 'exited', command: 'npm run dev', startedAt: 1, endedAt: 2, exitCode: 1 }
+    for (const l of r.listeners) l()
+    env.timers.advance(INBOX_THROTTLE_MS)
+    expect(env.channel.inboxEvents().at(-1)?.inbox.projects[0].streams[0].run).toEqual({ status: 'exited', startedAt: 1, endedAt: 2, exitCode: 1 })
+    env.service.stop()
+    expect(r.listeners.size).toBe(0)
   })
 })
 

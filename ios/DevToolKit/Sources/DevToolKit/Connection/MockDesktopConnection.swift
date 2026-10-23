@@ -40,6 +40,8 @@ public actor MockDesktopConnection: DesktopConnection {
     private var fixes: [String: Task<Void, Never>] = [:]
     /// Pause between streamed chunks.
     private let streamStep: Duration
+    /// Each stream's app run output (§8.19), by stream ID.
+    private var runLogs: [String: String] = MockInbox.runLogs
 
     public init(
         desktopId: String,
@@ -217,6 +219,23 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             return StreamNewResult(streamId: try addStream(parsed)).json
+        case TaskOp.streamRun:
+            let parsed: StreamRunParams
+            do {
+                parsed = try StreamRunParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            try controlRun(parsed)
+            return .object([:])
+        case TaskOp.streamLogs:
+            let parsed: StreamLogsParams
+            do {
+                parsed = try StreamLogsParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return try logs(parsed).json
         case TaskOp.newProject:
             let parsed: ProjectNewParams
             do {
@@ -436,6 +455,62 @@ public actor MockDesktopConnection: DesktopConnection {
         inbox.generatedAt = Date().unixMilliseconds
         continuation.yield(.inbox(inbox))
         return streamId
+    }
+
+    /// The stream `stream.run` and `stream.logs` name, as indices into the inbox.
+    private func runStream(projectId: String, streamId: String) throws -> (Int, Int) {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == projectId }),
+              let s = inbox.projects[p].streams.firstIndex(where: { $0.id == streamId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")
+        }
+        return (p, s)
+    }
+
+    /// `stream.run`: start (a no-op while it runs), stop (a no-op unless it
+    /// runs) or restart. A stream without a command answers `internal`, as the
+    /// desktop does. The inbox with the new `run` goes out right away.
+    private func controlRun(_ params: StreamRunParams) throws {
+        let (p, s) = try runStream(projectId: params.projectId, streamId: params.streamId)
+        let stream = inbox.projects[p].streams[s]
+        let now = Date().unixMilliseconds
+        func stop() {
+            guard stream.run?.isRunning == true else { return }
+            inbox.projects[p].streams[s].run?.status = .stopped
+            inbox.projects[p].streams[s].run?.endedAt = now
+            runLogs[stream.id, default: ""] += "^C\n"
+        }
+        func start() throws {
+            guard let command = stream.runCommand else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "No run command is set for this project or stream")
+            }
+            inbox.projects[p].streams[s].run = InboxStreamRun(status: .running, startedAt: now)
+            runLogs[stream.id] = "$ \(command)\n\n> \(stream.name)@0.1.0 dev\n> vite\n\n  VITE v6.0.0  ready in 412 ms\n\n  ➜  Local:   http://localhost:5173/\n"
+        }
+        switch params.action {
+        case .start:
+            if stream.run?.isRunning == true { return }
+            try start()
+        case .stop:
+            stop()
+        case .restart:
+            stop()
+            try start()
+        }
+        inbox.generatedAt = now
+        continuation.yield(.inbox(inbox))
+    }
+
+    /// `stream.logs`: the run's output so far; a running one prints a line per ask.
+    private func logs(_ params: StreamLogsParams) throws -> StreamLogsResult {
+        let (p, s) = try runStream(projectId: params.projectId, streamId: params.streamId)
+        let stream = inbox.projects[p].streams[s]
+        if stream.run?.isRunning == true {
+            let time = Date().formatted(date: .omitted, time: .standard)
+            runLogs[stream.id, default: ""] += "\(time) [vite] hmr update /src/App.tsx\n"
+        }
+        let text = runLogs[stream.id] ?? ""
+        guard text.count > StreamLogsResult.maxLength else { return StreamLogsResult(text: text) }
+        return StreamLogsResult(text: String(text.suffix(StreamLogsResult.maxLength)), truncated: true)
     }
 
     /// The desktop's `branchSlug` (`StreamNaming.branchSlug`).
@@ -886,7 +961,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.pin, DesktopFeature.taskTriage,
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
-            DesktopFeature.chatBash, DesktopFeature.projectNew,
+            DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -991,16 +1066,34 @@ public enum MockInbox {
     /// Worktree tasks whose close conflicts until the agent fixes it.
     public static let conflictingTasks: Set<String> = ["t-auth"]
 
+    /// The sample's app run output (§8.19), by stream ID.
+    public static let runLogs: [String: String] = [
+        "s-api-main": "$ npm run dev\n\n> api-server@0.4.2 dev\n> tsx watch src/server.ts\n\n"
+            + (0..<60).map { "[12:\(String(format: "%02d", $0)):07] GET /health 200 2ms" }.joined(separator: "\n") + "\n",
+        "s-api-050": "$ npm run dev -- --port 3001\n\n> api-server@0.5.0 dev\n> tsx watch src/server.ts --port 3001\n\n"
+            + "node:internal/modules/cjs/loader:1228\n  throw err;\n  ^\n\nError: Cannot find module './rate-limit'\n"
+            + "Require stack:\n- /Users/join3r/code/api-server/src/server.ts\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1225:15)\n"
+            + "    at Module._load (node:internal/modules/cjs/loader:1051:27) {\n  code: 'MODULE_NOT_FOUND'\n}\n\nNode.js v24.1.0\n",
+        "s-web-login": "$ npm run storybook\n\nstorybook v8.4.0\n\n  Local:  http://localhost:6006/\n^C\n",
+    ]
+
     public static func sample(desktopId: String, desktopName: String, now: Date = Date()) -> Inbox {
         let t = now.unixMilliseconds
         func ago(_ minutes: Double) -> Int64 { t - Int64(minutes * 60_000) }
 
-        let apiMain = InboxStream(id: "s-api-main", name: "main", isMain: true)
+        // App runs (§8.19): main's dev server runs, 0.5.0's exited with an error,
+        // web-dashboard's main has a command that hasn't run, login-redesign was stopped.
+        let apiMain = InboxStream(id: "s-api-main", name: "main", isMain: true,
+                                  runCommand: "npm run dev", run: InboxStreamRun(status: .running, startedAt: ago(25)))
         // 0.5.0 runs its queue by itself, waiting on rate-limiter.
-        let api050 = InboxStream(id: "s-api-050", name: "0.5.0", branch: "0.5.0", queueAutoRun: true, queueTaskId: "t-rate")
+        let api050 = InboxStream(id: "s-api-050", name: "0.5.0", branch: "0.5.0", queueAutoRun: true, queueTaskId: "t-rate",
+                                 runCommand: "npm run dev -- --port 3001",
+                                 run: InboxStreamRun(status: .exited, startedAt: ago(14), endedAt: ago(13), exitCode: 1))
         let apiBugs = InboxStream(id: "s-api-bugs", name: "bugfixes")
-        let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true)
-        let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign")
+        let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true, runCommand: "npm run dev")
+        let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign",
+                                   runCommand: "npm run storybook",
+                                   run: InboxStreamRun(status: .stopped, startedAt: ago(90), endedAt: ago(70)))
         let web240 = InboxStream(id: "s-web-240", name: "2.4.0", branch: "2.4.0")
         let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
         func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,

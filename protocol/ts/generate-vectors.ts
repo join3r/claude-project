@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -221,9 +221,10 @@ function appMessages(): unknown {
       {
         id: 'p1', name: 'api-server', emoji: '🚀', remote: false,
         streams: [
-          { id: 's-main', name: 'main', main: true },
-          { id: 's-050', name: '0.5.0', branch: '0.5.0', queueAutoRun: true, queueTaskId: 't2' },
-          { id: 's-bugs', name: 'bugfixes', queueAutoRun: true }
+          // §8.19: `run` and `runCommand` (the stream's own, else the project's).
+          { id: 's-main', name: 'main', main: true, runCommand: 'npm run dev', run: { status: 'running', startedAt: 1789999000000 } },
+          { id: 's-050', name: '0.5.0', branch: '0.5.0', queueAutoRun: true, queueTaskId: 't2', runCommand: 'npm run dev -- --port 5180', run: { status: 'exited', startedAt: 1789990000000, endedAt: 1789990500000, exitCode: 1 } },
+          { id: 's-bugs', name: 'bugfixes', queueAutoRun: true, runCommand: 'npm run dev', run: { status: 'stopped', startedAt: 1789980000000, endedAt: 1789980100000 } }
         ],
         lastStreamId: 's-050',
         tasks: [{
@@ -272,7 +273,11 @@ function appMessages(): unknown {
     projects: [{
       // `missingFolder` counts only as `true`.
       id: 'p1', name: 'api-server', remote: false, emoji: null, pinned: true, lastStreamId: null, missingFolder: 'yes',
-      streams: [{ id: 's-main', name: 'main', main: 'yes', branch: null, color: 'green', queueAutoRun: 'yes', queueTaskId: null }],
+      // A null `run` or `runCommand` is absent; a newer desktop's extra run fields are dropped.
+      streams: [
+        { id: 's-main', name: 'main', main: 'yes', branch: null, color: 'green', queueAutoRun: 'yes', queueTaskId: null, runCommand: null, run: null },
+        { id: 's-2', name: 'two', runCommand: 'make run', run: { status: 'exited', startedAt: 5, endedAt: null, exitCode: -15, pid: 42 } }
+      ],
       queue: [{ id: 'q1', text: 'Add rate limiting', streamId: 's-main', author: 'me' }],
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'thinking', since: null,
@@ -294,7 +299,10 @@ function appMessages(): unknown {
     generatedAt: 1790000000000,
     projects: [{
       id: 'p1', name: 'api-server', remote: false,
-      streams: [{ id: 's-main', name: 'main' }],
+      streams: [
+        { id: 's-main', name: 'main' },
+        { id: 's-2', name: 'two', runCommand: 'make run', run: { status: 'exited', startedAt: 5, exitCode: -15 } }
+      ],
       queue: [{ id: 'q1', text: 'Add rate limiting', streamId: 's-main' }],
       tasks: [{
         id: 't1', name: 'fix-auth', streamId: 's-main', streamName: 'main', status: 'idle',
@@ -805,6 +813,41 @@ function chatMessages(): unknown {
       invalid: {
         params: [text({}), text({ name: '   ' }), text({ name: 7 }), text({ name: 'x'.repeat(256) }), 'null'],
         results: [text({}), text({ projectId: 7 }), '[]']
+      }
+    },
+    // §8.19: `stream.run` starts, stops or restarts a stream's app run; `stream.logs` reads its output.
+    streamRun: {
+      params: [
+        text({ projectId: 'p1', streamId: 's-main', action: 'start' }),
+        text({ projectId: 'p1', streamId: 's-main', action: 'stop', extra: 1 }),
+        text({ projectId: 'p1', streamId: 's-050', action: 'restart' })
+      ].map((json) => ({ json, expected: parseStreamRunParams(JSON.parse(json)) })),
+      results: [text({})],
+      invalid: {
+        params: [
+          text({ streamId: 's-main', action: 'start' }),
+          text({ projectId: 'p1', action: 'start' }),
+          text({ projectId: 'p1', streamId: 's-main' }),
+          text({ projectId: 'p1', streamId: 's-main', action: 'pause' }),
+          text({ projectId: 'p1', streamId: 7, action: 'start' }),
+          'null'
+        ]
+      }
+    },
+    streamLogs: {
+      params: [
+        text({ projectId: 'p1', streamId: 's-main' }),
+        text({ projectId: 'p1', streamId: 's-main', since: 100 })
+      ].map((json) => ({ json, expected: parseStreamLogsParams(JSON.parse(json)) })),
+      results: [
+        text({ text: '' }),
+        text({ text: '> vite\n\n  Local: http://localhost:5173/\n' }),
+        text({ text: 'ready\n', truncated: true }),
+        text({ text: 'x', truncated: false })
+      ].map((json) => ({ json, expected: parseStreamLogsResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({ projectId: 'p1' }), text({ streamId: 's-main' }), 'null'],
+        results: [text({}), text({ text: 7 }), '[]']
       }
     },
     // §8.16: `queue.update` edits Project Home's queue; `queue.run` starts a queued prompt now.

@@ -26,6 +26,10 @@ final class AppModel {
     var queueError: String?
     /// Queued prompts whose Run now is in flight (`desktopId/itemId`).
     private(set) var startingQueued: Set<String> = []
+    /// A failed `stream.run` (§8.19), for the alert.
+    var runError: String?
+    /// Streams whose Run, Stop or Restart is in flight (`desktopId/streamId`), and which.
+    private(set) var pendingRuns: [String: StreamRunParams.Action] = [:]
 
     /// Push registration (SPEC.md §7.4); told about every established session.
     @ObservationIgnored weak var push: PushManager?
@@ -286,6 +290,38 @@ final class AppModel {
 
     func isStartingQueued(_ itemId: String, desktopId: String) -> Bool {
         startingQueued.contains("\(desktopId)/\(itemId)")
+    }
+
+    // MARK: - App runs (§8.19)
+
+    /// `stream.run`: start, stop or restart the stream's app run. The new
+    /// `run` comes with the next inbox; a failure (the desktop's message, e.g.
+    /// a spawn error) sets `runError`. One action per stream at a time.
+    func controlRun(_ action: StreamRunParams.Action, projectId: String, streamId: String, desktopId: String) async {
+        guard let connection = connections[desktopId] else {
+            runError = DesktopConnectionError.notConnected.localizedDescription
+            return
+        }
+        let key = "\(desktopId)/\(streamId)"
+        guard pendingRuns[key] == nil else { return }
+        pendingRuns[key] = action
+        defer { pendingRuns[key] = nil }
+        do {
+            try await connection.controlRun(projectId: projectId, streamId: streamId, action: action)
+        } catch {
+            runError = error.localizedDescription
+        }
+    }
+
+    /// The Run, Stop or Restart in flight for the stream, if any.
+    func pendingRun(streamId: String, desktopId: String) -> StreamRunParams.Action? {
+        pendingRuns["\(desktopId)/\(streamId)"]
+    }
+
+    /// `stream.logs`: the end of the stream's app run output.
+    func runLogs(projectId: String, streamId: String, desktopId: String) async throws -> StreamLogsResult {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.runLogs(projectId: projectId, streamId: streamId)
     }
 
     private func project(_ projectId: String, desktopId: String) -> InboxProject? {

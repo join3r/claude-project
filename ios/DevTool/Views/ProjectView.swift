@@ -15,6 +15,8 @@ struct ProjectView: View {
     @State private var queuePrompt: QueuePromptTarget?
     /// A stream just made from the New stream sheet: scrolled to once the inbox has it.
     @State private var createdStream: String?
+    /// The stream whose app run logs are pushed (§8.19).
+    @State private var logs: StreamLogsTarget?
 
     var body: some View {
         if let inbox = model.inboxes[ref.desktopId], let project = inbox.projects.first(where: { $0.id == ref.projectId }) {
@@ -58,8 +60,16 @@ struct ProjectView: View {
                 switch demoSheet {
                 case .newStream: newStream = NewStreamTarget(desktopId: ref.desktopId, projectId: project.id)
                 case .newTask: newTask = NewTaskTarget(desktopId: ref.desktopId, projectId: project.id, streamId: project.streams.last?.id)
+                case .streamLogs:
+                    let wanted = LaunchOptions.current.demoStream
+                    if let stream = project.streams.first(where: { $0.id == wanted }) ?? project.streams.first(where: { $0.runCommand != nil }) {
+                        logs = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id)
+                    }
                 default: break
                 }
+            }
+            .navigationDestination(item: $logs) { target in
+                StreamLogsView(target: target)
             }
             .closeTaskFlow($closing) { closed in
                 if selection == TaskRef(desktopId: closed.desktopId, taskId: closed.taskId) { selection = nil }
@@ -161,6 +171,9 @@ struct ProjectView: View {
     private func streamSection(_ stream: InboxStream, project: InboxProject, inbox: Inbox, now: Date) -> some View {
         let tasks = sorted(project.tasks.filter { $0.streamId == stream.id })
         return Section {
+            if model.supports(DesktopFeature.streamRun, on: ref.desktopId), stream.runCommand != nil || stream.run != nil {
+                runRow(stream, project: project, now: now)
+            }
             ForEach(tasks) { task in
                 taskRow(task, project: project, inbox: inbox, now: now)
             }
@@ -227,6 +240,29 @@ struct ProjectView: View {
                 .disabled(offline)
             }
         }
+    }
+
+    /// The stream's app run (§8.19): status, Run / Stop / Restart, and Logs.
+    private func runRow(_ stream: InboxStream, project: InboxProject, now: Date) -> some View {
+        let target = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id)
+        let canRun = stream.runCommand != nil && !offline && model.pendingRun(streamId: stream.id, desktopId: ref.desktopId) == nil
+        let running = stream.run?.isRunning == true
+        func control(_ action: StreamRunParams.Action) {
+            Task { await model.controlRun(action, projectId: project.id, streamId: stream.id, desktopId: ref.desktopId) }
+        }
+        return StreamRunRow(target: target, stream: stream, now: now) { logs = target }
+            .opacity(offline ? 0.55 : 1)
+            .contextMenu {
+                if stream.runCommand != nil {
+                    if running {
+                        Button("Stop", systemImage: "stop.fill") { control(.stop) }.disabled(!canRun)
+                        Button("Restart", systemImage: "arrow.clockwise") { control(.restart) }.disabled(!canRun)
+                    } else {
+                        Button("Run", systemImage: "play.fill") { control(.start) }.disabled(!canRun)
+                    }
+                }
+                Button("Logs", systemImage: "text.alignleft") { logs = target }
+            }
     }
 
     private func taskRow(_ task: InboxTask, project: InboxProject, inbox: Inbox, now: Date) -> some View {

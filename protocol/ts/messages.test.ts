@@ -182,4 +182,16 @@ describe('app messages', () => {
     // A version 1 project has no streams.
     expect(() => parseInbox({ ...inbox, projects: [{ id: 'p', name: 'n', tasks: [] }] })).toThrow(ProtocolError)
   })
+
+  it('parses a stream\'s runCommand and run (§4.4, §8.19)', () => {
+    const inbox = { desktop: { id: ID, name: 'd' }, generatedAt: 1, projects: [] }
+    const withStream = (stream: unknown) => parseInbox({ ...inbox, projects: [{ id: 'p', name: 'n', streams: [stream], tasks: [] }] }).projects[0].streams[0]
+    expect(withStream({ id: 's', name: 'main', runCommand: 'npm run dev', run: { status: 'running', startedAt: 10 } }))
+      .toEqual({ id: 's', name: 'main', runCommand: 'npm run dev', run: { status: 'running', startedAt: 10 } })
+    expect(withStream({ id: 's', name: 'main', run: { status: 'exited', startedAt: 10, endedAt: 20, exitCode: -9, pid: 1 } }))
+      .toEqual({ id: 's', name: 'main', run: { status: 'exited', startedAt: 10, endedAt: 20, exitCode: -9 } })
+    expect(withStream({ id: 's', name: 'main', runCommand: null, run: null })).toEqual({ id: 's', name: 'main' })
+    expect(() => withStream({ id: 's', name: 'main', run: { status: 'running' } })).toThrow(ProtocolError)
+    expect(() => withStream({ id: 's', name: 'main', run: { status: 'exited', startedAt: 1, exitCode: 1.5 } })).toThrow(ProtocolError)
+  })
 })

@@ -239,6 +239,8 @@ export interface Stream {
   promptQueueAutoRun?: true
   /** The task the queue started last in this stream, while it counts as running. */
   promptQueueWatch?: { taskId: string; tabId: string }
+  /** This stream's own app command, in place of the project's `runCommand` (`src/shared/stream-run.ts`). */
+  runCommand?: string
 }
 
 export interface WorkspaceConfig {
@@ -424,6 +426,8 @@ export interface Project {
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
+  /** The command that starts the app, run from a stream's folder (`src/shared/stream-run.ts`). */
+  runCommand?: string
   /**
    * Conda / micromamba env name (display + fallback lookup).
    * Spawn prefers `condaEnvPrefix` when that folder is still a real env.
