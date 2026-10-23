@@ -14,6 +14,10 @@ describe('cleanTaskTitle', () => {
     expect(cleanTaskTitle('\n\n  Voice   dictation\nmore text')).toBe('Voice dictation')
   })
 
+  it('keeps a five-word title past 40 characters', () => {
+    expect(cleanTaskTitle('Fix missing electron-chrome-extensions dependency\n')).toBe('Fix missing electron-chrome-extensions dependency')
+  })
+
   it('gives up on an empty or long reply', () => {
     expect(cleanTaskTitle('  \n')).toBeNull()
     expect(cleanTaskTitle('""')).toBeNull()

@@ -14,8 +14,8 @@ export function taskNameFromPrompt(text: string, max = TASK_NAME_FROM_PROMPT_MAX
   return line.slice(0, max - 1).trimEnd() + '…'
 }
 
-/** Past this a model's title is no better than the prompt's first line. */
-export const TASK_TITLE_MAX = 40
+/** Past this a model's title is no better than the prompt's first line, which is cut to the same length. */
+export const TASK_TITLE_MAX = TASK_NAME_FROM_PROMPT_MAX
 
 /**
  * A model's reply as a task name: its first line, unquoted, without a "Title:"

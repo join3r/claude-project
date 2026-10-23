@@ -12,7 +12,7 @@ const PROMPT_MAX = 4000
 
 const SYSTEM_PROMPT = [
   "You name tasks in a developer's task list.",
-  'Reply with only a title of 2 to 5 words that says what the task is about: its essence, not its first words.',
+  'Reply with only a title of 2 to 5 words, under 40 characters, that says what the task is about: its essence, not its first words.',
   'Use the language of the request, in sentence case. No quotes, no trailing period.'
 ].join(' ')
 
