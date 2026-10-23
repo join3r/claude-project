@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowDownToLine, Bot, Check, CircleSlash, ListTodo, Plug, Square, SquareTerminal, Workflow, X } from 'lucide-react'
-import { TASK_LINGER_MS, type ChatTask, type ChatTaskKind } from '../../../shared/claude-chat'
+import { Activity, ArrowDownToLine, Bot, Check, ChevronRight, Circle, CircleSlash, ListTodo, Plug, Square, SquareTerminal, Workflow, X } from 'lucide-react'
+import { TASK_LINGER_MS, type ChatTask, type ChatTaskKind, type ChatWorkflow, type ChatWorkflowAgent, type ChatWorkflowAgentState, type ChatWorkflowPhase } from '../../../shared/claude-chat'
 import { menuCls } from '../ui'
 import { formatTokens } from './UsageMeter'
 
@@ -138,6 +138,146 @@ function StopButton({ description, onStop }: { description: string; onStop: () =
   )
 }
 
+interface WorkflowCounts { total: number; done: number; failed: number; running: number }
+
+function countAgents(agents: ChatWorkflowAgent[]): WorkflowCounts {
+  const counts = { total: agents.length, done: 0, failed: 0, running: 0 }
+  for (const agent of agents) {
+    if (agent.state === 'done' || agent.state === 'skipped') counts.done++
+    else if (agent.state === 'failed') counts.failed++
+    else if (agent.state === 'running') counts.running++
+  }
+  return counts
+}
+
+/** The phase the run is in: the latest one with agents still going, else the latest one reached. */
+function currentPhase(workflow: ChatWorkflow): ChatWorkflowPhase | undefined {
+  const started = workflow.phases.filter((phase) => phase.started)
+  const busy = started.filter((phase) => workflow.agents.some((agent) => agent.phaseIndex === phase.index && (agent.state === 'running' || agent.state === 'queued')))
+  return busy.at(-1) ?? started.at(-1)
+}
+
+/** "Phase 2 of 3 · Review" and "5 of 12 agents done · 1 failed", with a bar. */
+function WorkflowSummary({ workflow, running }: { workflow: ChatWorkflow; running: boolean }): React.ReactElement | null {
+  const counts = countAgents(workflow.agents)
+  const phase = currentPhase(workflow)
+  if (!phase && counts.total === 0) return null
+  const phaseLabel = phase
+    ? workflow.phases.length > 1 ? `Phase ${workflow.phases.indexOf(phase) + 1} of ${workflow.phases.length} · ${phase.title}` : phase.title
+    : undefined
+  const agentsLabel = counts.total > 0
+    ? [`${counts.done} of ${counts.total} ${counts.total === 1 ? 'agent' : 'agents'} done`, counts.failed > 0 ? `${counts.failed} failed` : undefined].filter(Boolean).join(' · ')
+    : undefined
+  const pct = (n: number): string => `${counts.total > 0 ? (n / counts.total) * 100 : 0}%`
+  return (
+    <span className="flex flex-col gap-0.5 min-w-0 pt-0.5">
+      {phaseLabel && <span className={`truncate text-xs ${running ? 'text-text-muted' : 'text-text-subtle'}`}>{phaseLabel}</span>}
+      {agentsLabel && <span className="truncate text-xs text-text-subtle tabular-nums">{agentsLabel}</span>}
+      {counts.total > 0 && (
+        <span className="flex h-1 w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
+          <span className="h-full bg-accent" style={{ width: pct(counts.done) }} />
+          <span className="h-full bg-danger" style={{ width: pct(counts.failed) }} />
+        </span>
+      )}
+    </span>
+  )
+}
+
+function AgentStateIcon({ state }: { state: ChatWorkflowAgentState }): React.ReactElement {
+  switch (state) {
+    case 'running': return <RunningDot />
+    case 'queued': return <Circle size={9} className="shrink-0 mx-px text-text-subtle" aria-label="Queued" />
+    case 'done': return <Check size={12} className="shrink-0 text-success" aria-label="Done" />
+    case 'failed': return <X size={12} className="shrink-0 text-danger" aria-label="Failed" />
+    case 'skipped': return <CircleSlash size={11} className="shrink-0 text-text-subtle" aria-label="Skipped" />
+  }
+}
+
+function WorkflowAgentRow({ agent, now }: { agent: ChatWorkflowAgent; now: number }): React.ReactElement {
+  const running = agent.state === 'running'
+  const elapsed = running && agent.startedAt !== undefined
+    ? formatElapsed(now - agent.startedAt)
+    : agent.durationMs !== undefined ? formatElapsed(agent.durationMs) : undefined
+  const title = [agent.label, agent.attempt ? `attempt ${agent.attempt}` : undefined, agent.tokens ? `${formatTokens(agent.tokens)} tokens` : undefined, agent.lastTool].filter(Boolean).join('\n')
+  return (
+    <li title={title} className="flex items-start gap-1.5 py-0.5 pl-1 pr-2">
+      <span className="pt-0.5 w-3 flex justify-center"><AgentStateIcon state={agent.state} /></span>
+      <span className="flex-1 min-w-0 flex flex-col">
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`flex-1 truncate text-xs ${running ? 'text-text' : 'text-text-muted'}`}>{agent.label}</span>
+          {agent.attempt && <span className="shrink-0 text-2xs text-text-subtle">try {agent.attempt}</span>}
+          {elapsed && <span className="shrink-0 text-2xs text-text-subtle tabular-nums">{elapsed}</span>}
+        </span>
+        {running && agent.lastTool && <span className="truncate text-2xs text-text-subtle">{agent.lastTool}</span>}
+      </span>
+    </li>
+  )
+}
+
+function WorkflowPhaseGroup({ title, detail, agents, started, now }: { title: string; detail?: string; agents: ChatWorkflowAgent[]; started: boolean; now: number }): React.ReactElement {
+  const counts = countAgents(agents)
+  const live = counts.running > 0 || agents.some((agent) => agent.state === 'queued')
+  // Open where there is something to watch or something that went wrong.
+  const [open, setOpen] = useState(live || counts.failed > 0)
+  const wasLive = useRef(live)
+  useEffect(() => {
+    if (live && !wasLive.current) setOpen(true)
+    wasLive.current = live
+  }, [live])
+  const status = !started
+    ? <Circle size={9} className="shrink-0 mx-px text-text-subtle" aria-hidden />
+    : live ? <RunningDot /> : counts.failed > 0
+      ? <X size={12} className="shrink-0 text-danger" aria-hidden />
+      : <Check size={12} className="shrink-0 text-success" aria-hidden />
+  return (
+    <li className="flex flex-col">
+      <button
+        type="button"
+        aria-expanded={open}
+        disabled={agents.length === 0}
+        title={detail}
+        onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+        className="flex items-center gap-1.5 py-0.5 pl-1 pr-2 rounded-sm bg-transparent border-0 text-left cursor-pointer disabled:cursor-default hover:bg-surface-3 disabled:hover:bg-transparent transition-colors duration-(--motion-fast)"
+      >
+        <span className="w-3 flex justify-center">{status}</span>
+        <span className={`flex-1 truncate text-xs font-medium ${started ? 'text-text' : 'text-text-subtle'}`}>{title}</span>
+        <span className="shrink-0 text-2xs text-text-subtle tabular-nums">
+          {agents.length > 0 ? `${counts.done}/${counts.total}` : started ? '' : 'not started'}
+        </span>
+        {agents.length > 0 && (
+          <ChevronRight size={11} aria-hidden className={`shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
+        )}
+      </button>
+      {open && agents.length > 0 && (
+        <ul className="flex flex-col m-0 p-0 pl-3 list-none">
+          {agents.map((agent) => <WorkflowAgentRow key={agent.index} agent={agent} now={now} />)}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+/** A workflow's phases, each with its agents. */
+function WorkflowDetail({ workflow, now }: { workflow: ChatWorkflow; now: number }): React.ReactElement {
+  const phaseIndexes = new Set(workflow.phases.map((phase) => phase.index))
+  const loose = workflow.agents.filter((agent) => agent.phaseIndex === undefined || !phaseIndexes.has(agent.phaseIndex))
+  return (
+    <ul aria-label="Workflow phases" className="flex flex-col gap-px m-0 mb-1 ml-7 mr-1 p-0 list-none border-l border-border pl-1">
+      {workflow.phases.map((phase) => (
+        <WorkflowPhaseGroup
+          key={`${phase.index}:${phase.title}`}
+          title={phase.title}
+          detail={phase.detail}
+          started={phase.started}
+          agents={workflow.agents.filter((agent) => agent.phaseIndex === phase.index)}
+          now={now}
+        />
+      ))}
+      {loose.length > 0 && <WorkflowPhaseGroup title={workflow.phases.length > 0 ? 'Other agents' : 'Agents'} agents={loose} started now={now} />}
+    </ul>
+  )
+}
+
 function TaskRow({ task, now, onStop, onBackground, onJump, canJump }: { task: ChatTask; now: number } & Omit<Props, 'tasks'>): React.ReactElement {
   const running = task.status === 'running'
   const elapsed = task.startedAt !== undefined ? formatElapsed((task.endedAt ?? now) - task.startedAt) : undefined
@@ -149,7 +289,10 @@ function TaskRow({ task, now, onStop, onBackground, onJump, canJump }: { task: C
   ].filter(Boolean).join(' · ')
   // A shell's summary often just repeats its description.
   const summary = task.summary && task.summary !== task.description ? task.summary : undefined
-  const detail = summary ?? (running && task.lastTool ? task.lastTool : undefined)
+  const workflow = task.workflow && (task.workflow.phases.length > 0 || task.workflow.agents.length > 0) ? task.workflow : undefined
+  const [expanded, setExpanded] = useState(false)
+  // A workflow's last_tool_name is just its latest agent's label: the summary below says more.
+  const detail = summary ?? (running && task.lastTool && !workflow ? task.lastTool : undefined)
   const jumpable = task.toolUseId !== undefined && canJump(task.toolUseId)
   const title = [task.description, task.command && task.command !== task.description ? `$ ${task.command}` : undefined].filter(Boolean).join('\n')
 
@@ -168,39 +311,55 @@ function TaskRow({ task, now, onStop, onBackground, onJump, canJump }: { task: C
         )}
         {meta && <span className="truncate text-xs text-text-subtle tabular-nums">{meta}</span>}
         {detail && <span className="truncate text-xs text-text-muted">{detail}</span>}
+        {workflow && <WorkflowSummary workflow={workflow} running={running} />}
       </span>
     </>
   )
 
   return (
-    <li className="flex items-start gap-1 rounded-md hover:bg-sel transition-colors duration-(--motion-fast)">
-      {jumpable ? (
-        <button
-          type="button"
-          title={title}
-          aria-label={`Show ${task.description} in the conversation`}
-          onClick={() => onJump(task.toolUseId as string)}
-          className="flex-1 min-w-0 flex items-start gap-2 px-2 py-1.5 bg-transparent border-0 text-left cursor-pointer"
-        >
-          {body}
-        </button>
-      ) : (
-        <div title={title} className="flex-1 min-w-0 flex items-start gap-2 px-2 py-1.5">{body}</div>
-      )}
-      <span className="flex items-center gap-0.5 shrink-0 pr-1 pt-1">
-        {running ? (
-          <>
-            {!task.background && task.toolUseId && (
-              <ActionButton label="Send to background" onClick={() => onBackground(task.toolUseId as string)}>
-                <ArrowDownToLine size={12} />
-              </ActionButton>
-            )}
-            <StopButton description={task.description} onStop={() => onStop(task.id)} />
-          </>
+    <li className="flex flex-col">
+      <div className="flex items-start gap-1 rounded-md hover:bg-sel transition-colors duration-(--motion-fast)">
+        {jumpable ? (
+          <button
+            type="button"
+            title={title}
+            aria-label={`Show ${task.description} in the conversation`}
+            onClick={() => onJump(task.toolUseId as string)}
+            className="flex-1 min-w-0 flex items-start gap-2 px-2 py-1.5 bg-transparent border-0 text-left cursor-pointer"
+          >
+            {body}
+          </button>
         ) : (
-          <span className="size-(--ctl-h-sm) flex items-center justify-center"><OutcomeIcon status={task.status} /></span>
+          <div title={title} className="flex-1 min-w-0 flex items-start gap-2 px-2 py-1.5">{body}</div>
         )}
-      </span>
+        <span className="flex items-center gap-0.5 shrink-0 pr-1 pt-1">
+          {workflow && (
+            <button
+              type="button"
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Hide phases and agents' : 'Show phases and agents'}
+              title={expanded ? 'Hide phases and agents' : 'Show phases and agents'}
+              onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }}
+              className="flex items-center justify-center size-(--ctl-h-sm) rounded-md bg-transparent border-0 cursor-pointer text-text-muted hover:text-text hover:bg-surface-3 transition-colors duration-(--motion-fast)"
+            >
+              <ChevronRight size={12} aria-hidden className={`transition-transform duration-(--motion-fast) ${expanded ? 'rotate-90' : ''}`} />
+            </button>
+          )}
+          {running ? (
+            <>
+              {!task.background && task.toolUseId && (
+                <ActionButton label="Send to background" onClick={() => onBackground(task.toolUseId as string)}>
+                  <ArrowDownToLine size={12} />
+                </ActionButton>
+              )}
+              <StopButton description={task.description} onStop={() => onStop(task.id)} />
+            </>
+          ) : (
+            <span className="size-(--ctl-h-sm) flex items-center justify-center"><OutcomeIcon status={task.status} /></span>
+          )}
+        </span>
+      </div>
+      {workflow && expanded && <WorkflowDetail workflow={workflow} now={now} />}
     </li>
   )
 }
@@ -277,7 +436,7 @@ export default function TaskIndicator({ tasks, onStop, onBackground, onJump, can
         <span className="tabular-nums whitespace-nowrap">{label}</span>
       </button>
       {open && (
-        <div role="dialog" aria-label="Running tasks" className={`absolute top-full mt-1 right-0 z-(--z-menu) w-80 max-h-96 overflow-auto ${menuCls}`}>
+        <div role="dialog" aria-label="Running tasks" className={`absolute top-full mt-1 right-0 z-(--z-menu) w-80 max-h-[min(36rem,70vh)] overflow-auto ${menuCls}`}>
           <ul className="flex flex-col gap-px m-0 p-0 list-none">
             {shown.map((task) => (
               <TaskRow

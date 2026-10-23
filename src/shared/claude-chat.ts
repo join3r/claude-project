@@ -113,6 +113,40 @@ export interface ChatTask {
   tokens?: number
   lastTool?: string
   summary?: string
+  /** Workflows: their phases and agents, from `task_progress.workflow_progress`. */
+  workflow?: ChatWorkflow
+}
+
+export type ChatWorkflowAgentState = 'queued' | 'running' | 'done' | 'failed' | 'skipped'
+
+export interface ChatWorkflowAgent {
+  /** The run's own 1-based agent number. */
+  index: number
+  label: string
+  phaseIndex?: number
+  state: ChatWorkflowAgentState
+  startedAt?: number
+  durationMs?: number
+  tokens?: number
+  toolCalls?: number
+  /** What it is doing: the last tool's one-line summary, or its name. */
+  lastTool?: string
+  /** Above 1 when the script retried it. */
+  attempt?: number
+}
+
+export interface ChatWorkflowPhase {
+  /** 1-based, as the script's `phase()` calls number them. */
+  index: number
+  title: string
+  detail?: string
+  /** Reached by the run: a declared phase stays false until it starts. */
+  started: boolean
+}
+
+export interface ChatWorkflow {
+  phases: ChatWorkflowPhase[]
+  agents: ChatWorkflowAgent[]
 }
 
 /** How long a finished task stays listed with its outcome. */
@@ -757,6 +791,99 @@ function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+const STRING_FIELD = (key: string): RegExp => new RegExp(`\\b${key}\\s*:\\s*(['"\`])((?:\\\\.|(?!\\1)[^\\\\])*)\\1`)
+
+/**
+ * The phases a workflow script declares in its `meta` literal, so the row can
+ * say "phase 1 of 3" before the later ones start. `task_started.prompt` carries
+ * the script. Best effort: anything it can't read just leaves the list empty.
+ */
+export function declaredWorkflowPhases(script: string | undefined): ChatWorkflowPhase[] {
+  if (!script) return []
+  const metaAt = script.search(/export\s+const\s+meta\s*=/)
+  if (metaAt < 0) return []
+  const phasesAt = script.slice(metaAt).search(/\bphases\s*:\s*\[/)
+  if (phasesAt < 0) return []
+  const start = script.indexOf('[', metaAt + phasesAt)
+  const end = script.indexOf(']', start)
+  if (end < 0) return []
+  const phases: ChatWorkflowPhase[] = []
+  for (const match of script.slice(start + 1, end).matchAll(/\{([^{}]*)\}/g)) {
+    const title = STRING_FIELD('title').exec(match[1])?.[2].replace(/\\(.)/g, '$1').trim()
+    if (!title) continue
+    const detail = STRING_FIELD('detail').exec(match[1])?.[2].replace(/\\(.)/g, '$1').trim()
+    phases.push({ index: phases.length + 1, title, ...(detail ? { detail } : {}), started: false })
+  }
+  return phases
+}
+
+function workflowAgentState(state: unknown, startedAt: number | undefined): ChatWorkflowAgentState {
+  switch (state) {
+    case 'done': return 'done'
+    case 'error':
+    case 'failed': return 'failed'
+    case 'skipped':
+    case 'cancelled': return 'skipped'
+    case 'start':
+    case 'started':
+    case 'starting':
+    case 'queued': return startedAt === undefined ? 'queued' : 'running'
+  }
+  return 'running'
+}
+
+/**
+ * Folds a `workflow_progress` snapshot (the run's `workflow_phase` and
+ * `workflow_agent` entries, sent whole every few seconds) over what the row
+ * already knows, keeping declared phases the run hasn't reached yet.
+ */
+export function foldWorkflowProgress(previous: ChatWorkflow | undefined, entries: unknown[]): ChatWorkflow {
+  const phases = (previous?.phases ?? []).map((phase) => ({ ...phase }))
+  const notePhase = (index: number | undefined, title: string | undefined): void => {
+    if (index === undefined || !title) return
+    const declared = phases.find((phase) => phase.title === title) ?? phases.find((phase) => phase.index === index && !phase.started)
+    if (declared) {
+      declared.index = index
+      declared.title = title
+      declared.started = true
+    } else {
+      phases.push({ index, title, started: true })
+    }
+  }
+  const agents = new Map<number, ChatWorkflowAgent>()
+  for (const raw of entries) {
+    const entry = obj(raw)
+    if (!entry) continue
+    if (entry.type === 'workflow_phase') {
+      notePhase(num(entry.index), str(entry.title)?.trim())
+      continue
+    }
+    if (entry.type !== 'workflow_agent') continue
+    const index = num(entry.index)
+    if (index === undefined) continue
+    const phaseIndex = num(entry.phaseIndex)
+    notePhase(phaseIndex, str(entry.phaseTitle)?.trim())
+    const startedAt = num(entry.startedAt)
+    const attempt = num(entry.attempt)
+    const lastTool = str(entry.lastToolSummary)?.trim() || str(entry.lastToolName)
+    agents.set(index, {
+      index,
+      label: str(entry.label)?.trim() || `Agent ${index}`,
+      ...(phaseIndex !== undefined ? { phaseIndex } : {}),
+      state: workflowAgentState(entry.state, startedAt),
+      ...(startedAt !== undefined ? { startedAt } : {}),
+      ...(num(entry.durationMs) !== undefined ? { durationMs: num(entry.durationMs) } : {}),
+      ...(num(entry.tokens) !== undefined ? { tokens: num(entry.tokens) } : {}),
+      ...(num(entry.toolCalls) !== undefined ? { toolCalls: num(entry.toolCalls) } : {}),
+      ...(lastTool ? { lastTool } : {}),
+      ...(attempt !== undefined && attempt > 1 ? { attempt } : {})
+    })
+  }
+  // Phases are numbered by call order, so a declared one ahead of the run sorts by its slot.
+  phases.sort((a, b) => a.index - b.index)
+  return { phases, agents: [...agents.values()].sort((a, b) => a.index - b.index) }
+}
+
 function taskKind(taskType: string | undefined, toolName: string | undefined, agentType: string | undefined): ChatTaskKind {
   switch (taskType) {
     case 'local_agent':
@@ -827,6 +954,7 @@ function applyTaskMessage(draft: Draft, state: ChatState, m: Json, subtype: stri
       const command = kind === 'shell' ? str(toolItem?.input.command) : undefined
       const workflow = str(m.workflow_name)
       const description = str(m.description)?.trim() || (workflow ? `Workflow ${workflow}` : '') || command || existing?.description || 'Task'
+      const declared = kind === 'workflow' && !existing?.workflow ? declaredWorkflowPhases(str(m.prompt)) : []
       return put({
         ...existing,
         id,
@@ -838,6 +966,7 @@ function applyTaskMessage(draft: Draft, state: ChatState, m: Json, subtype: stri
         ...(agentType ? { agentType } : {}),
         background: m.is_backgrounded === true || existing?.background === true,
         ...(m.owned_by_subagent === true || existing?.nested ? { nested: true } : {}),
+        ...(declared.length > 0 ? { workflow: { phases: declared, agents: [] } } : {}),
         // A resumed subagent registers again under its id: it runs anew.
         status: 'running',
         endedAt: undefined,
@@ -854,7 +983,9 @@ function applyTaskMessage(draft: Draft, state: ChatState, m: Json, subtype: stri
         toolUses: num(usage?.tool_uses) ?? existing.toolUses,
         tokens: num(usage?.total_tokens) ?? existing.tokens,
         ...(lastTool ? { lastTool } : {}),
-        ...(summary ? { summary } : {})
+        ...(summary ? { summary } : {}),
+        // Only some progress frames carry the snapshot; the rest keep the last one.
+        ...(Array.isArray(m.workflow_progress) ? { workflow: foldWorkflowProgress(existing.workflow, m.workflow_progress) } : {})
       })
     }
     case 'task_updated': {

@@ -213,3 +213,71 @@ describe('chat task IPC arguments', () => {
     expect(() => validateArgs('chat-background-task', chatTaskArgs, ['tab-1', 't', 'extra'])).toThrow(/at most 2/)
   })
 })
+
+describe('chat workflow progress', () => {
+  const script = [
+    "export const meta = {",
+    "  name: 'review',",
+    "  description: 'Review the diff',",
+    "  phases: [{ title: 'Review', detail: 'one agent per dimension' }, { title: \"Verify\" }, { title: 'Report' }],",
+    "}",
+    "const results = await agent('Look', { phase: 'Review' })"
+  ].join('\n')
+  const agentEntry = (index: number, phaseIndex: number, phaseTitle: string, state: string, extra: Record<string, unknown> = {}): Record<string, unknown> =>
+    ({ type: 'workflow_agent', index, label: `agent-${index}`, phaseIndex, phaseTitle, agentId: `a${index}`, state, queuedAt: 1000, ...extra })
+
+  it('reads the declared phases from the script, then folds progress snapshots over them', () => {
+    let state = fold([
+      system('task_started', { task_id: 'w1', tool_use_id: 'tu1', description: 'Review the diff', task_type: 'local_workflow', workflow_name: 'review', prompt: script }, 1000)
+    ])
+    expect(state.tasks.w1.kind).toBe('workflow')
+    expect(state.tasks.w1.workflow).toEqual({
+      phases: [
+        { index: 1, title: 'Review', detail: 'one agent per dimension', started: false },
+        { index: 2, title: 'Verify', started: false },
+        { index: 3, title: 'Report', started: false }
+      ],
+      agents: []
+    })
+
+    state = fold([
+      system('task_progress', {
+        task_id: 'w1', description: 'Review: agent-1', usage: { total_tokens: 900, tool_uses: 4, duration_ms: 10 }, last_tool_name: 'agent-1',
+        workflow_progress: [
+          { type: 'workflow_phase', index: 1, title: 'Review' },
+          agentEntry(1, 1, 'Review', 'progress', { startedAt: 1100, lastToolName: 'Bash', lastToolSummary: 'git diff', tokens: 500 }),
+          agentEntry(2, 1, 'Review', 'start'),
+          agentEntry(3, 1, 'Review', 'done', { startedAt: 1100, durationMs: 4000, attempt: 2 }),
+          agentEntry(4, 1, 'Review', 'error', { startedAt: 1100 }),
+          { type: 'workflow_log', message: 'ignored' }
+        ]
+      }, 2000)
+    ], state)
+    const workflow = state.tasks.w1.workflow
+    expect(workflow?.phases.map((phase) => [phase.index, phase.title, phase.started])).toEqual([[1, 'Review', true], [2, 'Verify', false], [3, 'Report', false]])
+    expect(workflow?.phases[0].detail).toBe('one agent per dimension')
+    expect(workflow?.agents).toEqual([
+      { index: 1, label: 'agent-1', phaseIndex: 1, state: 'running', startedAt: 1100, tokens: 500, lastTool: 'git diff' },
+      { index: 2, label: 'agent-2', phaseIndex: 1, state: 'queued' },
+      { index: 3, label: 'agent-3', phaseIndex: 1, state: 'done', startedAt: 1100, durationMs: 4000, attempt: 2 },
+      { index: 4, label: 'agent-4', phaseIndex: 1, state: 'failed', startedAt: 1100 }
+    ])
+
+    // A frame without the snapshot keeps the last one.
+    state = fold([system('task_progress', { task_id: 'w1', description: 'x', usage: { total_tokens: 1000, tool_uses: 5, duration_ms: 20 } }, 3000)], state)
+    expect(state.tasks.w1.workflow).toBe(workflow)
+    expect(state.tasks.w1.tokens).toBe(1000)
+  })
+
+  it('builds phases from progress alone when the script declares none', () => {
+    const state = fold([
+      system('task_started', { task_id: 'w2', description: 'Ad hoc', task_type: 'local_workflow', prompt: 'await agent("x")' }, 1000),
+      system('task_progress', {
+        task_id: 'w2', description: 'x', usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 },
+        workflow_progress: [agentEntry(1, 2, 'Second', 'done'), agentEntry(2, 1, 'First', 'cancelled'), { type: 'workflow_agent', state: 'done' }]
+      }, 2000)
+    ])
+    expect(state.tasks.w2.workflow?.phases).toEqual([{ index: 1, title: 'First', started: true }, { index: 2, title: 'Second', started: true }])
+    expect(state.tasks.w2.workflow?.agents.map((agent) => agent.state)).toEqual(['done', 'skipped'])
+  })
+})

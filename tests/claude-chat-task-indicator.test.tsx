@@ -116,6 +116,42 @@ describe('TaskIndicator', () => {
     act(() => { vi.advanceTimersByTime(2000) })
     expect(screen.getByText('Plan · 7s')).toBeTruthy()
   })
+  it('summarizes a workflow and lists its phases and agents on demand', () => {
+    renderIndicator([task({
+      id: 'w1',
+      kind: 'workflow',
+      description: 'Review the diff',
+      workflow: {
+        phases: [
+          { index: 1, title: 'Review', started: true },
+          { index: 2, title: 'Verify', started: true },
+          { index: 3, title: 'Report', started: false }
+        ],
+        agents: [
+          { index: 1, label: 'bugs', phaseIndex: 1, state: 'done', durationMs: 65_000 },
+          { index: 2, label: 'perf', phaseIndex: 1, state: 'failed' },
+          { index: 3, label: 'verify-bugs', phaseIndex: 2, state: 'running', startedAt: NOW - 12_000, lastTool: 'git diff' },
+          { index: 4, label: 'verify-perf', phaseIndex: 2, state: 'queued' }
+        ]
+      }
+    })])
+    fireEvent.click(screen.getByRole('button', { name: 'Running: 1 workflow' }))
+    expect(screen.getByText('Phase 2 of 3 · Verify')).toBeTruthy()
+    expect(screen.getByText('1 of 4 agents done · 1 failed')).toBeTruthy()
+    expect(screen.queryByText('verify-bugs')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show phases and agents' }))
+    // The busy phase and the one with a failure start open; the unstarted one has nothing to open.
+    expect(screen.getByText('verify-bugs')).toBeTruthy()
+    expect(screen.getByText('git diff')).toBeTruthy()
+    expect(screen.getByText('12s')).toBeTruthy()
+    expect(screen.getByText('perf')).toBeTruthy()
+    expect(screen.getByText('1m 5s')).toBeTruthy()
+    expect(screen.getByText('not started')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Review/ }))
+    expect(screen.queryByText('perf')).toBeNull()
+  })
 })
 
 describe('ArtifactIndicator', () => {
