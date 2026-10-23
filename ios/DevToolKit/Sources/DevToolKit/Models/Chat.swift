@@ -245,10 +245,12 @@ public struct ChatStatus: Sendable, Equatable {
     public var settings: ChatSettings?
     /// The context, cost and plan-limit meter; nil until the desktop has read any of it.
     public var usage: ChatUsage?
+    /// What Claude runs beside the turn (§8.20); empty from a desktop without `chat.tasks`.
+    public var tasks: [ChatTask]
 
     public init(busy: Bool = false, turnStartedAt: Int64? = nil, process: ChatProcessState = .idle,
                 processError: String? = nil, permissionMode: String? = nil, model: String? = nil,
-                settings: ChatSettings? = nil, usage: ChatUsage? = nil) {
+                settings: ChatSettings? = nil, usage: ChatUsage? = nil, tasks: [ChatTask] = []) {
         self.busy = busy
         self.turnStartedAt = turnStartedAt
         self.process = process
@@ -257,6 +259,7 @@ public struct ChatStatus: Sendable, Equatable {
         self.model = model
         self.settings = settings
         self.usage = usage
+        self.tasks = tasks
     }
 }
 
@@ -814,6 +817,8 @@ public enum ChatOp {
     public static let permissionsUpdate = "chat.permissions.update"
     /// `!command` (§8.17); parsed by `ChatBashParams`, not `ChatParams`.
     public static let bash = "chat.bash"
+    /// §8.20, behind `DesktopFeature.chatTasks`.
+    public static let stopTask = "chat.task.stop"
 
     /// §6.3 limits.
     public static let maxSendLength = 32_000
@@ -857,7 +862,8 @@ extension ChatStatus {
             permissionMode: try f.optStr("permissionMode"),
             model: try f.optStr("model"),
             settings: f.isUnset("settings") ? nil : try ChatSettings.parse(f["settings"]),
-            usage: f.isUnset("usage") ? nil : try ChatUsage.parse(f["usage"])
+            usage: f.isUnset("usage") ? nil : try ChatUsage.parse(f["usage"]),
+            tasks: f.isUnset("tasks") ? [] : try f.array("tasks").map { (v) throws(ProtocolError) -> ChatTask in try ChatTask.parse(v) }
         )
     }
 
@@ -870,6 +876,7 @@ extension ChatStatus {
         if let model { o["model"] = .string(model) }
         if let settings { o["settings"] = settings.json }
         if let usage { o["usage"] = usage.json }
+        if !tasks.isEmpty { o["tasks"] = .array(tasks.map(\.json)) }
     }
 }
 

@@ -34,8 +34,9 @@ import Foundation
 ///   (default "Hello from the phone") and answers each prompt after
 ///   `-demoAnswerDelay <seconds>` (default 6): Allow, the first option(s), Approve.
 ///   `-demoComposerText <text>` puts text in the composer (`/` shows the command
-///   menu), and `-demoCommandSheet btw|permissions` opens that sheet (`btw` asks
-///   `-demoMessage`, or a canned question).
+///   menu), and `-demoCommandSheet btw|permissions|tasks|workflow` opens that sheet (`btw` asks
+///   `-demoMessage`, or a canned question; `workflow` is the task list with the
+///   first workflow's phases pushed).
 /// - `-pairLink <devtool://pair?d=…>` (Debug builds): open that pairing link at
 ///   launch, as if tapped; add `-autoConfirmPairing` to also press Pair. Lets
 ///   scripts pair the simulator without the system "Open in DevTool?" prompt.

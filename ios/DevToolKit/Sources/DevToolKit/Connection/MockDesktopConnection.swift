@@ -32,6 +32,8 @@ public actor MockDesktopConnection: DesktopConnection {
     private var openTab: String?
     private var chatSubscribers: [UUID: AsyncStream<ChatStreamEvent>.Continuation] = [:]
     private var scripts: [String: Task<Void, Never>] = [:]
+    /// Moves a chat's workflow along while it runs (§8.20), by tab.
+    private var taskTickers: [String: Task<Void, Never>] = [:]
     /// `/permissions` rules (§8.14), shared by every mock chat.
     private var permissionSources = MockChats.permissionSources()
     /// Worktree tasks whose close stops on a conflict until the agent fixes it (§8.15).
@@ -156,6 +158,7 @@ public actor MockDesktopConnection: DesktopConnection {
             let tabId = try string("tabId")
             guard let chat = chats[tabId] else { throw notFound() }
             openTab = tabId
+            startTaskTicker(tabId)
             return ChatOpenResult(seq: chat.seq, view: chat.view(tabId: tabId)).json
         case ChatOp.close:
             if openTab == (try string("tabId")) { openTab = nil }
@@ -347,6 +350,16 @@ public actor MockDesktopConnection: DesktopConnection {
             // Claude takes a moment to think it over.
             try? await Task.sleep(for: streamStep * 8)
             return ChatBtwResult(response: MockChats.sideAnswer(parsed.question)).json
+        case ChatOp.stopTask:
+            let parsed: ChatTaskStopParams
+            do {
+                parsed = try ChatTaskStopParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            guard let chat = chats[parsed.tabId], let task = chat.status.tasks.first(where: { $0.id == parsed.taskId }) else { throw notFound() }
+            if task.running { finishTask(parsed.tabId, parsed.taskId, .stopped) }
+            return .object([:])
         case ChatOp.bash:
             let parsed: ChatBashParams
             do {
@@ -836,6 +849,67 @@ public actor MockDesktopConnection: DesktopConnection {
         }
     }
 
+    private func finishTask(_ tabId: String, _ taskId: String, _ status: ChatTaskStatus, detail: String? = nil) {
+        change(tabId) { chat in
+            guard let at = chat.status.tasks.firstIndex(where: { $0.id == taskId }) else { return }
+            chat.status.tasks[at].status = status
+            chat.status.tasks[at].endedAt = Date().unixMilliseconds
+            if let detail { chat.status.tasks[at].detail = detail }
+        }
+    }
+
+    /// Every few seconds the running workflow's agent finishes and the next queued
+    /// one starts; the Explore subagent reports back on the fourth step.
+    private func startTaskTicker(_ tabId: String) {
+        guard taskTickers[tabId] == nil, chats[tabId]?.status.tasks.contains(where: \.running) == true else { return }
+        taskTickers[tabId] = Task { [weak self] in
+            var step = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, !Task.isCancelled else { return }
+                step += 1
+                guard await self.tickTasks(tabId, step: step) else { return }
+            }
+        }
+    }
+
+    /// One ticker step; false once nothing is left to move.
+    private func tickTasks(_ tabId: String, step: Int) -> Bool {
+        guard let chat = chats[tabId] else { return false }
+        if step == 4, chat.status.tasks.contains(where: { $0.id == "agent-callers" && $0.running }) {
+            finishTask(tabId, "agent-callers", .completed, detail: "Only src/routes/session.ts calls it, inside a try/catch.")
+        }
+        guard let at = chats[tabId]?.status.tasks.firstIndex(where: { $0.running && $0.workflow != nil }) else {
+            taskTickers[tabId] = nil
+            return false
+        }
+        let now = Date().unixMilliseconds
+        change(tabId) { chat in
+            guard var workflow = chat.status.tasks[at].workflow else { return }
+            if let running = workflow.agents.firstIndex(where: { $0.state == .running }) {
+                workflow.agents[running].state = .done
+                workflow.agents[running].durationMs = workflow.agents[running].startedAt.map { now - $0 }
+                workflow.agents[running].lastTool = nil
+            }
+            if let queued = workflow.agents.firstIndex(where: { $0.state == .queued }) {
+                workflow.agents[queued].state = .running
+                workflow.agents[queued].startedAt = now
+                workflow.agents[queued].lastTool = "Read src/auth/\(workflow.agents[queued].label.split(separator: ":").last ?? "")"
+            } else if let report = workflow.phases.firstIndex(where: { !$0.started }) {
+                workflow.phases[report].started = true
+                workflow.agents.append(ChatWorkflowAgent(label: "report", phase: report, state: .running, startedAt: now, lastTool: "Write REVIEW.md"))
+            } else {
+                chat.status.tasks[at].status = .completed
+                chat.status.tasks[at].endedAt = now
+                chat.status.tasks[at].detail = "2 findings, 1 review agent failed"
+            }
+            chat.status.tasks[at].workflow = workflow
+            chat.status.tasks[at].toolUses = (chat.status.tasks[at].toolUses ?? 0) + 5
+            chat.status.tasks[at].tokens = (chat.status.tasks[at].tokens ?? 0) + 21_000
+        }
+        return true
+    }
+
     /// `!command`: a Bash row that runs a moment, as the desktop's bash mode shows it.
     private func startBash(tabId: String, command: String) {
         guard var chat = chats[tabId] else { return }
@@ -962,6 +1036,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
+            DesktopFeature.chatTasks,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

@@ -384,6 +384,12 @@ extension DesktopConnection {
         _ = try await request(ChatOp.bash, params: ChatBashParams(tabId: tabId, command: command).json)
     }
 
+    /// `chat.task.stop` (§8.20): stops one of the chat's tasks. Its new status
+    /// arrives with a later chat event.
+    public func stopChatTask(tabId: String, taskId: String) async throws {
+        _ = try await request(ChatOp.stopTask, params: ChatTaskStopParams(tabId: tabId, taskId: taskId).json)
+    }
+
     /// `chat.permissions` (§8.14): the allow, ask and deny rules of the chat's
     /// settings files. A remote project answers `.remote(code: "unsupported")`.
     public func chatPermissions(tabId: String) async throws -> [ChatPermissionSource] {

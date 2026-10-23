@@ -11,6 +11,8 @@ enum DemoChatScript {
     enum Sheet {
         case permissions
         case btw(String)
+        /// The task list (§8.20), with that workflow's phases pushed when set.
+        case tasks(workflow: String?)
     }
 
     static func run(model: ChatModel, openDetail: (ChatItem) -> Void, setDraft: (String) -> Void, openSheet: (Sheet) -> Void) async {
@@ -29,6 +31,10 @@ enum DemoChatScript {
             openSheet(.permissions)
         case "btw":
             openSheet(.btw(options.demoMessage ?? "Why does the expired-token test get a 500?"))
+        case "tasks":
+            openSheet(.tasks(workflow: nil))
+        case "workflow":
+            openSheet(.tasks(workflow: model.view?.status.tasks.first { $0.workflow != nil }?.id))
         default:
             break
         }

@@ -162,9 +162,11 @@ enum MockChats {
         details["a1"] = .text(markdown: "Found it. `verifyRefreshToken` throws a `TokenExpiredError` …")
 
         let now = now.unixMilliseconds
+        var status = MockChatTranscript.status(turnStartedAt: now - 95_000, permissionMode: "acceptEdits", model: "claude-opus-4-5")
+        status.tasks = MockChats.fixAuthTasks(now: now)
         return MockChatTranscript(
             title: "Claude",
-            status: MockChatTranscript.status(turnStartedAt: now - 95_000, permissionMode: "acceptEdits", model: "claude-opus-4-5"),
+            status: status,
             items: items,
             prompts: [ChatPrompt(id: "p-bash", .permission(ChatPermission(
                 toolName: "Bash", title: "Run a shell command", summary: "npm test -- auth",
@@ -301,6 +303,33 @@ extension MockChats {
         ChatCommand(name: "release-notes", description: "Draft release notes from the commits since the last tag (skill)", argumentHint: "[since-tag]"),
         ChatCommand(name: "resume", description: "Resume a conversation", terminalOnly: true),
     ]
+
+    /// fix-auth's task pill (§8.20): a review workflow halfway through, an Explore
+    /// subagent and the dev server in the background.
+    static func fixAuthTasks(now: Int64) -> [ChatTask] {
+        let workflow = ChatWorkflow(
+            phases: [
+                ChatWorkflowPhase(title: "Review", detail: "one agent per concern", started: true),
+                ChatWorkflowPhase(title: "Verify", started: true),
+                ChatWorkflowPhase(title: "Report"),
+            ],
+            agents: [
+                ChatWorkflowAgent(label: "review:tokens", phase: 0, state: .done, startedAt: now - 80_000, durationMs: 41_000, tokens: 38_200),
+                ChatWorkflowAgent(label: "review:routes", phase: 0, state: .done, startedAt: now - 80_000, durationMs: 52_000, tokens: 44_900),
+                ChatWorkflowAgent(label: "review:tests", phase: 0, state: .failed, startedAt: now - 80_000, durationMs: 12_000, attempt: 2),
+                ChatWorkflowAgent(label: "verify:refresh.ts", phase: 1, state: .running, startedAt: now - 22_000, lastTool: "git diff src/auth/refresh.ts"),
+                ChatWorkflowAgent(label: "verify:session.ts", phase: 1, state: .queued),
+                ChatWorkflowAgent(label: "verify:middleware.ts", phase: 1, state: .queued),
+            ]
+        )
+        return [
+            ChatTask(id: "wf-review", kind: .workflow, description: "Review the refresh-token fix", startedAt: now - 82_000,
+                     background: true, toolUses: 46, tokens: 131_000, workflow: workflow),
+            ChatTask(id: "agent-callers", kind: .subagent, description: "Find other callers of verifyRefreshToken", startedAt: now - 9_000,
+                     agentType: "Explore", detail: "Grep", toolUses: 3, tokens: 8_400),
+            ChatTask(id: "shell-dev", kind: .shell, description: "Dev server", startedAt: now - 600_000, background: true, command: "npm run dev"),
+        ]
+    }
 
     /// What a mock `!command` prints.
     static func bashOutput(_ command: String) -> String {

@@ -18,6 +18,9 @@ struct ChatScreen: View {
     @State private var viewerImage: ChatImageRef?
     @State private var sideQuestion: SideQuestion?
     @State private var showingPermissions = false
+    @State private var showingTasks = false
+    /// A workflow the task sheet opens on (demo launches only).
+    @State private var tasksWorkflow: String?
     @State private var composerFocused = false
     /// The chat's height above the keyboard, bottom bar included; caps the prompt card.
     @State private var viewportHeight: CGFloat = 0
@@ -73,6 +76,11 @@ struct ChatScreen: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showingTasks) {
+                ChatTasksSheet(model: model, readOnly: readOnly, workflow: tasksWorkflow)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
             .sheet(isPresented: $showingPermissions) {
                 PermissionsSheet(
                     mode: model.view?.status.permissionMode,
@@ -104,6 +112,9 @@ struct ChatScreen: View {
                     switch sheet {
                     case .permissions: showingPermissions = true
                     case .btw(let question): sideQuestion = SideQuestion(question: question)
+                    case .tasks(let workflow):
+                        tasksWorkflow = workflow
+                        showingTasks = true
                     }
                 })
             }
@@ -234,6 +245,14 @@ struct ChatScreen: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomBar(proxy)
+            }
+            // Top right, as on the desktop: floating, so the bottom bar keeps its height.
+            .overlay(alignment: .topTrailing) {
+                if !model.showingCache, supportsTasks, let tasks = model.view?.status.tasks, !tasks.isEmpty {
+                    ChatTasksPill(tasks: tasks) { showingTasks = true }
+                        .padding(.top, 8)
+                        .padding(.trailing, 12)
+                }
             }
         }
         // Measured outside the bottom bar's inset: the card's height feeds the bar, so
@@ -399,6 +418,11 @@ struct ChatScreen: View {
     private var canSend: Bool {
         !readOnly && !model.sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && draft.count <= ChatOp.maxSendLength && (pictures.isEmpty || picturesSupported || bashMode)
+    }
+
+    /// The desktop sends the chat's tasks (§8.20).
+    private var supportsTasks: Bool {
+        app.supports(DesktopFeature.chatTasks, on: route.desktopId)
     }
 
     /// The desktop runs `!command`s (§8.17).

@@ -27,6 +27,8 @@ final class ChatModel {
     private(set) var loadingEarlier = false
     private(set) var sending = false
     private(set) var interrupting = false
+    /// Tasks whose `chat.task.stop` is on its way (§8.20).
+    private(set) var stoppingTasks: Set<String> = []
     /// Prompts with an answer in flight.
     private(set) var answering: Set<String> = []
     /// Why the last answer to a prompt failed (shown on its card).
@@ -273,6 +275,18 @@ final class ChatModel {
         } catch {
             show(error)
             return false
+        }
+    }
+
+    /// A task's Stop (§8.20); its new status comes with a later chat event.
+    func stopTask(_ taskId: String) async {
+        guard let connection = connection(), !stoppingTasks.contains(taskId) else { return }
+        stoppingTasks.insert(taskId)
+        defer { stoppingTasks.remove(taskId) }
+        do {
+            try await connection.stopChatTask(tabId: route.tabId, taskId: taskId)
+        } catch {
+            show(error)
         }
     }
 
