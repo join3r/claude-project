@@ -249,3 +249,86 @@ describe('InboxPanel grouped headers', () => {
     expect(onStreamMenu).toHaveBeenCalledWith(expect.objectContaining({ x: expect.any(Number) }), 'q', 'hot')
   })
 })
+
+describe('InboxPanel warnings, apps and rename', () => {
+  const server: Project = {
+    id: 'r',
+    name: 'GPU',
+    directory: '/srv/gpu',
+    host: 'srv1',
+    streams: [createMainStream('r', [task('g', { eventAt: NOW - 10_000 })])]
+  }
+  function renderWith(props: Partial<React.ComponentProps<typeof InboxPanel>>, projects: Project[] = [devtool, stem, server]) {
+    return render(
+      <InboxPanel
+        projects={projects}
+        selectedTaskId={null}
+        onSelectTask={vi.fn()}
+        onTaskContextMenu={vi.fn()}
+        onSnooze={vi.fn()}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onNewTask={vi.fn()}
+        allStatuses={statuses}
+        statusSince={since}
+        activities={{}}
+        now={NOW}
+        theme="dark"
+        {...props}
+      />
+    )
+  }
+
+  it('warns on rows of a project whose folder is missing, and the warning opens the fix', () => {
+    const onFixMissingDir = vi.fn()
+    const onSelectTask = vi.fn()
+    renderWith({ missingDirIds: new Set(['q']), onFixMissingDir, onSelectTask })
+    expect(within(row('f')).getByTestId('inbox-missing-dir').textContent).toBe('folder missing')
+    expect(within(row('a')).queryByTestId('inbox-missing-dir')).toBeNull()
+    fireEvent.click(within(row('f')).getByTestId('inbox-missing-dir'))
+    expect(onFixMissingDir).toHaveBeenCalledWith('q')
+    expect(onSelectTask).not.toHaveBeenCalled()
+  })
+
+  it('warns about and dims rows of an unreachable server, and its grouped header', () => {
+    const isUnreachable = (project: Project) => project.id === 'r'
+    renderWith({ isUnreachable })
+    expect(within(row('g')).getByTestId('inbox-server-offline').textContent).toBe('server offline')
+    expect(row('g').dataset.serverOffline).toBe('true')
+    expect(row('a').dataset.serverOffline).toBeUndefined()
+    cleanup()
+    renderWith({ isUnreachable, layout: 'grouped' })
+    const header = screen.getAllByTestId('inbox-project-header').find(el => el.dataset.projectId === 'r')!
+    expect(within(header).getByTestId('inbox-server-offline')).toBeTruthy()
+  })
+
+  it('shows the apps slot even when the inbox is empty, and a badge per row', () => {
+    renderWith({ apps: <div data-testid="apps" />, rowBadge: (entry) => (entry.task.id === 'b' ? <span data-testid="run" /> : null) })
+    expect(screen.getByTestId('apps')).toBeTruthy()
+    expect(within(row('b')).getByTestId('run')).toBeTruthy()
+    expect(within(row('a')).queryByTestId('run')).toBeNull()
+    cleanup()
+    renderWith({ apps: <div data-testid="apps" /> }, [])
+    expect(screen.getByTestId('apps')).toBeTruthy()
+    expect(screen.getByText('Nothing in the inbox yet')).toBeTruthy()
+  })
+
+  it('renames a row in place', () => {
+    const onChange = vi.fn()
+    const onSubmit = vi.fn()
+    const onCancel = vi.fn()
+    const onSelectTask = vi.fn()
+    renderWith({ onSelectTask, rename: { taskId: 'a', value: 'Task a', onChange, onSubmit, onCancel } })
+    const input = within(row('a')).getByTestId('inbox-row-rename') as HTMLInputElement
+    expect(input.value).toBe('Task a')
+    fireEvent.change(input, { target: { value: 'Renamed' } })
+    expect(onChange).toHaveBeenCalledWith('Renamed')
+    fireEvent.click(input)
+    expect(onSelectTask).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSubmit).toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(onCancel).toHaveBeenCalled()
+    expect(within(row('b')).queryByTestId('inbox-row-rename')).toBeNull()
+  })
+})

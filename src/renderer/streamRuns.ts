@@ -9,6 +9,8 @@ import { showToast } from './toasts'
  */
 
 let states: Record<string, StreamRunState> = {}
+/** Which project each known stream's run belongs to, so a project's runs can be replaced as a whole. */
+const projectOfStream = new Map<string, string>()
 const listeners = new Set<() => void>()
 const fetched = new Set<string>()
 let connected = false
@@ -28,18 +30,42 @@ function setState(streamId: string, state: StreamRunState | null): void {
 function connect(): void {
   if (connected) return
   connected = true
-  window.api.onStreamRunState((_projectId, streamId, state) => setState(streamId, state))
+  window.api.onStreamRunState((projectId, streamId, state) => {
+    projectOfStream.set(streamId, projectId)
+    setState(streamId, state)
+  })
 }
 
-function fetchProject(projectId: string): void {
-  if (fetched.has(projectId)) return
+/**
+ * Ask the project's host for its runs, once. `fresh` asks again and lets the
+ * answer replace what was known (a DevTool server back online may have
+ * restarted, so runs it no longer has are gone).
+ */
+function fetchProject(projectId: string, fresh = false): void {
+  if (fetched.has(projectId) && !fresh) return
   fetched.add(projectId)
   window.api.streamRunStates(projectId).then((snapshot) => {
-    // A pushed update since asking is newer than the snapshot: keep it.
-    const next = { ...snapshot, ...states }
+    for (const streamId of Object.keys(snapshot)) projectOfStream.set(streamId, projectId)
+    let next: Record<string, StreamRunState>
+    if (fresh) {
+      next = {}
+      for (const [streamId, state] of Object.entries(states)) {
+        if (projectOfStream.get(streamId) !== projectId) next[streamId] = state
+      }
+      Object.assign(next, snapshot)
+    } else {
+      // A pushed update since asking is newer than the snapshot: keep it.
+      next = { ...snapshot, ...states }
+    }
     states = next
     notify()
   }).catch(() => { fetched.delete(projectId) })
+}
+
+/** Ask these projects' hosts for their runs again (a DevTool server came back online). */
+export function refetchStreamRuns(projectIds: readonly string[]): void {
+  connect()
+  for (const projectId of projectIds) fetchProject(projectId, true)
 }
 
 function subscribe(listener: () => void): () => void {
@@ -52,6 +78,44 @@ function subscribe(listener: () => void): () => void {
 export function useStreamRun(projectId: string, streamId: string): StreamRunState | undefined {
   useEffect(() => { fetchProject(projectId) }, [projectId])
   return useSyncExternalStore(subscribe, () => states[streamId])
+}
+
+/**
+ * Every run this window knows, after asking each of these projects' hosts:
+ * what the Inbox's Apps section lists.
+ */
+export function useAllStreamRuns(projectIds: readonly string[]): Record<string, StreamRunState> {
+  const key = projectIds.join('\u0000')
+  useEffect(() => {
+    connect()
+    for (const projectId of key ? key.split('\u0000') : []) fetchProject(projectId)
+  }, [key])
+  return useSyncExternalStore(subscribe, () => states)
+}
+
+// ---- crashes dismissed from the Inbox's Apps section --------------------------
+
+/** `streamId:startedAt` of failed runs the Apps section was told to forget; the next run shows again. */
+let dismissed: ReadonlySet<string> = new Set()
+const dismissedListeners = new Set<() => void>()
+
+export function streamRunKey(streamId: string, run: StreamRunState): string {
+  return `${streamId}:${run.startedAt}`
+}
+
+export function dismissStreamRunCrash(streamId: string, run: StreamRunState): void {
+  dismissed = new Set([...dismissed, streamRunKey(streamId, run)])
+  dismissedListeners.forEach((listener) => listener())
+}
+
+export function useDismissedStreamRunCrashes(): ReadonlySet<string> {
+  return useSyncExternalStore(
+    (listener) => {
+      dismissedListeners.add(listener)
+      return () => dismissedListeners.delete(listener)
+    },
+    () => dismissed
+  )
 }
 
 /**

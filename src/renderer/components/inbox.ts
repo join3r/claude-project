@@ -1,4 +1,5 @@
 import type { Project, Stream, Task } from '../../shared/types'
+import type { StreamRunState } from '../../shared/stream-run'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import {
   inboxState,
@@ -270,4 +271,40 @@ export function formatWaitTime(ms: number): string {
 export function formatRelativeAge(ms: number): string {
   if (ms < 60_000) return 'now'
   return formatWaitTime(ms)
+}
+
+/** A stream's app the Inbox's Apps section lists: running, or ended by itself with a failure. */
+export interface InboxApp {
+  project: Project
+  stream: Stream
+  run: StreamRunState
+  /** It exited with a non-zero (or unknown) code. */
+  crashed: boolean
+}
+
+/**
+ * The Apps section: crashes first (latest to end on top), then running apps
+ * (latest started on top). A crash dismissed for its run (`streamId:startedAt`)
+ * stays out until the stream runs again.
+ */
+export function inboxApps(
+  projects: readonly Project[],
+  runs: Readonly<Record<string, StreamRunState>>,
+  dismissed: ReadonlySet<string> = new Set()
+): InboxApp[] {
+  const crashed: InboxApp[] = []
+  const running: InboxApp[] = []
+  for (const project of projects) {
+    for (const stream of project.streams) {
+      const run = runs[stream.id]
+      if (!run) continue
+      if (run.status === 'running') running.push({ project, stream, run, crashed: false })
+      else if (run.status === 'exited' && run.exitCode !== 0 && !dismissed.has(`${stream.id}:${run.startedAt}`)) {
+        crashed.push({ project, stream, run, crashed: true })
+      }
+    }
+  }
+  crashed.sort((a, b) => (b.run.endedAt ?? b.run.startedAt) - (a.run.endedAt ?? a.run.startedAt))
+  running.sort((a, b) => b.run.startedAt - a.run.startedAt)
+  return [...crashed, ...running]
 }

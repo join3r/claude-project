@@ -84,7 +84,7 @@ function EntityDialogView(): React.ReactElement | null {
     case 'rename-project':
       return <RenameFolderProject project={project} />
     case 'rename':
-      return <RenameDialog project={project} streamId={dialog.streamId} />
+      return <RenameDialog project={project} streamId={dialog.streamId} fresh={dialog.fresh} />
     case 'duplicate-project':
       return <DuplicateProject project={project} />
   }
@@ -105,7 +105,7 @@ function RenameFolderProject({ project }: { project: Project }): React.ReactElem
 }
 
 /** A new name for a stream, or for a project without a folder: what the tree does in place. */
-function RenameDialog({ project, streamId }: { project: Project; streamId?: string }): React.ReactElement | null {
+function RenameDialog({ project, streamId, fresh = false }: { project: Project; streamId?: string; fresh?: boolean }): React.ReactElement | null {
   const { renameProject, renameStream } = useApp()
   const stream = streamId ? project.streams.find(s => s.id === streamId) : undefined
   const [value, setValue] = useState(stream ? stream.name : project.name)
@@ -120,12 +120,12 @@ function RenameDialog({ project, streamId }: { project: Project; streamId?: stri
   }
   return (
     <Modal
-      title={stream ? `Rename stream · ${stream.name}` : `Rename ${project.name}`}
+      title={stream ? `Rename stream · ${stream.name}` : fresh ? 'Name the new project' : `Rename ${project.name}`}
       onClose={closeEntityDialog}
       footer={
         <>
           <LinkBtn onClick={closeEntityDialog}>Cancel</LinkBtn>
-          <PrimaryButton onClick={save} disabled={!value.trim()}>Rename</PrimaryButton>
+          <PrimaryButton onClick={save} disabled={!value.trim()}>{fresh ? 'Save' : 'Rename'}</PrimaryButton>
         </>
       }
     >

@@ -11,8 +11,8 @@ export type EntityDialog =
   | { kind: 'project-settings'; projectId: string }
   /** Rename… for a project with a folder: the dialog that can rename the folder too. */
   | { kind: 'rename-project'; projectId: string }
-  /** A plain name: a stream, or a project without a folder. */
-  | { kind: 'rename'; projectId: string; streamId?: string }
+  /** A plain name: a stream, or a project without a folder; `fresh` names a project just added (from the Inbox). */
+  | { kind: 'rename'; projectId: string; streamId?: string; fresh?: boolean }
   | { kind: 'duplicate-project'; projectId: string }
   /** The SSH project as it was when the dialog opened (once moved it has no `ssh`). */
   | { kind: 'move-to-server'; project: Project }

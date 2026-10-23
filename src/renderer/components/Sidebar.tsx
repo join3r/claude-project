@@ -1,4 +1,6 @@
 import { ProjectStreamRunBadge, SidebarStreamRunAction, SidebarStreamRunBadge } from './StreamRunControls'
+import InboxApps from './InboxApps'
+import { refetchStreamRuns } from '../streamRuns'
 import { streamRunCommand } from '../../shared/stream-run'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
@@ -259,6 +261,26 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     () => treeProjectIds.filter(id => !pinnedProjectIds.has(id)),
     [treeProjectIds, pinnedProjectIds]
   )
+  /** Task id → project id, for the Inbox's in-place rename. */
+  const inboxTaskIds = React.useMemo(() => {
+    const ids = new Map<string, string>()
+    for (const project of inboxProjects) for (const task of projectTasks(project)) ids.set(task.id, project.id)
+    return ids
+  }, [inboxProjects])
+
+  // A DevTool server back online may have started or lost runs while away: ask its projects again.
+  const onlineServerIds = pairedServers.filter(s => s.state === 'online').map(s => s.id).join(',')
+  const lastOnlineRef = useRef<ReadonlySet<string> | null>(null)
+  useEffect(() => {
+    const online = new Set(onlineServerIds ? onlineServerIds.split(',') : [])
+    const before = lastOnlineRef.current
+    lastOnlineRef.current = online
+    if (!before) return
+    const back = [...online].filter(id => !before.has(id))
+    if (back.length === 0) return
+    refetchStreamRuns(projects.filter(p => p.host && back.includes(p.host)).map(p => p.id))
+  }, [onlineServerIds]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const isPinned = useCallback((item: PinnedItem) => {
     const key = pinnedItemKey(item)
     return (pinnedItems ?? []).some(candidate => pinnedItemKey(candidate) === key)
@@ -333,18 +355,40 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   }, [])
 
   /**
-   * The inline rename input and the "+ Task" affordances only exist in the project
-   * tree, so anything that starts an edit has to bring the tree back first —
-   * otherwise the inbox swallows it and the action looks like it did nothing.
-   * A stream or task being renamed is opened so its row is on screen.
+   * Start an inline rename. In the tree a stream or task being renamed is opened
+   * so its row is on screen. In the Inbox a task is renamed on its own row; a
+   * project or stream (no row there) gets the rename dialog instead, so the
+   * sidebar never jumps to Projects.
    */
   const beginEdit = useCallback((id: string, name: string, projectId?: string, streamId?: string) => {
-    setSidebarTab('projects')
     if (projectId) setProjectExpanded(projectId, true)
     if (streamId) setStreamExpanded(streamId, true)
+    if (sidebarTab === 'inbox') {
+      const project = projectId ? projects.find(p => p.id === projectId) : projects.find(p => p.id === id)
+      if (project && !projectId) { openEntityDialog({ kind: 'rename', projectId: project.id }); return }
+      if (project && project.streams.some(stream => stream.id === id)) {
+        openEntityDialog({ kind: 'rename', projectId: project.id, streamId: id })
+        return
+      }
+    }
     setEditingId(id)
     setEditValue(name)
-  }, [setSidebarTab, setProjectExpanded, setStreamExpanded])
+  }, [sidebarTab, projects, setProjectExpanded, setStreamExpanded])
+
+  /**
+   * A project just added, to show once it is in the list: its Project Home (and
+   * a stream's card on it) when the sidebar is on the Inbox, which has no row for it.
+   */
+  const [pendingHome, setPendingHome] = useState<{ projectId: string; streamId?: string } | null>(null)
+  useEffect(() => {
+    if (!pendingHome || !projectsById.has(pendingHome.projectId)) return
+    setPendingHome(null)
+    selectProjectHome(pendingHome.projectId)
+    if (pendingHome.streamId) {
+      const testId = `home-stream-${pendingHome.streamId}`
+      window.setTimeout(() => document.querySelector(`[data-testid="${testId}"]`)?.scrollIntoView({ block: 'nearest' }), 50)
+    }
+  }, [pendingHome, projectsById, selectProjectHome])
 
   const handleAddProject = async () => {
     const dir = await window.api.pickDirectory()
@@ -354,7 +398,21 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     // A fresh project has no tasks, so it is invisible in the inbox; expanded in
     // the tree it at least offers "+ Task".
     setProjectExpanded(project.id, true)
+    if (inboxActive) {
+      // Stay in the Inbox: name it in a dialog over its Project Home.
+      setPendingHome({ projectId: project.id })
+      openEntityDialog({ kind: 'rename', projectId: project.id, fresh: true })
+      return
+    }
     beginEdit(project.id, project.name)
+  }
+
+  /** Where server projects just added show: their first one's row in the tree, or its Project Home from the Inbox. */
+  const revealAddedProjects = (created: readonly Project[]) => {
+    if (!created[0]) return
+    setProjectExpanded(created[0].id, true)
+    if (inboxActive) setPendingHome({ projectId: created[0].id })
+    else setSidebarTab('projects')
   }
 
   /** An empty task in `streamId`, or in the project's current stream (see `useAddEmptyTask`). */
@@ -372,9 +430,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const stream = addStream(projectId, name, workspace)
     setNewStreamProjectId(null)
     if (workspace && setupPending) openEntityDialog({ kind: 'stream-setup', projectId, streamId: stream.id, branch: workspace.branchName, pending: setupPending })
-    setSidebarTab('projects')
     setProjectExpanded(projectId, true)
     setStreamExpanded(stream.id, true)
+    // From the Inbox, the new stream shows on its project's home page rather than in the tree.
+    if (inboxActive) setPendingHome({ projectId, streamId: stream.id })
+    else setSidebarTab('projects')
   }
 
   /**
@@ -1009,6 +1069,31 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           layout={inboxGrouped ? 'grouped' : 'flat'}
           showIcons={showIcons}
           pinnedProjectIds={pinnedProjectOrder}
+          apps={(
+            <InboxApps
+              projects={inboxProjects}
+              now={now}
+              theme={effectiveTheme}
+              showIcons={showIcons}
+              isUnreachable={isUnreachable}
+              onStreamMenu={(at, projectId, streamId) => setEntityMenu({ ...at, kind: 'stream', projectId, streamId })}
+            />
+          )}
+          rowBadge={(entry) => <SidebarStreamRunBadge projectId={entry.project.id} streamId={entry.stream.id} command={undefined} />}
+          missingDirIds={missingDirs}
+          onFixMissingDir={(projectId) => openEntityDialog({ kind: 'project-settings', projectId })}
+          isUnreachable={isUnreachable}
+          rename={editingId && inboxTaskIds.has(editingId) ? {
+            taskId: editingId,
+            value: editValue,
+            onChange: setEditValue,
+            onSubmit: () => {
+              const projectId = inboxTaskIds.get(editingId)
+              if (projectId) handleRenameSubmit('task', projectId, editingId)
+              else setEditingId(null)
+            },
+            onCancel: () => setEditingId(null)
+          } : null}
         />
       ) : (
       <div className="sidebar-list flex-1 overflow-y-auto pb-1">
@@ -1087,8 +1172,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onAdd={(serverId, items) => {
             const created = addServerProjects(serverId, items)
             setServerProjectOpen(false)
-            setSidebarTab('projects')
-            if (created[0]) setProjectExpanded(created[0].id, true)
+            revealAddedProjects(created)
           }}
           onClose={() => setServerProjectOpen(false)}
         />
@@ -1099,9 +1183,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           sshTargets={knownSshTargets(orderedProjects)}
           existingDirectories={serverDirectories}
           onAddProjects={(serverId, items) => {
-            const created = addServerProjects(serverId, items)
-            setSidebarTab('projects')
-            if (created[0]) setProjectExpanded(created[0].id, true)
+            revealAddedProjects(addServerProjects(serverId, items))
           }}
           onChooseFolder={(serverId) => {
             setAddServerOpen(false)
@@ -1142,6 +1224,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               if (tagIds) setProjectTags(project.id, tagIds)
             }
             setProjectExpanded(project.id, true)
+            if (inboxActive) setPendingHome({ projectId: project.id })
           }}
           onCancel={() => setNewProjectOpen(false)}
         />

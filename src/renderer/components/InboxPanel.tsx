@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { AlarmClockOff, Check, Clock, Cog, Inbox as InboxIcon, MoreHorizontal, Plus, SquarePen, X } from 'lucide-react'
+import { AlarmClockOff, Check, Clock, Cog, Inbox as InboxIcon, MoreHorizontal, Plus, Server, SquarePen, TriangleAlert, X } from 'lucide-react'
 import type { AppConfig, Project, Task } from '../../shared/types'
 import { isEphemeralProject } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
@@ -23,6 +23,7 @@ import {
   type TaskActivitySummary
 } from './inbox'
 import type { AgentActivity } from '../../shared/agent-activity'
+import { serverName, useServersState } from '../serversState'
 
 type Props = {
   projects: Project[]
@@ -61,6 +62,27 @@ type Props = {
   showIcons?: boolean
   /** Pinned projects in pin order; the grouped layout puts their groups first. */
   pinnedProjectIds?: readonly string[]
+  /** Shown above everything, even an empty Inbox: the running and crashed apps (`InboxApps`). */
+  apps?: React.ReactNode
+  /** What a row shows of its stream's app (the ▶ badge). */
+  rowBadge?: (entry: InboxEntry) => React.ReactNode
+  /** Projects whose folder is gone: a "folder missing" warning on their rows and header. */
+  missingDirIds?: ReadonlySet<string>
+  /** The "folder missing" warning's click: what the tree's badge does (Project settings). */
+  onFixMissingDir?: (projectId: string) => void
+  /** A DevTool server's project whose server isn't online: warned about and dimmed, like the tree. */
+  isUnreachable?: (project: Project) => boolean
+  /** The task being renamed in place (the row menu's Rename), with the name typed so far. */
+  rename?: InboxRename | null
+}
+
+/** An Inbox row's name being edited: the input's value and what Enter, blur and Escape do. */
+export interface InboxRename {
+  taskId: string
+  value: string
+  onChange: (value: string) => void
+  onSubmit: () => void
+  onCancel: () => void
 }
 
 type GroupKey = 'needsYou' | 'ready' | 'working' | 'snoozed'
@@ -99,6 +121,59 @@ function rowSubtitle(entry: InboxEntry, now: number, group: GroupKey, agent: Tas
 }
 
 const TILE = 16
+
+/** The tree's inline rename input. */
+const renameInputCls = 'bg-field border border-border-focus text-text text-[inherit] px-1 py-px rounded-sm outline-none w-full'
+
+/** "folder missing" and "server offline" after a project's name: what the tree's badges say. */
+function ProjectWarnings({ project, missing, unreachable, onFixMissing }: {
+  project: Project
+  missing: boolean
+  unreachable: boolean
+  onFixMissing?: () => void
+}): React.ReactElement | null {
+  if (!missing && !unreachable) return null
+  return (
+    <>
+      {missing && (
+        <button
+          type="button"
+          className="flex items-center gap-1 shrink-0 px-1 py-px rounded-sm border border-danger/40 bg-transparent text-2xs text-danger cursor-pointer hover:bg-danger/10"
+          title={`Folder not found: ${project.directory}\nClick to pick its new location.`}
+          data-testid="inbox-missing-dir"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onFixMissing?.() }}
+        >
+          <TriangleAlert size={10} aria-hidden />
+          folder missing
+        </button>
+      )}
+      {unreachable && project.host && <ServerOfflineBadge serverId={project.host} />}
+    </>
+  )
+}
+
+const SERVER_STATE_WORDS: Record<string, string> = {
+  offline: 'server offline',
+  connecting: 'connecting',
+  incompatible: 'server needs an update',
+  updating: 'server updating'
+}
+
+function ServerOfflineBadge({ serverId }: { serverId: string }): React.ReactElement {
+  const state = useServersState()
+  const kind = state.servers.find(s => s.id === serverId)?.state ?? 'offline'
+  return (
+    <span
+      className="flex items-center gap-1 shrink-0 px-1 py-px rounded-sm border border-hair text-2xs text-text-muted font-normal"
+      title={`On ${serverName(serverId, state)} (${kind})`}
+      data-testid="inbox-server-offline"
+    >
+      <Server size={10} aria-hidden />
+      {SERVER_STATE_WORDS[kind] ?? 'server offline'}
+    </span>
+  )
+}
 const NO_PINS: readonly string[] = []
 
 /** The row's dot: the sidebar's colours for the same states. In Ready only the rows waiting on your reply get one. */
@@ -124,7 +199,11 @@ function InboxRow({
   onContextMenu,
   onSnooze,
   onClose,
-  onRemove
+  onRemove,
+  badge,
+  warnings,
+  dimmed = false,
+  rename
 }: {
   entry: InboxEntry
   group: GroupKey
@@ -141,6 +220,14 @@ function InboxRow({
   onSnooze: (e: React.MouseEvent) => void
   onClose: () => void
   onRemove: () => void
+  /** The stream's app badge (▶). */
+  badge?: React.ReactNode
+  /** The project's warnings (folder missing, server offline), after its name. */
+  warnings?: React.ReactNode
+  /** The project's server isn't online. */
+  dimmed?: boolean
+  /** Set while this row's name is being edited in place. */
+  rename?: InboxRename
 }): React.ReactElement {
   const { task, project, stream, unread } = entry
   const activity = lastActivityAt(task)
@@ -154,6 +241,7 @@ function InboxRow({
 
   const trailing = (
     <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+      {badge}
       <RowActions>
         <RowAction title="Close task" onClick={onClose}>
           <Check size={13} />
@@ -179,12 +267,13 @@ function InboxRow({
       className={[
         'group flex gap-2 mx-1.5 px-2 py-1.5 rounded-md cursor-pointer text-sm text-text',
         'transition-colors duration-(--motion-fast)',
-        working && !selected ? 'opacity-50 hover:opacity-100' : '',
+        working && !selected ? 'opacity-50 hover:opacity-100' : dimmed && !selected ? 'opacity-55 hover:opacity-100' : '',
         selected ? 'bg-sel' : 'hover:bg-surface-3'
       ].join(' ')}
-      onClick={onSelect}
+      onClick={rename ? undefined : onSelect}
       onContextMenu={onContextMenu}
-      title={agent.tooltip}
+      title={rename ? undefined : agent.tooltip}
+      data-server-offline={dimmed ? 'true' : undefined}
       data-testid="inbox-row"
       data-task-id={task.id}
     >
@@ -219,6 +308,24 @@ function InboxRow({
         </div>
       )}
       <div className={`flex items-center gap-1.5 ${indent}`}>
+        {rename ? (
+          <input
+            autoFocus
+            aria-label="Task name"
+            className={renameInputCls}
+            value={rename.value}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => rename.onChange(e.target.value)}
+            onBlur={rename.onSubmit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') rename.onSubmit()
+              if (e.key === 'Escape') rename.onCancel()
+            }}
+            data-testid="inbox-row-rename"
+          />
+        ) : (
         <span
           className={[
             'overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0',
@@ -229,7 +336,10 @@ function InboxRow({
         >
           {task.name}
         </span>
-        {!placeLine && trailing}
+        )}
+        {/* Under the project's name line, so hover actions never cover them. */}
+        {showProject && warnings && <span className="flex items-center gap-1 shrink-0">{warnings}</span>}
+        {!placeLine && !rename && trailing}
       </div>
       {subtitle && (
         <div
@@ -259,8 +369,10 @@ function belowAnchor(e: React.MouseEvent): MenuAnchor {
  * state and app badge. Clicking it opens the project's home page; right-click
  * or ⋯ opens the project's menu, and hovering offers + Task and its settings.
  */
-function ProjectHeader({ project, theme, count, showIcon, selected, state, badge, onOpen, onMenu, onSettings, onNewTask }: {
+function ProjectHeader({ project, theme, count, showIcon, selected, state, badge, warnings, dimmed = false, onOpen, onMenu, onSettings, onNewTask }: {
   project: Project
+  warnings?: React.ReactNode
+  dimmed?: boolean
   theme: 'dark' | 'light'
   count: number
   showIcon: boolean
@@ -277,7 +389,8 @@ function ProjectHeader({ project, theme, count, showIcon, selected, state, badge
       className={[
         'group flex items-center gap-1.5 mx-1.5 mt-1.5 px-1.5 py-1 rounded-md text-xs overflow-hidden whitespace-nowrap',
         onOpen ? 'cursor-pointer transition-colors duration-(--motion-fast)' : '',
-        selected ? 'bg-sel' : onOpen ? 'hover:bg-surface-3' : ''
+        selected ? 'bg-sel' : onOpen ? 'hover:bg-surface-3' : '',
+        dimmed ? 'opacity-55' : ''
       ].join(' ')}
       onClick={onOpen}
       onContextMenu={onMenu ? (e) => { e.preventDefault(); e.stopPropagation(); onMenu({ x: e.clientX, y: e.clientY }) } : undefined}
@@ -288,6 +401,7 @@ function ProjectHeader({ project, theme, count, showIcon, selected, state, badge
       {showIcon && <ProjectTileBadge project={project} theme={theme} size={TILE} />}
       <span className="text-base font-semibold text-text overflow-hidden text-ellipsis min-w-0">{project.name}</span>
       <span className="text-2xs text-text-subtle">{count}</span>
+      {warnings}
       <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
         {badge}
         <StateDot state={state} hideOnHover />
@@ -346,7 +460,7 @@ function QuietStreamsLine({ project, shownStreamIds, onStreamMenu }: {
   )
 }
 
-function GroupHeader({
+export function GroupHeader({
   label,
   count,
   collapsible,
@@ -398,8 +512,27 @@ export default function InboxPanel({
   theme,
   layout = 'flat',
   showIcons = false,
-  pinnedProjectIds = NO_PINS
+  pinnedProjectIds = NO_PINS,
+  apps,
+  rowBadge,
+  missingDirIds,
+  onFixMissingDir,
+  isUnreachable,
+  rename
 }: Props): React.ReactElement {
+  const warningsFor = (project: Project): React.ReactNode => {
+    const missing = !!missingDirIds?.has(project.id)
+    const unreachable = !!isUnreachable?.(project)
+    if (!missing && !unreachable) return null
+    return (
+      <ProjectWarnings
+        project={project}
+        missing={missing}
+        unreachable={unreachable}
+        onFixMissing={onFixMissingDir ? () => onFixMissingDir(project.id) : undefined}
+      />
+    )
+  }
   // Fold state lives with the panel, as it always has for Snoozed.
   // Ready and Working are never folded: Ready holds the replies you owe, and the
   // task you just sent a prompt to moves to Working and must stay in sight.
@@ -443,6 +576,10 @@ export default function InboxPanel({
       onSnooze={(e) => onSnooze(e, entry.project.id, entry.task.id)}
       onClose={() => onClose(entry.project.id, entry.task.id)}
       onRemove={() => onRemove(entry.project.id, entry.task.id)}
+      badge={rowBadge?.(entry)}
+      warnings={warningsFor(entry.project)}
+      dimmed={!!isUnreachable?.(entry.project)}
+      rename={rename?.taskId === entry.task.id ? rename : undefined}
     />
   )
 
@@ -466,6 +603,7 @@ export default function InboxPanel({
   if (total === 0) {
     return (
       <div className="sidebar-list flex-1 overflow-y-auto py-1">
+        {apps}
         <div className="flex flex-col items-center gap-2 p-6 text-text-muted text-sm text-center">
           <InboxIcon size={20} />
           <span>Nothing in the inbox yet</span>
@@ -483,6 +621,7 @@ export default function InboxPanel({
 
   return (
     <div className="sidebar-list flex-1 overflow-y-auto py-1">
+      {apps}
       {grouped ? (<>
         {projectGroups.map(({ project, entries }) => (
           <div key={project.id} data-testid="inbox-project-group">
@@ -494,6 +633,8 @@ export default function InboxPanel({
               selected={selectedProjectHomeId === project.id}
               state={rollUpState(projectTasks(project).map(task => sidebarTaskState(task, allStatuses, now)))}
               badge={projectBadge?.(project)}
+              warnings={warningsFor(project)}
+              dimmed={!!isUnreachable?.(project)}
               onOpen={onOpenProject ? () => onOpenProject(project.id) : undefined}
               onMenu={onProjectMenu && !isEphemeralProject(project) ? (at) => onProjectMenu(at, project.id) : undefined}
               onSettings={onProjectSettings && !isEphemeralProject(project) ? () => onProjectSettings(project.id) : undefined}
