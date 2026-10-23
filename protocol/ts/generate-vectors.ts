@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -537,6 +537,25 @@ function chatMessages(): unknown {
     tabId: 'tab-chat', title: 'Claude', busy: true, turnStartedAt: 1790000000000, process: 'running',
     permissionMode: 'default', model: 'claude-opus-4-5', settings, usage, items, hasEarlier: true, prompts
   }
+  // §8.20: the task pill's rows.
+  const tasks = [
+    {
+      id: 'wf1', kind: 'workflow', description: 'Review the diff', status: 'running', startedAt: 1790000001000,
+      background: true, toolUses: 31, tokens: 120400,
+      workflow: {
+        phases: [{ title: 'Review', detail: 'one agent per dimension', started: true }, { title: 'Verify', started: true }, { title: 'Report' }],
+        agents: [
+          { label: 'review:bugs', phase: 0, state: 'done', startedAt: 1790000001100, durationMs: 64000, tokens: 40100 },
+          { label: 'review:perf', phase: 0, state: 'failed', startedAt: 1790000001100, attempt: 2 },
+          { label: 'verify:auth.ts', phase: 1, state: 'running', startedAt: 1790000070000, lastTool: 'git diff src/auth.ts' },
+          { label: 'verify:cache.ts', phase: 1, state: 'queued' }
+        ],
+        moreAgents: 12
+      }
+    },
+    { id: 'a1', kind: 'subagent', description: 'Look around the router', status: 'running', startedAt: 1790000002000, agentType: 'Explore', detail: 'Grep', toolUses: 3, tokens: 1200 },
+    { id: 'b1', kind: 'shell', description: 'Dev server', status: 'completed', startedAt: 1790000000500, endedAt: 1790000003000, background: true, command: 'npm run dev' }
+  ]
   const viewWithUnknowns = {
     ...view,
     layout: 'bubbles',
@@ -609,6 +628,16 @@ function chatMessages(): unknown {
     events: [
       sample(event),
       sample({ ...event, seq: 13, upserts: [], removes: ['i10-0'], prompts: [], busy: false, turnStartedAt: null, process: 'exited', processError: 'Claude exited (code 1)', model: null }),
+      sample({ ...event, seq: 16, upserts: [], tasks }),
+      // Unknown kind, status and agent state read as other / running; unknown fields and nulls drop; an empty list is no tasks.
+      sample({
+        ...event, seq: 17, upserts: [],
+        tasks: [
+          { id: 'c1', kind: 'cron', description: 'Nightly', status: 'paused', startedAt: null, background: false, command: null, colour: 'blue' },
+          { ...tasks[0], workflow: { phases: [{ title: 'Review', started: false, detail: null }], agents: [{ label: 'x', state: 'thinking', phase: null, lastTool: null }], moreAgents: 0, eta: 5 } }
+        ]
+      }),
+      sample({ ...event, seq: 18, upserts: [], tasks: [] }),
       sample({ ...event, seq: 15, upserts: [], usage: { ...usage, fiveHour: { used: 43, resetsAt: 1790003600000 } }, settings: { ...settings, effort: 'high', defaultEffort: undefined } }),
       sample({ ...event, seq: 14, upserts: [{ kind: 'poll', id: 'x1', options: [] }, { ...items[3], preview: 'more…', streaming: true }], prompts: viewWithUnknowns.prompts, process: 'napping', cursor: 5 })
     ],
@@ -646,6 +675,10 @@ function chatMessages(): unknown {
         text({ ...event, settings: { ...settings, models: [{ value: 'opus' }] } }),
         text({ ...event, usage: { fiveHour: { used: 12.5 } } }),
         text({ ...event, usage: { costCents: -1 } }),
+        text({ ...event, tasks: [{ id: 'x', kind: 'shell', status: 'running' }] }),
+        text({ ...event, tasks: [{ id: 'x', kind: 'shell', description: 'd', status: 'running', tokens: -5 }] }),
+        text({ ...event, tasks: [{ ...tasks[0], workflow: { phases: [], agents: [{ state: 'done' }] } }] }),
+        text({ ...event, tasks: { a1: tasks[1] } }),
         text({ ...event, upserts: [{ kind: 'tool', id: 'x', name: 'Read', summary: 's', status: 'done', hasDetail: true, images: 'two' }] })
       ]
     },
@@ -1006,6 +1039,14 @@ function chatMessages(): unknown {
           'null'
         ]
       }
+    },
+    // §8.20: a task's Stop.
+    taskStop: {
+      params: [
+        text({ tabId: 'tab-chat', taskId: 'a1' }),
+        text({ tabId: 'tab-chat', taskId: 'wf1', extra: true })
+      ].map((json) => ({ json, expected: parseChatTaskStopParams(JSON.parse(json)) })),
+      invalid: { params: [text({ tabId: 'tab-chat' }), text({ taskId: 'a1' }), text({ tabId: 'tab-chat', taskId: 4 }), 'null'] }
     },
     permissions: {
       params: [text({ tabId: 'tab-chat' }), text({ tabId: 'tab-chat', cwd: '/elsewhere' })].map((json) => ({ json, expected: parseChatPermissionsParams(JSON.parse(json)) })),

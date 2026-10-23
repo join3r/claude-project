@@ -152,6 +152,16 @@ export interface ChatWorkflow {
 /** How long a finished task stays listed with its outcome. */
 export const TASK_LINGER_MS = 60_000
 
+/** Tasks worth listing at `now`: running ones, and finished ones inside their linger. */
+export function visibleTasks(tasks: Record<string, ChatTask>, now: number): ChatTask[] {
+  return Object.values(tasks)
+    .filter((task) => task.status === 'running' || (task.endedAt !== undefined && now - task.endedAt < TASK_LINGER_MS))
+    .sort((a, b) => {
+      if ((a.status === 'running') !== (b.status === 'running')) return a.status === 'running' ? -1 : 1
+      return (a.startedAt ?? 0) - (b.startedAt ?? 0)
+    })
+}
+
 export interface ChatModelOption {
   value: string
   /** The wire id an alias resolves to ('haiku' → 'claude-haiku-4-5'), to match `system:init`'s model. */

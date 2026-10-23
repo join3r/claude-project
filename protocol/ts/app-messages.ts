@@ -1,6 +1,6 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, CHAT_TASK_STOP_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
 import type { ChatViewEvent, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
@@ -241,6 +241,7 @@ export const AppOp = {
   ChatCommands: CHAT_COMMANDS_OP,
   ChatBtw: CHAT_BTW_OP,
   ChatBash: CHAT_BASH_OP,
+  ChatTaskStop: CHAT_TASK_STOP_OP,
   ChatPermissions: CHAT_PERMISSIONS_OP,
   ChatPermissionsUpdate: CHAT_PERMISSIONS_UPDATE_OP,
   PushRegister: PushOp.Register,

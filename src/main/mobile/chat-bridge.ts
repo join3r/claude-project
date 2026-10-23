@@ -32,6 +32,7 @@ import {
   emptySent,
   viewSettings,
   headKey,
+  tasksKey,
   mapPrompt,
   recordSent,
   toChatView,
@@ -43,6 +44,7 @@ import { fitImage, ImageTooLargeError, type ImageCodec } from './chat-image'
 import {
   AppErrorCode,
   CHAT_BASH_OP,
+  CHAT_TASK_STOP_OP,
   CHAT_BTW_OP,
   CHAT_COMMANDS_OP,
   CHAT_IMAGE_OP,
@@ -69,7 +71,8 @@ import type {
   ChatPermissionsResult,
   ChatPermissionsUpdateParams,
   ChatSendParams,
-  ChatSettingsParams
+  ChatSettingsParams,
+  ChatTaskStopParams
 } from '../../../protocol/ts/index.ts'
 
 /**
@@ -100,6 +103,8 @@ export interface ChatBridgeChats {
   askSideQuestion?(tabId: string, question: string): Promise<ChatSideAnswer>
   /** `!command` (`chat.bash`, §8.17); settles once the command has finished. */
   runBash?(tabId: string, command: string): Promise<void>
+  /** A task's Stop (`chat.task.stop`, §8.20); false when it couldn't (a notice says why). */
+  stopTask?(tabId: string, taskId: string): Promise<boolean>
   respond(tabId: string, promptId: string, response: ChatPromptResponse): boolean
 }
 
@@ -154,6 +159,7 @@ interface Subscription {
   stop: () => void
   sent: SentItems
   headKey: string
+  tasksKey: string
   timer: unknown
   lastFlushAt: number
 }
@@ -334,6 +340,16 @@ export class ChatBridge {
         })
         return {}
       }
+      case CHAT_TASK_STOP_OP: {
+        if (!this.deps.chats.stopTask) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot stop tasks')
+        const { taskId } = params as ChatTaskStopParams
+        const task = (await this.ensureRuntime(resolved)).tasks[taskId]
+        if (!task) throw new OpError(AppErrorCode.NotFound, 'No such task')
+        // Already over: nothing to stop.
+        if (task.status !== 'running') return {}
+        if (!(await this.deps.chats.stopTask(params.tabId, taskId))) throw new OpError(AppErrorCode.Internal, "Couldn't stop the task")
+        return {}
+      }
       case CHAT_PERMISSIONS_OP:
         return this.readPermissions(resolved)
       case CHAT_PERMISSIONS_UPDATE_OP: {
@@ -398,6 +414,7 @@ export class ChatBridge {
       stop: () => {},
       sent: emptySent(),
       headKey: '',
+      tasksKey: '',
       timer: null,
       lastFlushAt: Number.NEGATIVE_INFINITY
     }
@@ -420,7 +437,9 @@ export class ChatBridge {
     const chat = this.deps.chats.snapshot(tabId)?.state ?? listening.snapshot.state
     const view = toChatView(chat, { tabId, title: sub.title })
     sub.sent = recordSent(emptySent(), view.items, 'replace')
-    sub.headKey = headKey(view.prompts, viewStatus(chat))
+    const openStatus = viewStatus(chat)
+    sub.headKey = headKey(view.prompts, openStatus)
+    sub.tasksKey = tasksKey(openStatus)
     sub.lastFlushAt = this.deps.timers.now()
     const seq = state.seqs.get(tabId) ?? 0
     return { seq, view }
@@ -470,7 +489,7 @@ export class ChatBridge {
   // ---- events ----------------------------------------------------------------------
 
   /**
-   * Prompt and status changes go out at once; item-only changes are throttled to
+   * Prompt and status changes go out at once; item and task changes are throttled to
    * {@link CHAT_EVENT_INTERVAL_MS}, trailing, so a streaming reply is ≤ 4 events/s.
    */
   private schedule(state: PhoneState, sub: Subscription): void {
@@ -499,8 +518,9 @@ export class ChatBridge {
     const prompts = chat.pending.map(mapPrompt)
     const status = viewStatus(chat)
     const head = headKey(prompts, status)
+    const tasks = tasksKey(status)
     const diff = diffItems(sub.sent, chat.items)
-    if (diff.upserts.length === 0 && diff.removes.length === 0 && head === sub.headKey) return
+    if (diff.upserts.length === 0 && diff.removes.length === 0 && head === sub.headKey && tasks === sub.tasksKey) return
     const seq = (state.seqs.get(sub.tabId) ?? 0) + 1
     sub.lastFlushAt = this.deps.timers.now()
     const sent = state.phone.send({
@@ -518,6 +538,7 @@ export class ChatBridge {
     state.seqs.set(sub.tabId, seq)
     sub.sent = diff.next
     sub.headKey = head
+    sub.tasksKey = tasks
   }
 
   private endSubscription(state: PhoneState): void {

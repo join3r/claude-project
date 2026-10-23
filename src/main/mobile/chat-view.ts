@@ -1,8 +1,8 @@
 import { firstLine, summarizeTool } from '../../shared/agent-activity'
 import { editPairs, diffLines } from '../../shared/chat-diff'
 import { canAlwaysAllow, planText, promptQuestions } from '../../shared/chat-prompts'
-import { CHAT_EFFORT_LEVELS, findModelOption } from '../../shared/claude-chat'
-import type { ChatImage, ChatItem, ChatLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
+import { CHAT_EFFORT_LEVELS, findModelOption, visibleTasks } from '../../shared/claude-chat'
+import type { ChatImage, ChatItem, ChatTask, ChatWorkflow, ChatWorkflowAgent, ChatLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
 import { ChatLimits, capText } from '../../../protocol/ts/index.ts'
 import type {
   ChatDetailResult,
@@ -14,7 +14,10 @@ import type {
   ChatViewQuestion,
   ChatViewSettings,
   ChatViewStatus,
-  ChatViewUsage
+  ChatViewTask,
+  ChatViewUsage,
+  ChatViewWorkflow,
+  ChatViewWorkflowAgent
 } from '../../../protocol/ts/index.ts'
 
 /**
@@ -137,7 +140,7 @@ export function mapPrompt(prompt: ChatPrompt): ChatViewPrompt {
   return out
 }
 
-export function viewStatus(state: ChatState): ChatViewStatus {
+export function viewStatus(state: ChatState, now: number = Date.now()): ChatViewStatus {
   const status: ChatViewStatus = { busy: state.busy, process: state.process }
   if (state.turnStartedAt !== undefined) status.turnStartedAt = state.turnStartedAt
   if (state.processError !== undefined) status.processError = state.processError
@@ -146,7 +149,79 @@ export function viewStatus(state: ChatState): ChatViewStatus {
   status.settings = viewSettings(state.info, state.models)
   const usage = viewUsage(state.usage)
   if (usage) status.usage = usage
+  const tasks = viewTasks(state.tasks, now)
+  if (tasks.length > 0) status.tasks = tasks
   return status
+}
+
+/** The first non-blank line, capped at {@link ChatLimits.taskText} with "…". */
+function line(text: string | undefined): string | undefined {
+  const first = text?.split('\n').map((l) => l.trim()).find((l) => l.length > 0)
+  if (!first) return undefined
+  return first.length > ChatLimits.taskText ? `${first.slice(0, ChatLimits.taskText - 1)}…` : first
+}
+
+/** Which agents to send when a workflow has more than the cap: live and failed ones first, then the latest finished. */
+function keptAgents(agents: ChatWorkflowAgent[]): ChatWorkflowAgent[] {
+  if (agents.length <= ChatLimits.workflowAgents) return agents
+  const rank = (agent: ChatWorkflowAgent): number => agent.state === 'running' || agent.state === 'queued' || agent.state === 'failed' ? 0 : 1
+  const kept = new Set([...agents].sort((a, b) => rank(a) - rank(b) || b.index - a.index).slice(0, ChatLimits.workflowAgents))
+  return agents.filter((agent) => kept.has(agent))
+}
+
+function viewWorkflow(workflow: ChatWorkflow): ChatViewWorkflow {
+  const phaseAt = new Map(workflow.phases.map((phase, at) => [phase.index, at]))
+  const agents = keptAgents(workflow.agents)
+  const out: ChatViewWorkflow = {
+    phases: workflow.phases.map((phase) => ({
+      title: line(phase.title) ?? '',
+      ...(phase.detail ? { detail: line(phase.detail) } : {}),
+      ...(phase.started ? { started: true as const } : {})
+    })),
+    agents: agents.map((agent): ChatViewWorkflowAgent => {
+      const phase = agent.phaseIndex !== undefined ? phaseAt.get(agent.phaseIndex) : undefined
+      const lastTool = line(agent.lastTool)
+      return {
+        label: line(agent.label) ?? '',
+        ...(phase !== undefined ? { phase } : {}),
+        state: agent.state,
+        ...(agent.startedAt !== undefined ? { startedAt: agent.startedAt } : {}),
+        ...(count(agent.durationMs) !== undefined ? { durationMs: count(agent.durationMs) } : {}),
+        ...(count(agent.tokens) !== undefined ? { tokens: count(agent.tokens) } : {}),
+        ...(lastTool ? { lastTool } : {}),
+        ...(agent.attempt !== undefined ? { attempt: agent.attempt } : {})
+      }
+    })
+  }
+  if (agents.length < workflow.agents.length) out.moreAgents = workflow.agents.length - agents.length
+  return out
+}
+
+function viewTask(task: ChatTask): ChatViewTask {
+  const running = task.status === 'running'
+  // As the pill: a shell's summary often repeats its description, and a workflow's last tool is just an agent's label.
+  const summary = task.summary && task.summary !== task.description ? task.summary : undefined
+  const detail = line(summary ?? (running && task.lastTool && !task.workflow ? task.lastTool : undefined))
+  const command = task.command && task.command !== task.description ? line(task.command) : undefined
+  const out: ChatViewTask = { id: task.id, kind: task.kind, description: line(task.description) ?? 'Task', status: task.status }
+  if (task.startedAt !== undefined) out.startedAt = task.startedAt
+  if (task.endedAt !== undefined) out.endedAt = task.endedAt
+  if (task.background) out.background = true
+  if (command) out.command = command
+  if (task.agentType) out.agentType = line(task.agentType)
+  if (detail) out.detail = detail
+  if (count(task.toolUses)) out.toolUses = count(task.toolUses)
+  if (count(task.tokens)) out.tokens = count(task.tokens)
+  if (task.workflow && (task.workflow.phases.length > 0 || task.workflow.agents.length > 0)) out.workflow = viewWorkflow(task.workflow)
+  return out
+}
+
+/**
+ * The task pill's rows (§8.20): running tasks and ones finished within the
+ * linger, minus the ones a subagent started, as ClaudeChatTab lists them.
+ */
+export function viewTasks(tasks: Record<string, ChatTask>, now: number = Date.now()): ChatViewTask[] {
+  return visibleTasks(tasks, now).filter((task) => !task.nested).slice(0, ChatLimits.tasks).map(viewTask)
 }
 
 /** The composer's model and effort pickers, labelled as the desktop's are (Composer.tsx). */
@@ -249,9 +324,19 @@ export function itemKey(item: ChatViewItem): string {
   return JSON.stringify(item)
 }
 
-/** Equal keys mean the phone already has these prompts and status. */
+/**
+ * Equal keys mean the phone already has these prompts and status. Tasks are
+ * left out: they tick with every progress report, so they go out on the item
+ * throttle ({@link tasksKey}) instead of at once.
+ */
 export function headKey(prompts: ChatViewPrompt[], status: ChatViewStatus): string {
-  return JSON.stringify([prompts, status])
+  const { tasks: _tasks, ...rest } = status
+  return JSON.stringify([prompts, rest])
+}
+
+/** Equal keys mean the phone already has these tasks. */
+export function tasksKey(status: ChatViewStatus): string {
+  return JSON.stringify(status.tasks ?? [])
 }
 
 /** What one subscription has sent: the ids in order (oldest first) and their content keys. */

@@ -631,6 +631,7 @@ var CHAT_BTW_OP = "chat.btw";
 var CHAT_PERMISSIONS_OP = "chat.permissions";
 var CHAT_PERMISSIONS_UPDATE_OP = "chat.permissions.update";
 var CHAT_BASH_OP = "chat.bash";
+var CHAT_TASK_STOP_OP = "chat.task.stop";
 
 // protocol/ts/app-messages.ts
 var AppOp = {
@@ -660,6 +661,7 @@ var AppOp = {
   ChatCommands: CHAT_COMMANDS_OP,
   ChatBtw: CHAT_BTW_OP,
   ChatBash: CHAT_BASH_OP,
+  ChatTaskStop: CHAT_TASK_STOP_OP,
   ChatPermissions: CHAT_PERMISSIONS_OP,
   ChatPermissionsUpdate: CHAT_PERMISSIONS_UPDATE_OP,
   PushRegister: PushOp.Register,

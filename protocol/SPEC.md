@@ -300,6 +300,7 @@ ChatView = {
   permissionMode?: string, model?: string,
   settings?: ChatViewSettings,         // the composer's pickers (desktops that list chat.settings, §8.5)
   usage?: ChatViewUsage,               // the composer's meter
+  tasks?: ChatViewTask[],              // the task pill's rows (desktops that list chat.tasks, §8.20); absent = none
   items: ChatViewItem[],               // oldest → newest, WINDOWED (see 6.4)
   hasEarlier: boolean,                 // more items exist before items[0]
   prompts: ChatViewPrompt[]            // open prompts, oldest first
@@ -458,7 +459,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"` and §8.19 `"stream.run"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"`, §8.19 `"stream.run"` and §8.20 `"chat.tasks"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -712,6 +713,47 @@ The desktop answers once the action is done (the process started, or ended for `
 
 - A desktop that implements these ops lists `"stream.run"` in its features (§8.1) and sends `runCommand` and `run` (§4.4).
 - Errors: unknown `projectId` or `streamId`, or a project hidden from mobile (§4.4) → `not-found`. Missing `projectId` or `streamId`, or an unknown `action` → `bad-request`. `start` or `restart` failing (no run command set, the stream gone meanwhile, the shell or SSH connection failing) → `internal`, with the reason as the `message`.
+
+### 8.20 `tasks` and `chat.task.stop` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `chat.task.stop` | `{ tabId, taskId }` | `{}` |
+
+What Claude runs beside the turn, as the desktop chat's task pill shows it: subagents, shells, workflows, monitors and MCP tasks. The chat view's status (§6.2, so `chat.open`'s view and every `evt chat`) carries `tasks`:
+
+```ts
+ChatViewTask = {
+  id: string,                          // the CLI's task id, what chat.task.stop takes
+  kind: 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'other',
+  description: string,
+  status: 'running' | 'completed' | 'failed' | 'stopped',
+  startedAt?: number, endedAt?: number,          // unix ms
+  background?: true,
+  command?: string,                    // shells, when it differs from description
+  agentType?: string,                  // subagents ("Explore")
+  detail?: string,                     // one line: the task's summary, or the tool it is running
+  toolUses?: number, tokens?: number,
+  workflow?: ChatViewWorkflow          // workflows, once the run reports progress
+}
+ChatViewWorkflow = {
+  phases: [{ title, detail?, started?: true }],   // in order; declared ones the run hasn't reached lack started
+  agents: [{ label, phase?: number,               // phase: index into phases
+             state: 'queued' | 'running' | 'done' | 'failed' | 'skipped',
+             startedAt?, durationMs?, tokens?, lastTool?, attempt? }],   // attempt: > 1 when retried
+  moreAgents?: number                  // agents left out past the cap
+}
+```
+- `tasks` lists running tasks, then ones that finished in the last 60 s, each group by `startedAt`. Tasks a subagent started are left out, as on the desktop. At most **20** tasks, and at most **100** agents per workflow: past that the desktop keeps queued, running and failed agents and then the latest finished ones, and says in `moreAgents` how many it left out. `description`, `command`, `detail`, an agent's `label` and `lastTool` are one line of at most **300** characters.
+- `tasks` is sent whole, like the other status fields, but a change only to it goes out on the item throttle (§6.4), not at once: a workflow reports progress every few seconds.
+- A phone hides a finished task 60 s after its `endedAt`, even without a new event, and counts elapsed time from `startedAt`.
+- Forward compatibility: an unknown `kind` reads as `other`, an unknown `status` as `running` and an unknown agent `state` as `running`. Flags are `true` or absent, and an empty list means no tasks.
+
+`chat.task.stop` is the pill's Stop: the desktop stops the task (the CLI's `stop_task`), which throws away its work. It answers once the CLI took the request; the task's new `status` comes with a later `evt chat`. A task that already ended answers `{}` and nothing happens.
+
+- The chat need not be open on this phone. When it has no runtime yet, the desktop attaches one first, as for `chat.detail`.
+- A desktop that implements this lists `"chat.tasks"` in its features (§8.1) and sends `tasks`. A phone shows the task list only for such a desktop.
+- Errors: unknown tab, as §6.3, or a `taskId` the chat doesn't list → `not-found`. Missing or malformed params → `bad-request`. The CLI refusing or Claude not running → `internal`; the desktop also puts a notice in the chat.
 
 ## 9. Version 2: streams
 

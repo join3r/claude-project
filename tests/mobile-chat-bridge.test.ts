@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBridge, CHAT_EVENT_INTERVAL_MS, type ChatPhone } from '../src/main/mobile/chat-bridge'
 import type { ProjectsData, Tab, WorkspaceConfig } from '../src/shared/types'
-import type { ChatItem, ChatPrompt, ChatState } from '../src/shared/claude-chat'
+import type { ChatItem, ChatPrompt, ChatState, ChatTask } from '../src/shared/claude-chat'
 import type { AppMessage, ChatParams, ChatViewEvent } from '../protocol/ts/index.ts'
 import { FakeChats } from './helpers/fake-chats'
 import { fixtureProject } from './helpers/streams-fixtures'
@@ -500,6 +500,56 @@ describe('ChatBridge', () => {
     const remote = await req('chat.permissions', { tabId: 'tab-chat' })
     expect(remote).toMatchObject({ ok: false, error: { code: 'unsupported', message: expect.stringContaining('remote host') } })
     expect(calls).toHaveLength(3)
+  })
+
+  it('sends the task pill\'s rows on the item throttle, and stops a task (§8.20)', async () => {
+    const now = Date.now()
+    const workflow: ChatTask = {
+      id: 'wf1', kind: 'workflow', description: 'Review the diff', background: true, status: 'running', startedAt: now - 5000, lastTool: 'review:bugs',
+      workflow: {
+        phases: [{ index: 1, title: 'Review', started: true }, { index: 2, title: 'Verify', started: false }],
+        agents: [{ index: 1, label: 'review:bugs', phaseIndex: 1, state: 'running', startedAt: now - 4000, lastTool: 'git diff' }]
+      }
+    }
+    chats.update('tab-chat', (s) => ({
+      ...s,
+      tasks: {
+        wf1: workflow,
+        a1: { id: 'a1', kind: 'subagent', description: 'Look around', agentType: 'Explore', background: false, status: 'running', startedAt: now - 1000, lastTool: 'Grep' },
+        // Started by a subagent: part of its work, not a row.
+        n1: { id: 'n1', kind: 'shell', description: 'ls', background: false, nested: true, status: 'running', startedAt: now },
+        // Finished past the linger: gone.
+        old: { id: 'old', kind: 'shell', description: 'old', background: true, status: 'completed', startedAt: now - 200_000, endedAt: now - 100_000 }
+      }
+    }))
+    const res = await req('chat.open', { tabId: 'tab-chat' })
+    const view = (res as { result: { view: { tasks?: unknown[] } } }).result.view
+    expect(view.tasks).toEqual([
+      {
+        id: 'wf1', kind: 'workflow', description: 'Review the diff', status: 'running', startedAt: now - 5000, background: true,
+        workflow: {
+          phases: [{ title: 'Review', started: true }, { title: 'Verify' }],
+          agents: [{ label: 'review:bugs', phase: 0, state: 'running', startedAt: now - 4000, lastTool: 'git diff' }]
+        }
+      },
+      { id: 'a1', kind: 'subagent', description: 'Look around', status: 'running', startedAt: now - 1000, agentType: 'Explore', detail: 'Grep' }
+    ])
+
+    // Progress ticks wait for the throttle, as streaming text does.
+    chats.update('tab-chat', (s) => ({ ...s, tasks: { ...s.tasks, a1: { ...s.tasks.a1, lastTool: 'Read', toolUses: 2 } } }))
+    expect(events()).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(CHAT_EVENT_INTERVAL_MS)
+    expect(events()).toHaveLength(1)
+    expect(events()[0].tasks?.[1]).toMatchObject({ id: 'a1', detail: 'Read', toolUses: 2 })
+
+    expect(await req('chat.task.stop', { tabId: 'tab-chat', taskId: 'a1' })).toMatchObject({ ok: true, result: {} })
+    expect(chats.stoppedTasks).toEqual([{ tabId: 'tab-chat', taskId: 'a1' }])
+    expect(await req('chat.task.stop', { tabId: 'tab-chat', taskId: 'nope' })).toMatchObject({ ok: false, error: { code: 'not-found' } })
+    // A finished task has nothing to stop.
+    expect(await req('chat.task.stop', { tabId: 'tab-chat', taskId: 'old' })).toMatchObject({ ok: true })
+    expect(chats.stoppedTasks).toHaveLength(1)
+    chats.stopTaskResult = false
+    expect(await req('chat.task.stop', { tabId: 'tab-chat', taskId: 'wf1' })).toMatchObject({ ok: false, error: { code: 'internal' } })
   })
 
   it('reports a failing manager call as internal', async () => {

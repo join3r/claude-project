@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, ArrowDownToLine, Bot, Check, ChevronRight, Circle, CircleSlash, ListTodo, Plug, Square, SquareTerminal, Workflow, X } from 'lucide-react'
-import { TASK_LINGER_MS, type ChatTask, type ChatTaskKind, type ChatWorkflow, type ChatWorkflowAgent, type ChatWorkflowAgentState, type ChatWorkflowPhase } from '../../../shared/claude-chat'
+import { visibleTasks, type ChatTask, type ChatTaskKind, type ChatWorkflow, type ChatWorkflowAgent, type ChatWorkflowAgentState, type ChatWorkflowPhase } from '../../../shared/claude-chat'
 import { menuCls } from '../ui'
 import { formatTokens } from './UsageMeter'
 
@@ -24,16 +24,6 @@ const KIND_NOUN: Record<ChatTaskKind, [string, string]> = {
 }
 
 const KIND_ORDER: ChatTaskKind[] = ['subagent', 'shell', 'workflow', 'monitor', 'mcp', 'other']
-
-/** Tasks worth listing at `now`: running ones, and finished ones inside their linger. */
-export function visibleTasks(tasks: Record<string, ChatTask>, now: number): ChatTask[] {
-  return Object.values(tasks)
-    .filter((task) => task.status === 'running' || (task.endedAt !== undefined && now - task.endedAt < TASK_LINGER_MS))
-    .sort((a, b) => {
-      if ((a.status === 'running') !== (b.status === 'running')) return a.status === 'running' ? -1 : 1
-      return (a.startedAt ?? 0) - (b.startedAt ?? 0)
-    })
-}
 
 /** "2 agents · 1 shell". */
 export function countLabel(tasks: ChatTask[]): string {

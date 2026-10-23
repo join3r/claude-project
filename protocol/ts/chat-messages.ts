@@ -307,6 +307,16 @@ export const CHAT_BASH_OP = 'chat.bash'
 export const CHAT_BASH_FEATURE = 'chat.bash'
 
 export interface ChatBashParams { tabId: string; command: string }
+
+/**
+ * Work Claude runs beside the turn (SPEC.md §8.20): the view's `tasks`, and
+ * `chat.task.stop` to stop one, as the desktop's task pill does.
+ */
+export const CHAT_TASK_STOP_OP = 'chat.task.stop'
+/** The handshake feature (§8.1) a desktop lists when it sends `tasks` and answers `chat.task.stop`. */
+export const CHAT_TASKS_FEATURE = 'chat.tasks'
+
+export interface ChatTaskStopParams { tabId: string; taskId: string }
 export interface ChatBtwResult {
   /** Null when Claude had nothing to say (the question was cancelled). */
   response: string | null
@@ -382,7 +392,12 @@ export const ChatLimits = {
   /** A queued prompt's text (§8.16), as `chat.send`'s. */
   queueText: 32000,
   /** `stream.logs` text (§8.19): the end of the run's output. */
-  runLogs: 200_000
+  runLogs: 200_000,
+  /** `tasks` in the view (§8.20), and the agents listed per workflow. */
+  tasks: 20,
+  workflowAgents: 100,
+  /** A task's `description`, `command` and `detail`, and a workflow agent's `label` and `lastTool`. */
+  taskText: 300
 } as const
 
 export type ChatViewToolStatus = 'pending' | 'running' | 'waiting' | 'done' | 'error' | 'denied'
@@ -473,6 +488,52 @@ export interface ChatViewUsage {
   sevenDay?: ChatViewLimitWindow
 }
 
+export type ChatViewTaskKind = 'subagent' | 'shell' | 'workflow' | 'monitor' | 'mcp' | 'other'
+export type ChatViewTaskStatus = 'running' | 'completed' | 'failed' | 'stopped'
+export type ChatViewWorkflowAgentState = 'queued' | 'running' | 'done' | 'failed' | 'skipped'
+
+export interface ChatViewWorkflowPhase { title: string; detail?: string; started?: true }
+
+export interface ChatViewWorkflowAgent {
+  label: string
+  /** Index into the workflow's `phases`. */
+  phase?: number
+  state: ChatViewWorkflowAgentState
+  /** Unix ms. */
+  startedAt?: number
+  durationMs?: number
+  tokens?: number
+  lastTool?: string
+  /** Above 1 when the script retried it. */
+  attempt?: number
+}
+
+export interface ChatViewWorkflow {
+  phases: ChatViewWorkflowPhase[]
+  agents: ChatViewWorkflowAgent[]
+  /** Agents left out of `agents` (finished ones first), past {@link ChatLimits.workflowAgents}. */
+  moreAgents?: number
+}
+
+/** One row of the task list (§8.20). */
+export interface ChatViewTask {
+  id: string
+  kind: ChatViewTaskKind
+  description: string
+  status: ChatViewTaskStatus
+  /** Unix ms. */
+  startedAt?: number
+  endedAt?: number
+  background?: true
+  command?: string
+  agentType?: string
+  /** One line: the task's own summary, or the tool it is running. */
+  detail?: string
+  toolUses?: number
+  tokens?: number
+  workflow?: ChatViewWorkflow
+}
+
 /** The session-level fields `ChatView` and `evt chat` share. */
 export interface ChatViewStatus {
   busy: boolean
@@ -483,6 +544,8 @@ export interface ChatViewStatus {
   model?: string
   settings?: ChatViewSettings
   usage?: ChatViewUsage
+  /** Running tasks and ones finished in the last minute (§8.20); absent = none. */
+  tasks?: ChatViewTask[]
 }
 
 export interface ChatView extends ChatViewStatus {
@@ -531,6 +594,7 @@ export type ChatParams =
   | ChatImageParams
   | ChatBtwParams
   | ChatBashParams
+  | ChatTaskStopParams
   | ChatPermissionsUpdateParams
 
 export interface ChatOpenResult { seq: number; view: ChatView }
@@ -753,6 +817,69 @@ function parseUsage(value: unknown): ChatViewUsage {
   return usage
 }
 
+const TASK_KINDS: readonly string[] = ['subagent', 'shell', 'workflow', 'monitor', 'mcp', 'other']
+const TASK_STATUSES: readonly string[] = ['running', 'completed', 'failed', 'stopped']
+const WORKFLOW_AGENT_STATES: readonly string[] = ['queued', 'running', 'done', 'failed', 'skipped']
+
+function parseWorkflow(value: unknown): ChatViewWorkflow {
+  const o = obj(value, 'workflow')
+  const phases = arr(o, 'phases').map((raw): ChatViewWorkflowPhase => {
+    const p = obj(raw, 'phase')
+    const detail = optStr(p, 'detail')
+    return { title: str(p, 'title'), ...(detail !== undefined ? { detail } : {}), ...(flag(p, 'started') ? { started: true as const } : {}) }
+  })
+  const agents = arr(o, 'agents').map((raw): ChatViewWorkflowAgent => {
+    const a = obj(raw, 'agent')
+    const phase = optInt(a, 'phase')
+    const startedAt = optInt(a, 'startedAt')
+    const durationMs = optInt(a, 'durationMs')
+    const tokens = optInt(a, 'tokens')
+    const lastTool = optStr(a, 'lastTool')
+    const attempt = optInt(a, 'attempt')
+    const agent: ChatViewWorkflowAgent = {
+      label: str(a, 'label'),
+      ...(phase !== undefined ? { phase } : {}),
+      state: soft<ChatViewWorkflowAgentState>(a, 'state', WORKFLOW_AGENT_STATES, 'running'),
+      ...(startedAt !== undefined ? { startedAt } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(tokens !== undefined ? { tokens } : {}),
+      ...(lastTool !== undefined ? { lastTool } : {}),
+      ...(attempt !== undefined ? { attempt } : {})
+    }
+    return agent
+  })
+  const workflow: ChatViewWorkflow = { phases, agents }
+  const moreAgents = optInt(o, 'moreAgents')
+  if (moreAgents !== undefined && moreAgents > 0) workflow.moreAgents = moreAgents
+  return workflow
+}
+
+/** One task row. An unknown `kind` reads as `other`, an unknown `status` as `running`. */
+function parseTask(value: unknown): ChatViewTask {
+  const o = obj(value, 'task')
+  const task = {
+    id: str(o, 'id'),
+    kind: soft<ChatViewTaskKind>(o, 'kind', TASK_KINDS, 'other'),
+    description: str(o, 'description'),
+    status: soft<ChatViewTaskStatus>(o, 'status', TASK_STATUSES, 'running')
+  } as ChatViewTask
+  for (const key of ['startedAt', 'endedAt'] as const) {
+    const v = optInt(o, key)
+    if (v !== undefined) task[key] = v
+  }
+  if (flag(o, 'background')) task.background = true
+  for (const key of ['command', 'agentType', 'detail'] as const) {
+    const v = optStr(o, key)
+    if (v !== undefined) task[key] = v
+  }
+  for (const key of ['toolUses', 'tokens'] as const) {
+    const v = optInt(o, key)
+    if (v !== undefined) task[key] = v
+  }
+  if (!absent(o, 'workflow')) task.workflow = parseWorkflow(o.workflow)
+  return task
+}
+
 function parseStatus(o: Obj): ChatViewStatus {
   const status: ChatViewStatus = { busy: bool(o, 'busy'), process: soft<ChatViewProcess>(o, 'process', PROCESSES, 'idle') }
   const turnStartedAt = optInt(o, 'turnStartedAt')
@@ -765,6 +892,10 @@ function parseStatus(o: Obj): ChatViewStatus {
   if (model !== undefined) status.model = model
   if (!absent(o, 'settings')) status.settings = parseSettings(o.settings)
   if (!absent(o, 'usage')) status.usage = parseUsage(o.usage)
+  if (!absent(o, 'tasks')) {
+    const tasks = arr(o, 'tasks').map(parseTask)
+    if (tasks.length > 0) status.tasks = tasks
+  }
   return status
 }
 
@@ -779,7 +910,8 @@ function withStatus<T extends object>(head: T, status: ChatViewStatus): T & Chat
     ...(status.permissionMode !== undefined ? { permissionMode: status.permissionMode } : {}),
     ...(status.model !== undefined ? { model: status.model } : {}),
     ...(status.settings !== undefined ? { settings: status.settings } : {}),
-    ...(status.usage !== undefined ? { usage: status.usage } : {})
+    ...(status.usage !== undefined ? { usage: status.usage } : {}),
+    ...(status.tasks !== undefined ? { tasks: status.tasks } : {})
   }
 }
 
@@ -1128,6 +1260,12 @@ export function parseChatBashParams(params: unknown): ChatBashParams {
   if (command.length > ChatLimits.bashCommand) fail(`command over ${ChatLimits.bashCommand} characters`)
   if (!command.trim()) fail('command is empty')
   return { tabId, command }
+}
+
+/** `chat.task.stop` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing field. */
+export function parseChatTaskStopParams(params: unknown): ChatTaskStopParams {
+  const o = obj(params, 'params')
+  return { tabId: str(o, 'tabId'), taskId: str(o, 'taskId') }
 }
 
 function oneOf<T extends string>(o: Obj, key: string, allowed: readonly T[]): T {

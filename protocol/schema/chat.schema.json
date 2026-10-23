@@ -42,6 +42,59 @@
         "sevenDay": { "$ref": "#/$defs/limit" }
       }
     },
+    "task": {
+      "type": "object",
+      "required": ["id", "kind", "description", "status"],
+      "description": "§8.20: one row of the task pill",
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string", "description": "subagent | shell | workflow | monitor | mcp | other; unknown reads as other" },
+        "description": { "type": "string", "description": "≤ 300 chars" },
+        "status": { "type": "string", "description": "running | completed | failed | stopped; unknown reads as running" },
+        "startedAt": { "$ref": "#/$defs/ms" },
+        "endedAt": { "$ref": "#/$defs/ms" },
+        "background": { "const": true },
+        "command": { "type": "string", "description": "≤ 300 chars" },
+        "agentType": { "type": "string" },
+        "detail": { "type": "string", "description": "≤ 300 chars" },
+        "toolUses": { "type": "integer", "minimum": 0 },
+        "tokens": { "type": "integer", "minimum": 0 },
+        "workflow": { "$ref": "#/$defs/workflow" }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "required": ["phases", "agents"],
+      "properties": {
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title"],
+            "properties": { "title": { "type": "string" }, "detail": { "type": "string" }, "started": { "const": true } }
+          }
+        },
+        "agents": {
+          "type": "array",
+          "description": "≤ 100",
+          "items": {
+            "type": "object",
+            "required": ["label", "state"],
+            "properties": {
+              "label": { "type": "string", "description": "≤ 300 chars" },
+              "phase": { "type": "integer", "minimum": 0, "description": "Index into phases" },
+              "state": { "type": "string", "description": "queued | running | done | failed | skipped; unknown reads as running" },
+              "startedAt": { "$ref": "#/$defs/ms" },
+              "durationMs": { "type": "integer", "minimum": 0 },
+              "tokens": { "type": "integer", "minimum": 0 },
+              "lastTool": { "type": "string", "description": "≤ 300 chars" },
+              "attempt": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "moreAgents": { "type": "integer", "minimum": 1 }
+      }
+    },
     "view": {
       "type": "object",
       "required": ["tabId", "title", "busy", "process", "items", "hasEarlier", "prompts"],
@@ -56,6 +109,7 @@
         "model": { "type": "string" },
         "settings": { "$ref": "#/$defs/settings" },
         "usage": { "$ref": "#/$defs/usage" },
+        "tasks": { "type": "array", "description": "≤ 20", "items": { "$ref": "#/$defs/task" } },
         "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
         "hasEarlier": { "type": "boolean" },
         "prompts": { "type": "array", "items": { "$ref": "#/$defs/prompt" } }
@@ -254,7 +308,8 @@
         "permissionMode": { "type": "string" },
         "model": { "type": "string" },
         "settings": { "$ref": "#/$defs/settings" },
-        "usage": { "$ref": "#/$defs/usage" }
+        "usage": { "$ref": "#/$defs/usage" },
+        "tasks": { "type": "array", "description": "≤ 20", "items": { "$ref": "#/$defs/task" } }
       }
     }
   }
