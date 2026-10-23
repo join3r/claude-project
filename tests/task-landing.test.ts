@@ -206,6 +206,20 @@ describe('TaskLandingManager', () => {
     expect(git(repo, 'log', '-1', '--format=%b', 'release').trim()).toBe('')
   })
 
+  it('leaves a new link out of the worktree (an agent\'s node_modules) out of the auto-commit', async () => {
+    const ws = taskWorktree('t1')
+    fs.mkdirSync(path.join(repo, 'node_modules'))
+    fs.symlinkSync('../../node_modules', path.join(ws.worktreePath, 'node_modules'))
+    fs.symlinkSync('c.txt', path.join(ws.worktreePath, 'inside-link'))
+    write(ws.worktreePath, 'c.txt', 'x\n')
+    setTasks([task('t1', 'Add c', ws)])
+
+    expect(await manager.landTask('p1', 't1', { keepWorktree: true })).toEqual({ status: 'landed' })
+    expect(filesOn(repo, 'release')).toContain('c.txt')
+    expect(filesOn(repo, 'release')).toContain('inside-link')
+    expect(filesOn(repo, 'release')).not.toContain('node_modules')
+  })
+
   it('reports nothing to land and, closing, still removes the worktree', async () => {
     const ws = taskWorktree('t1')
     setTasks([task('t1', 'Idle', ws)])

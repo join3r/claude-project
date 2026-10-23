@@ -183,6 +183,22 @@ function readSetupArtifacts(gitDir: string): string[] {
   }
 }
 
+/**
+ * A new symlink that leads out of the worktree, like an agent's
+ * `node_modules -> ../../node_modules`: it only works on this machine, and a
+ * `node_modules/` ignore rule doesn't match a link, so `add -A` would take it.
+ */
+function isLinkOutOfWorktree(root: string, file: string): boolean {
+  const abs = path.join(root, file)
+  try {
+    if (!fs.lstatSync(abs).isSymbolicLink()) return false
+    const rel = path.relative(root, path.resolve(path.dirname(abs), fs.readlinkSync(abs)))
+    return rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)
+  } catch {
+    return false
+  }
+}
+
 /** The subject DevTool's commits get: the task's name. */
 function commitSubject(task: Task): string {
   return task.name.trim() || 'Task'
@@ -493,8 +509,8 @@ export class TaskLandingManager {
   }
 
   /**
-   * `add -A` and a commit named after the task, without DevTool's hooks file
-   * and without what setup commands left behind. False when there was nothing
+   * `add -A` and a commit named after the task, without DevTool's hooks file,
+   * what setup commands left behind or new links out of the worktree. False when there was nothing
    * (else) to commit.
    */
   private async autoCommit(at: Located): Promise<boolean> {
@@ -502,10 +518,12 @@ export class TaskLandingManager {
     if (!(await this.git(root, ['status', '--porcelain=v1', '-z']))) return false
     await this.git(root, ['add', '-A'], LONG_GIT_MS)
     const staged = splitNul(await this.git(root, ['diff', '--cached', '--name-only', '-z']))
+    const added = new Set(splitNul(await this.git(root, ['diff', '--cached', '--name-only', '--diff-filter=A', '-z'])))
     const artifacts = readSetupArtifacts(await absoluteGitDir(this.deps.runner, root))
     const keepOut = new Set<string>()
     for (const file of staged) {
       if (isHookFile(file)) keepOut.add(file)
+      if (added.has(file) && isLinkOutOfWorktree(root, file)) keepOut.add(file)
       const artifact = artifacts.find(entry => file === entry || file.startsWith(`${entry}/`))
       if (artifact) keepOut.add(artifact)
     }
