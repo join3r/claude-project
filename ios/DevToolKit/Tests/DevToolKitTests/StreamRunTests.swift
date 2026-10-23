@@ -100,4 +100,34 @@ import Testing
         }
         await mock.stop()
     }
+    /// The Inbox's Apps group: running and crashed runs only, crashes first.
+    @Test func inboxAppsListsRunningAndCrashedRuns() {
+        func stream(_ id: String, _ run: InboxStreamRun?) -> InboxStream {
+            InboxStream(id: id, name: id, isMain: id == "main", runCommand: "make", run: run)
+        }
+        let a = InboxProject(id: "a", name: "a", streams: [
+            stream("main", InboxStreamRun(status: .running, startedAt: 10)),
+            stream("clean", InboxStreamRun(status: .exited, startedAt: 1, endedAt: 2, exitCode: 0)),
+            stream("stopped", InboxStreamRun(status: .stopped, startedAt: 1, endedAt: 2)),
+            stream("never", nil),
+            stream("crash-old", InboxStreamRun(status: .exited, startedAt: 1, endedAt: 3, exitCode: 1)),
+        ], tasks: [])
+        let b = InboxProject(id: "b", name: "b", streams: [
+            stream("main", InboxStreamRun(status: .running, startedAt: 20)),
+            stream("killed", InboxStreamRun(status: .exited, startedAt: 1, endedAt: 5, exitCode: -15)),
+            stream("unknown", InboxStreamRun(status: .exited, startedAt: 1, endedAt: 4)),
+        ], tasks: [])
+        let c = InboxProject(id: "c", name: "c", streams: [stream("main", InboxStreamRun(status: .running, startedAt: 10))], tasks: [])
+        let d1 = Inbox(desktop: InboxDesktop(id: "d1", name: "one"), generatedAt: 0, projects: [a, b])
+        let d2 = Inbox(desktop: InboxDesktop(id: "d2", name: "two"), generatedAt: 0, projects: [c])
+        let apps = InboxAppRun.list([("d1", d1), ("d2", d2)])
+        #expect(apps.map(\.id) == [
+            "d1:b:killed", "d1:b:unknown", "d1:a:crash-old",
+            "d1:b:main", "d1:a:main", "d2:c:main",
+        ])
+        #expect(apps[0].project.name == "b" && apps[0].stream.id == "killed" && apps[0].run.crashed)
+        #expect(InboxAppRun.list([]).isEmpty)
+        #expect(!InboxStreamRun(status: .exited, startedAt: 1, endedAt: 2, exitCode: 0).isInboxApp)
+        #expect(!InboxStreamRun(status: .stopped, startedAt: 1, endedAt: 2).isInboxApp)
+    }
 }

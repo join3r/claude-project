@@ -117,6 +117,15 @@ final class AppModel {
         InboxPartition(desktops.compactMap { desktop in inboxes[desktop.id].map { (desktop.id, $0) } }, now: now)
     }
 
+    /// The Inbox's Apps group (§8.19): running or crashed app runs of the
+    /// desktops that list `stream.run`, in sidebar order.
+    func inboxApps() -> [InboxAppRun] {
+        InboxAppRun.list(desktops.compactMap { desktop in
+            guard supports(DesktopFeature.streamRun, on: desktop.id) else { return nil }
+            return inboxes[desktop.id].map { (desktop.id, $0) }
+        })
+    }
+
         func attentionCount(for desktopId: String) -> Int {
         inboxes[desktopId]?.projects.reduce(0) { sum, project in
             sum + project.tasks.filter { $0.status == .attention }.count

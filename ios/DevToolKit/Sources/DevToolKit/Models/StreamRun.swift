@@ -134,3 +134,57 @@ extension TaskOp {
     /// `stream.logs` (§8.19): the end of a stream's app run output.
     public static let streamLogs = "stream.logs"
 }
+
+extension InboxStreamRun {
+    /// Ended by itself with a non-zero (or unknown) exit code.
+    public var crashed: Bool { status == .exited && exitCode != 0 }
+
+    /// Belongs in the Inbox's Apps group: running, or crashed. Stopped runs
+    /// and clean exits don't.
+    public var isInboxApp: Bool { isRunning || crashed }
+}
+
+/// A row of the phone Inbox's Apps group (§8.19): a stream whose app is
+/// running or crashed, with the desktop and project it belongs to.
+public struct InboxAppRun: Sendable, Equatable, Identifiable {
+    public var desktopId: String
+    public var project: InboxProject
+    public var stream: InboxStream
+    public var run: InboxStreamRun
+
+    public init(desktopId: String, project: InboxProject, stream: InboxStream, run: InboxStreamRun) {
+        self.desktopId = desktopId
+        self.project = project
+        self.stream = stream
+        self.run = run
+    }
+
+    public var id: String { "\(desktopId):\(project.id):\(stream.id)" }
+
+    /// Every running or crashed app run across `inboxes` (pass only desktops
+    /// that list `stream.run`): crashes first, most recently ended first, then
+    /// running ones, most recently started first. Equal times keep the
+    /// desktops' own order.
+    public static func list(_ inboxes: [(desktopId: String, inbox: Inbox)]) -> [InboxAppRun] {
+        var crashed: [(InboxAppRun, Int)] = []
+        var running: [(InboxAppRun, Int)] = []
+        var index = 0
+        for (desktopId, inbox) in inboxes {
+            for project in inbox.projects {
+                for stream in project.streams {
+                    guard let run = stream.run, run.isInboxApp else { continue }
+                    let entry = (InboxAppRun(desktopId: desktopId, project: project, stream: stream, run: run), index)
+                    index += 1
+                    if run.crashed { crashed.append(entry) } else { running.append(entry) }
+                }
+            }
+        }
+        func sorted(_ entries: [(InboxAppRun, Int)], by key: (InboxStreamRun) -> Int64) -> [InboxAppRun] {
+            entries.sorted { a, b in
+                let ka = key(a.0.run), kb = key(b.0.run)
+                return ka != kb ? ka > kb : a.1 < b.1
+            }.map(\.0)
+        }
+        return sorted(crashed) { $0.endedAt ?? $0.startedAt } + sorted(running, by: \.startedAt)
+    }
+}

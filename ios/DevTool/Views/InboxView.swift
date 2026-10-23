@@ -4,6 +4,7 @@ import SwiftUI
 /// Every task of every paired desktop in the desktop inbox's groups (§8.3):
 /// Needs you and Ready open; Working and Snoozed folded
 /// into one-line summaries. The toolbar switches to cards by project.
+/// Above them, Apps: stream app runs that are running or crashed (§8.19).
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: TaskRef?
@@ -16,6 +17,8 @@ struct InboxView: View {
     @AppStorage(InboxSettings.groupedKey) private var grouped = false
     @State private var newTask: NewTaskTarget?
     @State private var closing: CloseTaskRequest?
+    /// The app run whose logs are pushed (§8.19).
+    @State private var logs: StreamLogsTarget?
 
     var body: some View {
         // Wait times and snooze expiry are worked out against the clock; the
@@ -41,6 +44,9 @@ struct InboxView: View {
         .sheet(item: $newTask) { target in
             NewTaskSheet(target: target)
         }
+        .navigationDestination(item: $logs) { target in
+            StreamLogsView(target: target)
+        }
         .closeTaskFlow($closing) { closed in
             if selection == TaskRef(desktopId: closed.desktopId, taskId: closed.taskId) { selection = nil }
         }
@@ -62,11 +68,13 @@ struct InboxView: View {
 
     private func list(now: Date) -> some View {
         let partition = model.inboxPartition(now: now)
+        let apps = model.inboxApps()
         return List(selection: $selection) {
             DesktopBanners(desktops: model.desktops)
-            if partition.isEmpty {
+            if partition.isEmpty && apps.isEmpty {
                 emptyState
             }
+            appsSection(apps, now: now)
             if grouped {
                 byProject(partition, now: now)
             } else {
@@ -121,6 +129,66 @@ struct InboxView: View {
                         .foregroundStyle(Color(.secondaryLabel))
                         .textCase(nil)
                 }
+            }
+        }
+    }
+
+    /// Apps (§8.19): every stream whose app is running or crashed, crashes
+    /// first. Tap for its logs; Restart and Stop (Run for a crash) trail.
+    @ViewBuilder
+    private func appsSection(_ apps: [InboxAppRun], now: Date) -> some View {
+        if !apps.isEmpty {
+            Section {
+                ForEach(apps) { appRow($0, now: now) }
+            } header: {
+                GroupHeader(title: "Apps", count: apps.count, tint: apps.contains(where: \.run.crashed) ? .red : .primary)
+            }
+        }
+    }
+
+    private func appRow(_ app: InboxAppRun, now: Date) -> some View {
+        let target = StreamLogsTarget(desktopId: app.desktopId, projectId: app.project.id, streamId: app.stream.id)
+        let offline = model.isOffline(app.desktopId)
+        let canRun = app.stream.runCommand != nil && !offline && model.pendingRun(streamId: app.stream.id, desktopId: app.desktopId) == nil
+        let running = app.run.isRunning
+        func control(_ action: StreamRunParams.Action) {
+            Task { await model.controlRun(action, projectId: app.project.id, streamId: app.stream.id, desktopId: app.desktopId) }
+        }
+        return InboxAppRow(
+            app: app,
+            target: target,
+            desktopName: model.desktops.count > 1 ? model.desktop(app.desktopId)?.name : nil,
+            isServer: model.isServer(app.desktopId),
+            now: now
+        ) { logs = target }
+        .opacity(offline ? 0.55 : 1)
+        .swipeActions(edge: .trailing) {
+            if canRun {
+                if running {
+                    Button { control(.stop) } label: { Label("Stop", systemImage: "stop.fill") }
+                        .tint(.red)
+                    Button { control(.restart) } label: { Label("Restart", systemImage: "arrow.clockwise") }
+                        .tint(.blue)
+                } else {
+                    Button { control(.start) } label: { Label("Run", systemImage: "play.fill") }
+                        .tint(.green)
+                }
+            }
+        }
+        .contextMenu {
+            Button("Logs", systemImage: "text.alignleft") { logs = target }
+            if app.stream.runCommand != nil {
+                if running {
+                    Button("Restart", systemImage: "arrow.clockwise") { control(.restart) }.disabled(!canRun)
+                    Button("Stop", systemImage: "stop.fill") { control(.stop) }.disabled(!canRun)
+                } else {
+                    Button("Run", systemImage: "play.fill") { control(.start) }.disabled(!canRun)
+                }
+            }
+            Button {
+                onOpenProject(ProjectRef(desktopId: app.desktopId, projectId: app.project.id))
+            } label: {
+                Label("Open \(app.project.name)", systemImage: "folder")
             }
         }
     }
@@ -464,6 +532,68 @@ struct InboxRow: View {
 
     private var streamAndDesktop: String? {
         let parts = [streamName, desktopName].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// An Apps row, project first (Design › Rules): tile, **project** stream
+/// (left out on `main`); then the run's dot and status ("Running · 25m",
+/// "Exited with code 1 · 3m ago"). The row opens the logs; Restart and Stop
+/// (Run for a crash) trail it.
+struct InboxAppRow: View {
+    let app: InboxAppRun
+    let target: StreamLogsTarget
+    /// Set when more than one desktop is paired.
+    let desktopName: String?
+    /// The desktop is a DevTool server: its rack goes by `desktopName`.
+    var isServer = false
+    let now: Date
+    let onLogs: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onLogs) {
+                HStack(alignment: .top, spacing: 12) {
+                    ProjectTileView(tile: app.project.tile, size: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(app.project.name)
+                                .font(.body.weight(.bold))
+                                .layoutPriority(1)
+                            if let place {
+                                Text(place)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                if isServer && desktopName != nil { ServerGlyph() }
+                            }
+                        }
+                        .lineLimit(1)
+                        HStack(spacing: 6) {
+                            RunDot(run: app.run)
+                            Text(app.run.line(now: now))
+                                .foregroundStyle(app.run.color)
+                                .monospacedDigit()
+                        }
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens the app's logs")
+            RunControls(target: target, stream: app.stream)
+        }
+        .padding(.vertical, 2)
+        .alignmentGuide(.listRowSeparatorLeading) { d in d[.leading] + 48 }
+    }
+
+    /// The stream (unless it is `main`) and the desktop.
+    private var place: String? {
+        let stream = app.stream.isMain || app.stream.name.isEmpty ? nil : app.stream.name
+        let parts = [stream, desktopName].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
