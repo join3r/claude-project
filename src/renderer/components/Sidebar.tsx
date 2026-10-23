@@ -1,28 +1,23 @@
-import { SidebarStreamRunAction, SidebarStreamRunBadge } from './StreamRunControls'
+import { ProjectStreamRunBadge, SidebarStreamRunAction, SidebarStreamRunBadge } from './StreamRunControls'
 import { streamRunCommand } from '../../shared/stream-run'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
-import { NEW_TASK_NAME, isEphemeralProject, isRemoteProject, isShellCommandProject, pinnedItemKey } from '../../shared/types'
+import { NEW_TASK_NAME, isEphemeralProject, pinnedItemKey } from '../../shared/types'
 import type { Task, Project, PinnedItem, PendingWorktreeSetup, Stream } from '../../shared/types'
 import AddRemoteProject from './AddRemoteProject'
 import AddShellCommandProject from './AddShellCommandProject'
-import AddLocalProject from './AddLocalProject'
 import NewProjectModal from './NewProjectModal'
-import RenameProjectModal from './RenameProjectModal'
 import AddServerProject, { type AddServerProjectMode } from './servers/AddServerProject'
 import AddServerDialog from './servers/AddServerDialog'
-import MoveToServerDialog from './servers/MoveToServerDialog'
 import ServerNotices from './servers/ServerNotices'
 import { knownSshTargets } from './servers/sshTargets'
 import { serverName, useServersState } from '../serversState'
-import ProjectSettings from './ProjectSettings'
 import Settings from './Settings'
 import ProjectSwitcher from './ProjectSwitcher'
 import InboxPanel from './InboxPanel'
 import NewTaskModal from './NewTaskModal'
 import NewStreamModal from './NewStreamModal'
-import StreamSetupModal from './StreamSetupModal'
 import { terminalTaskName, type NewTaskSubmission } from './newTask'
 import { setPendingCommand } from './terminalStartup'
 import { createTab } from './newTaskTabs'
@@ -56,8 +51,11 @@ import SidebarContextMenu from './sidebar/SidebarContextMenu'
 import { usePinnedDrag, useSidebarTreeDrag } from './sidebar/useSidebarDrag'
 import { useCloseTask } from './sidebar/useCloseTask'
 import { useCloseStream } from './sidebar/useCloseStream'
-import { ProjectDoneGroup, StreamDoneRow, type DoneRowActions } from './sidebar/DoneRows'
-import { closeArchivedView, getArchivedView } from './archivedViewTarget'
+import { ProjectDoneGroup, StreamDoneRow } from './sidebar/DoneRows'
+import { useDoneRowActions } from './sidebar/doneActions'
+import { openEntityDialog } from '../entityActions'
+import { useAddEmptyTask, useMoveTask } from '../hooks/useTaskMenuActions'
+import { EntityMenuPopup, type EntityMenuTarget } from './menus/EntityMenus'
 import {
   extraTabCount,
   formatActivityAge,
@@ -67,7 +65,7 @@ import {
   sidebarTaskState,
   type SidebarTaskState
 } from './sidebar/streamTree'
-import { currentStreamId, findStreamOfTask, findTaskInProject, needsTaskWorktree, projectTasks, runsInTaskDir, streamDirectory, taskDirectory, taskMoveBlocker, taskTabs } from '../../shared/streams'
+import { findStreamOfTask, findTaskInProject, projectTasks, taskTabs } from '../../shared/streams'
 
 /** A pin resolved against the data: its project, and the stream or task it names. */
 type ResolvedPin = { item: PinnedItem; key: string; project: Project; stream?: Stream; task?: Task }
@@ -85,10 +83,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     projects, tags, projectOrder,
     pinnedItems, togglePinnedItem, setPinnedOrder,
     selectedProjectId, selectedTaskId,
-    switchToTask, selectProjectHome, showArchived,
-    addProject, addRemoteProject, addShellCommandProject, addServerProjects, addTag, setProjectTags, renameProject, updateProject,
+    switchToTask, selectProjectHome,
+    addProject, addRemoteProject, addShellCommandProject, addServerProjects, addTag, setProjectTags, renameProject,
     addTask, addTaskInDirectory, addStream, renameTask, titleTaskFromPrompt,
-    moveTask, renameStream, reopenTask, reopenStream, deleteArchived,
+    renameStream,
     reorderProjects, getProjectDir,
     config, updateConfig,
     expandedProjectIds, toggleProjectExpansion, setProjectExpanded,
@@ -174,7 +172,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [addServerOpen, setAddServerOpen] = useState(false)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [newProjectOpen, setNewProjectOpen] = useState(false)
-  const [renameProjectId, setRenameProjectId] = useState<string | null>(null)
   const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const [serverProjectOpen, setServerProjectOpen] = useState(false)
   /** Add server's "Choose a folder…" opens Server project on that server's folder browser. */
@@ -187,9 +184,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const serverDirectories = useCallback((serverId: string): ReadonlySet<string> =>
     new Set(projects.filter(p => p.host === serverId).map(p => p.directory)), [projects])
   const [shellCommandModalOpen, setShellCommandModalOpen] = useState(false)
-  const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null)
-  /** The SSH project being moved to a server, as it was when the dialog opened (once moved it has no `ssh`). */
-  const [moveProject, setMoveProject] = useState<Project | null>(null)
+  /** A project or stream menu opened from the Inbox (a group header, its "also:" streams). */
+  const [entityMenu, setEntityMenu] = useState<EntityMenuTarget | null>(null)
+  const closeEntityMenu = useCallback(() => setEntityMenu(null), [])
   const [iconMetadata, setIconMetadata] = useState<DashboardIconsMetadata | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -199,12 +196,9 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const [newTaskWhere, setNewTaskWhere] = useState<{ projectId: string; streamId?: string } | null>(null)
   // The project the New stream dialog is open for.
   const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
-  /** A new stream whose worktree setup commands wait for approval. */
-  const [streamSetup, setStreamSetup] = useState<{ projectId: string; streamId: string; branch: string; pending: PendingWorktreeSetup } | null>(null)
   const closeTaskFlow = useCloseTask()
   const closeStreamFlow = useCloseStream()
   useStreamAheadPolling(projects, selectedProjectId, selectedTaskId)
-  const [duplicateProjectId, setDuplicateProjectId] = useState<string | null>(null)
   const missingDirs = useMissingProjectDirs(projects)
   const [switcherActive, setSwitcherActive] = useState(false)
   const expandedProjects = new Set(expandedProjectIds)
@@ -337,11 +331,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   useEffect(() => {
     return paletteEvents.on('open-add-server', () => setAddServerOpen(true))
   }, [])
-  useEffect(() => {
-    return paletteEvents.on('open-project-settings', () => {
-      if (selectedProjectId) setProjectSettingsId(selectedProjectId)
-    })
-  }, [selectedProjectId])
 
   /**
    * The inline rename input and the "+ Task" affordances only exist in the project
@@ -368,19 +357,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     beginEdit(project.id, project.name)
   }
 
-  /**
-   * An empty task in `streamId`, or in the project's current stream (the one this
-   * window is in, else the one last worked in, else `main`). No inline rename:
-   * the task opens on its prompt box, and the first prompt names it.
-   */
-  const handleAddTask = (projectId: string, streamId?: string) => {
-    const project = projects.find(p => p.id === projectId)
-    if (!project) return
-    const target = streamId ?? currentStreamId(project, selectedTaskId)
-    addTask(projectId, NEW_TASK_NAME, [], target)
-    setProjectExpanded(projectId, true)
-    if (target) setStreamExpanded(target, true)
-  }
+  /** An empty task in `streamId`, or in the project's current stream (see `useAddEmptyTask`). */
+  const handleAddTask = useAddEmptyTask()
 
   const findTask = useCallback((projectId: string, taskId: string): Task | undefined =>
     findTaskInProject(projects.find(p => p.id === projectId), taskId)
@@ -393,7 +371,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const handleStreamCreated = (projectId: string, name: string, workspace?: Parameters<typeof addStream>[2], setupPending?: PendingWorktreeSetup) => {
     const stream = addStream(projectId, name, workspace)
     setNewStreamProjectId(null)
-    if (workspace && setupPending) setStreamSetup({ projectId, streamId: stream.id, branch: workspace.branchName, pending: setupPending })
+    if (workspace && setupPending) openEntityDialog({ kind: 'stream-setup', projectId, streamId: stream.id, branch: workspace.branchName, pending: setupPending })
     setSidebarTab('projects')
     setProjectExpanded(projectId, true)
     setStreamExpanded(stream.id, true)
@@ -442,62 +420,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
   const handleCloseStream = closeStreamFlow.closeStream
 
   /** What the Done rows do: open read-only, reopen, delete for good (after a confirm). */
-  const doneActions: DoneRowActions = {
-    open: showArchived,
-    reopenTask: (projectId, taskId) => {
-      if (getArchivedView()?.id === taskId) closeArchivedView()
-      void reopenTask(projectId, taskId)
-    },
-    reopenStream: (projectId, streamId) => {
-      void reopenStream(projectId, streamId).then(({ notice, setup }) => {
-        if (notice) window.alert(notice)
-        // Its worktree came back from the branch; setup runs as for a new stream.
-        if (setup?.pending) setStreamSetup({ projectId, streamId, branch: setup.branch, pending: setup.pending })
-        else if (setup?.error) window.alert(`The worktree of the reopened stream is back, but its setup failed:\n\n${setup.error}`)
-      }).catch((err: unknown) => {
-        window.alert(`Couldn't reopen the stream: ${err instanceof Error ? err.message : String(err)}`)
-      })
-    },
-    deleteTask: (projectId, entry) => {
-      if (!window.confirm(`Delete "${entry.task.name}" permanently? It can't be reopened afterwards. The agent's own session files are kept.`)) return
-      if (getArchivedView()?.id === entry.task.id) closeArchivedView()
-      void deleteArchived(projectId, { tasks: [entry.task.id] })
-    },
-    deleteStream: (projectId, entry) => {
-      const count = entry.stream.tasks.length + entry.doneTasks.length
-      if (!window.confirm(`Delete stream "${entry.stream.name}" and its ${count} ${count === 1 ? 'task' : 'tasks'} permanently? It can't be reopened afterwards. Its branch and the agents' session files are kept.`)) return
-      if (getArchivedView()?.id === entry.stream.id) closeArchivedView()
-      void deleteArchived(projectId, { streams: [entry.stream.id] })
-    }
-  }
+  const doneActions = useDoneRowActions()
 
-  /**
-   * A task dropped into a place in the tree. Into a stream with another folder,
-   * it asks first: the task's agent and terminals start again over there. A
-   * task with its own worktree stays in its stream (it says why).
-   */
-  const handleMoveTask = useCallback((projectId: string, taskId: string, toStreamId: string, toIndex: number) => {
-    const project = projects.find(p => p.id === projectId)
-    const from = project?.streams.find(stream => stream.tasks.some(task => task.id === taskId))
-    const to = project?.streams.find(stream => stream.id === toStreamId)
-    const task = findTaskInProject(project, taskId)
-    if (!project || !from || !to || !task) return
-    const blocked = taskMoveBlocker(task, from, to)
-    if (blocked) {
-      window.alert(blocked)
-      return
-    }
-    const restart = from !== to && taskDirectory(project, task) !== streamDirectory(project, to)
-    if (restart) {
-      const where = needsTaskWorktree(project, to, task)
-        ? `a worktree of its own, branched from ${to.workspace!.branchName}`
-        : to.workspace ? `the ${to.workspace.branchName} worktree` : 'the project folder'
-      const lines = [`Move "${task.name}" to ${to.name}?`, `It will work in ${where}.`]
-      if (taskTabs(task).some(runsInTaskDir)) lines.push('Its agent and terminals restart there.')
-      if (!window.confirm(lines.join('\n\n'))) return
-    }
-    void moveTask(projectId, taskId, toStreamId, toIndex, { restart })
-  }, [projects, moveTask])
+  /** A task dropped into a place in the tree (see `useMoveTask`). */
+  const handleMoveTask = useMoveTask()
 
   const handleRenameSubmit = (type: 'project' | 'stream' | 'task', projectId: string, id?: string) => {
     if (!editValue.trim()) {
@@ -803,14 +729,14 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             <ProjectIconSlot project={project} theme={effectiveTheme} metadata={iconMetadata} show={showIcons} />
             <span className={`overflow-hidden text-ellipsis whitespace-nowrap font-semibold${missingDirs.has(project.id) ? ' text-text-subtle' : ''}`}>{project.name}</span>
             {project.host && <ServerBadge serverId={project.host} />}
-            {missingDirs.has(project.id) && <MissingDirBadge directory={project.directory} onClick={() => setProjectSettingsId(project.id)} />}
+            {missingDirs.has(project.id) && <MissingDirBadge directory={project.directory} onClick={() => openEntityDialog({ kind: 'project-settings', projectId: project.id })} />}
             <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
               {!isExpanded && <StateDot state={rollUpState(projectTasks(project).map(stateOf))} hideOnHover />}
               <RowActions>
                 <RowAction title="New task" onClick={() => handleAddTask(project.id)}>
                   <Plus size={13} />
                 </RowAction>
-                <RowAction title="Project settings" onClick={() => setProjectSettingsId(project.id)}>
+                <RowAction title="Project settings" onClick={() => openEntityDialog({ kind: 'project-settings', projectId: project.id })}>
                   <Cog size={13} />
                 </RowAction>
               </RowActions>
@@ -925,7 +851,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             <>
               <span className={`overflow-hidden text-ellipsis whitespace-nowrap font-semibold${missingDirs.has(project.id) ? ' text-text-subtle' : ''}`}>{project.name}</span>
               {project.host && <ServerBadge serverId={project.host} />}
-              {missingDirs.has(project.id) && <MissingDirBadge directory={project.directory} onClick={() => setProjectSettingsId(project.id)} />}
+              {missingDirs.has(project.id) && <MissingDirBadge directory={project.directory} onClick={() => openEntityDialog({ kind: 'project-settings', projectId: project.id })} />}
             </>
           ) : (
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">
@@ -1070,6 +996,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onClose={(projectId, taskId) => void handleCloseTask(projectId, taskId)}
           onRemove={(projectId, taskId) => void closeTaskFlow.removeTask(projectId, taskId)}
           onNewTask={() => setNewTaskOpen(true)}
+          onProjectMenu={(at, projectId) => setEntityMenu({ ...at, kind: 'project', projectId })}
+          onStreamMenu={(at, projectId, streamId) => setEntityMenu({ ...at, kind: 'stream', projectId, streamId })}
+          onProjectSettings={(projectId) => openEntityDialog({ kind: 'project-settings', projectId })}
+          onNewTaskIn={(projectId) => { setNewTaskWhere({ projectId }); setNewTaskOpen(true) }}
+          projectBadge={(project) => <ProjectStreamRunBadge projectId={project.id} streamIds={project.streams.map(stream => stream.id)} />}
           allStatuses={allStatuses}
           statusSince={statusSince}
           activities={agentActivities}
@@ -1115,22 +1046,16 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       <SidebarContextMenu
         contextMenu={contextMenu}
         missingDirs={missingDirs}
-        onRenameProject={setRenameProjectId}
         snoozeSubmenu={snoozeSubmenu}
         setSnoozeSubmenu={setSnoozeSubmenu}
         closeContextMenu={closeContextMenu}
-        setContextMenu={setContextMenu}
         findTask={findTask}
         handleCloseTask={handleCloseTask}
         handleCloseStream={handleCloseStream}
         beginEdit={beginEdit}
         isPinned={isPinned}
-        setDuplicateProjectId={setDuplicateProjectId}
-        setProjectSettingsId={setProjectSettingsId}
-        onAddTask={handleAddTask}
-        onNewStream={handleNewStream}
-        onMoveToServer={(projectId) => setMoveProject(projects.find(p => p.id === projectId) ?? null)}
       />
+      <EntityMenuPopup menu={entityMenu} onClose={closeEntityMenu} />
 
       <ServerNotices onOpenSettings={(tab) => { setSettingsTab(tab); setSettingsOpen(true) }} />
 
@@ -1187,10 +1112,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
         />
       )}
 
-      {moveProject && (
-        <MoveToServerDialog key={moveProject.id} project={moveProject} onClose={() => setMoveProject(null)} />
-      )}
-
       {shellCommandModalOpen && (
         <AddShellCommandProject
           allTags={tags}
@@ -1202,93 +1123,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           onCancel={() => setShellCommandModalOpen(false)}
         />
       )}
-
-      {renameProjectId && (() => {
-        const project = projects.find(p => p.id === renameProjectId)
-        if (!project) return null
-        return (
-          <RenameProjectModal
-            project={project}
-            folderMissing={missingDirs.has(project.id)}
-            onRenameOnly={(name) => renameProject(project.id, name)}
-            onClose={() => setRenameProjectId(null)}
-          />
-        )
-      })()}
-
-      {projectSettingsId && (() => {
-        const project = projects.find(p => p.id === projectSettingsId)
-        if (!project) return null
-        return (
-          <ProjectSettings
-            project={project}
-            onSave={(payload) => updateProject(projectSettingsId, payload)}
-            onClose={() => setProjectSettingsId(null)}
-            onMoveToServer={() => {
-              setProjectSettingsId(null)
-              setMoveProject(project)
-            }}
-          />
-        )
-      })()}
-
-      {duplicateProjectId && (() => {
-        const project = projects.find(p => p.id === duplicateProjectId)
-        if (!project) return null
-        if (isRemoteProject(project)) {
-          return (
-            <AddRemoteProject
-              allTags={tags}
-              onEnsureTag={addTag}
-              initialValues={{
-                host: project.ssh!.host,
-                port: project.ssh!.port,
-                username: project.ssh!.username,
-                keyFile: project.ssh!.keyFile,
-                remoteDir: project.ssh!.remoteDir,
-                aiToolArgs: project.aiToolArgs
-              }}
-              onAdd={(name, ssh, aiToolArgs, tagIds) => {
-                addRemoteProject(name, ssh, aiToolArgs, tagIds)
-                setDuplicateProjectId(null)
-              }}
-              onCancel={() => setDuplicateProjectId(null)}
-            />
-          )
-        }
-        if (isShellCommandProject(project)) {
-          return (
-            <AddShellCommandProject
-              allTags={tags}
-              onEnsureTag={addTag}
-              initialValues={{
-                name: project.name,
-                command: project.shellCommand!.command
-              }}
-              onAdd={(name, command, tagIds) => {
-                addShellCommandProject(name, command, tagIds)
-                setDuplicateProjectId(null)
-              }}
-              onCancel={() => setDuplicateProjectId(null)}
-            />
-          )
-        }
-        return (
-          <AddLocalProject
-            allTags={tags}
-            onEnsureTag={addTag}
-            initialValues={{
-              name: project.name,
-              directory: project.directory
-            }}
-            onAdd={(name, directory, tagIds) => {
-              addProject(name, directory, tagIds)
-              setDuplicateProjectId(null)
-            }}
-            onCancel={() => setDuplicateProjectId(null)}
-          />
-        )
-      })()}
 
       {newProjectOpen && (
         <NewProjectModal
@@ -1324,15 +1158,6 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           />
         )
       })()}
-
-      {streamSetup && (
-        <StreamSetupModal
-          key={streamSetup.streamId}
-          {...streamSetup}
-          serverId={projectsById.get(streamSetup.projectId)?.host}
-          onClose={() => setStreamSetup(null)}
-        />
-      )}
 
       {closeStreamFlow.dialog}
       {closeTaskFlow.dialog}

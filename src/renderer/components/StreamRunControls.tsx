@@ -1,7 +1,7 @@
 import React from 'react'
 import { Play, RotateCw, Square } from 'lucide-react'
 import type { StreamRunAction, StreamRunState } from '../../shared/stream-run'
-import { controlStreamRun, openStreamRunLogs, useStreamRun } from '../streamRuns'
+import { controlStreamRun, openStreamRunLogs, useProjectStreamRun, useStreamRun } from '../streamRuns'
 import { RowAction } from './ui'
 
 /** What a run's state reads as: "Running", "Exited (1)", "Stopped". */
@@ -118,4 +118,11 @@ export function SidebarStreamRunAction({ projectId, streamId, command }: StreamP
       {running ? <Square size={12} /> : <Play size={13} />}
     </RowAction>
   )
+}
+
+/** A project's sign of its streams' apps: the badge of the one running (else the one that failed). */
+export function ProjectStreamRunBadge({ projectId, streamIds }: { projectId: string; streamIds: readonly string[] }): React.ReactElement | null {
+  const shown = useProjectStreamRun(projectId, streamIds)
+  if (!shown) return null
+  return <StreamRunBadge run={shown.run} onClick={() => openStreamRunLogs({ projectId, streamId: shown.streamId })} />
 }

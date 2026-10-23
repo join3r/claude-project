@@ -7,6 +7,7 @@ import { emptyChatState, reduceChat } from '../../shared/claude-chat'
 import { taskTabs } from '../../shared/streams'
 import { useProjectArchive } from '../hooks/archiveStore'
 import { closeArchivedView, type ArchivedViewTarget } from './archivedViewTarget'
+import { reopenStreamWithSetup } from './sidebar/doneActions'
 import Timeline from './claude-chat/Timeline'
 import { GrpHead, FormGroup, PrimaryButton } from './ui'
 
@@ -182,8 +183,8 @@ export function ArchivedView({ target }: { target: ArchivedViewTarget }): React.
   const shown = tasks.find(item => item.task.id === shownTaskId) ?? tasks[0]
   const onReopen = () => {
     setBusy(true)
-    reopenStream(project.id, entry.stream.id)
-      .then(({ notice }) => { if (notice) window.alert(notice) })
+    // As from the sidebar: its worktree's setup waits for approval like a new stream's.
+    reopenStreamWithSetup(reopenStream, project.id, entry.stream.id)
       .catch(reopenFailed)
       .finally(() => setBusy(false))
   }

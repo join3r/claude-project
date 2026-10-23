@@ -8,6 +8,7 @@ import { fixtureProject } from './helpers/streams-fixtures'
 import { AppProvider } from '../src/renderer/context/AppContext'
 import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
 import Sidebar from '../src/renderer/components/Sidebar'
+import EntityActionsHost from '../src/renderer/components/EntityActionsHost'
 import { projectDeletePrompt, revealFolder } from '../src/renderer/components/sidebar/SidebarContextMenu'
 
 // React import is required by the JSX runtime under vitest's default transform.
@@ -76,6 +77,7 @@ function renderSidebar() {
     <TabStatusProvider>
       <AppProvider>
         <Sidebar />
+        <EntityActionsHost />
       </AppProvider>
     </TabStatusProvider>
   )
@@ -403,6 +405,56 @@ describe('Sidebar stream tree', () => {
     await screen.findByText('Busy task')
     fireEvent.click(within(streamRow('stream-busy')).getByTitle('New task in 0.5.0'))
     await waitFor(() => expect(lastProject()?.streams.find(s => s.id === 'stream-busy')?.tasks).toHaveLength(2))
+  })
+
+  it('opens the task\'s stream menu as a page, and renames the stream in a dialog', async () => {
+    renderSidebar()
+    fireEvent.contextMenu(await screen.findByText('Busy task'))
+    fireEvent.click(await screen.findByTestId('task-menu-open-stream'))
+    const page = await screen.findByTestId('task-menu-stream')
+    expect(within(page).getByTestId('stream-menu-header').textContent).toContain('0.5.0')
+    for (const name of ['New task here', 'Run app', 'Run command…', 'Rename', 'Pin stream', 'Close stream']) {
+      expect(within(page).getByRole('button', { name })).toBeTruthy()
+    }
+    fireEvent.click(within(page).getByRole('button', { name: 'Rename' }))
+    const input = await screen.findByLabelText('Stream name')
+    fireEvent.change(input, { target: { value: 'release' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    await waitFor(() => expect(lastProject()?.streams.find(s => s.id === 'stream-busy')?.name).toBe('release'))
+  })
+
+  it('offers no Close on main\'s page, and goes back to the task menu', async () => {
+    renderSidebar()
+    fireEvent.contextMenu(await screen.findByText('Quiet task'))
+    fireEvent.click(await screen.findByTestId('task-menu-open-stream'))
+    const page = await screen.findByTestId('task-menu-stream')
+    expect(within(page).queryByRole('button', { name: 'Close stream' })).toBeNull()
+    fireEvent.click(within(page).getByRole('button', { name: 'Quiet task' }))
+    expect(await screen.findByTestId('task-menu-open-project')).toBeTruthy()
+  })
+
+  it('opens Project Settings from the task\'s project page', async () => {
+    renderSidebar()
+    fireEvent.contextMenu(await screen.findByText('Quiet task'))
+    fireEvent.click(await screen.findByTestId('task-menu-open-project'))
+    const page = await screen.findByTestId('task-menu-project')
+    expect(within(page).getByRole('button', { name: 'Rename…' })).toBeTruthy()
+    expect(within(page).getByRole('button', { name: 'Delete…' })).toBeTruthy()
+    fireEvent.click(within(page).getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByText('Project Settings')).toBeTruthy()
+  })
+
+  it('moves a task to another stream from its menu, asking first when its folder changes', async () => {
+    const confirm = vi.fn((_message: string) => true)
+    vi.stubGlobal('confirm', confirm)
+    renderSidebar()
+    fireEvent.contextMenu(await screen.findByText('Quiet task'))
+    fireEvent.click(await screen.findByTestId('task-menu-open-move'))
+    const page = await screen.findByTestId('task-menu-move')
+    expect(within(page).queryByTestId(`move-to-stream-${mainStreamId('p1')}`)).toBeNull()
+    fireEvent.click(within(page).getByTestId('move-to-stream-stream-busy'))
+    expect(confirm.mock.calls[0][0]).toMatch(/^Move "Quiet task" to 0\.5\.0\?[\s\S]*release-0\.5 worktree/)
+    await waitFor(() => expect(lastProject()?.streams.find(s => s.id === 'stream-busy')?.tasks.map(t => t.id)).toEqual(['busy', 'quiet']))
   })
 
   it('pins a stream from its menu and lists its tasks under the pin', async () => {

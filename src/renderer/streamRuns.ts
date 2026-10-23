@@ -54,6 +54,22 @@ export function useStreamRun(projectId: string, streamId: string): StreamRunStat
   return useSyncExternalStore(subscribe, () => states[streamId])
 }
 
+/**
+ * The project's stream that shows an app badge (running, else failed), with its
+ * run: what a row standing for the whole project (an Inbox group header) shows.
+ */
+export function useProjectStreamRun(projectId: string, streamIds: readonly string[]): { streamId: string; run: StreamRunState } | null {
+  useEffect(() => { fetchProject(projectId) }, [projectId])
+  const all = useSyncExternalStore(subscribe, () => states)
+  let failed: { streamId: string; run: StreamRunState } | null = null
+  for (const streamId of streamIds) {
+    const run = all[streamId]
+    if (run?.status === 'running') return { streamId, run }
+    if (!failed && run?.status === 'exited' && run.exitCode !== 0) failed = { streamId, run }
+  }
+  return failed
+}
+
 /** Run, Stop or Restart; a failure (no command, a folder that's gone) shows as a toast. */
 export async function controlStreamRun(projectId: string, streamId: string, action: StreamRunAction): Promise<void> {
   const result = await window.api.streamRunControl(projectId, streamId, action)

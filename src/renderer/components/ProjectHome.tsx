@@ -4,7 +4,12 @@ import { StreamRunButtons, StreamRunStatusLabel } from './StreamRunControls'
 import React, { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince } from '../context/TabStatusContext'
-import { GrpHead, FormGroup } from './ui'
+import { GrpHead, FormGroup, ContextMenu, RowAction, RowActions, type ContextMenuItem } from './ui'
+import { Cog, MoreHorizontal, RotateCcw, Trash2 } from 'lucide-react'
+import { EntityMenuPopup, type EntityMenuTarget } from './menus/EntityMenus'
+import { openEntityDialog } from '../entityActions'
+import { useDoneRowActions } from './sidebar/doneActions'
+import type { ArchivedTask } from '../../shared/archive'
 import { useGitPosture } from '../hooks/useGitPosture'
 import { useCommitHistory } from '../hooks/useCommitHistory'
 import { useProjectArchive } from '../hooks/archiveStore'
@@ -64,8 +69,48 @@ function StreamRunCardRow({ project, stream }: { project: Project; stream: Strea
 }
 
 /**
+ * An archived task under a card's `Done (N)`: a click opens it read-only; hover
+ * offers Reopen and Delete permanently…, as does a right-click.
+ */
+function DoneTaskItem({ project, entry }: { project: Project; entry: ArchivedTask }): React.ReactElement {
+  const actions = useDoneRowActions()
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const open = () => actions.open({ projectId: project.id, kind: 'task', id: entry.task.id })
+  const reopen = () => actions.reopenTask(project.id, entry.task.id)
+  const remove = () => actions.deleteTask(project.id, entry)
+  const items: ContextMenuItem[] = [
+    { label: 'Open', onSelect: open },
+    { label: 'Reopen', onSelect: reopen },
+    { label: 'Delete permanently…', onSelect: remove, danger: true }
+  ]
+  return (
+    <li className="group min-w-0 flex items-center gap-1 rounded-sm hover:bg-surface-3 px-1 -mx-1" data-testid={`home-archived-task-${entry.task.id}`}>
+      <button
+        type="button"
+        className="flex-1 min-w-0 bg-transparent border-0 p-0 py-0.5 text-left text-xs text-text-muted cursor-pointer truncate"
+        title={`${entry.task.name} · archived`}
+        onClick={open}
+        onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) }}
+      >
+        {entry.task.name}
+      </button>
+      <RowActions>
+        <RowAction title="Reopen" onClick={reopen}>
+          <RotateCcw size={12} />
+        </RowAction>
+        <RowAction danger title="Delete permanently…" onClick={remove}>
+          <Trash2 size={12} />
+        </RowAction>
+      </RowActions>
+      <ContextMenu menu={menu} items={menu ? items : []} onClose={() => setMenu(null)} />
+    </li>
+  )
+}
+
+/**
  * One stream: its rolled-up status, branch and worktree state, its open tasks
  * (click to open), `Done (N)` (its archived tasks, opened read-only) and `+ Task`.
+ * Its ⋯ (or a right-click on its name) opens the stream menu.
  */
 function StreamCard({ project, stream, local, allStatuses, statusSince, now }: {
   project: Project
@@ -75,7 +120,7 @@ function StreamCard({ project, stream, local, allStatuses, statusSince, now }: {
   statusSince: Record<string, number>
   now: number
 }): React.ReactElement {
-  const { switchToTask, showArchived } = useApp()
+  const { switchToTask } = useApp()
   const [doneOpen, setDoneOpen] = useState(false)
   const archive = useProjectArchive(project.id, doneOpen)
   const workspace = stream.workspace
@@ -83,6 +128,8 @@ function StreamCard({ project, stream, local, allStatuses, statusSince, now }: {
   const tone = streamTone(stream, allStatuses, statusSince, now)
   const doneCount = stream.archivedTaskCount ?? 0
   const doneTasks = archive ? archivedTasksOf(visibleArchive(archive, project), stream.id) : []
+  const [menu, setMenu] = useState<EntityMenuTarget | null>(null)
+  const openMenu = (x: number, y: number) => setMenu({ x, y, kind: 'stream', projectId: project.id, streamId: stream.id })
 
   const where: string[] = []
   if (workspace) {
@@ -102,14 +149,29 @@ function StreamCard({ project, stream, local, allStatuses, statusSince, now }: {
       className={`bg-field border rounded-lg p-3 flex flex-col gap-2 min-w-0 ${tone === 'attention' ? 'border-border-strong' : 'border-border'}`}
       data-testid={`home-stream-${stream.id}`}
     >
-      <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center gap-1.5 min-w-0" onContextMenu={(e) => { e.preventDefault(); openMenu(e.clientX, e.clientY) }}>
         <ToneDot tone={tone} title={STREAM_TONE_LABEL[tone]} />
         <span className="font-mono font-semibold text-base truncate" title={stream.name}>{stream.name}</span>
         <span className="flex-1" />
         {workspace && (
           <span className="font-mono text-2xs text-text-subtle truncate max-w-[50%]" title={workspace.branchName}>⎇ {workspace.branchName}</span>
         )}
+        <button
+          type="button"
+          className="shrink-0 -my-1 -mr-1 flex items-center justify-center size-(--ctl-h-sm) rounded-md bg-transparent border-0 cursor-pointer text-text-subtle hover:text-text hover:bg-surface-3 transition-colors duration-(--motion-fast)"
+          title={`${stream.name}: stream actions`}
+          aria-haspopup="menu"
+          aria-expanded={menu !== null}
+          data-testid={`home-stream-menu-${stream.id}`}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            openMenu(rect.left, rect.bottom + 4)
+          }}
+        >
+          <MoreHorizontal size={14} />
+        </button>
       </div>
+      <EntityMenuPopup menu={menu} onClose={() => setMenu(null)} />
       <div className="text-xs text-text-subtle">
         {where.join(' · ')}
         {tone !== 'quiet' && <span className={TONE_TEXT_CLS[tone]}> · {STREAM_TONE_LABEL[tone].toLowerCase()}</span>}
@@ -154,18 +216,7 @@ function StreamCard({ project, stream, local, allStatuses, statusSince, now }: {
       {doneOpen && (
         <ul className="flex flex-col gap-0.5 m-0 p-0 list-none">
           {!archive && <li className="text-xs text-text-subtle">Loading…</li>}
-          {doneTasks.map(entry => (
-            <li key={entry.task.id} className="min-w-0">
-              <button
-                type="button"
-                className="w-full bg-transparent border-0 px-1 -mx-1 py-0.5 rounded-sm text-left text-xs text-text-muted cursor-pointer hover:bg-surface-3 truncate"
-                title={`${entry.task.name} · archived`}
-                onClick={() => showArchived({ projectId: project.id, kind: 'task', id: entry.task.id })}
-              >
-                {entry.task.name}
-              </button>
-            </li>
-          ))}
+          {doneTasks.map(entry => <DoneTaskItem key={entry.task.id} project={project} entry={entry} />)}
         </ul>
       )}
     </div>
@@ -250,6 +301,14 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
             <h1 className="m-0 text-xl font-semibold text-text truncate">{project.name}</h1>
             {where && <span className="font-mono text-xs text-text-subtle truncate" title={where}>{where}</span>}
           </div>
+          <button
+            type="button"
+            className={`${headerBtnCls} bg-transparent border-0 text-text-muted hover:text-text hover:bg-surface-3`}
+            onClick={() => openEntityDialog({ kind: 'project-settings', projectId: project.id })}
+            data-testid="home-project-settings"
+          >
+            <Cog size={14} /> Settings
+          </button>
           <button
             type="button"
             className={`${headerBtnCls} bg-transparent border border-border-strong text-text hover:bg-surface-3`}

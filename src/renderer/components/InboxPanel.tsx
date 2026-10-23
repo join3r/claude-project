@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from 'react'
-import { AlarmClockOff, Check, Clock, Inbox as InboxIcon, SquarePen, X } from 'lucide-react'
+import { AlarmClockOff, Check, Clock, Cog, Inbox as InboxIcon, MoreHorizontal, Plus, SquarePen, X } from 'lucide-react'
 import type { AppConfig, Project, Task } from '../../shared/types'
 import { isEphemeralProject } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { RowActions, RowAction } from './ui'
 import ProjectTileBadge from './ProjectTileBadge'
 import { StateDot, TreeChevron } from './sidebar/SidebarParts'
-import type { SidebarTaskState } from './sidebar/streamTree'
+import { rollUpState, sidebarTaskState, type SidebarTaskState } from './sidebar/streamTree'
+import type { MenuAnchor } from '../hooks/useMenuPosition'
+import { projectTasks } from '../../shared/streams'
 import {
   formatRelativeAge,
   formatWaitTime,
@@ -38,6 +40,16 @@ type Props = {
   /** The row's ✕: removes the task and, after a confirm, its worktree's changes unlanded. */
   onRemove: (projectId: string, taskId: string) => void
   onNewTask: () => void
+  /** Grouped layout: a project header's menu (right-click or its ⋯), at `at`. */
+  onProjectMenu?: (at: MenuAnchor, projectId: string) => void
+  /** Grouped layout: the menu of a stream named on its project's "also:" line. */
+  onStreamMenu?: (at: MenuAnchor, projectId: string, streamId: string) => void
+  /** Grouped layout: a project header's cog. */
+  onProjectSettings?: (projectId: string) => void
+  /** Grouped layout: a project header's +, a new task in that project. */
+  onNewTaskIn?: (projectId: string) => void
+  /** Grouped layout: what a project header shows of its streams' apps (the ▶ badge). */
+  projectBadge?: (project: Project) => React.ReactNode
   allStatuses: Record<string, TabStatusValue>
   statusSince: Record<string, number>
   activities: Record<string, AgentActivity>
@@ -236,29 +248,100 @@ function InboxRow({
   )
 }
 
-/** The grouped layout's header: the project's tile and name. Clicking it opens the project's home page. */
-function ProjectHeader({ project, theme, count, showIcon, selected, onOpen }: {
+/** Where a button's dropdown opens: under it, at its left edge. */
+function belowAnchor(e: React.MouseEvent): MenuAnchor {
+  const rect = e.currentTarget.getBoundingClientRect()
+  return { x: rect.left, y: rect.bottom + 4 }
+}
+
+/**
+ * The grouped layout's header: the project's tile and name, its rolled-up
+ * state and app badge. Clicking it opens the project's home page; right-click
+ * or ⋯ opens the project's menu, and hovering offers + Task and its settings.
+ */
+function ProjectHeader({ project, theme, count, showIcon, selected, state, badge, onOpen, onMenu, onSettings, onNewTask }: {
   project: Project
   theme: 'dark' | 'light'
   count: number
   showIcon: boolean
   selected: boolean
+  state: SidebarTaskState
+  badge?: React.ReactNode
   onOpen?: () => void
+  onMenu?: (at: MenuAnchor) => void
+  onSettings?: () => void
+  onNewTask?: () => void
 }): React.ReactElement {
   return (
     <div
       className={[
-        'flex items-center gap-1.5 mx-1.5 mt-1.5 px-1.5 py-1 rounded-md text-xs overflow-hidden whitespace-nowrap',
+        'group flex items-center gap-1.5 mx-1.5 mt-1.5 px-1.5 py-1 rounded-md text-xs overflow-hidden whitespace-nowrap',
         onOpen ? 'cursor-pointer transition-colors duration-(--motion-fast)' : '',
         selected ? 'bg-sel' : onOpen ? 'hover:bg-surface-3' : ''
       ].join(' ')}
       onClick={onOpen}
+      onContextMenu={onMenu ? (e) => { e.preventDefault(); e.stopPropagation(); onMenu({ x: e.clientX, y: e.clientY }) } : undefined}
       title={onOpen ? `Open ${project.name}` : undefined}
       data-testid="inbox-project-header"
+      data-project-id={project.id}
     >
       {showIcon && <ProjectTileBadge project={project} theme={theme} size={TILE} />}
       <span className="text-base font-semibold text-text overflow-hidden text-ellipsis min-w-0">{project.name}</span>
       <span className="text-2xs text-text-subtle">{count}</span>
+      <span className="ml-auto flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
+        {badge}
+        <StateDot state={state} hideOnHover />
+        <RowActions>
+          {onNewTask && (
+            <RowAction title={`New task in ${project.name}`} onClick={onNewTask}>
+              <Plus size={13} />
+            </RowAction>
+          )}
+          {onSettings && (
+            <RowAction title="Project settings" onClick={onSettings}>
+              <Cog size={13} />
+            </RowAction>
+          )}
+          {onMenu && (
+            <RowAction title="Project actions" onClick={(e) => onMenu(belowAnchor(e))}>
+              <MoreHorizontal size={13} />
+            </RowAction>
+          )}
+        </RowActions>
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Below a project's rows: its open streams that have nothing in the Inbox,
+ * each opening its stream menu, so an empty stream is still in reach.
+ */
+function QuietStreamsLine({ project, shownStreamIds, onStreamMenu }: {
+  project: Project
+  shownStreamIds: ReadonlySet<string>
+  onStreamMenu: (at: MenuAnchor, streamId: string) => void
+}): React.ReactElement | null {
+  const quiet = project.streams.filter(stream => !shownStreamIds.has(stream.id))
+  if (quiet.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-x-1 mx-1.5 pl-[22px] pr-2 pt-0.5 pb-1 text-2xs text-text-subtle" data-testid="inbox-quiet-streams">
+      <span>also:</span>
+      {quiet.map((stream, index) => (
+        <React.Fragment key={stream.id}>
+          {index > 0 && <span aria-hidden>·</span>}
+          <button
+            type="button"
+            className="bg-transparent border-0 p-0 font-mono text-2xs text-text-subtle cursor-pointer hover:text-text hover:underline"
+            title={`${stream.name}: stream actions`}
+            data-stream-id={stream.id}
+            onClick={(e) => onStreamMenu(belowAnchor(e), stream.id)}
+            onContextMenu={(e) => { e.preventDefault(); onStreamMenu({ x: e.clientX, y: e.clientY }, stream.id) }}
+          >
+            {stream.name}
+          </button>
+        </React.Fragment>
+      ))}
     </div>
   )
 }
@@ -303,6 +386,11 @@ export default function InboxPanel({
   onClose,
   onRemove,
   onNewTask,
+  onProjectMenu,
+  onStreamMenu,
+  onProjectSettings,
+  onNewTaskIn,
+  projectBadge,
   allStatuses,
   statusSince,
   activities,
@@ -404,9 +492,21 @@ export default function InboxPanel({
               count={entries.length}
               showIcon={showIcons}
               selected={selectedProjectHomeId === project.id}
+              state={rollUpState(projectTasks(project).map(task => sidebarTaskState(task, allStatuses, now)))}
+              badge={projectBadge?.(project)}
               onOpen={onOpenProject ? () => onOpenProject(project.id) : undefined}
+              onMenu={onProjectMenu && !isEphemeralProject(project) ? (at) => onProjectMenu(at, project.id) : undefined}
+              onSettings={onProjectSettings && !isEphemeralProject(project) ? () => onProjectSettings(project.id) : undefined}
+              onNewTask={onNewTaskIn && !isEphemeralProject(project) ? () => onNewTaskIn(project.id) : undefined}
             />
             {entries.map(entry => renderRow(entry, groupOf(entry), false))}
+            {onStreamMenu && !isEphemeralProject(project) && (
+              <QuietStreamsLine
+                project={project}
+                shownStreamIds={new Set(entries.map(entry => entry.stream.id))}
+                onStreamMenu={(at, streamId) => onStreamMenu(at, project.id, streamId)}
+              />
+            )}
           </div>
         ))}
       </>) : (<>

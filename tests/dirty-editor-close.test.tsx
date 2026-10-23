@@ -226,6 +226,8 @@ beforeEach(() => {
     onMenuZoomOut: vi.fn().mockReturnValue(() => {}),
     onMenuZoomReset: vi.fn().mockReturnValue(() => {}),
     onWindowFocusChanged: vi.fn().mockReturnValue(() => {}),
+    onStreamRunState: vi.fn().mockReturnValue(() => {}),
+    streamRunStates: vi.fn().mockResolvedValue({}),
     subscribe: noopSubscribe
   }
 })

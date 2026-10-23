@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import InboxPanel from '../src/renderer/components/InboxPanel'
 import { createMainStream } from '../src/shared/types'
 import type { Project, Task } from '../src/shared/types'
@@ -186,5 +186,66 @@ describe('InboxPanel', () => {
     renderPanel('flat')
     expect(screen.queryByRole('button', { name: /allow|deny/i })).toBeNull()
     expect(screen.queryByText(/filter/i)).toBeNull()
+  })
+})
+
+describe('InboxPanel grouped headers', () => {
+  // Stem gains a stream with nothing in the inbox; DevTool's streams both have rows.
+  const stemWithHotfix: Project = { ...stem, streams: [...stem.streams, { id: 'hot', name: 'hotfix', tasks: [] }] }
+  function renderGrouped(handlers: Partial<React.ComponentProps<typeof InboxPanel>>) {
+    return render(
+      <InboxPanel
+        projects={[devtool, stemWithHotfix]}
+        selectedTaskId={null}
+        onSelectTask={vi.fn()}
+        onTaskContextMenu={vi.fn()}
+        onSnooze={vi.fn()}
+        onClose={vi.fn()}
+        onRemove={vi.fn()}
+        onNewTask={vi.fn()}
+        allStatuses={statuses}
+        statusSince={since}
+        activities={{}}
+        now={NOW}
+        theme="dark"
+        layout="grouped"
+        {...handlers}
+      />
+    )
+  }
+  const header = (projectId: string) => screen.getAllByTestId('inbox-project-header').find(el => el.dataset.projectId === projectId)!
+
+  it('opens the project menu on right-click and from ⋯, and offers + Task and settings', () => {
+    const onProjectMenu = vi.fn()
+    const onProjectSettings = vi.fn()
+    const onNewTaskIn = vi.fn()
+    const onOpenProject = vi.fn()
+    renderGrouped({ onProjectMenu, onProjectSettings, onNewTaskIn, onOpenProject })
+    fireEvent.contextMenu(header('p'), { clientX: 10, clientY: 20 })
+    expect(onProjectMenu).toHaveBeenLastCalledWith({ x: 10, y: 20 }, 'p')
+    fireEvent.click(within(header('q')).getByTitle('Project actions'))
+    expect(onProjectMenu).toHaveBeenLastCalledWith(expect.objectContaining({ x: expect.any(Number) }), 'q')
+    fireEvent.click(within(header('q')).getByTitle('Project settings'))
+    expect(onProjectSettings).toHaveBeenCalledWith('q')
+    fireEvent.click(within(header('q')).getByTitle('New task in Stem'))
+    expect(onNewTaskIn).toHaveBeenCalledWith('q')
+    // The hover buttons don't open the project's home.
+    expect(onOpenProject).not.toHaveBeenCalled()
+  })
+
+  it('rolls up the project state and shows the app badge it is given', () => {
+    renderGrouped({ projectBadge: (project) => (project.id === 'p' ? <span data-testid="badge" /> : null) })
+    expect(within(header('p')).getByTitle('Needs you')).toBeTruthy()
+    expect(within(header('p')).getByTestId('badge')).toBeTruthy()
+    expect(within(header('q')).queryByTestId('badge')).toBeNull()
+  })
+
+  it('lists streams with nothing in the inbox, each opening its stream menu', () => {
+    const onStreamMenu = vi.fn()
+    renderGrouped({ onStreamMenu })
+    const lines = screen.getAllByTestId('inbox-quiet-streams')
+    expect(lines.map(line => line.textContent)).toEqual(['also:hotfix'])
+    fireEvent.click(within(lines[0]).getByText('hotfix'))
+    expect(onStreamMenu).toHaveBeenCalledWith(expect.objectContaining({ x: expect.any(Number) }), 'q', 'hot')
   })
 })

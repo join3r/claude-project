@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { MoreHorizontal } from 'lucide-react'
+import { ChevronDown, MoreHorizontal } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince } from '../context/TabStatusContext'
 import { useAllAgentActivity } from '../agentActivity'
@@ -16,8 +16,22 @@ import { useTaskLandingActions } from './useTaskLandingActions'
 import { canLandTask, useLandingOp, useStreamAhead } from '../taskLanding'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { featureUnavailableReason } from '../../shared/project-features'
+import { isEphemeralProject } from '../../shared/types'
+import { taskMoveBlocker } from '../../shared/streams'
+import { streamRunCommand } from '../../shared/stream-run'
+import { EntityMenuPopup, type EntityMenuTarget } from './menus/EntityMenus'
+import { SidebarStreamRunBadge } from './StreamRunControls'
+import { useMoveTask } from '../hooks/useTaskMenuActions'
 
 const iconBtnCls = 'bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
+
+const crumbMenuBtnCls = 'bg-transparent border-0 cursor-pointer size-5 -ml-1 rounded-sm shrink-0 inline-flex items-center justify-center text-text-subtle hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
+
+/** Where a breadcrumb's dropdown opens: under it, at its left edge. */
+function belowAnchor(e: React.MouseEvent): MenuAnchor {
+  const rect = e.currentTarget.getBoundingClientRect()
+  return { x: rect.left, y: rect.bottom + 4 }
+}
 
 /** The state label's dot, in the sidebar's colours. */
 const STATE_DOT_CLS: Record<TaskChipTone, string> = {
@@ -32,7 +46,10 @@ const STATE_DOT_CLS: Record<TaskChipTone, string> = {
  * left out when it is `main`), then a quiet state label. Right side: the
  * caller's tools (new terminal / browser, Files / Git / Notes, IDE) and the
  * task menu, which also closes the task. The project name opens the project's
- * Home. On a project's Home it is just the project.
+ * Home; its chevron (or a right-click) opens the project menu, which for a task
+ * in `main` also leads to main's stream menu. The stream name opens the stream
+ * menu, and its app's ▶ badge shows beside it while the app runs or after it
+ * failed. On a project's Home it is just the project, with its menu.
  */
 export default function TaskHeader({
   project,
@@ -60,7 +77,10 @@ export default function TaskHeader({
   const tabStatusStore = useTabStatusStore()
   const landingOp = useLandingOp(task?.id ?? '')
   const streamAhead = useStreamAhead(task?.id ?? '')
-  const [menu, setMenu] = useState<(MenuAnchor & { page: 'main' | 'snooze' }) | null>(null)
+  const [menu, setMenu] = useState<(MenuAnchor & { page: 'main' | 'snooze' | 'move' }) | null>(null)
+  const [entityMenu, setEntityMenu] = useState<EntityMenuTarget | null>(null)
+  const closeEntityMenu = React.useCallback(() => setEntityMenu(null), [])
+  const moveTask = useMoveTask()
   const [renaming, setRenaming] = useState<string | null>(null)
   const renameRef = useRef<HTMLInputElement>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -81,6 +101,15 @@ export default function TaskHeader({
   }, [renaming !== null]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const showStream = !!task && !!stream && !stream.isMain
+  // A "task in a directory" has no project you chose to have, so no project or stream menu.
+  const menusOn = !isEphemeralProject(project)
+  const openProjectMenu = (at: MenuAnchor): void => setEntityMenu({
+    ...at,
+    kind: 'project',
+    projectId: project.id,
+    // main has no name of its own in the breadcrumb: its menu is a page of the project's.
+    ...(task && stream?.isMain ? { withStreamId: stream.id } : {})
+  })
   const showIcon = config?.showProjectIcons ?? false
 
   const agentTab = task ? taskAgentTab(task) : undefined
@@ -101,6 +130,17 @@ export default function TaskHeader({
         label: preset.hint ? `${preset.label} (${preset.hint})` : preset.label,
         onSelect: () => snoozeTask(project.id, task.id, { until: preset.until, untilAttention: preset.untilAttention })
       }))
+    }
+    if (menu.page === 'move') {
+      return project.streams.filter(other => other.id !== stream?.id).map(other => {
+        const blocked = stream ? taskMoveBlocker(task, stream, other) : null
+        return {
+          label: other.name,
+          disabled: !!blocked,
+          hint: blocked ? 'has its own worktree' : other.workspace ? `⎇ ${other.workspace.branchName}` : undefined,
+          onSelect: () => moveTask(project.id, task.id, other.id)
+        }
+      })
     }
     const items: ContextMenuItem[] = []
     // Same session, other face: the Claude tab flips between terminal and chat.
@@ -135,6 +175,9 @@ export default function TaskHeader({
     const pin: PinnedItem = { type: 'task', projectId: project.id, streamId: stream?.id ?? '', taskId: task.id }
     const pinned = (pinnedItems ?? []).some(item => pinnedItemKey(item) === pinnedItemKey(pin))
     items.push({ label: pinned ? 'Unpin' : 'Pin', onSelect: () => togglePinnedItem(pin) })
+    if (project.streams.length > 1 && !isEphemeralProject(project)) {
+      items.push({ label: 'Move to stream…', onSelect: () => setMenu({ ...menu, page: 'move' }) })
+    }
     if (isSnoozed(task, Date.now())) {
       items.push({ label: 'Wake now', dividerBefore: true, onSelect: () => unsnoozeTask(project.id, task.id) })
     } else {
@@ -160,17 +203,51 @@ export default function TaskHeader({
               className="bg-transparent border-0 p-0 font-semibold text-sm text-text truncate shrink-0 max-w-[40%] cursor-pointer hover:underline [-webkit-app-region:no-drag]"
               title={`Open ${project.name} home`}
               onClick={() => setSelectedTaskId(null)}
+              onContextMenu={menusOn ? (e) => { e.preventDefault(); openProjectMenu({ x: e.clientX, y: e.clientY }) } : undefined}
               data-testid="task-header-project"
             >
               {project.name}
             </button>
           ) : (
-            <span className="font-semibold text-text truncate shrink-0 max-w-[40%]">{project.name}</span>
+            <span
+              className="font-semibold text-text truncate shrink-0 max-w-[40%]"
+              onContextMenu={menusOn ? (e) => { e.preventDefault(); openProjectMenu({ x: e.clientX, y: e.clientY }) } : undefined}
+            >{project.name}</span>
+          )}
+          {menusOn && (
+            <button
+              type="button"
+              className={crumbMenuBtnCls}
+              aria-haspopup="menu"
+              aria-expanded={entityMenu?.kind === 'project'}
+              title={`${project.name} actions`}
+              onClick={(e) => openProjectMenu(belowAnchor(e))}
+              data-testid="task-header-project-menu"
+            >
+              <ChevronDown size={12} />
+            </button>
+          )}
+          {task && stream?.isMain && (
+            <SidebarStreamRunBadge projectId={project.id} streamId={stream.id} command={streamRunCommand(project, stream)} />
           )}
           {showStream && (
             <>
               <span className="text-text-subtle">›</span>
-              <span className="font-mono text-text truncate shrink-0 max-w-[30%]">{stream.name}</span>
+              <button
+                type="button"
+                className="bg-transparent border-0 p-0 font-mono text-sm text-text truncate shrink-0 max-w-[30%] cursor-pointer hover:underline [-webkit-app-region:no-drag]"
+                aria-haspopup="menu"
+                aria-expanded={entityMenu?.kind === 'stream'}
+                title={`${stream.name}: stream actions`}
+                onClick={(e) => setEntityMenu({ ...belowAnchor(e), kind: 'stream', projectId: project.id, streamId: stream.id })}
+                onContextMenu={(e) => { e.preventDefault(); setEntityMenu({ x: e.clientX, y: e.clientY, kind: 'stream', projectId: project.id, streamId: stream.id }) }}
+                data-testid="task-header-stream"
+              >
+                {stream.name}
+              </button>
+              <span className="shrink-0 flex items-center [-webkit-app-region:no-drag]">
+                <SidebarStreamRunBadge projectId={project.id} streamId={stream.id} command={streamRunCommand(project, stream)} />
+              </span>
               {!!streamAhead && task.workspace && (
                 <span
                   className="font-mono text-xs text-text-subtle shrink-0"
@@ -226,6 +303,7 @@ export default function TaskHeader({
         </div>
       </div>
       <ContextMenu menu={menu} items={menuItems()} onClose={() => setMenu(null)} />
+      <EntityMenuPopup menu={entityMenu} onClose={closeEntityMenu} />
       {closeTaskFlow.dialog}
     </>
   )
