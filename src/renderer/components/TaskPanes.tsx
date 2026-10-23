@@ -20,7 +20,7 @@ import TaskWorktreePanel from './TaskWorktreePanel'
 import ServerOfflineOverlay, { useServerOnline } from './ServerOfflineOverlay'
 import { ensureTaskWorktree, useTaskSpawnHeld, useTaskWorktreeState } from '../taskWorktrees'
 import { useTaskClosing } from '../taskLanding'
-import type { Tab, AiTabType, Project, Task } from '../../shared/types'
+import type { Tab, AiTabType, Project, Task, WorktreeSetupOfferAnswer } from '../../shared/types'
 import { paneIndexOfElement, setFocusedPane, useFocusedPane } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
 
@@ -250,6 +250,14 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           </button>
         </div>
       )}
+      {worktree.state?.phase === 'setup-offer' && (
+        <WorktreeSetupOffer
+          taskId={task.id}
+          commands={worktree.state.commands}
+          adding={worktree.state.adding === true}
+          streamBranch={task.workspace?.baseBranch}
+        />
+      )}
       {bodies.map(({ tab, paneIndex, active }) => (
         <div
           // A session tab mounts again (and spawns in the new folder) when the
@@ -346,4 +354,44 @@ function useTaskWorktreeGate(project: Project, task: Task, visible: boolean): {
   }, [visible, needed, hasWaitingTabs, state, closing, hostOnline, ask])
 
   return { waiting, state, closing, retry: ask }
+}
+
+/**
+ * A task worktree made without dependencies, because the repo has no
+ * `.devtool/worktree.json`: offers the config DevTool suggests. The tabs run meanwhile.
+ */
+function WorktreeSetupOffer({ taskId, commands, adding, streamBranch }: {
+  taskId: string
+  commands: string[]
+  adding: boolean
+  streamBranch?: string
+}): React.ReactElement {
+  const answer = (value: WorktreeSetupOfferAnswer): void => {
+    window.api.taskWorktreeSetupOffer(taskId, value)
+      .catch((err: unknown) => window.alert(`Couldn't add the worktree setup: ${err instanceof Error ? err.message : String(err)}`))
+  }
+  const action = 'bg-transparent border-0 p-0 text-sm text-accent cursor-pointer hover:underline shrink-0 disabled:opacity-50 disabled:cursor-default'
+  return (
+    <div
+      role="status"
+      data-testid="worktree-setup-offer"
+      className="absolute left-2 right-2 bottom-2 z-(--z-sticky) flex flex-col gap-1.5 rounded-md border-[0.5px] border-border bg-surface-2 shadow-pop px-3 py-2 text-sm"
+    >
+      <div className="text-text">
+        {adding
+          ? 'Adding the worktree setup…'
+          : <>This repository has no <span className="font-mono">.devtool/worktree.json</span>, so this worktree has no <span className="font-mono">node_modules</span>.</>}
+      </div>
+      <div className="text-text-muted">
+        Add setup commits one{streamBranch ? <> to <span className="font-mono">{streamBranch}</span></> : null} that links <span className="font-mono">node_modules</span> into
+        every task worktree, and runs this when there is none to link:
+      </div>
+      <pre className="m-0 text-xs font-mono text-text whitespace-pre-wrap break-all">{commands.join('\n')}</pre>
+      <div className="flex items-center justify-end gap-4">
+        <button type="button" className={action} disabled={adding} onClick={() => answer('decline')}>Not for this repo</button>
+        <button type="button" className={action} disabled={adding} onClick={() => { void window.api.taskWorktreeDismiss(taskId) }}>Dismiss</button>
+        <button type="button" className={action} disabled={adding} onClick={() => answer('add')}>Add setup</button>
+      </div>
+    </div>
+  )
 }

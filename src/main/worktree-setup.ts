@@ -107,6 +107,65 @@ export function readWorktreeConfig(sourceRoot: string): LoadedWorktreeConfig {
   return { ok: true, config: checked.config, hash: createHash('sha256').update(bytes).digest('hex') }
 }
 
+// ── suggested config ─────────────────────────────────────────────────────────
+
+/** Lockfile at a checkout's root → the install that reproduces it. First match wins. */
+const INSTALLS: { lockfile: string; install: string }[] = [
+  { lockfile: 'pnpm-lock.yaml', install: 'pnpm install --frozen-lockfile' },
+  { lockfile: 'yarn.lock', install: 'yarn install --frozen-lockfile' },
+  { lockfile: 'bun.lock', install: 'bun install --frozen-lockfile' },
+  { lockfile: 'bun.lockb', install: 'bun install --frozen-lockfile' },
+  { lockfile: 'package-lock.json', install: 'npm ci' }
+]
+
+export interface SuggestedWorktreeConfig {
+  config: WorktreeSetupConfig
+  /** The file as DevTool writes it. */
+  text: string
+}
+
+/**
+ * What DevTool offers a repo with no `.devtool/worktree.json` whose new
+ * worktrees would start without dependencies: link the source checkout's
+ * `node_modules`, and install from the lockfile when it has none. Null when
+ * the repo has a config already or no lockfile DevTool knows.
+ */
+export function suggestWorktreeConfig(sourceRoot: string): SuggestedWorktreeConfig | null {
+  if (fs.existsSync(path.join(sourceRoot, WORKTREE_CONFIG_FILE))) return null
+  const found = INSTALLS.find(entry => fs.existsSync(path.join(sourceRoot, entry.lockfile)))
+  if (!found) return null
+  const config: WorktreeSetupConfig = { setup: [`[ -e node_modules ] || ${found.install}`], symlink: ['node_modules'], copy: [] }
+  const text = JSON.stringify({ symlink: config.symlink, setup: config.setup }, null, 2) + '\n'
+  return { config, text }
+}
+
+/**
+ * Writes `suggested` as the checkout's `.devtool/worktree.json` and commits
+ * just that file on its branch, without the user's hooks. Returns the file's
+ * hash and the repo key, for approving it. A commit git refuses (a rebase in
+ * the middle, say) leaves the file written and comes back as `commitError`.
+ */
+export async function addWorktreeConfig(
+  runner: GitRunner,
+  sourceRoot: string,
+  suggested: SuggestedWorktreeConfig
+): Promise<{ repoKey: string; hash: string; commitError?: string }> {
+  const file = path.join(sourceRoot, WORKTREE_CONFIG_FILE)
+  if (fs.existsSync(file)) throw new Error(`${WORKTREE_CONFIG_FILE} is there already`)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, suggested.text)
+  const repoKey = await gitCommonDir(runner, sourceRoot)
+  const hash = createHash('sha256').update(suggested.text).digest('hex')
+  let commitError: string | undefined
+  try {
+    await gitOutput(runner, ['add', '--', WORKTREE_CONFIG_FILE], { cwd: sourceRoot })
+    await gitOutput(runner, ['-c', 'core.hooksPath=/dev/null', 'commit', '-q', '-m', 'Add DevTool worktree setup', '--', WORKTREE_CONFIG_FILE], { cwd: sourceRoot, timeoutMs: 30_000 })
+  } catch (err) {
+    commitError = err instanceof Error ? err.message : String(err)
+  }
+  return { repoKey, hash, commitError }
+}
+
 // ── info/exclude ─────────────────────────────────────────────────────────────
 
 /**

@@ -277,6 +277,58 @@ describe('TaskWorktreeManager', () => {
     expect(fs.existsSync(path.join(workspace.worktreePath, 'apps', 'web', 'index.txt'))).toBe(true)
   })
 
+  describe('setup offer for a repo without a config', () => {
+    const offer = ['[ -e node_modules ] || npm ci']
+
+    beforeEach(() => {
+      const stream = streamWorkspace.worktreePath
+      fs.writeFileSync(path.join(stream, 'package-lock.json'), '{}\n')
+      git(stream, 'add', 'package-lock.json')
+      git(stream, 'commit', '-q', '-m', 'lockfile')
+      // Installed already, so adding the config runs no npm.
+      fs.mkdirSync(path.join(stream, 'node_modules'))
+    })
+
+    it('offers it, and adding it commits the config on the stream and links node_modules into its tasks', async () => {
+      setProjects([project([
+        fixtureTask({ id: 't1', name: 'First', tabs: { left: [tab('a')] } }),
+        fixtureTask({ id: 't2', name: 'Second', tabs: { left: [tab('b')] } })
+      ])])
+      expect((await manager.ensureTaskWorktree('p1', 't1')).status).toBe('ready')
+      await manager.ensureTaskWorktree('p1', 't2')
+      expect(states.get('t1')).toEqual({ phase: 'setup-offer', branch: 'release--first', commands: offer })
+      expect(states.get('t2')?.phase).toBe('setup-offer')
+
+      await manager.answerSetupOffer('t1', 'add')
+
+      expect(states.size).toBe(0)
+      expect(JSON.parse(git(repo, 'show', `release:${WORKTREE_CONFIG_FILE}`))).toEqual({ symlink: ['node_modules'], setup: offer })
+      expect(git(streamWorkspace.worktreePath, 'status', '--porcelain')).toBe('')
+      for (const id of ['t1', 't2']) {
+        expect(fs.lstatSync(path.join(taskOf(id)!.workspace!.worktreePath, 'node_modules')).isSymbolicLink()).toBe(true)
+      }
+
+      // The next task is set up without an offer or a question.
+      setProjects([project([fixtureTask({ id: 't3', name: 'Third', tabs: { left: [tab('c')] } })])])
+      expect((await manager.ensureTaskWorktree('p1', 't3')).status).toBe('ready')
+      expect(states.size).toBe(0)
+      expect(fs.lstatSync(path.join(taskOf('t3')!.workspace!.worktreePath, 'node_modules')).isSymbolicLink()).toBe(true)
+    })
+
+    it('stays away from the repo once declined', async () => {
+      setProjects([project([fixtureTask({ id: 't1', name: 'First', tabs: { left: [tab('a')] } })])])
+      await manager.ensureTaskWorktree('p1', 't1')
+
+      await manager.answerSetupOffer('t1', 'decline')
+
+      expect(states.size).toBe(0)
+      expect(fs.existsSync(path.join(streamWorkspace.worktreePath, WORKTREE_CONFIG_FILE))).toBe(false)
+      setProjects([project([fixtureTask({ id: 't2', name: 'Second', tabs: { left: [tab('b')] } })])])
+      await manager.ensureTaskWorktree('p1', 't2')
+      expect(states.size).toBe(0)
+    })
+  })
+
   describe('a reopened task with its worktree recorded', () => {
     /** Closes the task the way a closing stream's Keep branches / Discard all does. */
     async function closeForStream(mode: 'keep' | 'discard'): Promise<void> {

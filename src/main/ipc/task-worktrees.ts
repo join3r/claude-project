@@ -56,6 +56,12 @@ export function registerTaskWorktreeHandlers(ipc: IpcRegistrar, deps: TaskWorktr
     deps.taskWorktrees.dismiss(taskId)
   })
 
+  ipc.handle('task-worktree-setup-offer', [safeId, v.literal('add', 'decline')], (ctx, taskId, answer) => {
+    // `add` approves the suggested commands, like Run setup.
+    if (answer === 'add') assertApprovedInWindow(ctx.clientId)
+    return deps.taskWorktrees.answerSetupOffer(taskId, answer)
+  })
+
   ipc.handle('task-worktree-states', [], () => deps.taskWorktrees.getStates())
 
   ipc.handle('stream-worktree-setup-run', [safeId, safeId, pendingSetup], (ctx, projectId, streamId, pending) => {

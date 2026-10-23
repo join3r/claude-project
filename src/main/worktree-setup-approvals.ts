@@ -13,6 +13,9 @@ import path from 'path'
 export interface SetupApprovals {
   isApproved(repoKey: string, hash: string): boolean
   approve(repoKey: string, hash: string): void
+  /** The user said no to DevTool's suggested config for this repo; don't offer it again. */
+  isOfferDeclined(repoKey: string): boolean
+  declineOffer(repoKey: string): void
 }
 
 /** Per repo, a stream branch may carry a different config than main; keep a few approved versions. */
@@ -22,6 +25,8 @@ interface ApprovalsFile {
   version: 1
   /** repoKey -> approved hashes, oldest first. */
   repos: Record<string, string[]>
+  /** Repos that turned down DevTool's suggested config. */
+  declinedOffers?: string[]
 }
 
 export const SETUP_APPROVALS_FILE = 'worktree-setup-approvals.json'
@@ -43,6 +48,20 @@ export class FileSetupApprovals implements SetupApprovals {
     const hashes = (data.repos[repoKey] ?? []).filter(h => h !== hash)
     hashes.push(hash)
     data.repos[repoKey] = hashes.slice(-MAX_HASHES_PER_REPO)
+    this.save(data)
+  }
+
+  isOfferDeclined(repoKey: string): boolean {
+    return this.load().declinedOffers?.includes(repoKey) ?? false
+  }
+
+  declineOffer(repoKey: string): void {
+    const data = this.load()
+    if (data.declinedOffers?.includes(repoKey)) return
+    this.save({ ...data, declinedOffers: [...(data.declinedOffers ?? []), repoKey] })
+  }
+
+  private save(data: ApprovalsFile): void {
     fs.mkdirSync(path.dirname(this.file), { recursive: true })
     const tmp = `${this.file}.${process.pid}.tmp`
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8')
@@ -57,7 +76,10 @@ export class FileSetupApprovals implements SetupApprovals {
       for (const [key, value] of Object.entries(parsed.repos)) {
         if (Array.isArray(value)) repos[key] = value.filter((h): h is string => typeof h === 'string')
       }
-      return { version: 1, repos }
+      const declinedOffers = Array.isArray(parsed.declinedOffers)
+        ? parsed.declinedOffers.filter((k): k is string => typeof k === 'string')
+        : []
+      return { version: 1, repos, declinedOffers }
     } catch {
       return { version: 1, repos: {} }
     }
@@ -67,6 +89,7 @@ export class FileSetupApprovals implements SetupApprovals {
 /** Approvals that live as long as the object; tests, and the default when no store is wired. */
 export class MemorySetupApprovals implements SetupApprovals {
   private readonly approved = new Set<string>()
+  private readonly declined = new Set<string>()
 
   isApproved(repoKey: string, hash: string): boolean {
     return this.approved.has(`${repoKey}\0${hash}`)
@@ -74,5 +97,13 @@ export class MemorySetupApprovals implements SetupApprovals {
 
   approve(repoKey: string, hash: string): void {
     this.approved.add(`${repoKey}\0${hash}`)
+  }
+
+  isOfferDeclined(repoKey: string): boolean {
+    return this.declined.has(repoKey)
+  }
+
+  declineOffer(repoKey: string): void {
+    this.declined.add(repoKey)
   }
 }

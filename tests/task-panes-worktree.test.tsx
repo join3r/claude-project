@@ -38,6 +38,7 @@ const api = {
   taskWorktreeEnsure: vi.fn(),
   taskWorktreeDecide: vi.fn(),
   taskWorktreeDismiss: vi.fn(),
+  taskWorktreeSetupOffer: vi.fn(),
   taskWorktreeStates: vi.fn(),
   onTaskWorktreeState: vi.fn()
 }
@@ -64,6 +65,7 @@ beforeAll(() => {
 beforeEach(() => {
   api.taskWorktreeEnsure.mockReset().mockResolvedValue({ status: 'failed', error: 'not now' })
   api.taskWorktreeDecide.mockReset().mockResolvedValue({ status: 'ready', workspace: ownWs })
+  api.taskWorktreeSetupOffer.mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -105,6 +107,22 @@ describe('TaskPanes and task worktrees', () => {
     expect(api.taskWorktreeDecide).toHaveBeenCalledWith('t1', 'run')
     // A task that already has its worktree is never asked for one.
     expect(api.taskWorktreeEnsure).not.toHaveBeenCalled()
+  })
+
+  it('offers the suggested worktree setup over the running tabs', async () => {
+    const { project, task } = setup({ ownWorkspace: ownWs })
+    mount(project, task)
+
+    act(() => pushState('t1', { phase: 'setup-offer', branch: 'rel--fix', commands: ['[ -e node_modules ] || npm ci'] }))
+    expect(screen.getByTestId('chat-body')).toBeTruthy()
+    expect(screen.getByTestId('worktree-setup-offer').textContent).toContain('[ -e node_modules ] || npm ci')
+
+    await act(async () => { fireEvent.click(screen.getByText('Add setup')) })
+    expect(api.taskWorktreeSetupOffer).toHaveBeenCalledWith('t1', 'add')
+
+    act(() => pushState('t1', { phase: 'setup-offer', branch: 'rel--fix', commands: ['npm ci'], adding: true }))
+    expect(screen.getByText('Adding the worktree setup…')).toBeTruthy()
+    expect((screen.getByText('Not for this repo') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('offers Retry after a git failure', async () => {

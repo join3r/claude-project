@@ -297,6 +297,10 @@ export interface WorkspaceCreateResult {
  *  - `failed`: no worktree (git refused); the tabs can't start. Retry asks again.
  *  - `setup-failed`: made, but a setup step failed. The tabs start anyway; the
  *    task shows the error until dismissed.
+ *  - `setup-offer`: made, but the repo has no `.devtool/worktree.json`, so it
+ *    has no dependencies. The tabs start; the task offers DevTool's suggested
+ *    config (`commands`) until answered or dismissed. `adding` while it is
+ *    being added and run.
  */
 export type TaskWorktreeState =
   | { phase: 'creating'; branch?: string; log?: string }
@@ -304,6 +308,10 @@ export type TaskWorktreeState =
   | { phase: 'setup'; branch: string; log?: string }
   | { phase: 'failed'; error: string }
   | { phase: 'setup-failed'; branch: string; error: string }
+  | { phase: 'setup-offer'; branch: string; commands: string[]; adding?: boolean }
+
+/** The answer to a `setup-offer`: add the config, or never offer it for the repo again. */
+export type WorktreeSetupOfferAnswer = 'add' | 'decline'
 
 /**
  * What `ensureTaskWorktree` came to. `needs-approval` already has the worktree

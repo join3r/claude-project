@@ -34,6 +34,7 @@ import type {
   TaskWorktreeResult,
   TaskWorktreeState,
   WorktreeSetupDecision,
+  WorktreeSetupOfferAnswer,
   HostTabStatus
 } from '../shared/types'
 import type { ArchivedStream, ArchivedTask, ProjectArchive } from '../shared/archive'
@@ -505,6 +506,9 @@ const api = {
   taskWorktreeDecide: (taskId: string, decision: WorktreeSetupDecision): Promise<TaskWorktreeResult> =>
     ipcRenderer.invoke('task-worktree-decide', taskId, decision),
   taskWorktreeDismiss: (taskId: string): Promise<void> => ipcRenderer.invoke('task-worktree-dismiss', taskId),
+  /** Answer a task's `setup-offer`: add DevTool's suggested worktree setup, or stop offering it for the repo. */
+  taskWorktreeSetupOffer: (taskId: string, answer: WorktreeSetupOfferAnswer): Promise<void> =>
+    ipcRenderer.invoke('task-worktree-setup-offer', taskId, answer),
   taskWorktreeStates: (): Promise<Record<string, TaskWorktreeState>> => ipcRenderer.invoke('task-worktree-states'),
   onTaskWorktreeState: (callback: (taskId: string, state: TaskWorktreeState | null) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, taskId: string, state: TaskWorktreeState | null) => callback(taskId, state)

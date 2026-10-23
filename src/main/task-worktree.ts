@@ -11,7 +11,8 @@ import type {
   TaskWorktreeState,
   WorkspaceConfig,
   WorkspaceRestoreResult,
-  WorktreeSetupDecision
+  WorktreeSetupDecision,
+  WorktreeSetupOfferAnswer
 } from '../shared/types'
 import { findStreamOfTask, findTaskInProject, mapTaskInProject, needsTaskWorktree, taskWorktreesSupported } from '../shared/streams'
 import { taskBranchName } from '../shared/branch-name'
@@ -35,7 +36,11 @@ import type { WorktreeSetupResult } from './worktree-setup'
  * is on screen.
  */
 
-export type TaskWorktreeGit = Pick<WorkspaceManager, 'listBranches' | 'create' | 'restore' | 'runSetup' | 'approveSetup' | 'delete' | 'repoRoot'>
+export type TaskWorktreeGit = Pick<
+  WorkspaceManager,
+  'listBranches' | 'create' | 'restore' | 'runSetup' | 'approveSetup' | 'delete' | 'repoRoot' |
+  'setupOffer' | 'addSuggestedSetup' | 'declineSetupOffer'
+>
 
 export interface TaskWorktreeDeps {
   /** Main's canonical projects: `commit` is app-runtime's one write path. */
@@ -130,10 +135,65 @@ export class TaskWorktreeManager {
     return this.single(taskId, () => this.runHeld(taskId, held, decision))
   }
 
-  /** Clears a shown error (`failed`, `setup-failed`). */
+  /** Clears a shown error (`failed`, `setup-failed`) or a setup offer not being added. */
   dismiss(taskId: string): void {
-    const phase = this.states.get(taskId)?.phase
-    if (phase === 'failed' || phase === 'setup-failed') this.setState(taskId, null)
+    const state = this.states.get(taskId)
+    if (state?.phase === 'failed' || state?.phase === 'setup-failed' || (state?.phase === 'setup-offer' && !state.adding)) {
+      this.setState(taskId, null)
+    }
+  }
+
+  /**
+   * The answer to a task's `setup-offer`. `add` commits DevTool's suggested
+   * `.devtool/worktree.json` on the stream's branch, installs in the stream's
+   * worktree when it has no `node_modules`, then links it into every task
+   * worktree of the stream that is there. `decline` stops the offer for the repo.
+   */
+  async answerSetupOffer(taskId: string, answer: WorktreeSetupOfferAnswer): Promise<void> {
+    const state = this.states.get(taskId)
+    const found = this.locate(taskId)
+    const base = found?.stream.workspace
+    if (state?.phase !== 'setup-offer' || state.adding) return
+    if (!found || !base) {
+      this.setState(taskId, null)
+      return
+    }
+    const offered = this.offerTasks(found.stream)
+    if (answer === 'decline') {
+      try {
+        await this.deps.git.declineSetupOffer(base.worktreePath)
+      } catch (err) {
+        this.deps.log?.(`task worktree setup offer decline error=${errorMessage(err)}`)
+      }
+      for (const id of offered) this.setState(id, null)
+      return
+    }
+    for (const id of offered) {
+      const current = this.states.get(id)
+      if (current?.phase === 'setup-offer') this.setState(id, { ...current, adding: true })
+    }
+    const errors: string[] = []
+    try {
+      const { commitError } = await this.deps.git.addSuggestedSetup(base.worktreePath)
+      if (commitError) errors.push(`.devtool/worktree.json is written but not committed: ${commitError}`)
+      // The stream's worktree is its own source: the config's install fills it, and its tasks link to that.
+      const stream = await this.deps.git.runSetup({ sourceRoot: base.worktreePath, worktreeRoot: base.worktreePath, branch: base.branchName })
+      if (stream.status === 'failed') errors.push(stream.error)
+      else {
+        const exists = this.deps.exists ?? fs.existsSync
+        for (const task of found.stream.tasks) {
+          const own = task.workspace
+          if (!own || !exists(own.worktreePath)) continue
+          const setup = await this.deps.git.runSetup({ sourceRoot: base.worktreePath, worktreeRoot: own.worktreePath, branch: own.branchName })
+          if (setup.status === 'failed') errors.push(setup.error)
+        }
+      }
+    } catch (err) {
+      errors.push(errorMessage(err))
+    }
+    this.deps.log?.(`task worktree setup offer added stream=${found.stream.id}${errors.length ? ` errors=${errors.length}` : ''}`)
+    for (const id of offered) this.setState(id, null)
+    if (errors.length) this.setState(taskId, { phase: 'setup-failed', branch: state.branch, error: errors.join('\n\n') })
   }
 
   /** The task's worktree is gone (landed, kept as a branch, discarded): drop its held setup and state. */
@@ -343,8 +403,33 @@ export class TaskWorktreeManager {
       this.setState(taskId, { phase: 'setup-failed', branch: workspace.branchName, error: setup.error })
       return { status: 'ready', workspace, setupError: setup.error }
     }
-    this.setState(taskId, null)
+    const offer = await this.setupOffer(roots.sourceRoot)
+    this.setState(taskId, offer ? { phase: 'setup-offer', branch: workspace.branchName, commands: offer } : null)
     return { status: 'ready', workspace }
+  }
+
+  /** DevTool's suggested setup commands for a repo with no config; null on any doubt. */
+  private async setupOffer(sourceRoot: string): Promise<string[] | null> {
+    try {
+      return await this.deps.git.setupOffer(sourceRoot)
+    } catch (err) {
+      this.deps.log?.(`task worktree setup offer error=${errorMessage(err)}`)
+      return null
+    }
+  }
+
+  /** The stream's tasks showing a setup offer (one answer covers them all). */
+  private offerTasks(stream: Stream): string[] {
+    return stream.tasks.map(t => t.id).filter(id => this.states.get(id)?.phase === 'setup-offer')
+  }
+
+  /** The task wherever it is. */
+  private locate(taskId: string): Located | null {
+    for (const project of this.deps.projects.peek().projects) {
+      const found = this.find(project.id, taskId)
+      if (found) return found
+    }
+    return null
   }
 
   /** What a task that needs nothing more done answers. */

@@ -2,7 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import type { WorkspaceDeleteResult, WorkspaceRestoreResult } from '../shared/types'
 import { GitError, gitOutput, LocalGitRunner, type GitRunner } from './git-runner'
-import { runWorktreeSetup, type WorktreeSetupResult } from './worktree-setup'
+import { addWorktreeConfig, gitCommonDir, runWorktreeSetup, suggestWorktreeConfig, type WorktreeSetupResult } from './worktree-setup'
 import { MemorySetupApprovals, type SetupApprovals } from './worktree-setup-approvals'
 
 function errorText(err: unknown): string {
@@ -143,6 +143,34 @@ export class WorkspaceManager {
   /** Lets this exact config content (`hash`, from a `needs-approval` result) run its commands in the repo `repoKey`. */
   approveSetup(repoKey: string, hash: string): void {
     this.approvals.approve(repoKey, hash)
+  }
+
+  /**
+   * The setup commands DevTool would suggest for a checkout with no
+   * `.devtool/worktree.json` (see `suggestWorktreeConfig`); null when it has
+   * one, nothing fits, or the user turned the offer down for the repo.
+   */
+  async setupOffer(sourceRoot: string): Promise<string[] | null> {
+    const suggested = suggestWorktreeConfig(sourceRoot)
+    if (!suggested) return null
+    if (this.approvals.isOfferDeclined(await gitCommonDir(this.runner, sourceRoot))) return null
+    return suggested.config.setup
+  }
+
+  /**
+   * Adds the suggested config to the checkout (written and committed on its
+   * branch) and approves it: the user saw its commands in the offer.
+   */
+  async addSuggestedSetup(sourceRoot: string): Promise<{ commitError?: string }> {
+    const suggested = suggestWorktreeConfig(sourceRoot)
+    if (!suggested) throw new Error('This repository has a worktree setup already, or none DevTool can suggest')
+    const added = await addWorktreeConfig(this.runner, sourceRoot, suggested)
+    this.approvals.approve(added.repoKey, added.hash)
+    return added.commitError ? { commitError: added.commitError } : {}
+  }
+
+  async declineSetupOffer(sourceRoot: string): Promise<void> {
+    this.approvals.declineOffer(await gitCommonDir(this.runner, sourceRoot))
   }
 
   /**
