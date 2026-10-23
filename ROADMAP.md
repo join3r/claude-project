@@ -26,7 +26,7 @@ Company-deploy security snapshot (what this app actually is on a workstation): [
 
 Stay on **0.x** until the app is something you would tell a friend to unzip. **1.0.0** is that call, not “Phase 5 finished.”
 
-`package.json` is **0.6.0** (Phase 5 packaging + app identity). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
+`package.json` is **0.6.1** (Phase 5 packaging + app identity, plus the streams, task worktrees and DevTool servers work since). Phase 2 landed without tagging `0.4.0` and stayed **0.3.2**, so Phase 3 used that skipped minor instead of jumping to `0.5.0`. Shape:
 
 | Part | Meaning |
 | --- | --- |
@@ -47,6 +47,7 @@ Work inside a phase is `0.x.y`; shipping the phase is the next `0.(x+1).0`.
 | Phase 4 done | `0.5.0` (native `.ipynb` tabs) |
 | Phase 4.5 (agent context links) | `0.5.1` (tagged; not a numbered bump) |
 | Phase 5 done (packaging + app identity) | `0.6.0` (signing dormant until a certificate; a signed build is a `0.6.x` patch) |
+| Streams, task worktrees, DevTool servers | `0.6.1` (tagged; not a numbered bump) |
 | Phase 6 (Pi chat tab) | `0.7.0` |
 
 LSP is parked (see Ideas); it does not get a numbered phase or a minor. Phase 6 is the Pi chat tab; there is no Phase 7 until something else earns one. Phase 0.5 does not get a version. Ideas in the parking lot do not get a version until they are pulled into a phase.
