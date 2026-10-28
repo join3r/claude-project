@@ -4,7 +4,7 @@ import type { editor } from 'monaco-editor'
 import { DEFAULT_CONFIG } from '../../shared/types'
 import { useApp } from '../context/AppContext'
 import { useDirtyBufferStore } from '../context/DirtyBufferContext'
-import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
+import { pollWhileVisible } from '../hooks/fileBrowserRefresh'
 import { buildMonacoEditorOptions, getLanguageFromPath } from './monacoOptions'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 import MarkdownPreview from './MarkdownPreview'
@@ -123,9 +123,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
 
     refreshContent()
 
-    const intervalId = window.setInterval(() => {
-      refreshContent()
-    }, FILE_BROWSER_REFRESH_MS)
+    const stopPolling = pollWhileVisible(() => refreshContent())
 
     const handleFocus = () => refreshContent()
     const handleReload = (event: Event) => {
@@ -138,7 +136,7 @@ export default function EditorTab({ tabId, visible, filePath, projectDir, projec
     window.addEventListener('reload-file-tab', handleReload)
 
     return () => {
-      window.clearInterval(intervalId)
+      stopPolling()
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('reload-file-tab', handleReload)
     }

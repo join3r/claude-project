@@ -3,7 +3,7 @@ import { loader, type Monaco } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { DEFAULT_CONFIG } from '../../shared/types'
 import { useApp } from '../context/AppContext'
-import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
+import { pollWhileVisible } from '../hooks/fileBrowserRefresh'
 import { buildMonacoDiffOptions, getLanguageFromPath } from './monacoOptions'
 import { defineMonacoThemes, monacoThemeFor } from './monacoTheme'
 
@@ -79,9 +79,7 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, projectI
 
     refreshDiff()
 
-    const intervalId = window.setInterval(() => {
-      refreshDiff()
-    }, FILE_BROWSER_REFRESH_MS)
+    const stopPolling = pollWhileVisible(refreshDiff)
 
     const handleFocus = () => refreshDiff()
     const handleFileSaved = (event: Event) => {
@@ -101,7 +99,7 @@ export default function DiffTab({ tabId, visible, filePath, projectDir, projectI
 
     return () => {
       requestIdRef.current += 1
-      window.clearInterval(intervalId)
+      stopPolling()
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('file-saved', handleFileSaved)
       window.removeEventListener('reload-file-tab', handleReload)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitStatusResult } from '../../shared/types'
-import { FILE_BROWSER_REFRESH_MS } from './fileBrowserRefresh'
+import { pollWhileVisible } from './fileBrowserRefresh'
 
 /** `projectId` routes the calls to a DevTool server's project. */
 export function useGitStatus(projectDir: string, enabled: boolean, projectId?: string): GitStatusResult | null {
@@ -37,9 +37,7 @@ export function useGitStatus(projectDir: string, enabled: boolean, projectId?: s
 
     fetchGitStatus()
 
-    const intervalId = window.setInterval(() => {
-      fetchGitStatus()
-    }, FILE_BROWSER_REFRESH_MS)
+    const stopPolling = pollWhileVisible(fetchGitStatus)
 
     const handleFocus = () => fetchGitStatus()
     const handleFileSaved = () => fetchGitStatus()
@@ -49,7 +47,7 @@ export function useGitStatus(projectDir: string, enabled: boolean, projectId?: s
 
     return () => {
       requestIdRef.current += 1
-      window.clearInterval(intervalId)
+      stopPolling()
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('file-saved', handleFileSaved)
     }

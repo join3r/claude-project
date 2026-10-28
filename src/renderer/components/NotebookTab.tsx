@@ -54,7 +54,7 @@ import {
 import type { editor } from 'monaco-editor'
 import { useApp } from '../context/AppContext'
 import { useDirtyBufferStore } from '../context/DirtyBufferContext'
-import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
+import { pollWhileVisible } from '../hooks/fileBrowserRefresh'
 import NotebookCellView from './NotebookCell'
 import { scheduleResumeAfterNotebookReorder } from './notebookCellEditor'
 import ThemedSelect from './ThemedSelect'
@@ -231,7 +231,7 @@ export default function NotebookTab({
   useEffect(() => {
     if (!visible) return
     refreshContent()
-    const intervalId = window.setInterval(() => refreshContent(), FILE_BROWSER_REFRESH_MS)
+    const stopPolling = pollWhileVisible(() => refreshContent())
     const handleFocus = () => refreshContent()
     const handleReload = (event: Event) => {
       const detail = (event as CustomEvent<{ tabId?: string }>).detail
@@ -241,7 +241,7 @@ export default function NotebookTab({
     window.addEventListener('focus', handleFocus)
     window.addEventListener('reload-file-tab', handleReload)
     return () => {
-      window.clearInterval(intervalId)
+      stopPolling()
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('reload-file-tab', handleReload)
     }

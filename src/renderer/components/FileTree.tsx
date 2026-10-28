@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import type { DirectoryEntry, GitStatusResult, GitFileStatus } from '../../shared/types'
 import { ChevronRight, Folder, FileText, BookText } from 'lucide-react'
-import { FILE_BROWSER_REFRESH_MS } from '../hooks/fileBrowserRefresh'
+import { pollWhileVisible } from '../hooks/fileBrowserRefresh'
 import { posixRelativeJoin } from '../../shared/workspace-path'
 import { isNotebookFile } from '../../shared/notebook'
 import { revealInFolderLabel, revealInTerminalLabel } from '../utils/revealLabel'
@@ -535,12 +535,12 @@ const FileTree = React.forwardRef<FileTreeHandle, Props>(function FileTree({
     if (!projectDir) return
     const run = (): void => { void refreshVisibleDirectories() }
 
-    const intervalId = window.setInterval(run, FILE_BROWSER_REFRESH_MS)
+    const stopPolling = pollWhileVisible(run)
     window.addEventListener('focus', run)
     window.addEventListener('file-saved', run)
 
     return () => {
-      window.clearInterval(intervalId)
+      stopPolling()
       window.removeEventListener('focus', run)
       window.removeEventListener('file-saved', run)
     }

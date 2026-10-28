@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { GitPostureResult } from '../../shared/types'
-import { FILE_BROWSER_REFRESH_MS } from './fileBrowserRefresh'
+import { pollWhileVisible } from './fileBrowserRefresh'
 
 /** `projectId` routes the calls to a DevTool server's project. */
 export function useGitPosture(projectDir: string, enabled: boolean, projectId?: string): GitPostureResult | null {
@@ -27,12 +27,12 @@ export function useGitPosture(projectDir: string, enabled: boolean, projectId?: 
       return
     }
     fetchPosture()
-    const intervalId = window.setInterval(fetchPosture, FILE_BROWSER_REFRESH_MS)
+    const stopPolling = pollWhileVisible(fetchPosture)
     const onFocus = () => fetchPosture()
     window.addEventListener('focus', onFocus)
     return () => {
       requestIdRef.current += 1
-      window.clearInterval(intervalId)
+      stopPolling()
       window.removeEventListener('focus', onFocus)
     }
   }, [enabled, projectDir, fetchPosture])
