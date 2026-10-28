@@ -20,6 +20,12 @@ interface Props {
   selectedTaskId?: string | null
   /** Pre-selected stream (of the default project), overriding the one above. */
   defaultStreamId?: string | null
+  /**
+   * Open on the project filter rather than the prompt: picking where the task
+   * goes is usually the first thing you do. Off when the caller already chose
+   * the project (New task from a project or stream).
+   */
+  pickProjectFirst?: boolean
   getProjectDir: (project: Project) => string
   /** Which agents are switched on, and the last agent and mode a prompt went to. */
   config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi' | 'promptBoxAgent' | 'promptBoxMode'>
@@ -63,6 +69,7 @@ export default function NewTaskModal({
   defaultProjectId,
   selectedTaskId,
   defaultStreamId,
+  pickProjectFirst = false,
   getProjectDir,
   config,
   allTags,
@@ -85,7 +92,9 @@ export default function NewTaskModal({
   const [kind, setKind] = useState<NewTaskKind>('agent')
   // Null: the target project's current stream.
   const [pickedStreamId, setPickedStreamId] = useState<string | null>(defaultStreamId ?? null)
-  const [pickerOpen, setPickerOpen] = useState(false)
+  // With one project there is no filter to type into, so the prompt keeps focus.
+  const startOnPicker = pickProjectFirst && projects.length > 1
+  const [pickerOpen, setPickerOpen] = useState(startOnPicker)
   const [projectFilter, setProjectFilter] = useState('')
   // The directory picked via "Use a directory…", if any. No project record exists
   // for it yet — one is minted only if this draft is actually created.
@@ -264,9 +273,10 @@ export default function NewTaskModal({
       const delta = e.key === 'ArrowDown' ? 1 : -1
       const next = Math.min(Math.max((cursor < 0 ? 0 : cursor) + delta, 0), rows.length - 1)
       selectTarget(rows[next].target)
-    } else if (e.key === 'Enter') {
-      // The destination is already picked — Enter here just moves you along to
-      // the thing you still have to type.
+    } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+      // The destination is already picked — Enter (or Tab) here just moves you
+      // along to the thing you still have to type.
+      if (e.nativeEvent.isComposing) return
       e.preventDefault()
       setPickerOpen(false)
       focusPrompt()
@@ -429,7 +439,7 @@ export default function NewTaskModal({
               rows={terminal ? 1 : 3}
               value={prompt}
               disabled={!agent && !takesCommand}
-              autoFocus
+              autoFocus={!startOnPicker}
               aria-label={terminal ? 'Start-up command' : 'First prompt'}
               placeholder={placeholder}
               onChange={(e) => setPrompt(e.target.value)}

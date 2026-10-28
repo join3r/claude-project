@@ -1251,6 +1251,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
           defaultProjectId={newTaskWhere?.projectId ?? selectedProjectId}
           selectedTaskId={selectedTaskId}
           defaultStreamId={newTaskWhere?.streamId ?? null}
+          pickProjectFirst={!newTaskWhere}
           getProjectDir={getProjectDir}
           config={config}
           allTags={tags}

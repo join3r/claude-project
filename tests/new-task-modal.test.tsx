@@ -69,11 +69,12 @@ afterEach(() => {
   cleanup()
 })
 
-function modal(defaultProjectId: string | null, projects: Project[], config: ComposerConfig = CONFIG): React.ReactElement {
+function modal(defaultProjectId: string | null, projects: Project[], config: ComposerConfig = CONFIG, pickProjectFirst = false): React.ReactElement {
   return (
     <NewTaskModal
       projects={projects}
       defaultProjectId={defaultProjectId}
+      pickProjectFirst={pickProjectFirst}
       getProjectDir={(p) => p.directory}
       config={config}
       allTags={[]}
@@ -409,6 +410,42 @@ describe('NewTaskModal', () => {
       expect(onClose).not.toHaveBeenCalled()
       await act(async () => { fireEvent.keyDown(window, { key: 'Escape' }) })
       expect(onClose).toHaveBeenCalled()
+    })
+
+    describe('opened to pick the project first', () => {
+      function renderPickFirst(projects: Project[] = PROJECTS) {
+        return render(modal('p1', projects, CONFIG, true))
+      }
+
+      it('opens on the focused filter with the current project highlighted', () => {
+        renderPickFirst()
+        expect(document.activeElement).toBe(projectFilter())
+        expect(selectedProject()).toBe('devtool')
+      })
+
+      it('types a project, then moves on to the prompt with Enter', async () => {
+        renderPickFirst()
+        await act(async () => { fireEvent.change(projectFilter(), { target: { value: 'not' } }) })
+        await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'Enter' }) })
+        expect(screen.queryByRole('group', { name: 'Destination' })).toBeNull()
+        expect(destination()).toBe('notes')
+        await typePrompt('Fix the badge')
+        await submit()
+        expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ target: inProject('p2') }))
+      })
+
+      it('moves on to the prompt with Tab too', async () => {
+        renderPickFirst()
+        await act(async () => { fireEvent.keyDown(projectFilter(), { key: 'Tab' }) })
+        expect(screen.queryByRole('group', { name: 'Destination' })).toBeNull()
+        expect(destination()).toBe('devtool')
+      })
+
+      it('goes straight to the prompt when there is only one project', () => {
+        renderPickFirst([PROJECTS[0]])
+        expect(screen.queryByRole('group', { name: 'Destination' })).toBeNull()
+        expect(document.activeElement).toBe(promptInput())
+      })
     })
 
     it('drops the filter input when there is only one project to pick', async () => {
