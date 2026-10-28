@@ -10,7 +10,7 @@ import {
   type MobilePendingRequest,
   type MobileState
 } from '../../shared/mobile'
-import type { ProjectsData, TabStatusValue } from '../../shared/types'
+import type { GitDiffSummary, ProjectsData, TabStatusValue } from '../../shared/types'
 import { buildInbox, inboxContentKey } from './inbox'
 import type { ChatBridge, ChatPhone } from './chat-bridge'
 import type { MobilePairing, MobilePushRegistration } from './pairings-store'
@@ -247,6 +247,8 @@ export interface MobileServiceDeps {
   newProject?(params: ProjectNewParams): Promise<{ ok: true; projectId: string } | { ok: false; code: string; message: string }>
   /** Local projects whose folder is gone (§4.4 `missingFolder`); a change sends a fresh inbox. */
   missingFolders?: { peek(): ReadonlySet<string>; subscribe(listener: () => void): () => void }
+  /** Tasks' lines added and removed (§4.4 `diff`); a change sends a fresh inbox. */
+  taskDiffs?: { peek(): ReadonlyMap<string, GitDiffSummary>; subscribe(listener: () => void): () => void }
   /** Streams' app runs (§8.19): the inbox's `run` fields, `stream.run` and `stream.logs`. A change sends a fresh inbox. */
   streamRuns?: {
     state(streamId: string): StreamRunState | null
@@ -376,7 +378,8 @@ export class MobileService {
       }),
       this.deps.activity.subscribe(() => this.scheduleInbox()),
       ...(this.deps.missingFolders ? [this.deps.missingFolders.subscribe(() => this.scheduleInbox())] : []),
-      ...(this.deps.streamRuns ? [this.deps.streamRuns.subscribe(() => this.scheduleInbox())] : [])
+      ...(this.deps.streamRuns ? [this.deps.streamRuns.subscribe(() => this.scheduleInbox())] : []),
+      ...(this.deps.taskDiffs ? [this.deps.taskDiffs.subscribe(() => this.scheduleInbox())] : [])
     ]
     if (this.deps.getConfig().enabled) this.connect()
     this.emitState()
@@ -1107,8 +1110,14 @@ export class MobileService {
       { id: this.deps.getDesktopId() ?? '', name: this.desktopName() },
       this.timers.now(),
       this.deps.missingFolders?.peek(),
-      (streamId) => this.deps.streamRuns?.state(streamId) ?? null
+      (streamId) => this.deps.streamRuns?.state(streamId) ?? null,
+      (taskId) => this.deps.taskDiffs?.peek().get(taskId)
     )
+  }
+
+  /** Whether a paired phone is connected now: the inbox's git counts are worth running. */
+  hasPairedPhone(): boolean {
+    return this.pairedSessions().length > 0
   }
 
   private pairedSessions(): Session[] {

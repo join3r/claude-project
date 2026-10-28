@@ -55,6 +55,7 @@ import { readLocalTranscript, readRemoteTranscript } from '../claude-chat/transc
 import { readPermissionSettings, updatePermissionRule } from '../claude-chat/permission-settings'
 import { registerFileBrowserHandlers } from '../ipc/file-browser'
 import { registerGitHandlers } from '../ipc/git'
+import { TaskDiffWatch } from '../task-diff-watch'
 import { registerNotebookHandlers } from '../ipc/notebooks'
 import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
@@ -254,6 +255,11 @@ export class HostServices {
   /** Local projects whose folder is gone, for the phone's inbox (SPEC.md §4.4). */
   private readonly missingFolders = new MissingFolderWatch(() => this.projectsStore.peek().projects)
   private missingFoldersUnsub: (() => void) | null = null
+  /** Tasks' lines added and removed, for the phone's inbox (SPEC.md §4.4 `diff`), counted while a phone is connected. */
+  private readonly taskDiffs = new TaskDiffWatch(
+    () => this.projectsStore.peek().projects,
+    () => this.mobileService?.hasPairedPhone() ?? false
+  )
   private readonly promptQueue: PromptQueueRunner
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
@@ -479,6 +485,7 @@ export class HostServices {
     void this.taskLanding.reconcile()
     this.promptQueue.start()
     this.missingFolders.start()
+    this.taskDiffs.start()
     this.missingFoldersUnsub = this.projectsStore.subscribe(() => { void this.missingFolders.refresh() })
     this.streamRunsUnsub = this.projectsStore.subscribe(() => this.streamRuns.reconcile())
     this.mobileService.start()
@@ -627,6 +634,7 @@ export class HostServices {
         return result.ok ? result : { ok: false, code: AppErrorCode.Internal, message: result.error }
       },
       missingFolders: this.missingFolders,
+      taskDiffs: this.taskDiffs,
       newProject: async ({ name }) => {
         let directory: string
         try {
@@ -935,6 +943,7 @@ export class HostServices {
     this.mobileService?.stop()
     this.missingFoldersUnsub?.()
     this.missingFolders.stop()
+    this.taskDiffs.stop()
     this.streamRunsUnsub?.()
     this.promptQueue.dispose()
     this.ptySessions.saveAllScrollback()

@@ -250,6 +250,27 @@ public struct InboxQueuedPrompt: Codable, Sendable, Equatable, Hashable, Identif
     }
 }
 
+/// A task's lines added and removed, as the desktop Inbox shows them (§4.4 `diff`).
+public struct InboxTaskDiff: Codable, Sendable, Equatable, Hashable {
+    public var added: Int
+    public var deleted: Int
+
+    public init(added: Int, deleted: Int) {
+        self.added = added
+        self.deleted = deleted
+    }
+
+    /// Something changed: the row shows the counts.
+    public var isEmpty: Bool { added == 0 && deleted == 0 }
+
+    /// `1240` → `1.2k`, the way the desktop shows line counts.
+    public static func format(_ n: Int) -> String {
+        guard n >= 1000 else { return String(n) }
+        let tenths = (Double(n) / 100).rounded() / 10
+        return tenths == tenths.rounded() ? "\(Int(tenths))k" : "\(tenths)k"
+    }
+}
+
 public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var name: String
@@ -281,6 +302,9 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
     public var branch: String?
     /// Present while the task lands into its stream or has stopped doing so (§4.4).
     public var landing: TaskLanding?
+    /// Lines added and removed in the task's directory (§4.4); nil when
+    /// nothing changed or the desktop doesn't count them.
+    public var diff: InboxTaskDiff?
     public var tabs: [InboxTab]
 
     public init(
@@ -290,6 +314,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         eventAt: Int64? = nil, unread: Bool = false,
         snoozedUntil: Int64? = nil, snoozeUntilAttention: Bool = false,
         branch: String? = nil, landing: TaskLanding? = nil,
+        diff: InboxTaskDiff? = nil,
         tabs: [InboxTab]
     ) {
         self.id = id
@@ -307,6 +332,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         self.snoozeUntilAttention = snoozeUntilAttention
         self.branch = branch
         self.landing = landing
+        self.diff = diff
         self.tabs = tabs
     }
 
@@ -328,6 +354,7 @@ public struct InboxTask: Codable, Sendable, Equatable, Identifiable {
         snoozeUntilAttention = (try? c.decodeIfPresent(Bool.self, forKey: .snoozeUntilAttention)) == true
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
         landing = (try? c.decodeIfPresent(TaskLanding.self, forKey: .landing)) ?? nil
+        diff = (try? c.decodeIfPresent(InboxTaskDiff.self, forKey: .diff)) ?? nil
         tabs = try c.decodeIfPresent([InboxTab].self, forKey: .tabs) ?? []
         status = try c.decodeIfPresent(TabStatus.self, forKey: .status)
             ?? tabs.map(\.status).max(by: { $0.priority < $1.priority }) ?? .idle

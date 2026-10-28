@@ -99,6 +99,15 @@
         "snoozeUntilAttention": { "const": true, "description": "Present while the task is snoozed until it needs the user (SPEC.md §4.4)." },
         "branch": { "type": "string", "description": "Version 3: the task's own worktree branch, once it has one (SPEC.md §4.4)." },
         "landing": { "$ref": "#/$defs/landing", "description": "Version 3: present while the task is landing into its stream or stopped doing so (SPEC.md §4.4)." },
+        "diff": {
+          "description": "Lines added and removed in the task's directory (SPEC.md §4.4); absent when nothing changed or unknown.",
+          "type": "object",
+          "required": ["added", "deleted"],
+          "properties": {
+            "added": { "type": "integer", "minimum": 0 },
+            "deleted": { "type": "integer", "minimum": 0 }
+          }
+        },
         "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
       }
     },

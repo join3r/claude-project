@@ -435,6 +435,7 @@ struct InboxRow: View {
                         if isServer && desktopName != nil { ServerGlyph() }
                     }
                     Spacer(minLength: 4)
+                    diffText
                     ageText
                 }
                 .lineLimit(1)
@@ -462,6 +463,7 @@ struct InboxRow: View {
                     taskName
                 }
                 Spacer(minLength: 4)
+                diffText
                 ageText
             }
             .lineLimit(1)
@@ -474,6 +476,23 @@ struct InboxRow: View {
         Text(entry.task.name)
             .font(.body.weight(entry.task.unread ? .semibold : .regular))
             .lineLimit(1)
+    }
+
+    /// Lines added (green) and removed (red), as the desktop Inbox shows
+    /// them. Snoozed rows stay quiet, as there.
+    @ViewBuilder
+    private var diffText: some View {
+        if group != .snoozed, let diff = entry.task.diff, !diff.isEmpty {
+            HStack(spacing: 3) {
+                Text("+\(InboxTaskDiff.format(diff.added))")
+                    .foregroundStyle(diff.added > 0 ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+                Text("−\(InboxTaskDiff.format(diff.deleted))")
+                    .foregroundStyle(diff.deleted > 0 ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+            }
+            .font(.footnote.monospaced())
+            .fixedSize()
+            .accessibilityLabel("\(diff.added) lines added, \(diff.deleted) removed")
+        }
     }
 
     @ViewBuilder

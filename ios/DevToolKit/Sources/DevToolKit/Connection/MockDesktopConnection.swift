@@ -1173,10 +1173,10 @@ public enum MockInbox {
         let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
         func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,
                   eventAt: Int64? = nil, unread: Bool = false, snoozedUntil: Int64? = nil,
-                  branch: String? = nil, landing: TaskLanding? = nil, tabs: [InboxTab]) -> InboxTask {
+                  branch: String? = nil, landing: TaskLanding? = nil, diff: InboxTaskDiff? = nil, tabs: [InboxTab]) -> InboxTask {
             var task = InboxTask(id: id, name: name, streamId: stream.id, streamName: stream.name,
                                  lastInteractedAt: lastInteractedAt, attentionAt: attentionAt, eventAt: eventAt, unread: unread,
-                                 snoozedUntil: snoozedUntil, branch: branch, landing: landing, tabs: tabs)
+                                 snoozedUntil: snoozedUntil, branch: branch, landing: landing, diff: diff, tabs: tabs)
             task.status = MockDesktopConnection.status(of: task)
             let statusTab = MockDesktopConnection.statusTabs(of: task).first { $0.status == task.status }
             task.since = statusTab?.since
@@ -1189,13 +1189,14 @@ public enum MockInbox {
             generatedAt: t,
             projects: [
                 InboxProject(id: "p-api", name: "api-server", emoji: "🚀", streams: [apiMain, api050, apiBugs], lastStreamId: api050.id, tasks: [
-                    task("t-docs", "openapi-docs", apiMain, lastInteractedAt: ago(180), eventAt: ago(170), tabs: [
+                    task("t-docs", "openapi-docs", apiMain, lastInteractedAt: ago(180), eventAt: ago(170),
+                         diff: InboxTaskDiff(added: 1240, deleted: 388), tabs: [
                         InboxTab(id: "tab-5", type: .terminal, title: "npm run docs", status: .exited, since: ago(170)),
                     ]),
                     // Task worktrees (§4.4): closing fix-auth stops on a conflict; cache-headers'
                     // Land is blocked by local changes in 0.5.0.
                     task("t-auth", "fix-auth", api050, lastInteractedAt: ago(3), attentionAt: ago(1), eventAt: ago(1), unread: true,
-                         branch: "0.5.0--fix-auth", tabs: [
+                         branch: "0.5.0--fix-auth", diff: InboxTaskDiff(added: 128, deleted: 14), tabs: [
                         InboxTab(id: "tab-1", type: .claudeChat, title: "Claude", status: .attention, since: ago(1), activity: "Wants to run npm test", topic: "Fix the flaky login test"),
                         InboxTab(id: "tab-2", type: .terminal, title: "zsh", status: .idle, since: ago(40)),
                     ]),

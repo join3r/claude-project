@@ -7,6 +7,27 @@ import Testing
         try JSONDecoder().decode(Inbox.self, from: Data(json.utf8))
     }
 
+    @Test func decodesTaskDiff() throws {
+        let inbox = try decode("""
+        {
+          "desktop": { "id": "d1", "name": "mbp" }, "generatedAt": 1,
+          "projects": [{
+            "id": "p1", "name": "p", "remote": false, "streams": [{ "id": "s1", "name": "main", "main": true }],
+            "tasks": [
+              { "id": "t1", "name": "a", "streamId": "s1", "streamName": "main", "status": "idle", "diff": { "added": 1240, "deleted": 14 }, "tabs": [] },
+              { "id": "t2", "name": "b", "streamId": "s1", "streamName": "main", "status": "idle", "diff": "junk", "tabs": [] }
+            ]
+          }]
+        }
+        """)
+        let tasks = try #require(inbox.projects.first).tasks
+        #expect(tasks[0].diff == InboxTaskDiff(added: 1240, deleted: 14))
+        #expect(tasks[1].diff == nil)
+        #expect(InboxTaskDiff.format(1240) == "1.2k")
+        #expect(InboxTaskDiff.format(2000) == "2k")
+        #expect(InboxTaskDiff.format(999) == "999")
+    }
+
     @Test func decodesSpecExample() throws {
         let inbox = try decode("""
         {

@@ -38,6 +38,16 @@ function lookup(
   }
 }
 
+describe('buildInbox diff', () => {
+  it("sends a task's lines added and removed, and nothing for a clean one", () => {
+    const p = project('p1', [task('t1', [tab('a', 'claude')]), task('t2', [tab('b', 'claude')])])
+    const diffs = new Map([['t1', { added: 12, deleted: 3 }], ['t2', { added: 0, deleted: 0 }]])
+    const inbox = buildInbox(data([p]), lookup(), DESKTOP, NOW, new Set(), () => null, (id) => diffs.get(id))
+    expect(inbox.projects[0].tasks.find(t => t.id === 't1')?.diff).toEqual({ added: 12, deleted: 3 })
+    expect(inbox.projects[0].tasks.find(t => t.id === 't2')).not.toHaveProperty('diff')
+  })
+})
+
 describe('buildInbox', () => {
   it('stamps the desktop and generation time', () => {
     const inbox = buildInbox(data([]), lookup(), DESKTOP, NOW)

@@ -225,6 +225,7 @@ Desktop rules (a server follows them too):
       "landing": { "state": "landing" | "conflict" | "blocked" | "fixing",
                    "intent": "close" | "land" | "update",
                    "files": ["src/auth.ts"], "fileCount": 1, "message": "…" },
+      "diff": { "added": 128, "deleted": 14 },
       "tabs": [{
         "id": "…", "type": "claude-chat", "title": "Claude",
         "status": "working" | "attention" | "exited" | "idle",
@@ -251,6 +252,7 @@ Desktop rules (a server follows them too):
   - `intent` is what was asked for: `close` (absent means `close`; the task goes to Done once it lands), `land` (it lands and stays open) or `update` (rebase onto the stream only, from the desktop's Update from stream). A receiver drops an unknown `intent`.
   - `files` lists the conflicted files (`conflict`, `fixing`) or the stream's files in the way (`blocked`), at most the first 20, and `fileCount` is how many there are in all; both are present only when there are files. `message` is git's reason (`blocked`), at most 1000 characters.
   - A task whose landing is `conflict` or `blocked` is the user's turn on the desktop's Inbox, ahead of a working tab; `landing` and `fixing` are not.
+- `diff` is the task's lines added and removed, as the desktop Inbox shows them: for a task with a worktree of its own, everything since it branched off its stream (its commits, uncommitted changes and untracked files); for any other task, what is not committed in its directory, so tasks sharing a folder carry the same numbers. The desktop recounts about every 15 seconds while a phone is connected. It is absent when nothing changed, before the first count, and for SSH, server and shell-command projects. A phone shows it as a green `+added` and a red `−deleted`.
 - Archived streams and tasks are never sent, nor is anything inside an archived stream. Ephemeral-but-spent projects (no open task left) and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.
 - `pinned` is the desktop sidebar's Pinned list in its order: a project, a stream when `streamId` is set, or a task when `taskId` is set (its `streamId` is then the stream holding the task now). A pin whose project, stream or task isn't in `projects` (hidden, spent, archived, gone) is left out, and the field is absent when nothing is left. A phone ignores a pin it can't resolve. A pinned stream shows its tasks under it; its tasks are not pinned by themselves.

@@ -99,7 +99,15 @@ export interface InboxTask {
   branch?: string
   /** Present while the task is landing into its stream or stopped doing so (version 3, §4.4). */
   landing?: TaskLanding
+  /** Lines added and removed in the task's directory (§4.4); absent when nothing changed or unknown. */
+  diff?: InboxTaskDiff
   tabs: InboxTab[]
+}
+
+/** A task's lines added and removed, as the desktop Inbox shows them (§4.4 `diff`). */
+export interface InboxTaskDiff {
+  added: number
+  deleted: number
 }
 
 /** A line of work in a project (§4.4); archived streams are never sent. */

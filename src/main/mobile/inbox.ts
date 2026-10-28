@@ -4,6 +4,7 @@ import { isSnoozed, isUnread, statusTabs, taskStatus } from '../../shared/inbox-
 import {
   isSpentEphemeralProject,
   type Project,
+  type GitDiffSummary,
   type ProjectsData,
   type Stream,
   type Tab,
@@ -123,7 +124,10 @@ export function wireLanding(landing: TaskLanding): WireLanding {
   return out
 }
 
-function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: number): MobileInboxTask {
+/** Each task's lines added and removed (§4.4 `diff`), by task id. */
+export type TaskDiffLookup = (taskId: string) => GitDiffSummary | undefined
+
+function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: number, diffs: TaskDiffLookup): MobileInboxTask {
   const out: Omit<MobileInboxTask, 'tabs'> = {
     id: task.id,
     name: task.name,
@@ -137,6 +141,8 @@ function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: numb
   // A task with a worktree of its own (version 3): its branch, and where its landing is.
   if (task.workspace) out.branch = task.workspace.branchName
   if (task.landing) out.landing = wireLanding(task.landing)
+  const diff = diffs(task.id)
+  if (diff && (diff.added > 0 || diff.deleted > 0)) out.diff = { added: diff.added, deleted: diff.deleted }
   const tabs = taskTabs(task)
     .filter(isMobileTab)
     .map((tab) => buildTab(tab, lookup))
@@ -186,7 +192,7 @@ export function isVisibleOnMobile(project: Project): boolean {
  * Archived streams and tasks live outside `project.streams` (`archive/<id>.json`),
  * so only open ones are ever sent.
  */
-function buildProject(project: Project, lookup: InboxTabLookup, now: number, missingFolder: boolean, runs: StreamRunLookup): MobileInboxProject {
+function buildProject(project: Project, lookup: InboxTabLookup, now: number, missingFolder: boolean, runs: StreamRunLookup, diffs: TaskDiffLookup): MobileInboxProject {
   const lastStream = project.streams.find((stream) => stream.id === project.lastStreamId)
   const queue = buildQueue(project)
   return {
@@ -196,7 +202,7 @@ function buildProject(project: Project, lookup: InboxTabLookup, now: number, mis
     remote: !!project.ssh,
     streams: project.streams.map((stream) => buildStream(project, stream, runs)),
     ...(lastStream ? { lastStreamId: lastStream.id } : {}),
-    tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now))),
+    tasks: project.streams.flatMap((stream) => stream.tasks.map((task) => buildTask(stream, task, lookup, now, diffs))),
     ...(queue.length > 0 ? { queue } : {}),
     ...(missingFolder ? { missingFolder: true as const } : {})
   }
@@ -266,13 +272,15 @@ export function buildInbox(
   /** Local projects whose folder is gone (§4.4 `missingFolder`). */
   missingFolders: ReadonlySet<string> = new Set(),
   /** Streams' app runs (§8.19). */
-  runs: StreamRunLookup = () => null
+  runs: StreamRunLookup = () => null,
+  /** Tasks' lines added and removed (§4.4 `diff`). */
+  diffs: TaskDiffLookup = () => undefined
 ): MobileInbox {
   const visible = orderedProjects(data).filter(isVisibleOnMobile)
   const inbox: MobileInbox = {
     desktop: { id: desktop.id, name: desktop.name },
     generatedAt: now,
-    projects: visible.map((project) => buildProject(project, lookup, now, missingFolders.has(project.id), runs))
+    projects: visible.map((project) => buildProject(project, lookup, now, missingFolders.has(project.id), runs, diffs))
   }
   const pinned = buildPinned(data, visible)
   if (pinned.length > 0) inbox.pinned = pinned
