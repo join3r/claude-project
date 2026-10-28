@@ -5,6 +5,7 @@ import type {
   CommitHistoryResult,
   DirectoryEntry,
   GitOperationResult,
+  GitDiffSummary,
   GitPostureResult,
   GitStatusResult,
   NotesEnvelope,
@@ -461,6 +462,8 @@ const api = {
     ipcRenderer.invoke('fb-git-status', projectCwd, projectId),
   gitProjectPosture: (projectCwd: string, projectId?: string): Promise<GitPostureResult> =>
     ipcRenderer.invoke('git-project-posture', projectCwd, projectId),
+  gitTaskDiffSummary: (taskCwd: string, baseBranch?: string, projectId?: string): Promise<GitDiffSummary | null> =>
+    ipcRenderer.invoke('git-task-diff-summary', taskCwd, baseBranch, projectId),
   gitCommitHistory: (projectCwd: string, projectId?: string): Promise<CommitHistoryResult> =>
     ipcRenderer.invoke('git-commit-history', projectCwd, projectId),
   fbGitDiff: (projectCwd: string, relativeFilePath: string, projectId?: string): Promise<string> =>

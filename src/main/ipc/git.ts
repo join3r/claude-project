@@ -15,7 +15,7 @@ import { nestedGitRepos, repoForPath, toProjectEntries, toRepoPath } from '../gi
 import { GIT_STATUS_ARGS, parseGitStatusZ } from '../git-status-parse'
 import { findGitBashExe } from '../shell-env'
 import type { IpcRegistrar } from './registrar'
-import { optSafeId, str, stringList } from './schemas'
+import { optSafeId, optStr, str, stringList } from './schemas'
 
 const execFileAsync = promisify(execFile)
 
@@ -111,13 +111,17 @@ async function readUntrackedSummary(cwd: string, opts: string[]): Promise<GitDif
   }
 }
 
-async function readGitDiffSummary(cwd: string, nested: boolean): Promise<GitDiffSummary> {
+/**
+ * Lines added and removed in the working tree, untracked files included, against
+ * `against` (a commit; default HEAD).
+ */
+async function readGitDiffSummary(cwd: string, nested: boolean, against = 'HEAD'): Promise<GitDiffSummary> {
   const opts = nested ? NESTED_READ_OPTS : []
   const untrackedSummary = await readUntrackedSummary(cwd, opts)
 
   try {
     const diffArgs = await hasHeadCommit(cwd, opts)
-      ? ['diff', '--numstat', 'HEAD']
+      ? ['diff', '--numstat', against]
       : ['diff', '--numstat', '--cached']
     // `dirty` compares only the commit a submodule points at, so git doesn't
     // run status inside a nested repo's submodules.
@@ -132,6 +136,27 @@ async function readGitDiffSummary(cwd: string, nested: boolean): Promise<GitDiff
   } catch {
     return untrackedSummary
   }
+}
+
+/**
+ * A task's lines added and removed, for the Inbox. With `baseBranch` (the task's
+ * own worktree) everything since it branched off: its commits plus what is not
+ * committed yet. Without it, only what is not committed. Null outside a git repo.
+ */
+export async function readTaskDiffSummary(cwd: string, baseBranch?: string): Promise<GitDiffSummary | null> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd })
+  } catch {
+    return null
+  }
+  let against = 'HEAD'
+  if (baseBranch && !baseBranch.startsWith('-')) {
+    try {
+      const { stdout } = await execFileAsync('git', ['merge-base', 'HEAD', baseBranch], { cwd })
+      against = stdout.trim() || 'HEAD'
+    } catch { /* the base branch is gone: count what is not committed */ }
+  }
+  return readGitDiffSummary(cwd, false, against)
 }
 
 /** One repo's status and line summary, or null when `cwd` is not inside a git repo. */
@@ -220,6 +245,11 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
     } catch {
       return { ...EMPTY_POSTURE }
     }
+  })
+
+  ipc.handle('git-task-diff-summary', [str, optStr, optSafeId], async (_event, taskCwd, baseBranch): Promise<GitDiffSummary | null> => {
+    const cwd = await rootOrNull(taskCwd)
+    return cwd ? readTaskDiffSummary(cwd, baseBranch) : null
   })
 
   ipc.handle('git-commit-history', [str, optSafeId], async (_event, projectCwd): Promise<CommitHistoryResult> => {

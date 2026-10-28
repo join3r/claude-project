@@ -153,6 +153,7 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'fb-delete': projectAt(2),
   'git-project-posture': projectAt(1),
   'git-commit-history': projectAt(1),
+  'git-task-diff-summary': projectAt(2),
   'fb-git-status': projectAt(1),
   'fb-git-diff': projectAt(2),
   'fb-git-stage': projectAt(3),

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { AlarmClockOff, Check, Clock, Cog, Inbox as InboxIcon, MoreHorizontal, Plus, Server, SquarePen, TriangleAlert, X } from 'lucide-react'
-import type { AppConfig, Project, Task } from '../../shared/types'
+import type { AppConfig, GitDiffSummary, Project, Task } from '../../shared/types'
 import { isEphemeralProject } from '../../shared/types'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import { RowActions, RowAction } from './ui'
@@ -24,6 +24,7 @@ import {
 } from './inbox'
 import type { AgentActivity } from '../../shared/agent-activity'
 import { serverName, useServersState } from '../serversState'
+import { formatLineCount, useTaskDiffSummaries } from '../hooks/useTaskDiffSummaries'
 
 type Props = {
   projects: Project[]
@@ -203,7 +204,8 @@ function InboxRow({
   badge,
   warnings,
   dimmed = false,
-  rename
+  rename,
+  diff
 }: {
   entry: InboxEntry
   group: GroupKey
@@ -228,6 +230,8 @@ function InboxRow({
   dimmed?: boolean
   /** Set while this row's name is being edited in place. */
   rename?: InboxRename
+  /** Lines added and removed in the task's directory (`useTaskDiffSummaries`). */
+  diff?: GitDiffSummary
 }): React.ReactElement {
   const { task, project, stream, unread } = entry
   const activity = lastActivityAt(task)
@@ -253,6 +257,16 @@ function InboxRow({
           <X size={13} />
         </RowAction>
       </RowActions>
+      {diff && (diff.added > 0 || diff.deleted > 0) && (
+        <span
+          className="flex items-center gap-1 pl-1 text-2xs font-mono tabular-nums"
+          title={`${diff.added} added, ${diff.deleted} removed`}
+          data-testid="inbox-row-diff"
+        >
+          <span className={diff.added > 0 ? 'text-success' : 'text-text-subtle'}>+{formatLineCount(diff.added)}</span>
+          <span className={diff.deleted > 0 ? 'text-danger' : 'text-text-subtle'}>−{formatLineCount(diff.deleted)}</span>
+        </span>
+      )}
       <span className="text-2xs text-text-subtle tabular-nums pl-1" data-testid="inbox-row-age">
         {activity > 0 ? formatRelativeAge(now - activity) : ''}
       </span>
@@ -545,14 +559,20 @@ export default function InboxPanel({
     () => partitionInbox(inboxSources(projects), allStatuses, statusSince, now),
     [projects, allStatuses, statusSince, now]
   )
+  // Snoozed rows stay folded away and quiet: no git for them.
+  const openEntries = useMemo(
+    () => [...partition.needsYou, ...partition.ready, ...partition.working],
+    [partition]
+  )
+  const diffs = useTaskDiffSummaries(openEntries, isUnreachable)
   const grouped = layout === 'grouped'
   // Grouped: the open groups by project. Snoozed stays a folded section below, as
   // in the flat list.
   const projectGroups = useMemo(
     () => (grouped
-      ? groupInboxByProject([...partition.needsYou, ...partition.ready, ...partition.working], pinnedProjectIds)
+      ? groupInboxByProject(openEntries, pinnedProjectIds)
       : []),
-    [grouped, partition, pinnedProjectIds]
+    [grouped, openEntries, pinnedProjectIds]
   )
 
   const total = Object.values(partition).reduce((sum, entries) => sum + entries.length, 0)
@@ -580,6 +600,7 @@ export default function InboxPanel({
       warnings={warningsFor(entry.project)}
       dimmed={!!isUnreachable?.(entry.project)}
       rename={rename?.taskId === entry.task.id ? rename : undefined}
+      diff={diffs.get(entry.task.id)}
     />
   )
 

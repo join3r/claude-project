@@ -332,3 +332,21 @@ describe('InboxPanel warnings, apps and rename', () => {
     expect(within(row('b')).queryByTestId('inbox-row-rename')).toBeNull()
   })
 })
+
+describe('InboxPanel line counts', () => {
+  afterEach(() => {
+    delete (window as { api?: unknown }).api
+  })
+
+  it('shows lines added and removed per task, nothing for a clean one', async () => {
+    const gitTaskDiffSummary = vi.fn(async (dir: string) =>
+      dir === '/tmp/devtool' ? { added: 1240, deleted: 14 } : { added: 0, deleted: 0 })
+    ;(window as { api?: unknown }).api = { gitTaskDiffSummary }
+    renderPanel('flat')
+    const diff = await within(row('a')).findByTestId('inbox-row-diff')
+    expect(diff.textContent).toBe('+1.2k−14')
+    expect(within(row('f')).queryByTestId('inbox-row-diff')).toBeNull()
+    // One call per directory, not per task.
+    expect(gitTaskDiffSummary.mock.calls.filter(([dir]) => dir === '/tmp/devtool')).toHaveLength(1)
+  })
+})
