@@ -597,7 +597,7 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
       const sanitized = sanitizeRestoredScrollback(data ?? '')
       if (sanitized) {
         entry.term.write(sanitized, () => {
-          entry.term.scrollToBottom()
+          if (terminals.get(tabId) === entry) entry.term.scrollToBottom()
         })
       }
       scrollbackPreloadedRef.current = true
@@ -731,10 +731,14 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
               sshConfig
             )
 
+            // The tab may have been disposed (closed, remounted) while attaching.
+            if (terminals.get(tabId) !== entry) return
             resizeTerminal(entry, attachResult.cols, attachResult.rows)
 
             const flushPending = () => {
               entry.restoring = false
+              // Write callbacks still fire after term.dispose(), whose renderer is gone.
+              if (terminals.get(tabId) !== entry) return
               if (entry.pendingData.length > 0) {
                 entry.term.write(entry.pendingData.join(''))
                 entry.pendingData = []

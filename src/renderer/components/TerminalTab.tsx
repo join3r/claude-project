@@ -457,11 +457,15 @@ export default function TerminalTab({ tabId, visible, projectId, taskId, project
 
           void attachPromise.then(({ cols, rows, scrollback }) => {
             if (run) takePendingRun(tabId)
+            // The tab may have been disposed (closed, remounted) while attaching.
+            if (terminals.get(tabId) !== entry) return
             resizeTerminal(entry, cols, rows)
             const restoredScrollback = sanitizeRestoredScrollback(scrollback)
 
             const flushPending = () => {
               entry.restoring = false
+              // Write callbacks still fire after term.dispose(), whose renderer is gone.
+              if (terminals.get(tabId) !== entry) return
               if (entry.pendingData.length > 0) {
                 entry.term.write(entry.pendingData.join(''))
                 entry.pendingData = []

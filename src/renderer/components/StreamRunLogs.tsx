@@ -101,12 +101,13 @@ export default function StreamRunLogs({ projectId, streamId, commandId }: Stream
     })
     term.reset()
     void window.api.streamRunAttach(projectId, tabId).then((result) => {
-      if (cancelled) return
+      if (cancelled || termRef.current?.term !== term) return
       attached = true
       setEmpty(!result || (!result.scrollback && result.exitCode !== null))
       if (!result) return
       const restored = sanitizeRestoredScrollback(result.scrollback)
-      if (restored) term.write(restored, () => term.scrollToBottom())
+      // The xterm may be replaced (config/theme change) before the write lands.
+      if (restored) term.write(restored, () => { if (termRef.current?.term === term) term.scrollToBottom() })
       fit.fit()
       window.api.ptyResize(tabId, term.cols, term.rows)
     }).catch(() => { if (!cancelled) setEmpty(true) })
