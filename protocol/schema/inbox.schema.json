@@ -41,7 +41,34 @@
         "queueAutoRun": { "const": true, "description": "The stream starts its next queued prompt by itself (SPEC.md §4.4, §8.16)." },
         "queueTaskId": { "type": "string", "description": "The task the stream's queue started last, while it still runs." },
         "runCommand": { "type": "string", "description": "The command the stream's app run starts; absent when it has none (SPEC.md §8.19)." },
-        "run": { "$ref": "#/$defs/streamRun" }
+        "run": { "$ref": "#/$defs/streamRun" },
+        "commands": {
+          "type": "array",
+          "description": "Every command the stream can run, in order (stream.run.commands, SPEC.md §8.19).",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "command"],
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "command": { "type": "string" } }
+          }
+        },
+        "runs": {
+          "type": "array",
+          "description": "Each command's run since the desktop started (stream.run.commands, SPEC.md §8.19).",
+          "items": {
+            "type": "object",
+            "required": ["commandId", "name", "command", "status", "startedAt"],
+            "properties": {
+              "commandId": { "type": "string" },
+              "name": { "type": "string" },
+              "command": { "type": "string" },
+              "status": { "enum": ["running", "exited", "stopped"] },
+              "startedAt": { "type": "integer", "minimum": 0 },
+              "endedAt": { "type": "integer", "minimum": 0 },
+              "exitCode": { "type": "integer" },
+              "taskId": { "type": "string" }
+            }
+          }
+        }
       }
     },
     "streamRun": {

@@ -122,10 +122,28 @@ export interface InboxStream {
   queueAutoRun?: true
   /** The task its queue started last, while it still runs: the next prompt waits for it. */
   queueTaskId?: string
-  /** The command the stream's app run starts (§8.19); absent when it has none. */
+  /** The command line of the stream's first command (§8.19); absent when it has none. */
   runCommand?: string
-  /** The stream's app run since the desktop started (§8.19); absent when it hasn't run. */
+  /** The first command's run since the desktop started (§8.19); absent when it hasn't run. */
   run?: InboxStreamRun
+  /** Every command the stream can run, in order (`stream.run.commands`, §8.19); absent when none. */
+  commands?: InboxRunCommand[]
+  /** Each command's run since the desktop started (`stream.run.commands`), in the order they first ran. */
+  runs?: InboxCommandRun[]
+}
+
+/** A named command a stream can run (§8.19). */
+export interface InboxRunCommand {
+  id: string
+  name: string
+  command: string
+}
+
+/** One command's run (§8.19): {@link InboxStreamRun} plus which command, as it started. */
+export interface InboxCommandRun extends InboxStreamRun {
+  commandId: string
+  name: string
+  command: string
 }
 
 /** A stream's app run (§4.4, §8.19). `exitCode` only with `exited`. */
@@ -454,10 +472,26 @@ function parseStream(value: unknown): InboxStream {
   const runCommand = optStr(o, 'runCommand')
   if (runCommand !== undefined) stream.runCommand = runCommand
   // A status from a newer desktop: no run to show, rather than no inbox.
-  if (o.run !== undefined && o.run !== null && !(isObj(o.run) && typeof o.run.status === 'string' && !RUN_STATUSES.includes(o.run.status))) {
+  if (o.run !== undefined && o.run !== null && !unknownRunStatus(o.run)) {
     stream.run = parseStreamRun(o.run)
   }
+  if (o.commands !== undefined && o.commands !== null) {
+    stream.commands = arr(o, 'commands').map((value) => {
+      const c = obj(value, 'command')
+      return { id: str(c, 'id'), name: str(c, 'name'), command: str(c, 'command') }
+    })
+  }
+  if (o.runs !== undefined && o.runs !== null) {
+    stream.runs = arr(o, 'runs').filter((value) => !unknownRunStatus(value)).map((value) => {
+      const r = obj(value, 'run')
+      return { ...parseStreamRun(r), commandId: str(r, 'commandId'), name: str(r, 'name'), command: str(r, 'command') }
+    })
+  }
   return stream
+}
+
+function unknownRunStatus(value: unknown): boolean {
+  return isObj(value) && typeof value.status === 'string' && !RUN_STATUSES.includes(value.status)
 }
 
 const RUN_STATUSES: readonly string[] = ['running', 'exited', 'stopped']

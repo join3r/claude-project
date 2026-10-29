@@ -117,7 +117,7 @@ import Testing
         let sample = MockInbox.sample(desktopId: "d", desktopName: "desk")
         let api = try #require(sample.projects.first { $0.id == "p-api" })
         let api050 = try #require(api.streams.first { $0.id == "s-api-050" })
-        #expect(api.runTask(api050)?.name == "cache-headers")
+        #expect(api.runTask(try #require(api050.run), in: api050)?.name == "cache-headers")
 
         try await mock.controlRun(projectId: "p-api", streamId: "s-api-050", action: .start, taskId: "t-auth")
         try await stream("s-api-050") { $0.run?.isRunning == true && $0.run?.taskId == "t-auth" }
@@ -130,6 +130,60 @@ import Testing
             try await mock.controlRun(projectId: "p-api", streamId: "s-api-050", action: .start, taskId: "missing")
         }
         await mock.stop()
+    }
+
+    /// `stream.run.commands`: each command runs on its own, with its own logs.
+    @Test func mockRunsNamedCommands() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor(RelayConnectionTests.isInbox)
+        func stream(_ id: String, _ predicate: @escaping @Sendable (InboxStream) -> Bool) async throws {
+            try await events.waitFor { event in
+                guard case .inbox(let inbox) = event else { return false }
+                return inbox.projects.flatMap(\.streams).first { $0.id == id }.map(predicate) ?? false
+            }
+        }
+        #expect(try await mock.runLogs(projectId: "p-api", streamId: "s-api-main", commandId: "c-install").text.hasPrefix("$ npm ci"))
+        try await mock.controlRun(projectId: "p-api", streamId: "s-api-main", action: .start, commandId: "c-staging")
+        try await stream("s-api-main") { s in
+            s.commandRun("c-staging")?.run.isRunning == true && s.commandRun("c-run")?.run.isRunning == true
+                && s.run?.isRunning == true && s.runCommand == "npm run dev"
+        }
+        #expect(try await mock.runLogs(projectId: "p-api", streamId: "s-api-main", commandId: "c-staging").text.hasPrefix("$ npm run dev -- --mode staging"))
+        try await mock.controlRun(projectId: "p-api", streamId: "s-api-main", action: .stop, commandId: "c-run")
+        try await stream("s-api-main") { s in s.commandRun("c-run")?.run.status == .stopped && s.commandRun("c-staging")?.run.isRunning == true }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such command")) {
+            try await mock.controlRun(projectId: "p-api", streamId: "s-api-main", action: .start, commandId: "c-nope")
+        }
+        await mock.stop()
+    }
+
+    @Test func commandsAndRunsRoundTrip() throws {
+        let stream = InboxStream(id: "s", name: "main", isMain: true, runCommand: "npm run dev",
+                                 run: InboxStreamRun(status: .running, startedAt: 5),
+                                 commands: [InboxRunCommand(id: "c1", name: "run", command: "npm run dev"), InboxRunCommand(id: "c2", name: "install", command: "npm ci")],
+                                 runs: [InboxCommandRun(commandId: "c1", name: "run", command: "npm run dev", run: InboxStreamRun(status: .running, startedAt: 5, taskId: "t1"))])
+        let inbox = Inbox(desktop: InboxDesktop(id: "d", name: "n"), generatedAt: 1, projects: [InboxProject(id: "p", name: "p", streams: [stream], tasks: [])])
+        #expect(try Inbox.parse(inbox.json).projects[0].streams[0] == stream)
+        let coded = try JSONDecoder().decode(InboxStream.self, from: JSONEncoder().encode(stream))
+        #expect(coded == stream)
+        // An older desktop: one command and its run, with an empty id.
+        let old = InboxStream(id: "s", name: "main", runCommand: "make", run: InboxStreamRun(status: .stopped, startedAt: 1, endedAt: 2))
+        #expect(old.runCommands == [InboxRunCommand(id: "", name: "run", command: "make")])
+        #expect(old.commandRuns.map(\.commandId) == [""])
+        // A run with a status this build doesn't know is dropped, the stream kept.
+        let wire = try Inbox.parse(try JSONValue.parse(#"""
+        { "desktop": { "id": "d", "name": "n" }, "generatedAt": 1, "projects": [{ "id": "p", "name": "n", "remote": false, "tasks": [], "streams": [
+          { "id": "a", "name": "main", "runs": [
+            { "commandId": "c1", "name": "run", "command": "x", "status": "paused", "startedAt": 5 },
+            { "commandId": "c2", "name": "install", "command": "y", "status": "exited", "startedAt": 5, "exitCode": 0 }
+          ] }
+        ] }] }
+        """#))
+        #expect(wire.projects[0].streams[0].runs.map(\.commandId) == ["c2"])
+        let params = StreamLogsParams(projectId: "p", streamId: "s", commandId: "c2")
+        #expect(try StreamLogsParams.parse(params.json) == params)
     }
 
     @Test func runTaskIdRoundTrips() throws {
@@ -162,8 +216,8 @@ import Testing
         let d2 = Inbox(desktop: InboxDesktop(id: "d2", name: "two"), generatedAt: 0, projects: [c])
         let apps = InboxAppRun.list([("d1", d1), ("d2", d2)])
         #expect(apps.map(\.id) == [
-            "d1:b:killed", "d1:b:unknown", "d1:a:crash-old",
-            "d1:b:main", "d1:a:main", "d2:c:main",
+            "d1:b:killed:", "d1:b:unknown:", "d1:a:crash-old:",
+            "d1:b:main:", "d1:a:main:", "d2:c:main:",
         ])
         #expect(apps[0].project.name == "b" && apps[0].stream.id == "killed" && apps[0].run.crashed)
         #expect(InboxAppRun.list([]).isEmpty)

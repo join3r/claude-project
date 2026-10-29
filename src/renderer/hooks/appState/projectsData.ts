@@ -6,7 +6,7 @@
  */
 import { v4 as uuid } from 'uuid'
 import { createMainStream, pinnedItemKey } from '../../../shared/types'
-import type { PinnedItem, Project, ProjectsData, Stream, Tab, Tag, Task, WorkspaceConfig } from '../../../shared/types'
+import type { PinnedItem, Project, ProjectsData, RunCommand, Stream, Tab, Tag, Task, WorkspaceConfig } from '../../../shared/types'
 import {
   addStreamToProject,
   addTaskToStream,
@@ -237,15 +237,18 @@ export function renameStreamInData(data: ProjectsData, projectId: string, stream
   }))
 }
 
-/** Set (or, blank, clear) a stream's own app command, which takes the place of the project's. */
-export function setStreamRunCommandInData(data: ProjectsData, projectId: string, streamId: string, command: string): ProjectsData {
-  const trimmed = command.trim()
+/**
+ * Set (or, empty, clear) a stream's own commands: one named like a project
+ * command replaces it in this stream, the others add to the project's. Older
+ * data's single `runCommand` goes with it.
+ */
+export function setStreamRunCommandsInData(data: ProjectsData, projectId: string, streamId: string, commands: RunCommand[]): ProjectsData {
   return mapProject(data, projectId, project => ({
     ...project,
     streams: project.streams.map(stream => {
       if (stream.id !== streamId) return stream
-      const { runCommand: _old, ...rest } = stream
-      return trimmed ? { ...rest, runCommand: trimmed } : rest
+      const { runCommand: _old, runCommands: _list, ...rest } = stream
+      return commands.length > 0 ? { ...rest, runCommands: commands } : rest
     })
   }))
 }

@@ -42,7 +42,7 @@ describe('buildInbox diff', () => {
   it("sends a task's lines added and removed, and nothing for a clean one", () => {
     const p = project('p1', [task('t1', [tab('a', 'claude')]), task('t2', [tab('b', 'claude')])])
     const diffs = new Map([['t1', { added: 12, deleted: 3 }], ['t2', { added: 0, deleted: 0 }]])
-    const inbox = buildInbox(data([p]), lookup(), DESKTOP, NOW, new Set(), () => null, (id) => diffs.get(id))
+    const inbox = buildInbox(data([p]), lookup(), DESKTOP, NOW, new Set(), () => [], (id) => diffs.get(id))
     expect(inbox.projects[0].tasks.find(t => t.id === 't1')?.diff).toEqual({ added: 12, deleted: 3 })
     expect(inbox.projects[0].tasks.find(t => t.id === 't2')).not.toHaveProperty('diff')
   })
@@ -268,23 +268,51 @@ describe('buildInbox', () => {
   it('sends each stream\'s run, with exitCode only once it exited (SPEC.md §8.19)', () => {
     const streams: Stream[] = ['s-run', 's-exit', 's-stop', 's-none'].map(id => ({ id, name: id, tasks: [] }))
     const p = project('p1', [], { streams, runCommand: 'npm run dev' })
+    const r = { commandId: 'run', name: 'run' }
     const runs: Record<string, StreamRunState> = {
-      's-run': { status: 'running', command: 'npm run dev', startedAt: 10 },
-      's-exit': { status: 'exited', command: 'npm run dev', startedAt: 10, endedAt: 20, exitCode: -15 },
+      's-run': { ...r, status: 'running', command: 'npm run dev', startedAt: 10 },
+      's-exit': { ...r, status: 'exited', command: 'npm run dev', startedAt: 10, endedAt: 20, exitCode: -15 },
       // A stopped run's exit code (Ctrl-C) is not sent.
-      's-stop': { status: 'stopped', command: 'npm run dev', startedAt: 10, endedAt: 30, exitCode: 130 }
+      's-stop': { ...r, status: 'stopped', command: 'npm run dev', startedAt: 10, endedAt: 30, exitCode: 130 }
     }
-    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW, new Set(), (id) => runs[id] ?? null).projects
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW, new Set(), (id) => (runs[id] ? [runs[id]] : [])).projects
     const byId = Object.fromEntries(wire.streams.map(s => [s.id, s.run]))
     expect(byId['s-run']).toEqual({ status: 'running', startedAt: 10 })
     expect(byId['s-exit']).toEqual({ status: 'exited', startedAt: 10, endedAt: 20, exitCode: -15 })
     expect(byId['s-stop']).toEqual({ status: 'stopped', startedAt: 10, endedAt: 30 })
     expect(byId['s-none']).toBeUndefined()
     expect(wire.streams.find(s => s.id === 's-none')).not.toHaveProperty('run')
-    // The wire never carries the command a run started with.
+    expect(wire.streams.find(s => s.id === 's-none')).not.toHaveProperty('runs')
+    // The older `run` never carries the command a run started with.
     expect(JSON.stringify(byId)).not.toContain('command')
     // Without a lookup no stream has a run.
     expect(buildInbox(data([p]), lookup(), DESKTOP, NOW).projects[0].streams.every(s => !('run' in s))).toBe(true)
+  })
+
+  it('sends every command and each one\'s run; `run` stays the first command\'s (stream.run.commands)', () => {
+    const p = project('p1', [], {
+      runCommands: [
+        { id: 'c-install', name: 'install', command: 'npm ci' },
+        { id: 'c-run', name: 'run', command: 'npm run dev' }
+      ]
+    })
+    const stream = p.streams[0]
+    const runs: StreamRunState[] = [
+      { commandId: 'c-run', name: 'run', status: 'running', command: 'npm run dev', startedAt: 10, taskId: 't9' },
+      { commandId: 'c-install', name: 'install', status: 'exited', command: 'npm ci', startedAt: 5, endedAt: 8, exitCode: 0 }
+    ]
+    const [wire] = buildInbox(data([p]), lookup(), DESKTOP, NOW, new Set(), (id) => (id === stream.id ? runs : [])).projects
+    const s = wire.streams[0]
+    expect(s.runCommand).toBe('npm ci')
+    expect(s.commands).toEqual([
+      { id: 'c-install', name: 'install', command: 'npm ci' },
+      { id: 'c-run', name: 'run', command: 'npm run dev' }
+    ])
+    expect(s.run).toEqual({ status: 'exited', startedAt: 5, endedAt: 8, exitCode: 0 })
+    expect(s.runs).toEqual([
+      { commandId: 'c-run', name: 'run', command: 'npm run dev', status: 'running', startedAt: 10, taskId: 't9' },
+      { commandId: 'c-install', name: 'install', command: 'npm ci', status: 'exited', startedAt: 5, endedAt: 8, exitCode: 0 }
+    ])
   })
 
   it('carries the Pinned list in its order, leaving out what the phone cannot see', () => {

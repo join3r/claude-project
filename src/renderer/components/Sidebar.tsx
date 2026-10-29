@@ -1,7 +1,7 @@
 import { ProjectStreamRunBadge, SidebarStreamRunAction, SidebarStreamRunBadge } from './StreamRunControls'
 import InboxApps from './InboxApps'
 import { refetchStreamRuns } from '../streamRuns'
-import { streamRunCommand } from '../../shared/stream-run'
+import { streamRunCommands } from '../../shared/stream-run'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useAllTabStatuses, useAllTabStatusSince, useTabStatusStore } from '../context/TabStatusContext'
@@ -670,7 +670,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     const isDropTarget = dropTarget?.type === 'task-slot' && dropTarget.projectId === project.id
       && dropTarget.streamId === stream.id && dropTarget.onStreamRow
     const removable = !stream.isMain
-    const runCommand = streamRunCommand(project, stream)
+    const runCommands = streamRunCommands(project, stream)
     return (
       <React.Fragment key={stream.id}>
         <div
@@ -708,13 +708,13 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
                 <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
               )}
               <span className="ml-auto flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-                <SidebarStreamRunBadge projectId={project.id} streamId={stream.id} command={runCommand} />
+                <SidebarStreamRunBadge projectId={project.id} streamId={stream.id} />
                 <StateDot state={rolled} hideOnHover />
                 {!open && (
                   <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>
                 )}
                 <RowActions>
-                  <SidebarStreamRunAction projectId={project.id} streamId={stream.id} command={runCommand} />
+                  <SidebarStreamRunAction projectId={project.id} streamId={stream.id} commands={runCommands} />
                   <RowAction title={`New task in ${stream.name}`} onClick={() => handleAddTask(project.id, stream.id)}>
                     <Plus size={13} />
                   </RowAction>
@@ -833,11 +833,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
             <span className="text-2xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap min-w-0">⎇ {stream.workspace.branchName}</span>
           )}
           <span className="ml-auto flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-            <SidebarStreamRunBadge projectId={project.id} streamId={stream.id} command={streamRunCommand(project, stream)} />
+            <SidebarStreamRunBadge projectId={project.id} streamId={stream.id} />
             <StateDot state={rolled} hideOnHover />
             {!open && <span className="text-xs text-text-subtle tabular-nums group-hover:hidden">{stream.tasks.length}</span>}
             <RowActions>
-              <SidebarStreamRunAction projectId={project.id} streamId={stream.id} command={streamRunCommand(project, stream)} />
+              <SidebarStreamRunAction projectId={project.id} streamId={stream.id} commands={streamRunCommands(project, stream)} />
               <RowAction title={`New task in ${stream.name}`} onClick={() => handleAddTask(project.id, stream.id)}>
                 <Plus size={13} />
               </RowAction>
@@ -1079,7 +1079,7 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
               onStreamMenu={(at, projectId, streamId) => setEntityMenu({ ...at, kind: 'stream', projectId, streamId })}
             />
           )}
-          rowBadge={(entry) => <SidebarStreamRunBadge projectId={entry.project.id} streamId={entry.stream.id} command={undefined} />}
+          rowBadge={(entry) => <SidebarStreamRunBadge projectId={entry.project.id} streamId={entry.stream.id} />}
           missingDirIds={missingDirs}
           onFixMissingDir={(projectId) => openEntityDialog({ kind: 'project-settings', projectId })}
           isUnreachable={isUnreachable}

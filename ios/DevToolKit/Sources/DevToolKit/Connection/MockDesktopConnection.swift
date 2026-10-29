@@ -479,11 +479,11 @@ public actor MockDesktopConnection: DesktopConnection {
         return (p, s)
     }
 
-    /// `stream.run`: start (a no-op while it runs in the same place, a move
-    /// while it runs elsewhere), stop (a no-op unless it runs) or restart (in
-    /// the same place unless `taskId` names another). A stream without a
-    /// command answers `internal`, as the desktop does. The inbox with the new
-    /// `run` goes out right away.
+    /// `stream.run`: one of the stream's commands (its first without
+    /// `commandId`). Start is a no-op while it runs in the same place and a move
+    /// while it runs elsewhere; stop is a no-op unless it runs; restart keeps
+    /// the place unless `taskId` names another. An unknown command answers
+    /// `not-found`. The inbox with the new run goes out right away.
     private func controlRun(_ params: StreamRunParams) throws {
         let (p, s) = try runStream(projectId: params.projectId, streamId: params.streamId)
         let stream = inbox.projects[p].streams[s]
@@ -491,48 +491,72 @@ public actor MockDesktopConnection: DesktopConnection {
            !inbox.projects[p].tasks.contains(where: { $0.id == taskId && $0.streamId == stream.id }) {
             throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
         }
+        guard let command = params.commandId.map({ id in stream.commands.first { $0.id == id } }) ?? stream.commands.first else {
+            throw DesktopConnectionError.remote(code: params.commandId == nil ? AppErrorCode.internal : AppErrorCode.notFound,
+                                                message: params.commandId == nil ? "No run command is set for this project or stream" : "No such command")
+        }
         // A task without a worktree of its own runs in the stream's folder.
         let ownWorktree = params.taskId.flatMap { id in inbox.projects[p].tasks.first { $0.id == id }?.branch != nil ? id : nil }
         let now = Date().unixMilliseconds
-        func stop() {
-            guard stream.run?.isRunning == true else { return }
-            inbox.projects[p].streams[s].run?.status = .stopped
-            inbox.projects[p].streams[s].run?.endedAt = now
-            runLogs[stream.id, default: ""] += "^C\n"
+        let key = Self.logKey(stream.id, command.id)
+        let current = stream.runs.first { $0.commandId == command.id }
+        func set(_ run: InboxStreamRun) {
+            var runs = inbox.projects[p].streams[s].runs
+            let next = InboxCommandRun(commandId: command.id, name: command.name, command: command.command, run: run)
+            if let i = runs.firstIndex(where: { $0.commandId == command.id }) { runs[i] = next } else { runs.append(next) }
+            inbox.projects[p].streams[s].runs = runs
+            inbox.projects[p].streams[s] = Self.withLegacyRun(inbox.projects[p].streams[s])
         }
-        func start(in taskId: String?) throws {
-            guard let command = stream.runCommand else {
-                throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "No run command is set for this project or stream")
-            }
-            inbox.projects[p].streams[s].run = InboxStreamRun(status: .running, startedAt: now, taskId: taskId)
-            runLogs[stream.id] = "$ \(command)\n\n> \(stream.name)@0.1.0 dev\n> vite\n\n  VITE v6.0.0  ready in 412 ms\n\n  ➜  Local:   http://localhost:5173/\n"
+        func stop() {
+            guard var run = current?.run, run.isRunning else { return }
+            run.status = .stopped
+            run.endedAt = now
+            set(run)
+            runLogs[key, default: ""] += "^C\n"
+        }
+        func start(in taskId: String?) {
+            set(InboxStreamRun(status: .running, startedAt: now, taskId: taskId))
+            runLogs[key] = "$ \(command.command)\n\n> \(stream.name)@0.1.0 dev\n> vite\n\n  VITE v6.0.0  ready in 412 ms\n\n  ➜  Local:   http://localhost:5173/\n"
         }
         switch params.action {
         case .start:
-            if stream.run?.isRunning == true && stream.run?.taskId == ownWorktree { return }
+            if current?.run.isRunning == true && current?.run.taskId == ownWorktree { return }
             stop()
-            try start(in: ownWorktree)
+            start(in: ownWorktree)
         case .stop:
             stop()
         case .restart:
             stop()
-            try start(in: params.taskId == nil ? stream.run?.taskId : ownWorktree)
+            start(in: params.taskId == nil ? current?.run.taskId : ownWorktree)
         }
         inbox.generatedAt = now
         continuation.yield(.inbox(inbox))
     }
 
-    /// `stream.logs`: the run's output so far; a running one prints a line per ask.
+    /// `stream.logs`: a command's output so far; a running one prints a line per ask.
     private func logs(_ params: StreamLogsParams) throws -> StreamLogsResult {
         let (p, s) = try runStream(projectId: params.projectId, streamId: params.streamId)
         let stream = inbox.projects[p].streams[s]
-        if stream.run?.isRunning == true {
+        guard let commandId = params.commandId ?? stream.commands.first?.id else { return StreamLogsResult(text: "") }
+        let key = Self.logKey(stream.id, commandId)
+        if stream.runs.first(where: { $0.commandId == commandId })?.run.isRunning == true {
             let time = Date().formatted(date: .omitted, time: .standard)
-            runLogs[stream.id, default: ""] += "\(time) [vite] hmr update /src/App.tsx\n"
+            runLogs[key, default: ""] += "\(time) [vite] hmr update /src/App.tsx\n"
         }
-        let text = runLogs[stream.id] ?? ""
+        let text = runLogs[key] ?? ""
         guard text.count > StreamLogsResult.maxLength else { return StreamLogsResult(text: text) }
         return StreamLogsResult(text: String(text.suffix(StreamLogsResult.maxLength)), truncated: true)
+    }
+
+    static func logKey(_ streamId: String, _ commandId: String) -> String { "\(streamId)~\(commandId)" }
+
+    /// `runCommand` and `run` as a desktop sends them for older phones: the first command's.
+    static func withLegacyRun(_ stream: InboxStream) -> InboxStream {
+        var out = stream
+        let first = stream.commands.first
+        out.runCommand = first?.command
+        out.run = first.flatMap { c in stream.runs.first { $0.commandId == c.id }?.run }
+        return out
     }
 
     /// The desktop's `branchSlug` (`StreamNaming.branchSlug`).
@@ -1045,7 +1069,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
-            DesktopFeature.streamRunTask, DesktopFeature.chatTasks,
+            DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.chatTasks,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -1150,34 +1174,49 @@ public enum MockInbox {
     /// Worktree tasks whose close conflicts until the agent fixes it.
     public static let conflictingTasks: Set<String> = ["t-auth"]
 
-    /// The sample's app run output (§8.19), by stream ID.
+    /// The sample's command run output (§8.19), by stream and command ID.
     public static let runLogs: [String: String] = [
-        "s-api-main": "$ npm run dev\n\n> api-server@0.4.2 dev\n> tsx watch src/server.ts\n\n"
+        "s-api-main~c-run": "$ npm run dev\n\n> api-server@0.4.2 dev\n> tsx watch src/server.ts\n\n"
             + (0..<60).map { "[12:\(String(format: "%02d", $0)):07] GET /health 200 2ms" }.joined(separator: "\n") + "\n",
-        "s-api-050": "$ npm run dev -- --port 3001\n\n> api-server@0.5.0 dev\n> tsx watch src/server.ts --port 3001\n\n"
+        "s-api-main~c-install": "$ npm ci\n\nadded 812 packages, and audited 813 packages in 14s\n\nfound 0 vulnerabilities\n",
+        "s-api-050~c-run": "$ npm run dev -- --port 3001\n\n> api-server@0.5.0 dev\n> tsx watch src/server.ts --port 3001\n\n"
             + "node:internal/modules/cjs/loader:1228\n  throw err;\n  ^\n\nError: Cannot find module './rate-limit'\n"
             + "Require stack:\n- /Users/join3r/code/api-server/src/server.ts\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1225:15)\n"
             + "    at Module._load (node:internal/modules/cjs/loader:1051:27) {\n  code: 'MODULE_NOT_FOUND'\n}\n\nNode.js v24.1.0\n",
-        "s-web-login": "$ npm run storybook\n\nstorybook v8.4.0\n\n  Local:  http://localhost:6006/\n^C\n",
+        "s-web-login~c-story": "$ npm run storybook\n\nstorybook v8.4.0\n\n  Local:  http://localhost:6006/\n^C\n",
     ]
 
     public static func sample(desktopId: String, desktopName: String, now: Date = Date()) -> Inbox {
         let t = now.unixMilliseconds
         func ago(_ minutes: Double) -> Int64 { t - Int64(minutes * 60_000) }
 
-        // App runs (§8.19): main's dev server runs, 0.5.0's exited with an error in cache-headers' worktree,
-        // web-dashboard's main has a command that hasn't run, login-redesign was stopped.
-        let apiMain = InboxStream(id: "s-api-main", name: "main", isMain: true,
-                                  runCommand: "npm run dev", run: InboxStreamRun(status: .running, startedAt: ago(25)))
+        // Command runs (§8.19): api-server has install, run and run (staging); main's
+        // dev server runs and install finished, 0.5.0's run (its own port) exited with
+        // an error in cache-headers' worktree. web-dashboard's main has a command that
+        // hasn't run, login-redesign's storybook was stopped.
+        func commands(port: String? = nil) -> [InboxRunCommand] {
+            [InboxRunCommand(id: "c-run", name: "run", command: "npm run dev" + (port.map { " -- --port \($0)" } ?? "")),
+             InboxRunCommand(id: "c-install", name: "install", command: "npm ci"),
+             InboxRunCommand(id: "c-staging", name: "run (staging)", command: "npm run dev -- --mode staging" + (port.map { " --port \($0)" } ?? ""))]
+        }
+        let apiMain = MockDesktopConnection.withLegacyRun(InboxStream(
+            id: "s-api-main", name: "main", isMain: true, commands: commands(),
+            runs: [InboxCommandRun(commandId: "c-run", name: "run", command: "npm run dev", run: InboxStreamRun(status: .running, startedAt: ago(25))),
+                   InboxCommandRun(commandId: "c-install", name: "install", command: "npm ci",
+                                   run: InboxStreamRun(status: .exited, startedAt: ago(27), endedAt: ago(26), exitCode: 0))]))
         // 0.5.0 runs its queue by itself, waiting on rate-limiter.
-        let api050 = InboxStream(id: "s-api-050", name: "0.5.0", branch: "0.5.0", queueAutoRun: true, queueTaskId: "t-rate",
-                                 runCommand: "npm run dev -- --port 3001",
-                                 run: InboxStreamRun(status: .exited, startedAt: ago(14), endedAt: ago(13), exitCode: 1, taskId: "t-cache"))
+        let api050 = MockDesktopConnection.withLegacyRun(InboxStream(
+            id: "s-api-050", name: "0.5.0", branch: "0.5.0", queueAutoRun: true, queueTaskId: "t-rate", commands: commands(port: "3001"),
+            runs: [InboxCommandRun(commandId: "c-run", name: "run", command: "npm run dev -- --port 3001",
+                                   run: InboxStreamRun(status: .exited, startedAt: ago(14), endedAt: ago(13), exitCode: 1, taskId: "t-cache"))]))
         let apiBugs = InboxStream(id: "s-api-bugs", name: "bugfixes")
-        let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true, runCommand: "npm run dev")
-        let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign",
-                                   runCommand: "npm run storybook",
-                                   run: InboxStreamRun(status: .stopped, startedAt: ago(90), endedAt: ago(70)))
+        let webMain = MockDesktopConnection.withLegacyRun(InboxStream(
+            id: "s-web-main", name: "main", isMain: true, commands: [InboxRunCommand(id: "c-run", name: "run", command: "npm run dev")]))
+        let webLogin = MockDesktopConnection.withLegacyRun(InboxStream(
+            id: "s-web-login", name: "login-redesign", branch: "login-redesign",
+            commands: [InboxRunCommand(id: "c-story", name: "storybook", command: "npm run storybook")],
+            runs: [InboxCommandRun(commandId: "c-story", name: "storybook", command: "npm run storybook",
+                                   run: InboxStreamRun(status: .stopped, startedAt: ago(90), endedAt: ago(70)))]))
         let web240 = InboxStream(id: "s-web-240", name: "2.4.0", branch: "2.4.0")
         let infraMain = InboxStream(id: "s-infra-main", name: "main", isMain: true)
         func task(_ id: String, _ name: String, _ stream: InboxStream, lastInteractedAt: Int64? = nil, attentionAt: Int64? = nil,

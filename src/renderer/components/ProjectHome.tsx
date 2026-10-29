@@ -1,5 +1,5 @@
-import { streamRunCommand, streamRunTask } from '../../shared/stream-run'
-import { controlStreamRun, openStreamRunLogs, useStreamRun } from '../streamRuns'
+import { streamRunCommands, streamRunTask } from '../../shared/stream-run'
+import { controlStreamRun, openStreamRunLogs, useStreamRuns } from '../streamRuns'
 import { StreamRunButtons, StreamRunStatusLabel } from './StreamRunControls'
 import React, { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
@@ -50,21 +50,44 @@ function ToneDot({ tone, title }: { tone: TaskChipTone; title?: string }): React
   return <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT_CLS[tone]}`} title={title} />
 }
 
-/** The stream's app: its command, how it runs, Run / Restart / Stop and its logs. Absent with no command and no run. */
-function StreamRunCardRow({ project, stream }: { project: Project; stream: Stream }): React.ReactElement | null {
-  const run = useStreamRun(project.id, stream.id)
-  const command = streamRunCommand(project, stream)
-  if (!command && !run) return null
+/**
+ * The stream's commands, a row each: name and command line, how it runs, Run /
+ * Restart / Stop and its logs. A command removed while it ran keeps its row
+ * until the run is gone. Nothing with no commands and no runs.
+ */
+function StreamRunCardRows({ project, stream }: { project: Project; stream: Stream }): React.ReactElement | null {
+  const runs = useStreamRuns(project.id, stream.id)
+  const commands = streamRunCommands(project, stream)
+  const ids = new Set(commands.map(c => c.id))
+  const rows = [
+    ...commands.map(c => ({ id: c.id, name: c.name, command: c.command, defined: true })),
+    ...runs.filter(r => !ids.has(r.commandId)).map(r => ({ id: r.commandId, name: r.name, command: r.command, defined: false }))
+  ]
+  if (rows.length === 0) return null
   return (
-    <div className="flex items-center gap-2 min-w-0 -my-0.5" data-testid={`home-stream-run-${stream.id}`}>
-      <span className="font-mono text-xs text-text-subtle truncate min-w-0" title={command}>$ {command ?? run?.command}</span>
-      <StreamRunStatusLabel run={run} taskName={streamRunTask(stream, run)?.name} />
-      <span className="flex-1" />
-      <StreamRunButtons run={run} canRun={!!command} onAction={(action) => void controlStreamRun(project.id, stream.id, action)} />
-      <button type="button" className={cardLinkCls} onClick={() => openStreamRunLogs({ projectId: project.id, streamId: stream.id })}>
-        Logs
-      </button>
-    </div>
+    <>
+      {rows.map(row => {
+        const run = runs.find(r => r.commandId === row.id)
+        return (
+          <div key={row.id} className="flex items-center gap-2 min-w-0 -my-0.5" data-testid={`home-stream-run-${stream.id}-${row.id}`}>
+            <span className="text-xs text-text truncate shrink-0 max-w-[55%]" title={`$ ${row.command}`}>{row.name}</span>
+            {/* Once it ran, its status takes the command line's place (still in the name's tooltip). */}
+            {run
+              ? <StreamRunStatusLabel run={run} taskName={streamRunTask(stream, run)?.name} />
+              : <span className="font-mono text-xs text-text-subtle truncate min-w-0" title={row.command}>$ {row.command}</span>}
+            <span className="flex-1" />
+            <StreamRunButtons
+              run={run}
+              canRun={row.defined}
+              onAction={(action) => void controlStreamRun(project.id, stream.id, row.id, action)}
+            />
+            <button type="button" className={cardLinkCls} onClick={() => openStreamRunLogs({ projectId: project.id, streamId: stream.id, commandId: row.id })}>
+              Logs
+            </button>
+          </div>
+        )
+      })}
+    </>
   )
 }
 
@@ -176,7 +199,7 @@ function StreamCard({ project, stream, local, allStatuses, statusSince, now }: {
         {where.join(' · ')}
         {tone !== 'quiet' && <span className={TONE_TEXT_CLS[tone]}> · {STREAM_TONE_LABEL[tone].toLowerCase()}</span>}
       </div>
-      <StreamRunCardRow project={project} stream={stream} />
+      <StreamRunCardRows project={project} stream={stream} />
       {stream.tasks.length > 0 && (
         <ul className="flex flex-col gap-0.5 m-0 p-0 list-none">
           {stream.tasks.map(task => {

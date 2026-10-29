@@ -251,7 +251,8 @@ export interface MobileServiceDeps {
   taskDiffs?: { peek(): ReadonlyMap<string, GitDiffSummary>; subscribe(listener: () => void): () => void }
   /** Streams' app runs (§8.19): the inbox's `run` fields, `stream.run` and `stream.logs`. A change sends a fresh inbox. */
   streamRuns?: {
-    state(streamId: string): StreamRunState | null
+    /** The stream's command runs, in the order they first ran. */
+    states(streamId: string): StreamRunState[]
     subscribe(listener: () => void): () => void
     control(params: StreamRunParams): Promise<{ ok: true } | { ok: false; code: string; message: string }>
     logs(params: StreamLogsParams): { ok: true; result: StreamLogsResult } | { ok: false; code: string; message: string }
@@ -1110,7 +1111,7 @@ export class MobileService {
       { id: this.deps.getDesktopId() ?? '', name: this.desktopName() },
       this.timers.now(),
       this.deps.missingFolders?.peek(),
-      (streamId) => this.deps.streamRuns?.state(streamId) ?? null,
+      (streamId) => this.deps.streamRuns?.states(streamId) ?? [],
       (taskId) => this.deps.taskDiffs?.peek().get(taskId)
     )
   }

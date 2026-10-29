@@ -9,7 +9,7 @@ void React
 
 describe('stream run store', () => {
   it('asks again for a project and drops runs its host no longer has', async () => {
-    const running: StreamRunState = { status: 'running', command: 'x', startedAt: 1 }
+    const running: StreamRunState = { status: 'running', commandId: 'run', name: 'run', command: 'x', startedAt: 1 }
     let answer: Record<string, StreamRunState> = { a: running, b: running }
     ;(window as any).api = {
       streamRunStates: vi.fn(async () => answer),

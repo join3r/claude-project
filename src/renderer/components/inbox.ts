@@ -1,5 +1,5 @@
 import type { Project, Stream, Task } from '../../shared/types'
-import type { StreamRunState } from '../../shared/stream-run'
+import { runsOfStream, streamRunCrashKey, streamRunCrashed, type StreamRunState } from '../../shared/stream-run'
 import type { TabStatusValue } from '../context/TabStatusContext'
 import {
   inboxState,
@@ -273,7 +273,7 @@ export function formatRelativeAge(ms: number): string {
   return formatWaitTime(ms)
 }
 
-/** A stream's app the Inbox's Apps section lists: running, or ended by itself with a failure. */
+/** A stream's command run the Inbox's Apps section lists: running, or ended by itself with a failure. */
 export interface InboxApp {
   project: Project
   stream: Stream
@@ -283,9 +283,9 @@ export interface InboxApp {
 }
 
 /**
- * The Apps section: crashes first (latest to end on top), then running apps
- * (latest started on top). A crash dismissed for its run (`streamId:startedAt`)
- * stays out until the stream runs again.
+ * The Apps section, a row per command run: crashes first (latest to end on top),
+ * then running ones (latest started on top). `runs` is by `streamRunKey`. A crash
+ * dismissed for its run (`streamRunCrashKey`) stays out until that command runs again.
  */
 export function inboxApps(
   projects: readonly Project[],
@@ -296,11 +296,11 @@ export function inboxApps(
   const running: InboxApp[] = []
   for (const project of projects) {
     for (const stream of project.streams) {
-      const run = runs[stream.id]
-      if (!run) continue
-      if (run.status === 'running') running.push({ project, stream, run, crashed: false })
-      else if (run.status === 'exited' && run.exitCode !== 0 && !dismissed.has(`${stream.id}:${run.startedAt}`)) {
-        crashed.push({ project, stream, run, crashed: true })
+      for (const run of runsOfStream(runs, stream.id)) {
+        if (run.status === 'running') running.push({ project, stream, run, crashed: false })
+        else if (streamRunCrashed(run) && !dismissed.has(streamRunCrashKey(stream.id, run))) {
+          crashed.push({ project, stream, run, crashed: true })
+        }
       }
     }
   }

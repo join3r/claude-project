@@ -2,13 +2,15 @@ import DevToolKit
 import SwiftUI
 import UIKit
 
-/// The stream a Logs screen follows.
+/// The command run a Logs screen follows.
 struct StreamLogsTarget: Hashable, Identifiable {
     var desktopId: String
     var projectId: String
     var streamId: String
+    /// Empty: an older desktop's single command.
+    var commandId: String
 
-    var id: String { "\(desktopId)/\(streamId)" }
+    var id: String { "\(desktopId)/\(streamId)/\(commandId)" }
 }
 
 // MARK: - Run status text
@@ -63,7 +65,7 @@ struct RunDot: View {
 }
 
 /// Run when it isn't running; Stop and Restart while it is; a spinner while
-/// one of them is in flight. Nothing without a command to run.
+/// one of them is in flight. Run only while the command is still set.
 struct RunControls: View {
     @Environment(AppModel.self) private var model
     let target: StreamLogsTarget
@@ -72,27 +74,33 @@ struct RunControls: View {
     var toolbar = false
 
     var body: some View {
-        if stream.runCommand != nil {
-            let offline = model.isOffline(target.desktopId)
-            if model.pendingRun(streamId: stream.id, desktopId: target.desktopId) != nil {
-                ProgressView()
-                    .frame(width: 36, height: 28)
-                    .accessibilityLabel("Working")
-            } else if stream.run?.isRunning == true {
-                button("Stop", systemImage: "stop.fill", tint: .red, action: .stop)
-                    .disabled(offline)
+        let offline = model.isOffline(target.desktopId)
+        let running = stream.commandRun(target.commandId)?.run.isRunning == true
+        if model.pendingRun(streamId: stream.id, commandId: target.commandId, desktopId: target.desktopId) != nil {
+            ProgressView()
+                .frame(width: 36, height: 28)
+                .accessibilityLabel("Working")
+        } else if running {
+            button("Stop", systemImage: "stop.fill", tint: .red, action: .stop)
+                .disabled(offline)
+            if stream.runCommand(target.commandId) != nil {
                 button("Restart", systemImage: "arrow.clockwise", tint: .accentColor, action: .restart)
                     .disabled(offline)
-            } else {
-                button("Run", systemImage: "play.fill", tint: .green, action: .start)
-                    .disabled(offline)
             }
+        } else if stream.runCommand(target.commandId) != nil {
+            button("Run", systemImage: "play.fill", tint: .green, action: .start)
+                .disabled(offline)
         }
     }
 
     private func button(_ title: String, systemImage: String, tint: Color, action: StreamRunParams.Action) -> some View {
         Button {
-            Task { await model.controlRun(action, projectId: target.projectId, streamId: stream.id, desktopId: target.desktopId) }
+            // Run again where it ran: a run in a task's worktree reruns there.
+            let taskId = action == .stop ? nil : stream.commandRun(target.commandId)?.run.taskId
+            Task {
+                await model.controlRun(action, projectId: target.projectId, streamId: stream.id, commandId: target.commandId,
+                                       desktopId: target.desktopId, taskId: taskId)
+            }
         } label: {
             if toolbar {
                 Label(title, systemImage: systemImage)
@@ -105,12 +113,12 @@ struct RunControls: View {
         }
         .buttonStyle(.borderless)
         .tint(tint)
-        .accessibilityLabel("\(title) app")
+        .accessibilityLabel("\(title) \(stream.commandRun(target.commandId)?.name ?? stream.runCommand(target.commandId)?.name ?? "app")")
     }
 }
 
-/// A stream's app run in its project screen (§8.3, §8.19): status dot, the
-/// command and how the run is doing, Run / Stop / Restart, and the row opens Logs.
+/// One command run in a project screen (§8.3, §8.19): status dot, the
+/// command's name and line, how it is doing, Run / Stop / Restart, and the row opens Logs.
 struct StreamRunRow: View {
     let target: StreamLogsTarget
     let stream: InboxStream
@@ -120,18 +128,25 @@ struct StreamRunRow: View {
     let onLogs: () -> Void
 
     var body: some View {
+        let commandRun = stream.commandRun(target.commandId)
+        let defined = stream.runCommand(target.commandId)
         HStack(spacing: 10) {
             Button(action: onLogs) {
                 HStack(spacing: 10) {
-                    RunDot(run: stream.run)
+                    RunDot(run: commandRun?.run)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(stream.runCommand ?? "App run")
-                            .font(.subheadline.monospaced())
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text(stream.run?.line(now: now, taskName: taskName) ?? "Not running")
+                        HStack(spacing: 6) {
+                            Text(commandRun?.name ?? defined?.name ?? "run")
+                                .font(.subheadline.weight(.semibold))
+                            Text(commandRun?.command ?? defined?.command ?? "")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                                .truncationMode(.middle)
+                        }
+                        .lineLimit(1)
+                        Text(commandRun?.run.line(now: now, taskName: taskName) ?? "Not running")
                             .font(.footnote)
-                            .foregroundStyle(stream.run?.color ?? .secondary)
+                            .foregroundStyle(commandRun?.run.color ?? .secondary)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 4)
@@ -140,7 +155,7 @@ struct StreamRunRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens the app's logs")
+            .accessibilityHint("Opens its logs")
             RunControls(target: target, stream: stream)
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
@@ -148,6 +163,39 @@ struct StreamRunRow: View {
                 .accessibilityHidden(true)
         }
         .padding(.vertical, 1)
+    }
+}
+
+/// Run's picker: the stream's commands that aren't running (in `taskId`'s
+/// worktree when it names one, which also moves a run from elsewhere).
+struct RunCommandMenu<Label: View>: View {
+    @Environment(AppModel.self) private var model
+    let desktopId: String
+    let projectId: String
+    let stream: InboxStream
+    var taskId: String? = nil
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        Menu {
+            ForEach(stream.runCommands) { command in
+                let run = stream.commandRun(command.id)?.run
+                let here = run?.isRunning == true && run?.taskId == taskId
+                Button {
+                    Task {
+                        await model.controlRun(.start, projectId: projectId, streamId: stream.id, commandId: command.id,
+                                               desktopId: desktopId, taskId: taskId)
+                    }
+                } label: {
+                    Text(command.name)
+                    Text(run?.isRunning == true ? (here ? "Running" : "Running elsewhere: moves it") : command.command)
+                }
+                .disabled(here || model.pendingRun(streamId: stream.id, commandId: command.id, desktopId: desktopId) != nil)
+            }
+        } label: {
+            label()
+        }
+        .disabled(model.isOffline(desktopId) || stream.runCommands.isEmpty)
     }
 }
 
@@ -177,12 +225,12 @@ struct StreamLogsView: View {
                 ToolbarItem(placement: .principal) {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
                         VStack(spacing: 0) {
-                            Text(stream.map { $0.name.isEmpty ? "Logs" : "\($0.name) logs" } ?? "Logs")
+                            Text(logsTitle(stream))
                                 .font(.headline)
                                 .lineLimit(1)
                             HStack(spacing: 5) {
-                                RunDot(run: stream?.run)
-                                Text(stream?.run?.line(now: context.date, taskName: stream.flatMap { currentProject?.runTask($0)?.name }) ?? "Not running")
+                                RunDot(run: currentRun?.run)
+                                Text(currentRun.map { cr in cr.run.line(now: context.date, taskName: stream.flatMap { s in currentProject?.runTask(cr.run, in: s)?.name }) } ?? "Not running")
                                     .lineLimit(1)
                             }
                             .font(.caption)
@@ -203,7 +251,7 @@ struct StreamLogsView: View {
             }
             .task(id: model.isOffline(target.desktopId)) { await poll() }
             // A new run starts with fresh output: fetch it now rather than on the next tick.
-            .onChange(of: stream?.run?.startedAt) { _, _ in
+            .onChange(of: currentRun?.run.startedAt) { _, _ in
                 Task { await load() }
             }
     }
@@ -214,6 +262,16 @@ struct StreamLogsView: View {
 
     private var currentStream: InboxStream? {
         currentProject?.streams.first { $0.id == target.streamId }
+    }
+
+    private var currentRun: InboxCommandRun? { currentStream?.commandRun(target.commandId) }
+
+    /// "main · run logs"; the stream left out when it is `main`.
+    private func logsTitle(_ stream: InboxStream?) -> String {
+        let name = currentRun?.name ?? stream?.runCommand(target.commandId)?.name
+        let place = stream.flatMap { $0.isMain || $0.name.isEmpty ? nil : $0.name }
+        let what = [place, name].compactMap { $0 }.joined(separator: " · ")
+        return what.isEmpty ? "Logs" : "\(what) logs"
     }
 
     @ViewBuilder
@@ -230,7 +288,7 @@ struct StreamLogsView: View {
             }
         } else {
             ContentUnavailableView("No output yet", systemImage: "terminal",
-                                   description: Text(currentStream?.run == nil ? "Run the app to see its output here." : "The app hasn't printed anything."))
+                                   description: Text(currentRun == nil ? "Run it to see its output here." : "It hasn't printed anything."))
         }
     }
 
@@ -269,7 +327,7 @@ struct StreamLogsView: View {
 
     private func load() async {
         do {
-            let result = try await model.runLogs(projectId: target.projectId, streamId: target.streamId, desktopId: target.desktopId)
+            let result = try await model.runLogs(projectId: target.projectId, streamId: target.streamId, commandId: target.commandId, desktopId: target.desktopId)
             guard !Task.isCancelled else { return }
             if result.text != text { text = result.text }
             truncated = result.truncated

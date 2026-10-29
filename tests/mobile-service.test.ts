@@ -755,7 +755,7 @@ describe('MobileService stream.run and stream.logs (SPEC.md §8.19)', () => {
     const states: Record<string, StreamRunState> = {}
     const calls: unknown[] = []
     const streamRuns: NonNullable<MobileServiceDeps['streamRuns']> = {
-      state: (streamId) => states[streamId] ?? null,
+      states: (streamId) => (states[streamId] ? [states[streamId]] : []),
       subscribe: (l) => { listeners.add(l); return () => listeners.delete(l) },
       control: async (params) => {
         calls.push(params)
@@ -819,7 +819,7 @@ describe('MobileService stream.run and stream.logs (SPEC.md §8.19)', () => {
     env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'inbox.get' })
     const first = env.channel.sent.at(-1) as { result: { projects: { streams: Record<string, unknown>[] }[] } }
     expect('run' in first.result.projects[0].streams[0]).toBe(false)
-    r.states[stream] = { status: 'exited', command: 'npm run dev', startedAt: 1, endedAt: 2, exitCode: 1 }
+    r.states[stream] = { commandId: 'run', name: 'run', status: 'exited', command: 'npm run dev', startedAt: 1, endedAt: 2, exitCode: 1 }
     for (const l of r.listeners) l()
     env.timers.advance(INBOX_THROTTLE_MS)
     expect(env.channel.inboxEvents().at(-1)?.inbox.projects[0].streams[0].run).toEqual({ status: 'exited', startedAt: 1, endedAt: 2, exitCode: 1 })

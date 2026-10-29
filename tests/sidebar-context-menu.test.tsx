@@ -413,7 +413,7 @@ describe('Sidebar stream tree', () => {
     fireEvent.click(await screen.findByTestId('task-menu-open-stream'))
     const page = await screen.findByTestId('task-menu-stream')
     expect(within(page).getByTestId('stream-menu-header').textContent).toContain('0.5.0')
-    for (const name of ['New task here', 'Run app', 'Run command…', 'Rename', 'Pin stream', 'Close stream']) {
+    for (const name of ['New task here', 'Commands…', 'Rename', 'Pin stream', 'Close stream']) {
       expect(within(page).getByRole('button', { name })).toBeTruthy()
     }
     fireEvent.click(within(page).getByRole('button', { name: 'Rename' }))

@@ -315,39 +315,25 @@ struct TaskInfoSheet: View {
         .closeTaskFlow($closing, onClosed: { _ in onClosed() }, onLanding: { _, _ in onLanding() })
     }
 
-    /// The stream's app run in this task's own worktree (§8.19, `stream.run.task`):
-    /// Run app here, or Restart, Stop and Logs while it runs here.
+    /// The stream's commands in this task's own worktree (§8.19, `stream.run.task`):
+    /// each one that runs here with Stop, Restart and Logs, and Run here… to start one.
     @ViewBuilder
     private func appSection(project: InboxProject, task: InboxTask, stream: InboxStream?, offline: Bool) -> some View {
-        if let stream, let command = stream.runCommand, task.branch != nil,
+        if let stream, !stream.runCommands.isEmpty, task.branch != nil,
            model.supports(DesktopFeature.streamRunTask, on: ref.desktopId) {
-            let target = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id)
-            let here = stream.run?.taskId == task.id
-            let running = stream.run?.isRunning == true
-            let busy = offline || model.pendingRun(streamId: stream.id, desktopId: ref.desktopId) != nil
-            let control = { (action: StreamRunParams.Action) in
-                Task { await model.controlRun(action, projectId: project.id, streamId: stream.id, desktopId: ref.desktopId, taskId: task.id) }
-            }
+            let here = stream.commandRuns.filter { $0.run.taskId == task.id }
             Section {
-                if here && running {
-                    Button("Restart app", systemImage: "arrow.clockwise") { control(.restart) }.disabled(busy)
-                    Button("Stop app", systemImage: "stop.fill") { control(.stop) }.disabled(busy)
-                } else {
-                    Button("Run app here", systemImage: "play.fill") { control(.start) }.disabled(busy)
+                ForEach(here) { commandRun in
+                    let target = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id, commandId: commandRun.commandId)
+                    StreamRunRow(target: target, stream: stream, now: Date()) { logs = target }
                 }
-                if here {
-                    Button("Logs", systemImage: "text.alignleft") { logs = target }
+                RunCommandMenu(desktopId: ref.desktopId, projectId: project.id, stream: stream, taskId: task.id) {
+                    Label("Run here…", systemImage: "play")
                 }
             } header: {
-                Text("App")
+                Text("Commands")
             } footer: {
-                if here, let run = stream.run {
-                    Text(run.line(now: Date()))
-                } else if running {
-                    Text("\(stream.name.isEmpty ? "The stream" : stream.name)’s app runs elsewhere. Run app here moves it to this task’s worktree.")
-                } else {
-                    Text("Runs \(command) in this task’s worktree.")
-                }
+                Text("Runs one of \(stream.name.isEmpty ? "the stream" : stream.name)’s commands in this task’s worktree. One already running elsewhere moves here.")
             }
         }
     }

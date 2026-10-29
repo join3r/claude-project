@@ -239,8 +239,21 @@ export interface Stream {
   promptQueueAutoRun?: true
   /** The task the queue started last in this stream, while it counts as running. */
   promptQueueWatch?: { taskId: string; tabId: string }
-  /** This stream's own app command, in place of the project's `runCommand` (`src/shared/stream-run.ts`). */
+  /**
+   * This stream's own commands (`src/shared/stream-run.ts`): one named like a
+   * project command replaces it here, the others add to the project's.
+   */
+  runCommands?: RunCommand[]
+  /** Older data: one command that took the place of the project's. Read only; `runCommands` replaces it. */
   runCommand?: string
+}
+
+/** A named command a stream can run (`src/shared/stream-run.ts`): `install`, `run`, `run (staging)`. */
+export interface RunCommand {
+  /** Stable across renames; a run is keyed by it. */
+  id: string
+  name: string
+  command: string
 }
 
 export interface WorkspaceConfig {
@@ -434,7 +447,9 @@ export interface Project {
   tunnel?: TunnelConfig
   shellCommand?: ShellCommandConfig
   aiToolArgs?: Partial<Record<AiTabType, string>>
-  /** The command that starts the app, run from a stream's folder (`src/shared/stream-run.ts`). */
+  /** The commands a stream can run from its folder (`src/shared/stream-run.ts`), in the order they're offered. */
+  runCommands?: RunCommand[]
+  /** Older data: the one command, read as a command named `run`. Read only; `runCommands` replaces it. */
   runCommand?: string
   /**
    * Conda / micromamba env name (display + fallback lookup).

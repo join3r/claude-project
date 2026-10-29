@@ -59,6 +59,112 @@ public struct InboxStreamRun: Codable, Sendable, Equatable, Hashable {
     }
 }
 
+/// A named command a stream can run (§8.19): `install`, `run`, `run (staging)`.
+public struct InboxRunCommand: Codable, Sendable, Equatable, Hashable, Identifiable {
+    /// Empty for the single command of a desktop from before named commands:
+    /// requests then leave `commandId` out.
+    public var id: String
+    public var name: String
+    public var command: String
+
+    public init(id: String, name: String, command: String) {
+        self.id = id
+        self.name = name
+        self.command = command
+    }
+
+    static func parse(_ value: JSONValue) throws(ProtocolError) -> InboxRunCommand {
+        let o = try Fields(value, "command")
+        return InboxRunCommand(id: try o.str("id"), name: try o.str("name"), command: try o.str("command"))
+    }
+
+    var json: JSONValue { .object(["id": .string(id), "name": .string(name), "command": .string(command)]) }
+}
+
+/// One command's run (§8.19): its run, and which command it is, as it started.
+public struct InboxCommandRun: Codable, Sendable, Equatable, Hashable, Identifiable {
+    /// Empty for an older desktop's single run (see `InboxRunCommand.id`).
+    public var commandId: String
+    public var name: String
+    public var command: String
+    public var run: InboxStreamRun
+
+    public init(commandId: String, name: String, command: String, run: InboxStreamRun) {
+        self.commandId = commandId
+        self.name = name
+        self.command = command
+        self.run = run
+    }
+
+    public var id: String { commandId }
+
+    private enum Keys: String, CodingKey { case commandId, name, command }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        commandId = try c.decode(String.self, forKey: .commandId)
+        name = try c.decode(String.self, forKey: .name)
+        command = try c.decode(String.self, forKey: .command)
+        run = try InboxStreamRun(from: decoder)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        try run.encode(to: encoder)
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(commandId, forKey: .commandId)
+        try c.encode(name, forKey: .name)
+        try c.encode(command, forKey: .command)
+    }
+
+    /// Wire parse; an unknown `status` throws, and the stream drops this run.
+    static func parse(_ value: JSONValue) throws(ProtocolError) -> InboxCommandRun {
+        let o = try Fields(value, "run")
+        return InboxCommandRun(commandId: try o.str("commandId"), name: try o.str("name"), command: try o.str("command"),
+                               run: try InboxStreamRun.parse(value))
+    }
+
+    var json: JSONValue {
+        guard case .object(var o) = run.json else { return run.json }
+        o["commandId"] = .string(commandId)
+        o["name"] = .string(name)
+        o["command"] = .string(command)
+        return .object(o)
+    }
+}
+
+/// Decodes a run this build can't read (an unknown status) as nil, so one bad
+/// entry drops only itself.
+struct LossyCommandRun: Decodable {
+    let value: InboxCommandRun?
+    init(from decoder: any Decoder) throws { value = try? InboxCommandRun(from: decoder) }
+}
+
+extension InboxStream {
+    /// The commands Run offers: `commands`, or an older desktop's single
+    /// `runCommand` (with an empty id).
+    public var runCommands: [InboxRunCommand] {
+        if !commands.isEmpty { return commands }
+        return runCommand.map { [InboxRunCommand(id: "", name: "run", command: $0)] } ?? []
+    }
+
+    /// Every command's run: `runs`, or an older desktop's single `run`.
+    public var commandRuns: [InboxCommandRun] {
+        if !runs.isEmpty { return runs }
+        guard let run else { return [] }
+        let first = commands.first
+        return [InboxCommandRun(commandId: first?.id ?? "", name: first?.name ?? "run", command: first?.command ?? runCommand ?? "", run: run)]
+    }
+
+    public func commandRun(_ commandId: String) -> InboxCommandRun? {
+        commandRuns.first { $0.commandId == commandId }
+    }
+
+    /// The command by id, as Run offers it.
+    public func runCommand(_ commandId: String) -> InboxRunCommand? {
+        runCommands.first { $0.id == commandId }
+    }
+}
+
 /// `stream.run` (§8.19) params: the desktop's Run, Stop and Restart.
 public struct StreamRunParams: Sendable, Equatable {
     public enum Action: String, Sendable, Equatable, CaseIterable {
@@ -71,13 +177,16 @@ public struct StreamRunParams: Sendable, Equatable {
     public var projectId: String
     public var streamId: String
     public var action: Action
+    /// Which of the stream's commands (`stream.run.commands`); nil means its first.
+    public var commandId: String?
     /// `start`, `restart`: run in that task's own worktree (`stream.run.task`).
     public var taskId: String?
 
-    public init(projectId: String, streamId: String, action: Action, taskId: String? = nil) {
+    public init(projectId: String, streamId: String, action: Action, commandId: String? = nil, taskId: String? = nil) {
         self.projectId = projectId
         self.streamId = streamId
         self.action = action
+        self.commandId = commandId
         self.taskId = taskId
     }
 
@@ -86,16 +195,13 @@ public struct StreamRunParams: Sendable, Equatable {
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> StreamRunParams {
         let o = try Fields(value, "params")
         let action = try o.oneOf("action", Action.allCases.map(\.rawValue))
-        var taskId: String?
-        if !o.isUnset("taskId") {
-            taskId = try o.str("taskId")
-            if taskId?.isEmpty == true { throw ProtocolError("taskId is empty") }
-        }
-        return StreamRunParams(projectId: try o.str("projectId"), streamId: try o.str("streamId"), action: Action(rawValue: action)!, taskId: taskId)
+        return StreamRunParams(projectId: try o.str("projectId"), streamId: try o.str("streamId"), action: Action(rawValue: action)!,
+                               commandId: try o.optNonEmpty("commandId"), taskId: try o.optNonEmpty("taskId"))
     }
 
     public var json: JSONValue {
         var o: JSONObject = ["projectId": .string(projectId), "streamId": .string(streamId), "action": .string(action.rawValue)]
+        if let commandId { o["commandId"] = .string(commandId) }
         if let taskId { o["taskId"] = .string(taskId) }
         return .object(o)
     }
@@ -105,19 +211,26 @@ public struct StreamRunParams: Sendable, Equatable {
 public struct StreamLogsParams: Sendable, Equatable {
     public var projectId: String
     public var streamId: String
+    /// Which of the stream's commands (`stream.run.commands`); nil means its first.
+    public var commandId: String?
 
-    public init(projectId: String, streamId: String) {
+    public init(projectId: String, streamId: String, commandId: String? = nil) {
         self.projectId = projectId
         self.streamId = streamId
+        self.commandId = commandId
     }
 
-    /// The desktop's side: a missing `projectId` or `streamId` throws (`bad-request`).
+    /// The desktop's side: a missing `projectId` or `streamId`, or an empty `commandId`, throws (`bad-request`).
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> StreamLogsParams {
         let o = try Fields(value, "params")
-        return StreamLogsParams(projectId: try o.str("projectId"), streamId: try o.str("streamId"))
+        return StreamLogsParams(projectId: try o.str("projectId"), streamId: try o.str("streamId"), commandId: try o.optNonEmpty("commandId"))
     }
 
-    public var json: JSONValue { .object(["projectId": .string(projectId), "streamId": .string(streamId)]) }
+    public var json: JSONValue {
+        var o: JSONObject = ["projectId": .string(projectId), "streamId": .string(streamId)]
+        if let commandId { o["commandId"] = .string(commandId) }
+        return .object(o)
+    }
 }
 
 /// `stream.logs` result: the run's output as plain text (terminal escapes
@@ -154,10 +267,10 @@ extension TaskOp {
 }
 
 extension InboxProject {
-    /// The task whose own worktree the stream's run is in (§8.19); nil when it
+    /// The task whose own worktree a run of `stream` is in (§8.19); nil when it
     /// runs in the stream's folder or that task is no longer listed.
-    public func runTask(_ stream: InboxStream) -> InboxTask? {
-        guard let taskId = stream.run?.taskId else { return nil }
+    public func runTask(_ run: InboxStreamRun, in stream: InboxStream) -> InboxTask? {
+        guard let taskId = run.taskId else { return nil }
         return tasks.first { $0.id == taskId && $0.streamId == stream.id }
     }
 }
@@ -171,22 +284,24 @@ extension InboxStreamRun {
     public var isInboxApp: Bool { isRunning || crashed }
 }
 
-/// A row of the phone Inbox's Apps group (§8.19): a stream whose app is
+/// A row of the phone Inbox's Apps group (§8.19): a stream command that is
 /// running or crashed, with the desktop and project it belongs to.
 public struct InboxAppRun: Sendable, Equatable, Identifiable {
     public var desktopId: String
     public var project: InboxProject
     public var stream: InboxStream
-    public var run: InboxStreamRun
+    public var commandRun: InboxCommandRun
 
-    public init(desktopId: String, project: InboxProject, stream: InboxStream, run: InboxStreamRun) {
+    public init(desktopId: String, project: InboxProject, stream: InboxStream, commandRun: InboxCommandRun) {
         self.desktopId = desktopId
         self.project = project
         self.stream = stream
-        self.run = run
+        self.commandRun = commandRun
     }
 
-    public var id: String { "\(desktopId):\(project.id):\(stream.id)" }
+    public var run: InboxStreamRun { commandRun.run }
+
+    public var id: String { "\(desktopId):\(project.id):\(stream.id):\(commandRun.commandId)" }
 
     /// Every running or crashed app run across `inboxes` (pass only desktops
     /// that list `stream.run`): crashes first, most recently ended first, then
@@ -199,10 +314,11 @@ public struct InboxAppRun: Sendable, Equatable, Identifiable {
         for (desktopId, inbox) in inboxes {
             for project in inbox.projects {
                 for stream in project.streams {
-                    guard let run = stream.run, run.isInboxApp else { continue }
-                    let entry = (InboxAppRun(desktopId: desktopId, project: project, stream: stream, run: run), index)
-                    index += 1
-                    if run.crashed { crashed.append(entry) } else { running.append(entry) }
+                    for commandRun in stream.commandRuns where commandRun.run.isInboxApp {
+                        let entry = (InboxAppRun(desktopId: desktopId, project: project, stream: stream, commandRun: commandRun), index)
+                        index += 1
+                        if commandRun.run.crashed { crashed.append(entry) } else { running.append(entry) }
+                    }
                 }
             }
         }

@@ -242,6 +242,8 @@ public enum DesktopFeature {
     public static let streamRun = "stream.run"
     /// `stream.run` takes `taskId`, and a `run` names the task it runs in (§8.19).
     public static let streamRunTask = "stream.run.task"
+    /// Streams carry `commands` and `runs`, and `stream.run` and `stream.logs` take `commandId` (§8.19).
+    public static let streamRunCommands = "stream.run.commands"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.
@@ -369,7 +371,10 @@ extension Inbox {
                            queueAutoRun: o["queueAutoRun"] == .bool(true), queueTaskId: try optStr(o, "queueTaskId"),
                            runCommand: try optStr(o, "runCommand"),
                            // A run this build can't read (an unknown status) is dropped, not the inbox.
-                           run: o.isUnset("run") ? nil : (try? InboxStreamRun.parse(o["run"])))
+                           run: o.isUnset("run") ? nil : (try? InboxStreamRun.parse(o["run"])),
+                           commands: o.isUnset("commands") ? [] : try o.array("commands").map { (v) throws(ProtocolError) in try InboxRunCommand.parse(v) },
+                           // A run this build can't read is dropped, as `run` is.
+                           runs: o.isUnset("runs") ? [] : try o.array("runs").compactMap { try? InboxCommandRun.parse($0) })
     }
 
     private static func parseQueuedPrompt(_ value: JSONValue) throws(ProtocolError) -> InboxQueuedPrompt {
@@ -478,6 +483,8 @@ extension InboxStream {
         if let queueTaskId { o["queueTaskId"] = .string(queueTaskId) }
         if let runCommand { o["runCommand"] = .string(runCommand) }
         if let run { o["run"] = run.json }
+        if !commands.isEmpty { o["commands"] = .array(commands.map(\.json)) }
+        if !runs.isEmpty { o["runs"] = .array(runs.map(\.json)) }
         return .object(o)
     }
 }

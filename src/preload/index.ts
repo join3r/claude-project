@@ -358,18 +358,19 @@ const api = {
   },
 
   // A stream's app run (main's stream-runs.ts)
-  /** `taskId` runs it in that task's worktree. */
-  streamRunControl: (projectId: string, streamId: string, action: StreamRunAction, taskId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+  /** One of the stream's commands; `taskId` runs it in that task's worktree. */
+  streamRunControl: (projectId: string, streamId: string, commandId: string, action: StreamRunAction, taskId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
     taskId
-      ? ipcRenderer.invoke('stream-run-control', projectId, streamId, action, taskId)
-      : ipcRenderer.invoke('stream-run-control', projectId, streamId, action),
+      ? ipcRenderer.invoke('stream-run-control', projectId, streamId, commandId, action, taskId)
+      : ipcRenderer.invoke('stream-run-control', projectId, streamId, commandId, action),
   streamRunStates: (projectId: string): Promise<Record<string, StreamRunState>> => ipcRenderer.invoke('stream-run-states', projectId),
   /** Starts showing a run's PTY (never spawns one); null when it has no output at all. */
   streamRunAttach: (projectId: string, tabId: string): Promise<{ cols: number; rows: number; scrollback: string; exitCode: number | null; state: StreamRunState | null } | null> =>
     ipcRenderer.invoke('stream-run-attach', projectId, tabId),
   streamRunDetach: (tabId: string): void => ipcRenderer.send('stream-run-detach', tabId),
-  onStreamRunState: (callback: (projectId: string, streamId: string, state: StreamRunState | null) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, projectId: string, streamId: string, state: StreamRunState | null) => callback(projectId, streamId, state)
+  onStreamRunState: (callback: (projectId: string, streamId: string, commandId: string, state: StreamRunState | null) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, projectId: string, streamId: string, commandId: string, state: StreamRunState | null) =>
+      callback(projectId, streamId, commandId, state)
     ipcRenderer.on('stream-run-state', handler)
     return () => ipcRenderer.removeListener('stream-run-state', handler)
   },

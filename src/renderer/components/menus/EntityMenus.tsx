@@ -5,8 +5,8 @@ import { isRemoteProject, isShellCommandProject, pinnedItemKey } from '../../../
 import type { PinnedItem, Project } from '../../../shared/types'
 import { canMoveToServer } from '../../../shared/project-move'
 import { findStreamOfTask, findTaskInProject, taskMoveBlocker } from '../../../shared/streams'
-import { streamRunCommand, streamRunTask } from '../../../shared/stream-run'
-import { controlStreamRun, openStreamRunCommand, openStreamRunLogs, useStreamRun } from '../../streamRuns'
+import { streamRunCrashed, streamRunTask } from '../../../shared/stream-run'
+import { openStreamRunCommands, useStreamRuns } from '../../streamRuns'
 import { openEntityDialog, requestCloseStream } from '../../entityActions'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
@@ -14,7 +14,7 @@ import { useMissingProjectDirs } from '../../hooks/useMissingProjectDirs'
 import { useAddEmptyTask, useMoveTask } from '../../hooks/useTaskMenuActions'
 import { revealInFolderLabel } from '../../utils/revealLabel'
 import { menuCls, menuItemCls } from '../ui'
-import { StreamRunStatusLabel } from '../StreamRunControls'
+import { StreamRunStatusLabel, streamRunMenuEntries } from '../StreamRunControls'
 import { formatWaitTime } from '../inbox'
 import {
   canTrashProjectFolder, projectDeletePrompt, projectDeleteWithFolderPrompt, revealFolder
@@ -78,43 +78,36 @@ export function SubmenuBack({ label, onClick }: { label: string; onClick: () => 
   )
 }
 
-/** A stream's app run in its menu: Run (or Restart and Stop), Show logs, and its own command. */
+/** A stream's commands in its menu: each one's Run (or Restart and Stop) and logs, and Commands… to edit the stream's own. */
 export function StreamRunMenuItems({ project, streamId, onDone }: { project: Project; streamId: string; onDone: () => void }): React.ReactElement {
   const stream = project.streams.find(s => s.id === streamId)
-  const run = useStreamRun(project.id, streamId)
-  const command = streamRunCommand(project, stream)
-  const running = run?.status === 'running'
+  const runs = useStreamRuns(project.id, streamId)
+  const entries = streamRunMenuEntries(project, stream, runs)
   const act = (fn: () => void) => () => { onDone(); fn() }
   return (
-    <div className={sectionCls}>
-      {running ? (
-        <>
-          <button className={menuItemCls} onClick={act(() => void controlStreamRun(project.id, streamId, 'restart'))}>Restart app</button>
-          <button className={menuItemCls} onClick={act(() => void controlStreamRun(project.id, streamId, 'stop'))}>Stop app</button>
-        </>
-      ) : (
+    <div className={sectionCls} data-testid="stream-menu-run">
+      {entries.map(entry => (
         <button
-          className={`${menuItemCls} disabled:opacity-50 disabled:cursor-default`}
-          disabled={!command}
-          title={command ? `$ ${command}` : 'Set a run command first'}
-          onClick={act(() => void controlStreamRun(project.id, streamId, 'start'))}
-        >Run app</button>
-      )}
-      {(run || command) && (
-        <button className={menuItemCls} onClick={act(() => openStreamRunLogs({ projectId: project.id, streamId }))}>Show app logs</button>
-      )}
-      <button className={menuItemCls} onClick={act(() => openStreamRunCommand({ projectId: project.id, streamId }))}>Run command…</button>
+          key={entry.label}
+          className={`${menuItemCls} flex items-center gap-6 justify-between ${entry.dividerBefore ? 'border-t border-hair mt-1 pt-1' : ''}`}
+          title={entry.title}
+          onClick={act(entry.onSelect)}
+        >
+          <span>{entry.label}</span>
+          {entry.hint && <span className="text-text-subtle text-xs">{entry.hint}</span>}
+        </button>
+      ))}
+      <button className={menuItemCls} onClick={act(() => openStreamRunCommands({ projectId: project.id, streamId }))}>Commands…</button>
     </div>
   )
 }
 
-/** The top of a stream menu shown on its own: its name and branch, how its app runs, and the command. */
+/** The top of a stream menu shown on its own: its name and branch, and which of its commands run. */
 export function StreamMenuHeader({ project, streamId }: { project: Project; streamId: string }): React.ReactElement | null {
   const stream = project.streams.find(s => s.id === streamId)
-  const run = useStreamRun(project.id, streamId)
+  const runs = useStreamRuns(project.id, streamId)
   if (!stream) return null
-  const command = streamRunCommand(project, stream) ?? run?.command
-  const running = run?.status === 'running'
+  const shown = runs.filter(run => run.status === 'running' || streamRunCrashed(run))
   return (
     <div className={`${sectionCls} px-2.5 pt-1 max-w-[280px]`} data-testid="stream-menu-header">
       <div className="flex items-center gap-2 min-w-0">
@@ -122,17 +115,15 @@ export function StreamMenuHeader({ project, streamId }: { project: Project; stre
         {stream.workspace && (
           <span className="font-mono text-2xs text-text-subtle truncate min-w-0">⎇ {stream.workspace.branchName}</span>
         )}
-        <span className="flex-1" />
-        {run && (
-          <span className="flex items-center gap-1 shrink-0">
-            <StreamRunStatusLabel run={run} taskName={streamRunTask(stream, run)?.name} />
-            {running && <span className="text-xs text-text-subtle tabular-nums">· {formatWaitTime(Date.now() - run.startedAt)}</span>}
-          </span>
-        )}
       </div>
-      {command && (
-        <div className="font-mono text-xs text-text-subtle truncate pb-0.5" title={command}>$ {command}</div>
-      )}
+      {shown.map(run => (
+        <div key={run.commandId} className="flex items-center gap-1.5 min-w-0 pb-0.5" title={`$ ${run.command}`}>
+          <span className="text-xs text-text truncate min-w-0">{run.name}</span>
+          <span className="flex-1" />
+          <StreamRunStatusLabel run={run} taskName={streamRunTask(stream, run)?.name} />
+          {run.status === 'running' && <span className="text-xs text-text-subtle tabular-nums shrink-0">· {formatWaitTime(Date.now() - run.startedAt)}</span>}
+        </div>
+      ))}
     </div>
   )
 }

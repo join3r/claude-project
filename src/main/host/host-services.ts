@@ -9,7 +9,7 @@ import { ArchiveStorage } from '../archive-storage'
 import { PtyManager } from '../pty-manager'
 import { PtySessions } from '../pty-sessions'
 import { StreamRuns } from '../stream-runs'
-import { plainRunLog } from '../../shared/stream-run'
+import { findStreamRunCommand, plainRunLog, streamRunCommands } from '../../shared/stream-run'
 import { isVisibleOnMobile } from '../mobile/inbox'
 import { resolveLocalTerminalSpawn } from '../resolve-local-terminal'
 import { HookServer } from '../hook-server'
@@ -112,6 +112,7 @@ import {
   STREAM_NEW_FEATURE,
   STREAM_RUN_FEATURE,
   STREAM_RUN_TASK_FEATURE,
+  STREAM_RUN_COMMANDS_FEATURE,
   ChatLimits,
   PROJECT_NEW_FEATURE,
   TAB_CLOSE_FEATURE,
@@ -430,7 +431,7 @@ export class HostServices {
       projects: () => this.projectsStore.peek(),
       localShell: () => resolveLocalTerminalSpawn(this.config).file,
       ensureSsh: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
-      onState: (projectId, streamId, state) => this.clients.broadcast('stream-run-state', projectId, streamId, state),
+      onState: (projectId, streamId, commandId, state) => this.clients.broadcast('stream-run-state', projectId, streamId, commandId, state),
       log: (message) => this.logDebug(message)
     })
   }
@@ -551,7 +552,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, CHAT_TASKS_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, CHAT_TASKS_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -659,17 +660,23 @@ export class HostServices {
         peek: () => this.projectsStore.peek()
       }, projectId),
       streamRuns: {
-        state: (streamId) => this.streamRuns.state(streamId),
+        states: (streamId) => this.streamRuns.statesOfStream(streamId),
         subscribe: (listener) => this.streamRuns.subscribe(listener),
-        control: async ({ projectId, streamId, action, taskId }) => {
+        control: async ({ projectId, streamId, action, commandId, taskId }) => {
           if (!this.mobileStreamExists(projectId, streamId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
           if (taskId && !this.mobileStreamHasTask(projectId, streamId, taskId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such task' }
-          const outcome = await this.streamRuns.control(projectId, streamId, action, taskId)
+          const id = commandId ?? this.mobileRunCommandId(projectId, streamId)
+          // A command that was removed while it ran can still be stopped.
+          if (!id || (action !== 'stop' && !this.mobileStreamHasCommand(projectId, streamId, id))) {
+            return { ok: false, code: AppErrorCode.NotFound, message: 'No such command' }
+          }
+          const outcome = await this.streamRuns.control(projectId, streamId, id, action, taskId)
           return outcome.ok ? outcome : { ok: false, code: AppErrorCode.Internal, message: outcome.error }
         },
-        logs: ({ projectId, streamId }) => {
+        logs: ({ projectId, streamId, commandId }) => {
           if (!this.mobileStreamExists(projectId, streamId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
-          const text = plainRunLog(this.streamRuns.logs(streamId))
+          const id = commandId ?? this.mobileRunCommandId(projectId, streamId)
+          const text = id ? plainRunLog(this.streamRuns.logs(streamId, id)) : ''
           return text.length > ChatLimits.runLogs
             ? { ok: true, result: { text: text.slice(-ChatLimits.runLogs), truncated: true } }
             : { ok: true, result: { text } }
@@ -684,6 +691,19 @@ export class HostServices {
   private mobileStreamExists(projectId: string, streamId: string): boolean {
     const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
     return !!project && isVisibleOnMobile(project) && project.streams.some(s => s.id === streamId)
+  }
+
+  /** The command a `stream.run` or `stream.logs` without `commandId` means: the stream's first, else its first run's. */
+  private mobileRunCommandId(projectId: string, streamId: string): string | undefined {
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    const stream = project?.streams.find(s => s.id === streamId)
+    const first = project ? streamRunCommands(project, stream)[0] : undefined
+    return first?.id ?? this.streamRuns.statesOfStream(streamId)[0]?.commandId
+  }
+
+  private mobileStreamHasCommand(projectId: string, streamId: string, commandId: string): boolean {
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    return !!project && !!findStreamRunCommand(project, project.streams.find(s => s.id === streamId), commandId)
   }
 
   private mobileStreamHasTask(projectId: string, streamId: string, taskId: string): boolean {

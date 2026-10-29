@@ -37,6 +37,14 @@ struct Fields {
         return value
     }
 
+    /// Absent or null as nil; an empty string throws.
+    func optNonEmpty(_ key: String) throws(ProtocolError) -> String? {
+        guard !isUnset(key) else { return nil }
+        let value = try str(key)
+        guard !value.isEmpty else { throw ProtocolError("\(key) is empty") }
+        return value
+    }
+
     func array(_ key: String) throws(ProtocolError) -> [JSONValue] {
         guard case .array(let a)? = o[key] else { throw ProtocolError("\(key) must be an array") }
         return a

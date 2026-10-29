@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { featureAvailable } from '../../shared/project-features'
 import { canMoveToServer } from '../../shared/project-move'
-import type { Project, AiTabType } from '../../shared/types'
+import type { Project, AiTabType, RunCommand } from '../../shared/types'
+import { projectRunCommands } from '../../shared/stream-run'
+import RunCommandsEditor, { cleanRunCommandDrafts, runCommandDraftsProblem } from './RunCommandsEditor'
 import {
   condaEnvFromSelection,
   condaSavedOptionLabel,
@@ -34,6 +36,8 @@ interface Props {
     condaEnvName?: string
     condaEnvPrefix?: string
     hideFromMobile?: true
+    /** Saved as the project's list; `runCommand` (older data) is cleared alongside. */
+    runCommands?: RunCommand[]
     runCommand?: string
   }) => void
   onClose: () => void
@@ -64,7 +68,8 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
   const [condaError, setCondaError] = useState<string | null>(null)
   const [condaLoading, setCondaLoading] = useState(false)
   const [hideFromMobile, setHideFromMobile] = useState(!!project.hideFromMobile)
-  const [runCommand, setRunCommand] = useState(project.runCommand ?? '')
+  const [runCommands, setRunCommands] = useState<RunCommand[]>(() => projectRunCommands(project))
+  const runCommandsProblem = runCommandDraftsProblem(runCommands)
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const canEditDirectory = !isRemoteProject(project) && !isShellCommandProject(project)
     && featureAvailable(project, 'project-settings-local')
@@ -137,7 +142,11 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
       tagIds,
       // Explicit undefined so turning it back off clears the stored flag.
       hideFromMobile: hideFromMobile ? true : undefined,
-      runCommand: isShellCommandProject(project) ? project.runCommand : runCommand.trim() || undefined,
+    }
+    if (!isShellCommandProject(project)) {
+      const list = cleanRunCommandDrafts(runCommands)
+      updates.runCommands = list.length > 0 ? list : undefined
+      updates.runCommand = undefined
     }
     if (canEditDirectory) updates.directory = cleanedDirectory
     if (canPickConda) {
@@ -168,7 +177,7 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
     <Modal
       title="Project Settings"
       onClose={onClose}
-      footer={<PrimaryButton onClick={handleSave} disabled={canEditDirectory && !directory.trim()}>Save</PrimaryButton>}
+      footer={<PrimaryButton onClick={handleSave} disabled={(canEditDirectory && !directory.trim()) || !!runCommandsProblem}>Save</PrimaryButton>}
     >
       {canEditDirectory && (
         <SetBlock label="Directory">
@@ -341,14 +350,12 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
       </SetBlock>
 
       {!isShellCommandProject(project) && (
-        <SetBlock label="Run command">
-          <Field
-            className="font-mono"
-            value={runCommand}
-            onChange={(e) => setRunCommand(e.target.value)}
-            placeholder="e.g. npm run dev"
-          />
-          <HelperText>Starts the app from a stream&apos;s folder: Run in the stream&apos;s menu or on its row. A stream can set its own.</HelperText>
+        <SetBlock label="Commands">
+          <RunCommandsEditor value={runCommands} onChange={setRunCommands} />
+          <HelperText>
+            {runCommandsProblem
+              ?? <>Install, run, run with another profile: each runs on its own from a stream&apos;s folder or a task&apos;s worktree, picked from Run on the stream&apos;s row or menu. A stream can add its own, or replace one by using the same name.</>}
+          </HelperText>
         </SetBlock>
       )}
 

@@ -201,12 +201,17 @@ export const STREAM_LOGS_OP = 'stream.logs'
 export const STREAM_RUN_FEATURE = 'stream.run'
 /** The handshake feature (§8.1) a desktop lists when `stream.run` takes `taskId` and a `run` carries it. */
 export const STREAM_RUN_TASK_FEATURE = 'stream.run.task'
+/** The handshake feature (§8.1) a desktop lists when streams carry `commands` and `runs`, and `stream.run` and `stream.logs` take `commandId`. */
+export const STREAM_RUN_COMMANDS_FEATURE = 'stream.run.commands'
 export const STREAM_RUN_ACTIONS = ['start', 'stop', 'restart'] as const
 export type StreamRunAction = (typeof STREAM_RUN_ACTIONS)[number]
 
-/** `taskId` (`start`, `restart`): run in that task's own worktree (§8.19). */
-export interface StreamRunParams { projectId: string; streamId: string; action: StreamRunAction; taskId?: string }
-export interface StreamLogsParams { projectId: string; streamId: string }
+/**
+ * `commandId`: which of the stream's commands (§8.19); absent means its first.
+ * `taskId` (`start`, `restart`): run in that task's own worktree.
+ */
+export interface StreamRunParams { projectId: string; streamId: string; action: StreamRunAction; commandId?: string; taskId?: string }
+export interface StreamLogsParams { projectId: string; streamId: string; commandId?: string }
 /** The run's output, terminal escapes stripped, at most {@link ChatLimits.runLogs} characters from its end. */
 export interface StreamLogsResult { text: string; truncated?: true }
 
@@ -1371,24 +1376,35 @@ export function parseProjectNewParams(params: unknown): ProjectNewParams {
 
 /**
  * `stream.run` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
- * missing `projectId` or `streamId`, an unknown `action`, or a `taskId` that isn't a
- * non-empty string.
+ * missing `projectId` or `streamId`, an unknown `action`, or a `commandId` or `taskId`
+ * that isn't a non-empty string.
  */
 export function parseStreamRunParams(params: unknown): StreamRunParams {
   const o = obj(params, 'params')
   const out: StreamRunParams = { projectId: str(o, 'projectId'), streamId: str(o, 'streamId'), action: oneOf(o, 'action', STREAM_RUN_ACTIONS) }
-  const taskId = optStr(o, 'taskId')
-  if (taskId !== undefined) {
-    if (!taskId) fail('taskId is empty')
-    out.taskId = taskId
-  }
+  const commandId = optNonEmpty(o, 'commandId')
+  if (commandId !== undefined) out.commandId = commandId
+  const taskId = optNonEmpty(o, 'taskId')
+  if (taskId !== undefined) out.taskId = taskId
   return out
 }
 
-/** `stream.logs` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `projectId` or `streamId`. */
+/**
+ * `stream.logs` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
+ * missing `projectId` or `streamId`, or an empty `commandId`.
+ */
 export function parseStreamLogsParams(params: unknown): StreamLogsParams {
   const o = obj(params, 'params')
-  return { projectId: str(o, 'projectId'), streamId: str(o, 'streamId') }
+  const out: StreamLogsParams = { projectId: str(o, 'projectId'), streamId: str(o, 'streamId') }
+  const commandId = optNonEmpty(o, 'commandId')
+  if (commandId !== undefined) out.commandId = commandId
+  return out
+}
+
+function optNonEmpty(o: Obj, key: string): string | undefined {
+  const value = optStr(o, key)
+  if (value === '') fail(`${key} is empty`)
+  return value
 }
 
 /** `stream.logs` result (the phone's side). */

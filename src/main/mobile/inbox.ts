@@ -1,4 +1,4 @@
-import { streamRunCommand, type StreamRunState } from '../../shared/stream-run'
+import { streamRunCommands, type StreamRunState } from '../../shared/stream-run'
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
 import { isSnoozed, isUnread, statusTabs, taskStatus } from '../../shared/inbox-state'
 import {
@@ -22,6 +22,7 @@ import type {
   InboxQueuedPrompt as MobileQueuedPrompt,
   InboxProject as MobileInboxProject,
   InboxStream as MobileInboxStream,
+  InboxStreamRun as MobileInboxStreamRun,
   InboxTab as MobileInboxTab,
   InboxTask as MobileInboxTask
 } from '../../../protocol/ts/index.ts'
@@ -149,8 +150,8 @@ function buildTask(stream: Stream, task: Task, lookup: InboxTabLookup, now: numb
   return { ...out, tabs }
 }
 
-/** A stream's app run as this host has it (`StreamRuns.state`). */
-export type StreamRunLookup = (streamId: string) => StreamRunState | null
+/** A stream's command runs as this host has them (`StreamRuns.statesOfStream`). */
+export type StreamRunLookup = (streamId: string) => StreamRunState[]
 
 function buildStream(project: Project, stream: Stream, runs: StreamRunLookup): MobileInboxStream {
   const out: MobileInboxStream = { id: stream.id, name: stream.name }
@@ -159,19 +160,31 @@ function buildStream(project: Project, stream: Stream, runs: StreamRunLookup): M
   if (stream.promptQueueAutoRun) out.queueAutoRun = true
   const watched = promptQueueWatchedTask(stream)
   if (watched) out.queueTaskId = watched.taskId
-  const runCommand = streamRunCommand(project, stream)
-  if (runCommand) out.runCommand = runCommand
-  const run = runs(stream.id)
-  if (run) {
-    out.run = {
-      status: run.status,
-      startedAt: run.startedAt,
-      ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
-      ...(run.status === 'exited' && run.exitCode !== undefined ? { exitCode: run.exitCode } : {}),
-      ...(run.taskId ? { taskId: run.taskId } : {})
-    }
+  const commands = streamRunCommands(project, stream)
+  const states = runs(stream.id)
+  if (commands.length > 0) {
+    out.runCommand = commands[0].command
+    out.commands = commands.map(({ id, name, command }) => ({ id, name, command }))
+  }
+  // Phones from before named commands see the first command's run (or, with
+  // every command removed, the run left over).
+  const firstId = commands[0]?.id
+  const first = firstId ? states.find(run => run.commandId === firstId) : states[0]
+  if (first) out.run = wireRun(first)
+  if (states.length > 0) {
+    out.runs = states.map(run => ({ commandId: run.commandId, name: run.name, command: run.command, ...wireRun(run) }))
   }
   return out
+}
+
+function wireRun(run: StreamRunState): MobileInboxStreamRun {
+  return {
+    status: run.status,
+    startedAt: run.startedAt,
+    ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
+    ...(run.status === 'exited' && run.exitCode !== undefined ? { exitCode: run.exitCode } : {}),
+    ...(run.taskId ? { taskId: run.taskId } : {})
+  }
 }
 
 /** Project Home's queue, each prompt with the stream it runs in (a closed one's go to `main`). */
@@ -273,7 +286,7 @@ export function buildInbox(
   /** Local projects whose folder is gone (§4.4 `missingFolder`). */
   missingFolders: ReadonlySet<string> = new Set(),
   /** Streams' app runs (§8.19). */
-  runs: StreamRunLookup = () => null,
+  runs: StreamRunLookup = () => [],
   /** Tasks' lines added and removed (§4.4 `diff`). */
   diffs: TaskDiffLookup = () => undefined
 ): MobileInbox {

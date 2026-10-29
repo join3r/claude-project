@@ -306,32 +306,34 @@ final class AppModel {
     /// `stream.run`: start, stop or restart the stream's app run. The new
     /// `run` comes with the next inbox; a failure (the desktop's message, e.g.
     /// a spawn error) sets `runError`. One action per stream at a time.
-    /// `taskId` runs it in that task's own worktree (`stream.run.task`).
-    func controlRun(_ action: StreamRunParams.Action, projectId: String, streamId: String, desktopId: String, taskId: String? = nil) async {
+    /// `commandId` picks one of the stream's commands (empty: an older
+    /// desktop's single one); `taskId` runs it in that task's own worktree
+    /// (`stream.run.task`). One action per command at a time.
+    func controlRun(_ action: StreamRunParams.Action, projectId: String, streamId: String, commandId: String, desktopId: String, taskId: String? = nil) async {
         guard let connection = connections[desktopId] else {
             runError = DesktopConnectionError.notConnected.localizedDescription
             return
         }
-        let key = "\(desktopId)/\(streamId)"
+        let key = "\(desktopId)/\(streamId)/\(commandId)"
         guard pendingRuns[key] == nil else { return }
         pendingRuns[key] = action
         defer { pendingRuns[key] = nil }
         do {
-            try await connection.controlRun(projectId: projectId, streamId: streamId, action: action, taskId: taskId)
+            try await connection.controlRun(projectId: projectId, streamId: streamId, action: action, commandId: commandId, taskId: taskId)
         } catch {
             runError = error.localizedDescription
         }
     }
 
-    /// The Run, Stop or Restart in flight for the stream, if any.
-    func pendingRun(streamId: String, desktopId: String) -> StreamRunParams.Action? {
-        pendingRuns["\(desktopId)/\(streamId)"]
+    /// The Run, Stop or Restart in flight for the command, if any.
+    func pendingRun(streamId: String, commandId: String, desktopId: String) -> StreamRunParams.Action? {
+        pendingRuns["\(desktopId)/\(streamId)/\(commandId)"]
     }
 
-    /// `stream.logs`: the end of the stream's app run output.
-    func runLogs(projectId: String, streamId: String, desktopId: String) async throws -> StreamLogsResult {
+    /// `stream.logs`: the end of a command's run output.
+    func runLogs(projectId: String, streamId: String, commandId: String, desktopId: String) async throws -> StreamLogsResult {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
-        return try await connection.runLogs(projectId: projectId, streamId: streamId)
+        return try await connection.runLogs(projectId: projectId, streamId: streamId, commandId: commandId)
     }
 
     private func project(_ projectId: String, desktopId: String) -> InboxProject? {

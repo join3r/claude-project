@@ -147,14 +147,20 @@ struct InboxView: View {
     }
 
     private func appRow(_ app: InboxAppRun, now: Date) -> some View {
-        let target = StreamLogsTarget(desktopId: app.desktopId, projectId: app.project.id, streamId: app.stream.id)
+        let commandId = app.commandRun.commandId
+        let target = StreamLogsTarget(desktopId: app.desktopId, projectId: app.project.id, streamId: app.stream.id, commandId: commandId)
         let offline = model.isOffline(app.desktopId)
-        let canRun = app.stream.runCommand != nil && !offline && model.pendingRun(streamId: app.stream.id, desktopId: app.desktopId) == nil
+        let idle = !offline && model.pendingRun(streamId: app.stream.id, commandId: commandId, desktopId: app.desktopId) == nil
+        let defined = app.stream.runCommand(commandId) != nil
+        let canRun = defined && idle
         let running = app.run.isRunning
         func control(_ action: StreamRunParams.Action) {
             // Run again where it ran: a crash in a task's worktree reruns there.
-            let taskId = action == .stop ? nil : app.project.runTask(app.stream)?.id
-            Task { await model.controlRun(action, projectId: app.project.id, streamId: app.stream.id, desktopId: app.desktopId, taskId: taskId) }
+            let taskId = action == .stop ? nil : app.project.runTask(app.run, in: app.stream)?.id
+            Task {
+                await model.controlRun(action, projectId: app.project.id, streamId: app.stream.id, commandId: commandId,
+                                       desktopId: app.desktopId, taskId: taskId)
+            }
         }
         return InboxAppRow(
             app: app,
@@ -165,27 +171,25 @@ struct InboxView: View {
         ) { logs = target }
         .opacity(offline ? 0.55 : 1)
         .swipeActions(edge: .trailing) {
-            if canRun {
-                if running {
-                    Button { control(.stop) } label: { Label("Stop", systemImage: "stop.fill") }
-                        .tint(.red)
+            if running && idle {
+                Button { control(.stop) } label: { Label("Stop", systemImage: "stop.fill") }
+                    .tint(.red)
+                if defined {
                     Button { control(.restart) } label: { Label("Restart", systemImage: "arrow.clockwise") }
                         .tint(.blue)
-                } else {
-                    Button { control(.start) } label: { Label("Run", systemImage: "play.fill") }
-                        .tint(.green)
                 }
+            } else if canRun {
+                Button { control(.start) } label: { Label("Run", systemImage: "play.fill") }
+                    .tint(.green)
             }
         }
         .contextMenu {
             Button("Logs", systemImage: "text.alignleft") { logs = target }
-            if app.stream.runCommand != nil {
-                if running {
-                    Button("Restart", systemImage: "arrow.clockwise") { control(.restart) }.disabled(!canRun)
-                    Button("Stop", systemImage: "stop.fill") { control(.stop) }.disabled(!canRun)
-                } else {
-                    Button("Run", systemImage: "play.fill") { control(.start) }.disabled(!canRun)
-                }
+            if running {
+                if defined { Button("Restart", systemImage: "arrow.clockwise") { control(.restart) }.disabled(!canRun) }
+                Button("Stop", systemImage: "stop.fill") { control(.stop) }.disabled(!idle)
+            } else if defined {
+                Button("Run", systemImage: "play.fill") { control(.start) }.disabled(!canRun)
             }
             Button {
                 onOpenProject(ProjectRef(desktopId: app.desktopId, projectId: app.project.id))
@@ -591,7 +595,7 @@ struct InboxAppRow: View {
                         .lineLimit(1)
                         HStack(spacing: 6) {
                             RunDot(run: app.run)
-                            Text(app.run.line(now: now, taskName: app.project.runTask(app.stream)?.name))
+                            Text("\(app.commandRun.name) · \(app.run.line(now: now, taskName: app.project.runTask(app.run, in: app.stream)?.name))")
                                 .foregroundStyle(app.run.color)
                                 .monospacedDigit()
                         }

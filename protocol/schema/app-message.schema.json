@@ -98,6 +98,7 @@
         "projectId": { "type": "string" },
         "streamId": { "type": "string" },
         "action": { "enum": ["start", "stop", "restart"] },
+        "commandId": { "type": "string", "pattern": ".", "description": "Which of the stream's commands (stream.run.commands); absent means its first." },
         "taskId": { "type": "string", "pattern": ".", "description": "start/restart: run in that task's own worktree (stream.run.task)." }
       }
     },
@@ -109,7 +110,11 @@
       "description": "stream.logs params (SPEC.md §8.19).",
       "type": "object",
       "required": ["projectId", "streamId"],
-      "properties": { "projectId": { "type": "string" }, "streamId": { "type": "string" } }
+      "properties": {
+        "projectId": { "type": "string" },
+        "streamId": { "type": "string" },
+        "commandId": { "type": "string", "pattern": ".", "description": "Which of the stream's commands (stream.run.commands); absent means its first." }
+      }
     },
     "streamLogsResult": {
       "description": "stream.logs result (SPEC.md §8.19): the end of the run's output as plain text, at most 200000 characters; truncated when the start was cut off.",

@@ -1639,6 +1639,25 @@
           "action": "start",
           "taskId": "t-auth"
         }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"commandId\":\"c-install\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-050",
+          "action": "start",
+          "commandId": "c-install"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"restart\",\"commandId\":\"c-staging\",\"taskId\":\"t-auth\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-050",
+          "action": "restart",
+          "commandId": "c-staging",
+          "taskId": "t-auth"
+        }
       }
     ],
     "results": [
@@ -1653,6 +1672,8 @@
         "{\"projectId\":\"p1\",\"streamId\":7,\"action\":\"start\"}",
         "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"taskId\":\"\"}",
         "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"taskId\":7}",
+        "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"commandId\":\"\"}",
+        "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"commandId\":7}",
         "null"
       ]
     }
@@ -1671,6 +1692,14 @@
         "expected": {
           "projectId": "p1",
           "streamId": "s-main"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-main\",\"commandId\":\"c-install\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-main",
+          "commandId": "c-install"
         }
       }
     ],
@@ -1705,6 +1734,7 @@
       "params": [
         "{\"projectId\":\"p1\"}",
         "{\"streamId\":\"s-main\"}",
+        "{\"projectId\":\"p1\",\"streamId\":\"s-main\",\"commandId\":\"\"}",
         "null"
       ],
       "results": [

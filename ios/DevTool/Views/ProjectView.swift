@@ -63,7 +63,8 @@ struct ProjectView: View {
                 case .streamLogs:
                     let wanted = LaunchOptions.current.demoStream
                     if let stream = project.streams.first(where: { $0.id == wanted }) ?? project.streams.first(where: { $0.runCommand != nil }) {
-                        logs = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id)
+                        let commandId = stream.commandRuns.first?.commandId ?? stream.runCommands.first?.id ?? ""
+                        logs = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id, commandId: commandId)
                     }
                 default: break
                 }
@@ -171,8 +172,13 @@ struct ProjectView: View {
     private func streamSection(_ stream: InboxStream, project: InboxProject, inbox: Inbox, now: Date) -> some View {
         let tasks = sorted(project.tasks.filter { $0.streamId == stream.id })
         return Section {
-            if model.supports(DesktopFeature.streamRun, on: ref.desktopId), stream.runCommand != nil || stream.run != nil {
-                runRow(stream, project: project, now: now)
+            if model.supports(DesktopFeature.streamRun, on: ref.desktopId) {
+                ForEach(stream.commandRuns) { commandRun in
+                    runRow(commandRun, stream: stream, project: project, now: now)
+                }
+                if !stream.runCommands.isEmpty {
+                    runPickerRow(stream, project: project)
+                }
             }
             ForEach(tasks) { task in
                 taskRow(task, project: project, inbox: inbox, now: now)
@@ -242,27 +248,40 @@ struct ProjectView: View {
         }
     }
 
-    /// The stream's app run (§8.19): status, Run / Stop / Restart, and Logs.
-    private func runRow(_ stream: InboxStream, project: InboxProject, now: Date) -> some View {
-        let target = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id)
-        let canRun = stream.runCommand != nil && !offline && model.pendingRun(streamId: stream.id, desktopId: ref.desktopId) == nil
-        let running = stream.run?.isRunning == true
+    /// One command's run (§8.19): status, Stop / Restart (Run once it ended), and Logs.
+    private func runRow(_ commandRun: InboxCommandRun, stream: InboxStream, project: InboxProject, now: Date) -> some View {
+        let target = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id, commandId: commandRun.commandId)
+        let canRun = !offline && model.pendingRun(streamId: stream.id, commandId: commandRun.commandId, desktopId: ref.desktopId) == nil
+        let running = commandRun.run.isRunning
+        let defined = stream.runCommand(commandRun.commandId) != nil
         func control(_ action: StreamRunParams.Action) {
-            Task { await model.controlRun(action, projectId: project.id, streamId: stream.id, desktopId: ref.desktopId) }
+            let taskId = action == .stop ? nil : commandRun.run.taskId
+            Task {
+                await model.controlRun(action, projectId: project.id, streamId: stream.id, commandId: commandRun.commandId,
+                                       desktopId: ref.desktopId, taskId: taskId)
+            }
         }
-        return StreamRunRow(target: target, stream: stream, taskName: project.runTask(stream)?.name, now: now) { logs = target }
+        return StreamRunRow(target: target, stream: stream, taskName: project.runTask(commandRun.run, in: stream)?.name, now: now) { logs = target }
             .opacity(offline ? 0.55 : 1)
             .contextMenu {
-                if stream.runCommand != nil {
-                    if running {
-                        Button("Stop", systemImage: "stop.fill") { control(.stop) }.disabled(!canRun)
-                        Button("Restart", systemImage: "arrow.clockwise") { control(.restart) }.disabled(!canRun)
-                    } else {
-                        Button("Run", systemImage: "play.fill") { control(.start) }.disabled(!canRun)
-                    }
+                if running {
+                    Button("Stop", systemImage: "stop.fill") { control(.stop) }.disabled(!canRun)
+                    if defined { Button("Restart", systemImage: "arrow.clockwise") { control(.restart) }.disabled(!canRun) }
+                } else if defined {
+                    Button("Run", systemImage: "play.fill") { control(.start) }.disabled(!canRun)
                 }
                 Button("Logs", systemImage: "text.alignleft") { logs = target }
             }
+    }
+
+    /// Run…: picks one of the stream's commands to start (§8.19).
+    private func runPickerRow(_ stream: InboxStream, project: InboxProject) -> some View {
+        RunCommandMenu(desktopId: ref.desktopId, projectId: project.id, stream: stream) {
+            Label(stream.commandRuns.isEmpty ? "Run…" : "Run another…", systemImage: "play")
+                .font(.subheadline)
+        }
+        .opacity(offline ? 0.55 : 1)
+        .accessibilityHint("Picks one of \(stream.name)'s commands to run")
     }
 
     private func taskRow(_ task: InboxTask, project: InboxProject, inbox: Inbox, now: Date) -> some View {

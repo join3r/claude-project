@@ -5,28 +5,30 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { useApp } from '../context/AppContext'
-import { streamRunCommand, streamRunTabId, streamRunTask } from '../../shared/stream-run'
+import { findStreamRunCommand, streamRunCommands, streamRunTabId, streamRunTask } from '../../shared/stream-run'
 import { buildXtermTheme } from './terminalThemes'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import { bindCopyOnSelect } from './copyOnSelect'
 import { WEB_LINK_REGEX } from '../utils/terminalLinkAt'
-import { controlStreamRun, openStreamRunLogs, useStreamRun, type StreamRunLogsTarget } from '../streamRuns'
+import { controlStreamRun, openStreamRunLogs, useStreamRun, useStreamRuns, type StreamRunLogsTarget } from '../streamRuns'
 import { StreamRunButtons, StreamRunStatusLabel } from './StreamRunControls'
 
 /**
- * A stream's app run log: the run's own PTY, shown like a terminal (typing
+ * One command's run log: the run's own PTY, shown like a terminal (typing
  * reaches the app, e.g. a dev server's shortcut keys). Closing it leaves the
- * app running. A restart starts the view over with the new run's output.
+ * command running. A restart starts the view over with the new run's output.
+ * The stream's other commands are a click away in the header.
  */
-export default function StreamRunLogs({ projectId, streamId }: StreamRunLogsTarget): React.ReactElement | null {
+export default function StreamRunLogs({ projectId, streamId, commandId }: StreamRunLogsTarget): React.ReactElement | null {
   const { projects, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const project = projects.find(p => p.id === projectId)
   const stream = project?.streams.find(s => s.id === streamId)
-  const run = useStreamRun(projectId, streamId)
+  const run = useStreamRun(projectId, streamId, commandId)
+  const streamRuns = useStreamRuns(projectId, streamId)
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null)
   const [empty, setEmpty] = useState(false)
-  const tabId = streamRunTabId(streamId)
+  const tabId = streamRunTabId(streamId, commandId)
   const close = () => openStreamRunLogs(null)
 
   // The stream went away (closed, deleted): nothing left to show.
@@ -117,7 +119,14 @@ export default function StreamRunLogs({ projectId, streamId }: StreamRunLogsTarg
   useEffect(() => () => window.api.streamRunDetach(tabId), [tabId])
 
   if (!project || !stream) return null
-  const command = run?.command ?? streamRunCommand(project, stream)
+  const defined = findStreamRunCommand(project, stream, commandId)
+  const command = run?.command ?? defined?.command
+  const name = run?.name ?? defined?.name ?? 'Command'
+  // Every command of the stream, and any that ran since it was removed.
+  const others = [
+    ...streamRunCommands(project, stream).map(c => ({ id: c.id, name: c.name })),
+    ...streamRuns.filter(r => !findStreamRunCommand(project, stream, r.commandId)).map(r => ({ id: r.commandId, name: r.name }))
+  ]
   // Run again where the shown run was: its task's worktree, if it's still open.
   const runTask = streamRunTask(stream, run)
   const termBackground = config ? buildXtermTheme(effectiveTerminalTheme, config.terminalColorScheme).background : undefined
@@ -134,12 +143,13 @@ export default function StreamRunLogs({ projectId, streamId }: StreamRunLogsTarg
             {project.name}
             {!stream.isMain && <span className="text-text-muted font-normal font-mono"> · {stream.name}</span>}
           </h2>
+          <span className="text-sm text-text whitespace-nowrap" data-testid="stream-run-logs-name">{name}</span>
           <StreamRunStatusLabel run={run} taskName={runTask?.name} />
           <span className="ml-auto flex items-center gap-1">
             <StreamRunButtons
               run={run}
-              canRun={!!command}
-              onAction={(action) => void controlStreamRun(projectId, streamId, action, action === 'stop' ? undefined : runTask?.id)}
+              canRun={!!defined}
+              onAction={(action) => void controlStreamRun(projectId, streamId, commandId, action, action === 'stop' ? undefined : runTask?.id)}
               size="md"
             />
           </span>
@@ -151,8 +161,29 @@ export default function StreamRunLogs({ projectId, streamId }: StreamRunLogsTarg
             &times;
           </button>
         </header>
+        {others.length > 1 && (
+          <div className="flex items-center gap-1 px-3 pb-1.5 shrink-0 overflow-x-auto" data-testid="stream-run-logs-commands">
+            {others.map(other => {
+              const otherRun = streamRuns.find(r => r.commandId === other.id)
+              return (
+                <button
+                  key={other.id}
+                  type="button"
+                  onClick={() => openStreamRunLogs({ projectId, streamId, commandId: other.id })}
+                  className={[
+                    'flex items-center gap-1.5 h-(--ctl-h-sm) px-2 rounded-md border-0 cursor-pointer text-xs whitespace-nowrap',
+                    other.id === commandId ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text hover:bg-sel'
+                  ].join(' ')}
+                >
+                  {otherRun?.status === 'running' && <span className="size-1.5 rounded-full bg-success" />}
+                  {other.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
         <div className="px-4 pb-2 text-xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap shrink-0" title={command}>
-          {command ? `$ ${command}` : 'No run command: set one in Project settings, or on the stream.'}
+          {command ? `$ ${command}` : 'This command is no longer set: add it in Project settings, or in the stream\'s commands.'}
         </div>
         <div className="relative flex-1 min-h-0 mx-3 mb-3 rounded-md overflow-hidden" style={{ background: termBackground }}>
           <div ref={hostRef} className="absolute inset-0 p-2" />

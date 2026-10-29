@@ -209,10 +209,15 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
     public var runCommand: String?
     /// Its app run since the desktop started (§8.19); nil when it hasn't run.
     public var run: InboxStreamRun?
+    /// Every command it can run, in order (`stream.run.commands`); empty from an older desktop.
+    public var commands: [InboxRunCommand]
+    /// Each command's run since the desktop started (`stream.run.commands`), in the order they first ran.
+    public var runs: [InboxCommandRun]
 
     public init(id: String, name: String, isMain: Bool = false, branch: String? = nil,
                 queueAutoRun: Bool = false, queueTaskId: String? = nil,
-                runCommand: String? = nil, run: InboxStreamRun? = nil) {
+                runCommand: String? = nil, run: InboxStreamRun? = nil,
+                commands: [InboxRunCommand] = [], runs: [InboxCommandRun] = []) {
         self.id = id
         self.name = name
         self.isMain = isMain
@@ -221,6 +226,8 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
         self.queueTaskId = queueTaskId
         self.runCommand = runCommand
         self.run = run
+        self.commands = commands
+        self.runs = runs
     }
 
     public init(from decoder: any Decoder) throws {
@@ -234,6 +241,8 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
         runCommand = try? c.decodeIfPresent(String.self, forKey: .runCommand)
         // A status this build doesn't know drops the run, not the stream.
         run = (try? c.decodeIfPresent(InboxStreamRun.self, forKey: .run)) ?? nil
+        commands = (try? c.decodeIfPresent([InboxRunCommand].self, forKey: .commands)) ?? []
+        runs = ((try? c.decodeIfPresent([LossyCommandRun].self, forKey: .runs)) ?? []).compactMap(\.value)
     }
 }
 

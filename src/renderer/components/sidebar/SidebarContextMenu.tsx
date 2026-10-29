@@ -234,7 +234,7 @@ export default function SidebarContextMenu({
         </div>
         {landing}
         {project && projectTask && (
-          <TaskRunMenuItems project={project} stream={stream} task={projectTask} itemClassName={menuItemCls} onDone={closeContextMenu} />
+          <TaskRunMenuItems project={project} stream={stream} task={projectTask} at={{ x: contextMenu.x, y: contextMenu.y }} itemClassName={menuItemCls} onDone={closeContextMenu} />
         )}
         {showPlaces && (
           <div className="border-b border-hair pb-1 mb-1">

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { Play, RotateCw, Square, X } from 'lucide-react'
 import type { Project } from '../../shared/types'
-import { streamRunCommand, streamRunTask } from '../../shared/stream-run'
+import { findStreamRunCommand, streamRunKey, streamRunTask } from '../../shared/stream-run'
 import {
   controlStreamRun,
   dismissStreamRunCrash,
@@ -19,9 +19,9 @@ import { RowAction, RowActions } from './ui'
 const TILE = 16
 
 /**
- * The top of the Inbox: every stream's app that runs, or that crashed, across
+ * The top of the Inbox: every stream command that runs, or that crashed, across
  * all projects, so a dev server stays in sight while its stream has nothing
- * that needs you. Gone when nothing runs. A row opens the app's logs; hovering
+ * that needs you. Gone when nothing runs. A row opens the run's logs; hovering
  * offers Restart and Stop (Run and dismiss for a crash); right-click is the
  * stream's menu.
  */
@@ -44,7 +44,7 @@ export default function InboxApps({ projects, now, theme, showIcons, isUnreachab
       <GroupHeader label="Apps" count={apps.length} />
       {apps.map(app => (
         <AppRow
-          key={app.stream.id}
+          key={streamRunKey(app.stream.id, app.run.commandId)}
           app={app}
           now={now}
           theme={theme}
@@ -66,8 +66,9 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
   onMenu: (at: MenuAnchor) => void
 }): React.ReactElement {
   const { project, stream, run, crashed } = app
-  const target = { projectId: project.id, streamId: stream.id }
-  const command = streamRunCommand(project, stream)
+  const commandId = run.commandId
+  const target = { projectId: project.id, streamId: stream.id, commandId }
+  const command = findStreamRunCommand(project, stream, commandId)?.command
   const runTask = streamRunTask(stream, run)
   return (
     <div
@@ -81,6 +82,7 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onMenu({ x: e.clientX, y: e.clientY }) }}
       data-testid="inbox-app-row"
       data-stream-id={stream.id}
+      data-command-id={commandId}
       data-app-state={crashed ? 'crashed' : 'running'}
     >
       <span className="flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
@@ -101,6 +103,7 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
             <span className="text-xs text-text-muted overflow-hidden text-ellipsis min-w-0" data-testid="inbox-app-task">{runTask.name}</span>
           </>
         )}
+        <span className="text-xs text-text-subtle overflow-hidden text-ellipsis min-w-0 shrink-0 max-w-[55%]" data-testid="inbox-app-command">· {run.name}</span>
       </span>
       <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
         <span
@@ -113,7 +116,7 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
           {crashed ? (
             <>
               {command && (
-                <RowAction title={`Run the app: ${command}`} onClick={() => void controlStreamRun(project.id, stream.id, 'start', runTask?.id)}>
+                <RowAction title={`Run ${run.name} again: ${command}`} onClick={() => void controlStreamRun(project.id, stream.id, commandId, 'start', runTask?.id)}>
                   <Play size={13} />
                 </RowAction>
               )}
@@ -123,10 +126,10 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
             </>
           ) : (
             <>
-              <RowAction title="Restart the app" onClick={() => void controlStreamRun(project.id, stream.id, 'restart')}>
+              <RowAction title={`Restart ${run.name}`} onClick={() => void controlStreamRun(project.id, stream.id, commandId, 'restart')}>
                 <RotateCw size={12} />
               </RowAction>
-              <RowAction title="Stop the app" onClick={() => void controlStreamRun(project.id, stream.id, 'stop')}>
+              <RowAction title={`Stop ${run.name}`} onClick={() => void controlStreamRun(project.id, stream.id, commandId, 'stop')}>
                 <Square size={12} />
               </RowAction>
             </>

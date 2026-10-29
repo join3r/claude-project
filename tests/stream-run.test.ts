@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { plainRunLog, streamIdOfRunTab, streamRunCommand, streamRunTabId } from '../src/shared/stream-run'
+import { parseStreamRunTabId, plainRunLog, streamRunCommands, streamRunTabId } from '../src/shared/stream-run'
 import type { Project, Stream } from '../src/shared/types'
 
 describe('plainRunLog', () => {
@@ -40,28 +40,52 @@ describe('plainRunLog', () => {
   })
 })
 
-describe('streamRunCommand', () => {
+describe('streamRunCommands', () => {
   const project = (extra: Partial<Project> = {}): Project => ({ id: 'p1', name: 'p', directory: '/x', streams: [], ...extra }) as Project
   const stream = (extra: Partial<Stream> = {}): Stream => ({ id: 's1', name: 's', tasks: [], ...extra })
+  const list = [
+    { id: 'c-install', name: 'install', command: 'npm ci' },
+    { id: 'c-run', name: 'run', command: ' npm run dev ' },
+    { id: 'c-blank', name: 'blank', command: '  ' }
+  ]
 
-  it("prefers the stream's own command, trimmed, over the project's", () => {
-    expect(streamRunCommand(project({ runCommand: ' npm run dev ' }), stream())).toBe('npm run dev')
-    expect(streamRunCommand(project({ runCommand: 'npm run dev' }), stream({ runCommand: ' make serve ' }))).toBe('make serve')
-    expect(streamRunCommand(project({ runCommand: 'npm run dev' }), stream({ runCommand: '  ' }))).toBe('npm run dev')
-    expect(streamRunCommand(project({ runCommand: 'npm run dev' }), undefined)).toBe('npm run dev')
+  it('reads older data’s single command as one named run', () => {
+    expect(streamRunCommands(project({ runCommand: ' npm run dev ' }), stream())).toEqual([{ id: 'run', name: 'run', command: 'npm run dev' }])
+    // A stream's old command took the place of the project's.
+    expect(streamRunCommands(project({ runCommand: 'npm run dev' }), stream({ runCommand: ' make serve ' })))
+      .toEqual([{ id: 'run', name: 'run', command: 'make serve' }])
+    expect(streamRunCommands(project({ runCommands: list }), stream({ runCommand: 'make serve' })).map(c => c.command))
+      .toEqual(['make serve', 'npm run dev'])
   })
 
-  it('is undefined with no command, or on a shell-command project', () => {
-    expect(streamRunCommand(project(), stream())).toBeUndefined()
-    expect(streamRunCommand(project({ runCommand: '   ' }), stream())).toBeUndefined()
-    expect(streamRunCommand(project({ runCommand: 'x', shellCommand: { command: 'top' } }), stream({ runCommand: 'y' }))).toBeUndefined()
+  it('lists the project’s commands, trimmed, without blank ones', () => {
+    expect(streamRunCommands(project({ runCommands: list }), undefined)).toEqual([
+      { id: 'c-install', name: 'install', command: 'npm ci' },
+      { id: 'c-run', name: 'run', command: 'npm run dev' }
+    ])
+  })
+
+  it('lets a stream replace one by name (any case) in its place, and add others after', () => {
+    const own = [{ id: 'c-x', name: 'seed', command: 'npm run seed' }, { id: 'c-y', name: ' RUN ', command: 'npm run dev -- --port 4000' }]
+    expect(streamRunCommands(project({ runCommands: list }), stream({ runCommands: own }))).toEqual([
+      { id: 'c-install', name: 'install', command: 'npm ci' },
+      { id: 'c-run', name: 'run', command: 'npm run dev -- --port 4000' },
+      { id: 'c-x', name: 'seed', command: 'npm run seed' }
+    ])
+  })
+
+  it('is empty with no command, or on a shell-command project', () => {
+    expect(streamRunCommands(project(), stream())).toEqual([])
+    expect(streamRunCommands(project({ runCommand: '   ' }), stream())).toEqual([])
+    expect(streamRunCommands(project({ runCommands: list, shellCommand: { command: 'top' } }), stream({ runCommand: 'y' }))).toEqual([])
   })
 })
 
 describe('run tab ids', () => {
-  it('round-trips a stream id and rejects other tab ids', () => {
-    expect(streamIdOfRunTab(streamRunTabId('s-1'))).toBe('s-1')
-    expect(streamIdOfRunTab('run-')).toBeNull()
-    expect(streamIdOfRunTab('tab-1')).toBeNull()
+  it('round-trips a stream and command and rejects other tab ids', () => {
+    expect(parseStreamRunTabId(streamRunTabId('s-1', 'c-run'))).toEqual({ streamId: 's-1', commandId: 'c-run' })
+    expect(parseStreamRunTabId('run-')).toBeNull()
+    expect(parseStreamRunTabId('run-s-1')).toBeNull()
+    expect(parseStreamRunTabId('tab-1')).toBeNull()
   })
 })

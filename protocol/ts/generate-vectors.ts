@@ -222,7 +222,17 @@ function appMessages(): unknown {
         id: 'p1', name: 'api-server', emoji: '🚀', remote: false,
         streams: [
           // §8.19: `run` and `runCommand` (the stream's own, else the project's).
-          { id: 's-main', name: 'main', main: true, runCommand: 'npm run dev', run: { status: 'running', startedAt: 1789999000000 } },
+          { id: 's-main', name: 'main', main: true, runCommand: 'npm run dev', run: { status: 'running', startedAt: 1789999000000 },
+            // `stream.run.commands`: every command, and each one's run.
+            commands: [
+              { id: 'run', name: 'run', command: 'npm run dev' },
+              { id: 'c-install', name: 'install', command: 'npm ci' },
+              { id: 'c-staging', name: 'run (staging)', command: 'npm run dev -- --mode staging' }
+            ],
+            runs: [
+              { commandId: 'run', name: 'run', command: 'npm run dev', status: 'running', startedAt: 1789999000000 },
+              { commandId: 'c-install', name: 'install', command: 'npm ci', status: 'exited', startedAt: 1789998000000, endedAt: 1789998060000, exitCode: 0 }
+            ] },
           { id: 's-050', name: '0.5.0', branch: '0.5.0', queueAutoRun: true, queueTaskId: 't2', runCommand: 'npm run dev -- --port 5180', run: { status: 'exited', startedAt: 1789990000000, endedAt: 1789990500000, exitCode: 1, taskId: 't2' } },
           { id: 's-bugs', name: 'bugfixes', queueAutoRun: true, runCommand: 'npm run dev', run: { status: 'stopped', startedAt: 1789980000000, endedAt: 1789980100000 } }
         ],
@@ -855,7 +865,10 @@ function chatMessages(): unknown {
         text({ projectId: 'p1', streamId: 's-main', action: 'stop', extra: 1 }),
         text({ projectId: 'p1', streamId: 's-050', action: 'restart' }),
         // `stream.run.task`: run in a task's own worktree.
-        text({ projectId: 'p1', streamId: 's-050', action: 'start', taskId: 't-auth' })
+        text({ projectId: 'p1', streamId: 's-050', action: 'start', taskId: 't-auth' }),
+        // `stream.run.commands`: one of the stream's named commands.
+        text({ projectId: 'p1', streamId: 's-050', action: 'start', commandId: 'c-install' }),
+        text({ projectId: 'p1', streamId: 's-050', action: 'restart', commandId: 'c-staging', taskId: 't-auth' })
       ].map((json) => ({ json, expected: parseStreamRunParams(JSON.parse(json)) })),
       results: [text({})],
       invalid: {
@@ -867,6 +880,8 @@ function chatMessages(): unknown {
           text({ projectId: 'p1', streamId: 7, action: 'start' }),
           text({ projectId: 'p1', streamId: 's-050', action: 'start', taskId: '' }),
           text({ projectId: 'p1', streamId: 's-050', action: 'start', taskId: 7 }),
+          text({ projectId: 'p1', streamId: 's-050', action: 'start', commandId: '' }),
+          text({ projectId: 'p1', streamId: 's-050', action: 'start', commandId: 7 }),
           'null'
         ]
       }
@@ -874,7 +889,8 @@ function chatMessages(): unknown {
     streamLogs: {
       params: [
         text({ projectId: 'p1', streamId: 's-main' }),
-        text({ projectId: 'p1', streamId: 's-main', since: 100 })
+        text({ projectId: 'p1', streamId: 's-main', since: 100 }),
+        text({ projectId: 'p1', streamId: 's-main', commandId: 'c-install' })
       ].map((json) => ({ json, expected: parseStreamLogsParams(JSON.parse(json)) })),
       results: [
         text({ text: '' }),
@@ -883,7 +899,7 @@ function chatMessages(): unknown {
         text({ text: 'x', truncated: false })
       ].map((json) => ({ json, expected: parseStreamLogsResult(JSON.parse(json)) })),
       invalid: {
-        params: [text({ projectId: 'p1' }), text({ streamId: 's-main' }), 'null'],
+        params: [text({ projectId: 'p1' }), text({ streamId: 's-main' }), text({ projectId: 'p1', streamId: 's-main', commandId: '' }), 'null'],
         results: [text({}), text({ text: 7 }), '[]']
       }
     },

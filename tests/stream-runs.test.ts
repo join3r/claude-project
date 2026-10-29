@@ -6,7 +6,7 @@ import type { ScrollbackStorage } from '../src/main/scrollback-storage'
 import { TabActivityRegistry } from '../src/main/tab-activity-registry'
 import type { AppConfig, Project, ProjectsData } from '../src/shared/types'
 import { createMainStream } from '../src/shared/types'
-import { streamRunCommand, streamRunTabId, type StreamRunState } from '../src/shared/stream-run'
+import { streamRunTabId, type StreamRunState } from '../src/shared/stream-run'
 
 function project(overrides: Partial<Project> = {}): Project {
   return {
@@ -21,16 +21,6 @@ function project(overrides: Partial<Project> = {}): Project {
     ...overrides
   } as Project
 }
-
-describe('streamRunCommand', () => {
-  it('takes the stream’s own command over the project’s, and none for shell-command projects', () => {
-    const p = project()
-    expect(streamRunCommand(p, p.streams[0])).toBe('npm run dev')
-    expect(streamRunCommand(p, { ...p.streams[1], runCommand: '  pnpm dev --port 4000 ' })).toBe('pnpm dev --port 4000')
-    expect(streamRunCommand(project({ runCommand: '  ' }), p.streams[0])).toBeUndefined()
-    expect(streamRunCommand(project({ shellCommand: { command: 'htop' } }), p.streams[0])).toBeUndefined()
-  })
-})
 
 describe('StreamRuns', () => {
   beforeEach(() => { vi.useFakeTimers() })
@@ -47,13 +37,13 @@ describe('StreamRuns', () => {
       discard: vi.fn((id: string) => { running.delete(id) }),
       loadScrollback: () => 'log'
     } satisfies StreamRunPtys
-    const states: [string, string, StreamRunState | null][] = []
+    const states: [string, string, string, StreamRunState | null][] = []
     const runs = new StreamRuns({
       ptys,
       projects: () => data,
       localShell: () => '/bin/zsh',
       ensureSsh: vi.fn(async () => {}),
-      onState: (projectId, streamId, state) => { states.push([projectId, streamId, state]) },
+      onState: (projectId, streamId, commandId, state) => { states.push([projectId, streamId, commandId, state]) },
       log: () => {},
       now: () => 1000,
       graceMs: 3000
@@ -63,21 +53,21 @@ describe('StreamRuns', () => {
 
   it('starts the command in the stream’s folder through a login shell', async () => {
     const { runs, ptys, states } = setup()
-    expect(await runs.control('p1', 's2', 'start')).toEqual({ ok: true })
+    expect(await runs.control('p1', 's2', 'run', 'start')).toEqual({ ok: true })
     expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({
-      id: streamRunTabId('s2'), shell: '/bin/zsh', args: ['-l', '-c', 'npm run dev'], cwd: '/repo/.worktrees/0.5.0', quiet: true
+      id: streamRunTabId('s2', 'run'), shell: '/bin/zsh', args: ['-l', '-c', 'npm run dev'], cwd: '/repo/.worktrees/0.5.0', quiet: true
     }))
-    expect(runs.state('s2')).toEqual({ status: 'running', command: 'npm run dev', startedAt: 1000 })
-    expect(states[states.length - 1]?.[2]?.status).toBe('running')
+    expect(runs.state('s2', 'run')).toEqual({ status: 'running', commandId: 'run', name: 'run', command: 'npm run dev', startedAt: 1000 })
+    expect(states[states.length - 1]?.[3]?.status).toBe('running')
     // A second Run while it runs changes nothing.
-    await runs.control('p1', 's2', 'start')
+    await runs.control('p1', 's2', 'run', 'start')
     expect(ptys.spawnDetached).toHaveBeenCalledTimes(1)
   })
 
   it('runs an SSH project’s command on the remote host', async () => {
     const ssh = { host: 'h', port: 22, username: 'u', remoteDir: '/srv/app' }
     const { runs, ptys } = setup(project({ ssh } as Partial<Project>))
-    await runs.control('p1', 's-main', 'start')
+    await runs.control('p1', 's-main', 'run', 'start')
     expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({
       shell: '/bin/sh', args: ['-c', 'npm run dev'], cwd: '/srv/app', sshConfig: ssh
     }))
@@ -85,60 +75,60 @@ describe('StreamRuns', () => {
 
   it('refuses a stream with no command', async () => {
     const { runs, ptys } = setup(project({ runCommand: undefined }))
-    const result = await runs.control('p1', 's-main', 'start')
+    const result = await runs.control('p1', 's-main', 'run', 'start')
     expect(result.ok).toBe(false)
     expect(ptys.spawnDetached).not.toHaveBeenCalled()
   })
 
   it('records an exit by itself as exited with its code', async () => {
     const { runs } = setup()
-    await runs.control('p1', 's-main', 'start')
-    runs.handleExit(streamRunTabId('s-main'), 1)
-    expect(runs.state('s-main')).toMatchObject({ status: 'exited', exitCode: 1, endedAt: 1000 })
+    await runs.control('p1', 's-main', 'run', 'start')
+    runs.handleExit(streamRunTabId('s-main', 'run'), 1)
+    expect(runs.state('s-main', 'run')).toMatchObject({ status: 'exited', exitCode: 1, endedAt: 1000 })
   })
 
   it('stops with Ctrl-C first and calls it stopped, whatever the code', async () => {
     const { runs, ptys } = setup()
-    await runs.control('p1', 's-main', 'start')
-    const stopped = runs.control('p1', 's-main', 'stop')
-    expect(ptys.writeFromMain).toHaveBeenCalledWith(streamRunTabId('s-main'), '\x03')
-    runs.handleExit(streamRunTabId('s-main'), 130)
+    await runs.control('p1', 's-main', 'run', 'start')
+    const stopped = runs.control('p1', 's-main', 'run', 'stop')
+    expect(ptys.writeFromMain).toHaveBeenCalledWith(streamRunTabId('s-main', 'run'), '\x03')
+    runs.handleExit(streamRunTabId('s-main', 'run'), 130)
     await stopped
     expect(ptys.terminate).not.toHaveBeenCalled()
-    expect(runs.state('s-main')).toMatchObject({ status: 'stopped' })
-    expect(runs.state('s-main')?.exitCode).toBeUndefined()
+    expect(runs.state('s-main', 'run')).toMatchObject({ status: 'stopped' })
+    expect(runs.state('s-main', 'run')?.exitCode).toBeUndefined()
   })
 
   it('ends the process outright when Ctrl-C does nothing', async () => {
     const { runs, ptys } = setup()
-    await runs.control('p1', 's-main', 'start')
-    const stopped = runs.control('p1', 's-main', 'stop')
+    await runs.control('p1', 's-main', 'run', 'start')
+    const stopped = runs.control('p1', 's-main', 'run', 'stop')
     await vi.advanceTimersByTimeAsync(3000)
-    expect(ptys.terminate).toHaveBeenCalledWith(streamRunTabId('s-main'))
+    expect(ptys.terminate).toHaveBeenCalledWith(streamRunTabId('s-main', 'run'))
     // No exit ever reported: still counts as stopped.
     await vi.advanceTimersByTimeAsync(1000)
     await stopped
-    expect(runs.state('s-main')?.status).toBe('stopped')
+    expect(runs.state('s-main', 'run')?.status).toBe('stopped')
   })
 
   it('restarts: stops, then starts afresh', async () => {
     const { runs, ptys } = setup()
-    await runs.control('p1', 's-main', 'start')
-    const restarted = runs.control('p1', 's-main', 'restart')
-    runs.handleExit(streamRunTabId('s-main'), 0)
+    await runs.control('p1', 's-main', 'run', 'start')
+    const restarted = runs.control('p1', 's-main', 'run', 'restart')
+    runs.handleExit(streamRunTabId('s-main', 'run'), 0)
     expect(await restarted).toEqual({ ok: true })
     expect(ptys.spawnDetached).toHaveBeenCalledTimes(2)
-    expect(runs.state('s-main')?.status).toBe('running')
+    expect(runs.state('s-main', 'run')?.status).toBe('running')
   })
 
   it('drops the run of a stream that is gone', async () => {
     const { runs, ptys, states, setData } = setup()
-    await runs.control('p1', 's2', 'start')
+    await runs.control('p1', 's2', 'run', 'start')
     setData({ projects: [project({ streams: [{ ...createMainStream('p1'), id: 's-main' }] })] } as ProjectsData)
     runs.reconcile()
-    expect(ptys.discard).toHaveBeenCalledWith(streamRunTabId('s2'))
-    expect(runs.state('s2')).toBeNull()
-    expect(states[states.length - 1]).toEqual(['p1', 's2', null])
+    expect(ptys.discard).toHaveBeenCalledWith(streamRunTabId('s2', 'run'))
+    expect(runs.state('s2', 'run')).toBeNull()
+    expect(states[states.length - 1]).toEqual(['p1', 's2', 'run', null])
   })
 
   describe('in a task’s worktree', () => {
@@ -157,64 +147,106 @@ describe('StreamRuns', () => {
 
     it('starts there and says which task it runs in', async () => {
       const { runs, ptys } = setup(withTasks())
-      expect(await runs.control('p1', 's2', 'start', 't-auth')).toEqual({ ok: true })
-      expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({ id: streamRunTabId('s2'), cwd: '/repo/.worktrees/0.5.0--fix-auth' }))
-      expect(runs.state('s2')).toEqual({ status: 'running', command: 'npm run dev', startedAt: 1000, taskId: 't-auth' })
+      expect(await runs.control('p1', 's2', 'run', 'start', 't-auth')).toEqual({ ok: true })
+      expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({ id: streamRunTabId('s2', 'run'), cwd: '/repo/.worktrees/0.5.0--fix-auth' }))
+      expect(runs.state('s2', 'run')).toEqual({ status: 'running', commandId: 'run', name: 'run', command: 'npm run dev', startedAt: 1000, taskId: 't-auth' })
     })
 
     it('runs a task without a worktree of its own in the stream’s folder', async () => {
       const { runs, ptys } = setup(withTasks())
-      await runs.control('p1', 's2', 'start', 't-shared')
+      await runs.control('p1', 's2', 'run', 'start', 't-shared')
       expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/repo/.worktrees/0.5.0' }))
-      expect(runs.state('s2')?.taskId).toBeUndefined()
+      expect(runs.state('s2', 'run')?.taskId).toBeUndefined()
     })
 
     it('refuses a task that isn’t in the stream', async () => {
       const { runs, ptys } = setup(withTasks())
-      expect(await runs.control('p1', 's2', 'start', 't-nope')).toEqual({ ok: false, error: 'The task is gone' })
+      expect(await runs.control('p1', 's2', 'run', 'start', 't-nope')).toEqual({ ok: false, error: 'The task is gone' })
       expect(ptys.spawnDetached).not.toHaveBeenCalled()
     })
 
     it('moves a running app there, and does nothing when it already runs there', async () => {
       const { runs, ptys } = setup(withTasks())
-      await runs.control('p1', 's2', 'start')
-      const moved = runs.control('p1', 's2', 'start', 't-auth')
-      expect(ptys.writeFromMain).toHaveBeenCalledWith(streamRunTabId('s2'), '\x03')
-      runs.handleExit(streamRunTabId('s2'), 130)
+      await runs.control('p1', 's2', 'run', 'start')
+      const moved = runs.control('p1', 's2', 'run', 'start', 't-auth')
+      expect(ptys.writeFromMain).toHaveBeenCalledWith(streamRunTabId('s2', 'run'), '\x03')
+      runs.handleExit(streamRunTabId('s2', 'run'), 130)
       expect(await moved).toEqual({ ok: true })
       expect(ptys.spawnDetached).toHaveBeenLastCalledWith(expect.objectContaining({ cwd: '/repo/.worktrees/0.5.0--fix-auth' }))
-      await runs.control('p1', 's2', 'start', 't-auth')
+      await runs.control('p1', 's2', 'run', 'start', 't-auth')
       expect(ptys.spawnDetached).toHaveBeenCalledTimes(2)
     })
 
     it('restarts where it ran', async () => {
       const { runs, ptys } = setup(withTasks())
-      await runs.control('p1', 's2', 'start', 't-auth')
-      const restarted = runs.control('p1', 's2', 'restart')
-      runs.handleExit(streamRunTabId('s2'), 0)
+      await runs.control('p1', 's2', 'run', 'start', 't-auth')
+      const restarted = runs.control('p1', 's2', 'run', 'restart')
+      runs.handleExit(streamRunTabId('s2', 'run'), 0)
       await restarted
       expect(ptys.spawnDetached).toHaveBeenLastCalledWith(expect.objectContaining({ cwd: '/repo/.worktrees/0.5.0--fix-auth' }))
-      expect(runs.state('s2')?.taskId).toBe('t-auth')
+      expect(runs.state('s2', 'run')?.taskId).toBe('t-auth')
     })
 
     it('drops the run once its task leaves the stream', async () => {
       const { runs, ptys, setData } = setup(withTasks())
-      await runs.control('p1', 's2', 'start', 't-auth')
+      await runs.control('p1', 's2', 'run', 'start', 't-auth')
       runs.reconcile()
       expect(ptys.discard).not.toHaveBeenCalled()
       const closed = withTasks()
       closed.streams[1].tasks = closed.streams[1].tasks.filter(t => t.id !== 't-auth')
       setData({ projects: [closed] } as ProjectsData)
       runs.reconcile()
-      expect(ptys.discard).toHaveBeenCalledWith(streamRunTabId('s2'))
-      expect(runs.state('s2')).toBeNull()
+      expect(ptys.discard).toHaveBeenCalledWith(streamRunTabId('s2', 'run'))
+      expect(runs.state('s2', 'run')).toBeNull()
+    })
+  })
+
+  describe('named commands', () => {
+    function named(): Project {
+      const p = project({
+        runCommand: undefined,
+        runCommands: [
+          { id: 'c-install', name: 'install', command: 'npm ci' },
+          { id: 'c-run', name: 'run', command: 'npm run dev' },
+          { id: 'c-staging', name: 'run (staging)', command: 'npm run dev -- --mode staging' }
+        ]
+      })
+      // 0.5.0 runs on another port, and has a command of its own.
+      p.streams[1] = { ...p.streams[1], runCommands: [{ id: 'c-own', name: 'Run', command: 'npm run dev -- --port 5180' }, { id: 'c-seed', name: 'seed', command: 'npm run seed' }] }
+      return p
+    }
+
+    it('runs each command on its own, side by side', async () => {
+      const { runs, ptys } = setup(named())
+      await runs.control('p1', 's-main', 'c-run', 'start')
+      await runs.control('p1', 's-main', 'c-staging', 'start')
+      expect(ptys.spawnDetached).toHaveBeenCalledTimes(2)
+      expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({ id: streamRunTabId('s-main', 'c-staging'), args: ['-l', '-c', 'npm run dev -- --mode staging'] }))
+      expect(runs.statesOfStream('s-main').map(r => [r.name, r.status])).toEqual([['run', 'running'], ['run (staging)', 'running']])
+      // Stopping one leaves the other running.
+      const stopped = runs.control('p1', 's-main', 'c-run', 'stop')
+      runs.handleExit(streamRunTabId('s-main', 'c-run'), 130)
+      await stopped
+      expect(runs.state('s-main', 'c-run')?.status).toBe('stopped')
+      expect(runs.state('s-main', 'c-staging')?.status).toBe('running')
+    })
+
+    it('lets a stream replace a project command by name and add its own', async () => {
+      const { runs, ptys } = setup(named())
+      await runs.control('p1', 's2', 'c-run', 'start')
+      expect(ptys.spawnDetached).toHaveBeenLastCalledWith(expect.objectContaining({ args: ['-l', '-c', 'npm run dev -- --port 5180'] }))
+      expect(runs.state('s2', 'c-run')?.name).toBe('run')
+      await runs.control('p1', 's2', 'c-seed', 'start')
+      expect(ptys.spawnDetached).toHaveBeenLastCalledWith(expect.objectContaining({ args: ['-l', '-c', 'npm run seed'] }))
+      // Another stream doesn't have it.
+      expect(await runs.control('p1', 's-main', 'c-seed', 'start')).toEqual({ ok: false, error: 'That command is no longer set for this project or stream' })
     })
   })
 
   it('lists one project’s runs', async () => {
     const { runs } = setup()
-    await runs.control('p1', 's2', 'start')
-    expect(Object.keys(runs.statesOf('p1'))).toEqual(['s2'])
+    await runs.control('p1', 's2', 'run', 'start')
+    expect(Object.keys(runs.statesOf('p1'))).toEqual(['s2~run'])
     expect(runs.statesOf('other')).toEqual({})
   })
 })

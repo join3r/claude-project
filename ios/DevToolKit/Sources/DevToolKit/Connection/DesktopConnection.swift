@@ -310,15 +310,19 @@ extension DesktopConnection {
     /// arrives in the next inbox. Stop waits up to the desktop's grace period
     /// and a remote project may have to connect over SSH first, so this waits
     /// longer than other ops.
-    /// `taskId` runs it in that task's own worktree (`stream.run.task`).
-    public func controlRun(projectId: String, streamId: String, action: StreamRunParams.Action, taskId: String? = nil) async throws {
-        let params = StreamRunParams(projectId: projectId, streamId: streamId, action: action, taskId: taskId)
+    /// `commandId` picks one of the stream's commands (`stream.run.commands`;
+    /// nil or empty means its first); `taskId` runs it in that task's own
+    /// worktree (`stream.run.task`).
+    public func controlRun(projectId: String, streamId: String, action: StreamRunParams.Action, commandId: String? = nil, taskId: String? = nil) async throws {
+        let params = StreamRunParams(projectId: projectId, streamId: streamId, action: action,
+                                     commandId: commandId?.isEmpty == false ? commandId : nil, taskId: taskId)
         _ = try await request(TaskOp.streamRun, params: params.json, timeout: .seconds(60))
     }
 
     /// `stream.logs` (§8.19): the end of the stream's app run output, as plain text.
-    public func runLogs(projectId: String, streamId: String) async throws -> StreamLogsResult {
-        let result = try await request(TaskOp.streamLogs, params: StreamLogsParams(projectId: projectId, streamId: streamId).json, timeout: .seconds(20))
+    public func runLogs(projectId: String, streamId: String, commandId: String? = nil) async throws -> StreamLogsResult {
+        let params = StreamLogsParams(projectId: projectId, streamId: streamId, commandId: commandId?.isEmpty == false ? commandId : nil)
+        let result = try await request(TaskOp.streamLogs, params: params.json, timeout: .seconds(20))
         return try decode(result, StreamLogsResult.parse)
     }
 
