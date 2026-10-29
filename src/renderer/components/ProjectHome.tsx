@@ -1,4 +1,4 @@
-import { streamRunCommand } from '../../shared/stream-run'
+import { streamRunCommand, streamRunTask } from '../../shared/stream-run'
 import { controlStreamRun, openStreamRunLogs, useStreamRun } from '../streamRuns'
 import { StreamRunButtons, StreamRunStatusLabel } from './StreamRunControls'
 import React, { useEffect, useState } from 'react'
@@ -58,7 +58,7 @@ function StreamRunCardRow({ project, stream }: { project: Project; stream: Strea
   return (
     <div className="flex items-center gap-2 min-w-0 -my-0.5" data-testid={`home-stream-run-${stream.id}`}>
       <span className="font-mono text-xs text-text-subtle truncate min-w-0" title={command}>$ {command ?? run?.command}</span>
-      <StreamRunStatusLabel run={run} />
+      <StreamRunStatusLabel run={run} taskName={streamRunTask(stream, run)?.name} />
       <span className="flex-1" />
       <StreamRunButtons run={run} canRun={!!command} onAction={(action) => void controlStreamRun(project.id, stream.id, action)} />
       <button type="button" className={cardLinkCls} onClick={() => openStreamRunLogs({ projectId: project.id, streamId: stream.id })}>

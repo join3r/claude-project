@@ -20,7 +20,8 @@ import { isEphemeralProject } from '../../shared/types'
 import { taskMoveBlocker } from '../../shared/streams'
 import { streamRunCommand } from '../../shared/stream-run'
 import { EntityMenuPopup, type EntityMenuTarget } from './menus/EntityMenus'
-import { SidebarStreamRunBadge } from './StreamRunControls'
+import { SidebarStreamRunBadge, taskRunMenuEntries } from './StreamRunControls'
+import { useStreamRun } from '../streamRuns'
 import { useMoveTask } from '../hooks/useTaskMenuActions'
 
 const iconBtnCls = 'bg-transparent border-0 cursor-pointer w-[30px] h-6 rounded-md leading-none inline-flex items-center justify-center text-text-muted hover:text-text hover:bg-surface-3 [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
@@ -77,6 +78,7 @@ export default function TaskHeader({
   const tabStatusStore = useTabStatusStore()
   const landingOp = useLandingOp(task?.id ?? '')
   const streamAhead = useStreamAhead(task?.id ?? '')
+  const streamRun = useStreamRun(project.id, stream?.id ?? '')
   const [menu, setMenu] = useState<(MenuAnchor & { page: 'main' | 'snooze' | 'move' }) | null>(null)
   const [entityMenu, setEntityMenu] = useState<EntityMenuTarget | null>(null)
   const closeEntityMenu = React.useCallback(() => setEntityMenu(null), [])
@@ -171,6 +173,10 @@ export default function TaskHeader({
         onSelect: () => { void landingActions.update(project, task) }
       })
     }
+    // The stream's app, run in this task's own worktree.
+    taskRunMenuEntries(project, stream, task, streamRun).forEach((entry, index) => {
+      items.push({ label: entry.label, dividerBefore: index === 0 && items.length > 0, onSelect: entry.onSelect })
+    })
     items.push({ label: 'Rename', dividerBefore: items.length > 0, onSelect: () => setRenaming(task.name) })
     const pin: PinnedItem = { type: 'task', projectId: project.id, streamId: stream?.id ?? '', taskId: task.id }
     const pinned = (pinnedItems ?? []).some(item => pinnedItemKey(item) === pinnedItemKey(pin))

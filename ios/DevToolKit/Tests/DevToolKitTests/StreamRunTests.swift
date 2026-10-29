@@ -100,6 +100,46 @@ import Testing
         }
         await mock.stop()
     }
+
+    /// `stream.run.task`: a run in a task's own worktree, moved, restarted in place.
+    @Test func mockRunsInATaskWorktree() async throws {
+        let mock = MockDesktopConnection(desktopId: "d", desktopName: "desk", flipInterval: .seconds(60), streamStep: .milliseconds(1))
+        let events = EventRecorder(mock)
+        await mock.start()
+        try await events.waitFor(RelayConnectionTests.isInbox)
+        func stream(_ id: String, _ predicate: @escaping @Sendable (InboxStream) -> Bool) async throws {
+            try await events.waitFor { event in
+                guard case .inbox(let inbox) = event else { return false }
+                return inbox.projects.flatMap(\.streams).first { $0.id == id }.map(predicate) ?? false
+            }
+        }
+        // 0.5.0's crashed run was in cache-headers' worktree.
+        let sample = MockInbox.sample(desktopId: "d", desktopName: "desk")
+        let api = try #require(sample.projects.first { $0.id == "p-api" })
+        let api050 = try #require(api.streams.first { $0.id == "s-api-050" })
+        #expect(api.runTask(api050)?.name == "cache-headers")
+
+        try await mock.controlRun(projectId: "p-api", streamId: "s-api-050", action: .start, taskId: "t-auth")
+        try await stream("s-api-050") { $0.run?.isRunning == true && $0.run?.taskId == "t-auth" }
+        try await mock.controlRun(projectId: "p-api", streamId: "s-api-050", action: .restart)
+        try await stream("s-api-050") { $0.run?.isRunning == true && $0.run?.taskId == "t-auth" }
+        // Run without a task moves it back to the stream's folder.
+        try await mock.controlRun(projectId: "p-api", streamId: "s-api-050", action: .start)
+        try await stream("s-api-050") { $0.run?.isRunning == true && $0.run?.taskId == nil }
+        await #expect(throws: DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")) {
+            try await mock.controlRun(projectId: "p-api", streamId: "s-api-050", action: .start, taskId: "missing")
+        }
+        await mock.stop()
+    }
+
+    @Test func runTaskIdRoundTrips() throws {
+        let run = InboxStreamRun(status: .running, startedAt: 5, taskId: "t1")
+        #expect(try InboxStreamRun.parse(run.json) == run)
+        #expect(try InboxStreamRun.parse(try JSONValue.parse(#"{"status":"running","startedAt":5,"taskId":""}"#)).taskId == nil)
+        let params = StreamRunParams(projectId: "p", streamId: "s", action: .start, taskId: "t1")
+        #expect(try StreamRunParams.parse(params.json) == params)
+    }
+
     /// The Inbox's Apps group: running and crashed runs only, crashes first.
     @Test func inboxAppsListsRunningAndCrashedRuns() {
         func stream(_ id: String, _ run: InboxStreamRun?) -> InboxStream {

@@ -194,6 +194,8 @@ describe('chat parsers', () => {
   it('parses stream.run and stream.logs (§8.19), which name no tab', () => {
     expect(parseStreamRunParams({ projectId: 'p1', streamId: 's1', action: 'restart', extra: 1 })).toEqual({ projectId: 'p1', streamId: 's1', action: 'restart' })
     expect(() => parseStreamRunParams({ projectId: 'p1', streamId: 's1', action: 'pause' })).toThrow(ProtocolError)
+    expect(parseStreamRunParams({ projectId: 'p1', streamId: 's1', action: 'start', taskId: 't1' })).toEqual({ projectId: 'p1', streamId: 's1', action: 'start', taskId: 't1' })
+    expect(() => parseStreamRunParams({ projectId: 'p1', streamId: 's1', action: 'start', taskId: '' })).toThrow(ProtocolError)
     expect(() => parseStreamRunParams({ projectId: 'p1', action: 'start' })).toThrow(ProtocolError)
     expect(parseStreamLogsParams({ projectId: 'p1', streamId: 's1' })).toEqual({ projectId: 'p1', streamId: 's1' })
     expect(() => parseStreamLogsParams({ streamId: 's1' })).toThrow(ProtocolError)

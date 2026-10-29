@@ -358,8 +358,11 @@ const api = {
   },
 
   // A stream's app run (main's stream-runs.ts)
-  streamRunControl: (projectId: string, streamId: string, action: StreamRunAction): Promise<{ ok: true } | { ok: false; error: string }> =>
-    ipcRenderer.invoke('stream-run-control', projectId, streamId, action),
+  /** `taskId` runs it in that task's worktree. */
+  streamRunControl: (projectId: string, streamId: string, action: StreamRunAction, taskId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+    taskId
+      ? ipcRenderer.invoke('stream-run-control', projectId, streamId, action, taskId)
+      : ipcRenderer.invoke('stream-run-control', projectId, streamId, action),
   streamRunStates: (projectId: string): Promise<Record<string, StreamRunState>> => ipcRenderer.invoke('stream-run-states', projectId),
   /** Starts showing a run's PTY (never spawns one); null when it has no output at all. */
   streamRunAttach: (projectId: string, tabId: string): Promise<{ cols: number; rows: number; scrollback: string; exitCode: number | null; state: StreamRunState | null } | null> =>

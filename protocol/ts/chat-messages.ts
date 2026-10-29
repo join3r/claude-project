@@ -199,10 +199,13 @@ export const STREAM_RUN_OP = 'stream.run'
 export const STREAM_LOGS_OP = 'stream.logs'
 /** The handshake feature (§8.1) a desktop lists when it answers `stream.run` and `stream.logs` and sends the run fields. */
 export const STREAM_RUN_FEATURE = 'stream.run'
+/** The handshake feature (§8.1) a desktop lists when `stream.run` takes `taskId` and a `run` carries it. */
+export const STREAM_RUN_TASK_FEATURE = 'stream.run.task'
 export const STREAM_RUN_ACTIONS = ['start', 'stop', 'restart'] as const
 export type StreamRunAction = (typeof STREAM_RUN_ACTIONS)[number]
 
-export interface StreamRunParams { projectId: string; streamId: string; action: StreamRunAction }
+/** `taskId` (`start`, `restart`): run in that task's own worktree (§8.19). */
+export interface StreamRunParams { projectId: string; streamId: string; action: StreamRunAction; taskId?: string }
 export interface StreamLogsParams { projectId: string; streamId: string }
 /** The run's output, terminal escapes stripped, at most {@link ChatLimits.runLogs} characters from its end. */
 export interface StreamLogsResult { text: string; truncated?: true }
@@ -1368,11 +1371,18 @@ export function parseProjectNewParams(params: unknown): ProjectNewParams {
 
 /**
  * `stream.run` params (the desktop's side). Throws ProtocolError — `bad-request` — on a
- * missing `projectId` or `streamId`, or an unknown `action`.
+ * missing `projectId` or `streamId`, an unknown `action`, or a `taskId` that isn't a
+ * non-empty string.
  */
 export function parseStreamRunParams(params: unknown): StreamRunParams {
   const o = obj(params, 'params')
-  return { projectId: str(o, 'projectId'), streamId: str(o, 'streamId'), action: oneOf(o, 'action', STREAM_RUN_ACTIONS) }
+  const out: StreamRunParams = { projectId: str(o, 'projectId'), streamId: str(o, 'streamId'), action: oneOf(o, 'action', STREAM_RUN_ACTIONS) }
+  const taskId = optStr(o, 'taskId')
+  if (taskId !== undefined) {
+    if (!taskId) fail('taskId is empty')
+    out.taskId = taskId
+  }
+  return out
 }
 
 /** `stream.logs` params (the desktop's side). Throws ProtocolError — `bad-request` — on a missing `projectId` or `streamId`. */

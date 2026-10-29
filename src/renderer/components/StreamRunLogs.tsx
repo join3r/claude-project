@@ -5,7 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { useApp } from '../context/AppContext'
-import { streamRunCommand, streamRunTabId } from '../../shared/stream-run'
+import { streamRunCommand, streamRunTabId, streamRunTask } from '../../shared/stream-run'
 import { buildXtermTheme } from './terminalThemes'
 import { sanitizeRestoredScrollback } from './scrollbackReplay'
 import { bindCopyOnSelect } from './copyOnSelect'
@@ -118,6 +118,8 @@ export default function StreamRunLogs({ projectId, streamId }: StreamRunLogsTarg
 
   if (!project || !stream) return null
   const command = run?.command ?? streamRunCommand(project, stream)
+  // Run again where the shown run was: its task's worktree, if it's still open.
+  const runTask = streamRunTask(stream, run)
   const termBackground = config ? buildXtermTheme(effectiveTerminalTheme, config.terminalColorScheme).background : undefined
 
   return (
@@ -132,12 +134,12 @@ export default function StreamRunLogs({ projectId, streamId }: StreamRunLogsTarg
             {project.name}
             {!stream.isMain && <span className="text-text-muted font-normal font-mono"> · {stream.name}</span>}
           </h2>
-          <StreamRunStatusLabel run={run} />
+          <StreamRunStatusLabel run={run} taskName={runTask?.name} />
           <span className="ml-auto flex items-center gap-1">
             <StreamRunButtons
               run={run}
               canRun={!!command}
-              onAction={(action) => void controlStreamRun(projectId, streamId, action)}
+              onAction={(action) => void controlStreamRun(projectId, streamId, action, action === 'stop' ? undefined : runTask?.id)}
               size="md"
             />
           </span>

@@ -2,7 +2,7 @@ import type { PtyAttachResult, PtySessions } from '../pty-sessions'
 import type { StreamRuns, StreamRunResult } from '../stream-runs'
 import { streamIdOfRunTab, type StreamRunState } from '../../shared/stream-run'
 import type { IpcRegistrar } from './registrar'
-import { safeId } from './schemas'
+import { optSafeId, safeId } from './schemas'
 import { v } from './validate'
 
 export interface StreamRunDeps {
@@ -15,7 +15,8 @@ export interface StreamRunAttachResult extends PtyAttachResult {
 }
 
 /**
- * A stream's app run (`src/shared/stream-run.ts`): Run, Stop and Restart, and the
+ * A stream's app run (`src/shared/stream-run.ts`): Run (in a task's worktree when
+ * given its id), Stop and Restart, and the
  * logs view, which attaches to the run's PTY like a terminal tab but never spawns
  * one. Typing and resizing then go through `pty-write` / `pty-resize`.
  */
@@ -24,8 +25,8 @@ export function registerStreamRunHandlers(ipc: IpcRegistrar, deps: StreamRunDeps
 
   ipc.handle(
     'stream-run-control',
-    [safeId, safeId, v.literal('start', 'stop', 'restart')],
-    (_ctx, projectId, streamId, action): Promise<StreamRunResult> => streamRuns.control(projectId, streamId, action)
+    [safeId, safeId, v.literal('start', 'stop', 'restart'), optSafeId],
+    (_ctx, projectId, streamId, action, taskId): Promise<StreamRunResult> => streamRuns.control(projectId, streamId, action, taskId)
   )
 
   ipc.handle('stream-run-states', [safeId], (_ctx, projectId) => streamRuns.statesOf(projectId))

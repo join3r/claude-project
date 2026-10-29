@@ -17,6 +17,7 @@ import {
   MoveToStreamItems, ProjectMenuItems, StreamMenuHeader, StreamMenuItems, SubmenuBack, SubmenuButton
 } from '../menus/EntityMenus'
 import { revealFolder } from '../menus/projectMenuRules'
+import { TaskRunMenuItems } from '../StreamRunControls'
 
 export {
   revealFolder, projectDeletePrompt, canTrashProjectFolder, projectDeleteWithFolderPrompt
@@ -173,9 +174,9 @@ export default function SidebarContextMenu({
     if (!task) return null
     const stream = findStreamOfTask(project, taskId)
     const snoozed = isSnoozed(task, Date.now())
+    const projectTask = findTaskInProject(project, taskId)
     const landing = (() => {
       // A task with a worktree of its own lands into its stream; not while its agent works.
-      const projectTask = findTaskInProject(project, taskId)
       if (!project || !projectTask || !stream || !canLandTask(project, projectTask)) return null
       const blocked = landingActionBlocker(projectTask, (tabId) => tabStatusStore.getStatus(tabId), !!getLandingOp(projectTask.id))
       const item = (label: string, run: () => Promise<void>) => (
@@ -232,6 +233,9 @@ export default function SidebarContextMenu({
           )}
         </div>
         {landing}
+        {project && projectTask && (
+          <TaskRunMenuItems project={project} stream={stream} task={projectTask} itemClassName={menuItemCls} onDone={closeContextMenu} />
+        )}
         {showPlaces && (
           <div className="border-b border-hair pb-1 mb-1">
             <SubmenuButton label="Stream" detail={stream!.name} onClick={() => setPage('stream')} testId="task-menu-open-stream" />

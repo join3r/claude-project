@@ -5,7 +5,7 @@ import { isRemoteProject, isShellCommandProject, pinnedItemKey } from '../../../
 import type { PinnedItem, Project } from '../../../shared/types'
 import { canMoveToServer } from '../../../shared/project-move'
 import { findStreamOfTask, findTaskInProject, taskMoveBlocker } from '../../../shared/streams'
-import { streamRunCommand } from '../../../shared/stream-run'
+import { streamRunCommand, streamRunTask } from '../../../shared/stream-run'
 import { controlStreamRun, openStreamRunCommand, openStreamRunLogs, useStreamRun } from '../../streamRuns'
 import { openEntityDialog, requestCloseStream } from '../../entityActions'
 import { paletteEvents } from '../../palette/paletteEvents'
@@ -125,7 +125,7 @@ export function StreamMenuHeader({ project, streamId }: { project: Project; stre
         <span className="flex-1" />
         {run && (
           <span className="flex items-center gap-1 shrink-0">
-            <StreamRunStatusLabel run={run} />
+            <StreamRunStatusLabel run={run} taskName={streamRunTask(stream, run)?.name} />
             {running && <span className="text-xs text-text-subtle tabular-nums">· {formatWaitTime(Date.now() - run.startedAt)}</span>}
           </span>
         )}

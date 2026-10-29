@@ -306,7 +306,8 @@ final class AppModel {
     /// `stream.run`: start, stop or restart the stream's app run. The new
     /// `run` comes with the next inbox; a failure (the desktop's message, e.g.
     /// a spawn error) sets `runError`. One action per stream at a time.
-    func controlRun(_ action: StreamRunParams.Action, projectId: String, streamId: String, desktopId: String) async {
+    /// `taskId` runs it in that task's own worktree (`stream.run.task`).
+    func controlRun(_ action: StreamRunParams.Action, projectId: String, streamId: String, desktopId: String, taskId: String? = nil) async {
         guard let connection = connections[desktopId] else {
             runError = DesktopConnectionError.notConnected.localizedDescription
             return
@@ -316,7 +317,7 @@ final class AppModel {
         pendingRuns[key] = action
         defer { pendingRuns[key] = nil }
         do {
-            try await connection.controlRun(projectId: projectId, streamId: streamId, action: action)
+            try await connection.controlRun(projectId: projectId, streamId: streamId, action: action, taskId: taskId)
         } catch {
             runError = error.localizedDescription
         }

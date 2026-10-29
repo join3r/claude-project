@@ -1,5 +1,5 @@
-import type { ProjectsData, Project, SshConfig, Stream } from '../shared/types'
-import { streamDirectory } from '../shared/streams'
+import type { ProjectsData, Project, SshConfig, Stream, Task } from '../shared/types'
+import { streamDirectory, taskDirectory } from '../shared/streams'
 import { streamIdOfRunTab, streamRunCommand, streamRunTabId, type StreamRunAction, type StreamRunState } from '../shared/stream-run'
 import type { PtySpawnRequest } from './pty-sessions'
 
@@ -41,8 +41,9 @@ const RUN_ROWS = 32
 
 /**
  * Each stream's app run (`src/shared/stream-run.ts`): start, stop and restart
- * the stream's command in a PTY of its own. One run per stream; a stream that is
- * archived or deleted has its run stopped.
+ * the stream's command in a PTY of its own, in the stream's folder or a task's
+ * worktree. One run per stream; a stream that is archived or deleted, or a task
+ * whose worktree the run is in that closes, has its run stopped.
  */
 export class StreamRuns {
   private readonly runs = new Map<string, RunEntry>()
@@ -76,14 +77,26 @@ export class StreamRuns {
     return () => { this.listeners.delete(listener) }
   }
 
-  async control(projectId: string, streamId: string, action: StreamRunAction): Promise<StreamRunResult> {
+  /**
+   * `taskId` runs the app in that task's worktree. Start with it while the app
+   * runs somewhere else moves the run there; Restart without it keeps the run
+   * where it was, Start without it runs in the stream's folder.
+   */
+  async control(projectId: string, streamId: string, action: StreamRunAction, taskId?: string): Promise<StreamRunResult> {
     if (action === 'stop') {
       await this.stop(streamId)
       return { ok: true }
     }
-    if (action === 'restart') await this.stop(streamId)
-    else if (this.runs.get(streamId)?.state.status === 'running') return { ok: true }
-    return this.start(projectId, streamId)
+    const current = this.runs.get(streamId)?.state
+    if (action === 'restart') {
+      await this.stop(streamId)
+      return this.start(projectId, streamId, taskId ?? current?.taskId)
+    }
+    if (current?.status === 'running') {
+      if (current.taskId === taskId) return { ok: true }
+      await this.stop(streamId)
+    }
+    return this.start(projectId, streamId, taskId)
   }
 
   /** The PTY exited (PtySessions' `onExit`). */
@@ -103,15 +116,21 @@ export class StreamRuns {
     }
   }
 
-  /** Stops runs whose stream (or project) is gone: archived, deleted, or moved off this host. */
+  /**
+   * Stops runs whose stream (or project) is gone: archived, deleted, or moved off
+   * this host; and runs in a task's worktree once the task left the stream (closed,
+   * so its worktree goes too).
+   */
   reconcile(): void {
-    const live = new Set<string>()
+    const live = new Map<string, Set<string>>()
     for (const project of this.deps.projects().projects) {
-      for (const stream of project.streams ?? []) live.add(stream.id)
+      for (const stream of project.streams ?? []) live.set(stream.id, new Set(stream.tasks.map(task => task.id)))
     }
     for (const [streamId, entry] of [...this.runs]) {
-      if (live.has(streamId)) continue
-      this.deps.log(`streamRun gone stream=${streamId}`)
+      const tasks = live.get(streamId)
+      const taskId = entry.state.taskId
+      if (tasks && (!taskId || tasks.has(taskId))) continue
+      this.deps.log(`streamRun gone stream=${streamId}${taskId ? ` task=${taskId}` : ''}`)
       this.deps.ptys.discard(streamRunTabId(streamId))
       if (entry.stopping) {
         clearTimeout(entry.stopping.timer)
@@ -123,13 +142,20 @@ export class StreamRuns {
     }
   }
 
-  private async start(projectId: string, streamId: string): Promise<StreamRunResult> {
+  private async start(projectId: string, streamId: string, taskId: string | undefined): Promise<StreamRunResult> {
     const found = this.find(projectId, streamId)
     if (!found) return { ok: false, error: 'The stream is gone' }
     const { project, stream } = found
     const command = streamRunCommand(project, stream)
     if (!command) return { ok: false, error: 'No run command is set for this project or stream' }
-    const cwd = streamDirectory(project, stream)
+    let task: Task | undefined
+    if (taskId) {
+      task = stream.tasks.find(t => t.id === taskId)
+      if (!task) return { ok: false, error: 'The task is gone' }
+      // A task without a worktree of its own works in the stream's folder.
+      if (!task.workspace) task = undefined
+    }
+    const cwd = task ? taskDirectory(project, task) : streamDirectory(project, stream)
     const id = streamRunTabId(streamId)
     const request: PtySpawnRequest = project.ssh
       ? { id, shell: '/bin/sh', args: ['-c', command], cwd, cols: RUN_COLS, rows: RUN_ROWS, projectId, sshConfig: project.ssh, quiet: true }
@@ -140,8 +166,8 @@ export class StreamRuns {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
-    this.deps.log(`streamRun start stream=${streamId} cwd=${cwd}`)
-    this.runs.set(streamId, { projectId, state: { status: 'running', command, startedAt: this.now() } })
+    this.deps.log(`streamRun start stream=${streamId}${task ? ` task=${task.id}` : ''} cwd=${cwd}`)
+    this.runs.set(streamId, { projectId, state: { status: 'running', command, startedAt: this.now(), ...(task ? { taskId: task.id } : {}) } })
     this.emit(projectId, streamId)
     return { ok: true }
   }

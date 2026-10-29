@@ -240,6 +240,8 @@ public enum DesktopFeature {
     /// The desktop answers `stream.run` and `stream.logs`, and sends streams'
     /// `runCommand` and `run` (§8.19, §4.4).
     public static let streamRun = "stream.run"
+    /// `stream.run` takes `taskId`, and a `run` names the task it runs in (§8.19).
+    public static let streamRunTask = "stream.run.task"
 }
 
 /// `res.error.code` values. Receivers treat the code as an open string.

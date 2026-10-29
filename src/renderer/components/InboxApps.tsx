@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { Play, RotateCw, Square, X } from 'lucide-react'
 import type { Project } from '../../shared/types'
-import { streamRunCommand } from '../../shared/stream-run'
+import { streamRunCommand, streamRunTask } from '../../shared/stream-run'
 import {
   controlStreamRun,
   dismissStreamRunCrash,
@@ -68,6 +68,7 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
   const { project, stream, run, crashed } = app
   const target = { projectId: project.id, streamId: stream.id }
   const command = streamRunCommand(project, stream)
+  const runTask = streamRunTask(stream, run)
   return (
     <div
       className={[
@@ -94,6 +95,12 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
             <span className="font-mono text-xs text-text-muted overflow-hidden text-ellipsis min-w-0">{stream.name}</span>
           </>
         )}
+        {runTask && (
+          <>
+            <span className="text-text-subtle shrink-0 text-xs">›</span>
+            <span className="text-xs text-text-muted overflow-hidden text-ellipsis min-w-0" data-testid="inbox-app-task">{runTask.name}</span>
+          </>
+        )}
       </span>
       <span className="ml-auto flex items-center shrink-0" onMouseDown={(e) => e.stopPropagation()}>
         <span
@@ -106,7 +113,7 @@ function AppRow({ app, now, theme, showIcon, dimmed, onMenu }: {
           {crashed ? (
             <>
               {command && (
-                <RowAction title={`Run the app: ${command}`} onClick={() => void controlStreamRun(project.id, stream.id, 'start')}>
+                <RowAction title={`Run the app: ${command}`} onClick={() => void controlStreamRun(project.id, stream.id, 'start', runTask?.id)}>
                   <Play size={13} />
                 </RowAction>
               )}

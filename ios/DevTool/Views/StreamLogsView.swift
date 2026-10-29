@@ -14,8 +14,14 @@ struct StreamLogsTarget: Hashable, Identifiable {
 // MARK: - Run status text
 
 extension InboxStreamRun {
-    /// "Running · 25m", "Exited with code 1 · 13m ago", "Stopped · 1h ago".
-    func line(now: Date) -> String {
+    /// "Running · 25m", "Exited with code 1 · 13m ago", "Stopped · 1h ago";
+    /// "… · in fix-auth" when it runs in that task's worktree.
+    func line(now: Date, taskName: String? = nil) -> String {
+        let status = statusLine(now: now)
+        return taskName.map { "\(status) · in \($0)" } ?? status
+    }
+
+    private func statusLine(now: Date) -> String {
         let nowMs = now.unixMilliseconds
         func ago() -> String {
             guard let endedAt else { return "" }
@@ -108,6 +114,8 @@ struct RunControls: View {
 struct StreamRunRow: View {
     let target: StreamLogsTarget
     let stream: InboxStream
+    /// The task whose worktree the run is in (`InboxProject.runTask`).
+    var taskName: String? = nil
     let now: Date
     let onLogs: () -> Void
 
@@ -121,7 +129,7 @@ struct StreamRunRow: View {
                             .font(.subheadline.monospaced())
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Text(stream.run?.line(now: now) ?? "Not running")
+                        Text(stream.run?.line(now: now, taskName: taskName) ?? "Not running")
                             .font(.footnote)
                             .foregroundStyle(stream.run?.color ?? .secondary)
                             .lineLimit(1)
@@ -174,7 +182,7 @@ struct StreamLogsView: View {
                                 .lineLimit(1)
                             HStack(spacing: 5) {
                                 RunDot(run: stream?.run)
-                                Text(stream?.run?.line(now: context.date) ?? "Not running")
+                                Text(stream?.run?.line(now: context.date, taskName: stream.flatMap { currentProject?.runTask($0)?.name }) ?? "Not running")
                                     .lineLimit(1)
                             }
                             .font(.caption)
@@ -200,8 +208,12 @@ struct StreamLogsView: View {
             }
     }
 
+    private var currentProject: InboxProject? {
+        model.inboxes[target.desktopId]?.projects.first { $0.id == target.projectId }
+    }
+
     private var currentStream: InboxStream? {
-        model.inboxes[target.desktopId]?.projects.first { $0.id == target.projectId }?.streams.first { $0.id == target.streamId }
+        currentProject?.streams.first { $0.id == target.streamId }
     }
 
     @ViewBuilder

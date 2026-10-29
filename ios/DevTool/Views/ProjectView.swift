@@ -250,7 +250,7 @@ struct ProjectView: View {
         func control(_ action: StreamRunParams.Action) {
             Task { await model.controlRun(action, projectId: project.id, streamId: stream.id, desktopId: ref.desktopId) }
         }
-        return StreamRunRow(target: target, stream: stream, now: now) { logs = target }
+        return StreamRunRow(target: target, stream: stream, taskName: project.runTask(stream)?.name, now: now) { logs = target }
             .opacity(offline ? 0.55 : 1)
             .contextMenu {
                 if stream.runCommand != nil {

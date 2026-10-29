@@ -152,7 +152,9 @@ struct InboxView: View {
         let canRun = app.stream.runCommand != nil && !offline && model.pendingRun(streamId: app.stream.id, desktopId: app.desktopId) == nil
         let running = app.run.isRunning
         func control(_ action: StreamRunParams.Action) {
-            Task { await model.controlRun(action, projectId: app.project.id, streamId: app.stream.id, desktopId: app.desktopId) }
+            // Run again where it ran: a crash in a task's worktree reruns there.
+            let taskId = action == .stop ? nil : app.project.runTask(app.stream)?.id
+            Task { await model.controlRun(action, projectId: app.project.id, streamId: app.stream.id, desktopId: app.desktopId, taskId: taskId) }
         }
         return InboxAppRow(
             app: app,
@@ -589,7 +591,7 @@ struct InboxAppRow: View {
                         .lineLimit(1)
                         HStack(spacing: 6) {
                             RunDot(run: app.run)
-                            Text(app.run.line(now: now))
+                            Text(app.run.line(now: now, taskName: app.project.runTask(app.stream)?.name))
                                 .foregroundStyle(app.run.color)
                                 .monospacedDigit()
                         }

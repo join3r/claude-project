@@ -236,6 +236,7 @@ struct TaskInfoSheet: View {
     /// Close task didn't land the task's worktree; it stays open with its banner.
     var onLanding: () -> Void = {}
     @State private var closing: CloseTaskRequest?
+    @State private var logs: StreamLogsTarget?
 
     var body: some View {
         NavigationStack {
@@ -303,13 +304,52 @@ struct TaskInfoSheet: View {
                 }
             }
             AlsoOpenSection(ref: ref, tabs: task.otherTabs, onOpenChat: onOpenChat)
+            appSection(project: project, task: task, stream: stream, offline: offline)
             actions(project: project, task: task, streamName: streamName, offline: offline)
         }
+        .sheet(item: $logs) { StreamLogsView(target: $0) }
         .listStyle(.insetGrouped)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { doneButton }
         .closeTaskFlow($closing, onClosed: { _ in onClosed() }, onLanding: { _, _ in onLanding() })
+    }
+
+    /// The stream's app run in this task's own worktree (§8.19, `stream.run.task`):
+    /// Run app here, or Restart, Stop and Logs while it runs here.
+    @ViewBuilder
+    private func appSection(project: InboxProject, task: InboxTask, stream: InboxStream?, offline: Bool) -> some View {
+        if let stream, let command = stream.runCommand, task.branch != nil,
+           model.supports(DesktopFeature.streamRunTask, on: ref.desktopId) {
+            let target = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id)
+            let here = stream.run?.taskId == task.id
+            let running = stream.run?.isRunning == true
+            let busy = offline || model.pendingRun(streamId: stream.id, desktopId: ref.desktopId) != nil
+            let control = { (action: StreamRunParams.Action) in
+                Task { await model.controlRun(action, projectId: project.id, streamId: stream.id, desktopId: ref.desktopId, taskId: task.id) }
+            }
+            Section {
+                if here && running {
+                    Button("Restart app", systemImage: "arrow.clockwise") { control(.restart) }.disabled(busy)
+                    Button("Stop app", systemImage: "stop.fill") { control(.stop) }.disabled(busy)
+                } else {
+                    Button("Run app here", systemImage: "play.fill") { control(.start) }.disabled(busy)
+                }
+                if here {
+                    Button("Logs", systemImage: "text.alignleft") { logs = target }
+                }
+            } header: {
+                Text("App")
+            } footer: {
+                if here, let run = stream.run {
+                    Text(run.line(now: Date()))
+                } else if running {
+                    Text("\(stream.name.isEmpty ? "The stream" : stream.name)’s app runs elsewhere. Run app here moves it to this task’s worktree.")
+                } else {
+                    Text("Runs \(command) in this task’s worktree.")
+                }
+            }
+        }
     }
 
     @ViewBuilder

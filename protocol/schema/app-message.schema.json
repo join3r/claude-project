@@ -97,7 +97,8 @@
       "properties": {
         "projectId": { "type": "string" },
         "streamId": { "type": "string" },
-        "action": { "enum": ["start", "stop", "restart"] }
+        "action": { "enum": ["start", "stop", "restart"] },
+        "taskId": { "type": "string", "pattern": ".", "description": "start/restart: run in that task's own worktree (stream.run.task)." }
       }
     },
     "streamRunResult": {

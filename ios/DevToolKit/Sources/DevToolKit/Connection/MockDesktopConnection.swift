@@ -479,12 +479,20 @@ public actor MockDesktopConnection: DesktopConnection {
         return (p, s)
     }
 
-    /// `stream.run`: start (a no-op while it runs), stop (a no-op unless it
-    /// runs) or restart. A stream without a command answers `internal`, as the
-    /// desktop does. The inbox with the new `run` goes out right away.
+    /// `stream.run`: start (a no-op while it runs in the same place, a move
+    /// while it runs elsewhere), stop (a no-op unless it runs) or restart (in
+    /// the same place unless `taskId` names another). A stream without a
+    /// command answers `internal`, as the desktop does. The inbox with the new
+    /// `run` goes out right away.
     private func controlRun(_ params: StreamRunParams) throws {
         let (p, s) = try runStream(projectId: params.projectId, streamId: params.streamId)
         let stream = inbox.projects[p].streams[s]
+        if let taskId = params.taskId,
+           !inbox.projects[p].tasks.contains(where: { $0.id == taskId && $0.streamId == stream.id }) {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such task")
+        }
+        // A task without a worktree of its own runs in the stream's folder.
+        let ownWorktree = params.taskId.flatMap { id in inbox.projects[p].tasks.first { $0.id == id }?.branch != nil ? id : nil }
         let now = Date().unixMilliseconds
         func stop() {
             guard stream.run?.isRunning == true else { return }
@@ -492,22 +500,23 @@ public actor MockDesktopConnection: DesktopConnection {
             inbox.projects[p].streams[s].run?.endedAt = now
             runLogs[stream.id, default: ""] += "^C\n"
         }
-        func start() throws {
+        func start(in taskId: String?) throws {
             guard let command = stream.runCommand else {
                 throw DesktopConnectionError.remote(code: AppErrorCode.internal, message: "No run command is set for this project or stream")
             }
-            inbox.projects[p].streams[s].run = InboxStreamRun(status: .running, startedAt: now)
+            inbox.projects[p].streams[s].run = InboxStreamRun(status: .running, startedAt: now, taskId: taskId)
             runLogs[stream.id] = "$ \(command)\n\n> \(stream.name)@0.1.0 dev\n> vite\n\n  VITE v6.0.0  ready in 412 ms\n\n  ➜  Local:   http://localhost:5173/\n"
         }
         switch params.action {
         case .start:
-            if stream.run?.isRunning == true { return }
-            try start()
+            if stream.run?.isRunning == true && stream.run?.taskId == ownWorktree { return }
+            stop()
+            try start(in: ownWorktree)
         case .stop:
             stop()
         case .restart:
             stop()
-            try start()
+            try start(in: params.taskId == nil ? stream.run?.taskId : ownWorktree)
         }
         inbox.generatedAt = now
         continuation.yield(.inbox(inbox))
@@ -1036,7 +1045,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
-            DesktopFeature.chatTasks,
+            DesktopFeature.streamRunTask, DesktopFeature.chatTasks,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))
@@ -1156,14 +1165,14 @@ public enum MockInbox {
         let t = now.unixMilliseconds
         func ago(_ minutes: Double) -> Int64 { t - Int64(minutes * 60_000) }
 
-        // App runs (§8.19): main's dev server runs, 0.5.0's exited with an error,
+        // App runs (§8.19): main's dev server runs, 0.5.0's exited with an error in cache-headers' worktree,
         // web-dashboard's main has a command that hasn't run, login-redesign was stopped.
         let apiMain = InboxStream(id: "s-api-main", name: "main", isMain: true,
                                   runCommand: "npm run dev", run: InboxStreamRun(status: .running, startedAt: ago(25)))
         // 0.5.0 runs its queue by itself, waiting on rate-limiter.
         let api050 = InboxStream(id: "s-api-050", name: "0.5.0", branch: "0.5.0", queueAutoRun: true, queueTaskId: "t-rate",
                                  runCommand: "npm run dev -- --port 3001",
-                                 run: InboxStreamRun(status: .exited, startedAt: ago(14), endedAt: ago(13), exitCode: 1))
+                                 run: InboxStreamRun(status: .exited, startedAt: ago(14), endedAt: ago(13), exitCode: 1, taskId: "t-cache"))
         let apiBugs = InboxStream(id: "s-api-bugs", name: "bugfixes")
         let webMain = InboxStream(id: "s-web-main", name: "main", isMain: true, runCommand: "npm run dev")
         let webLogin = InboxStream(id: "s-web-login", name: "login-redesign", branch: "login-redesign",

@@ -1,7 +1,8 @@
 import Foundation
 
 /// A stream's app run since the desktop started (§4.4, §8.19): the stream's
-/// `runCommand`, started in its folder, in a terminal no task owns.
+/// `runCommand`, started in its folder (or a task's own worktree), in a
+/// terminal no task owns.
 public struct InboxStreamRun: Codable, Sendable, Equatable, Hashable {
     public enum Status: String, Codable, Sendable, Hashable, CaseIterable {
         case running
@@ -18,12 +19,15 @@ public struct InboxStreamRun: Codable, Sendable, Equatable, Hashable {
     public var endedAt: Int64?
     /// Only with `exited`; may be negative.
     public var exitCode: Int?
+    /// The task whose own worktree it runs in (`stream.run.task`); nil in the stream's folder.
+    public var taskId: String?
 
-    public init(status: Status, startedAt: Int64, endedAt: Int64? = nil, exitCode: Int? = nil) {
+    public init(status: Status, startedAt: Int64, endedAt: Int64? = nil, exitCode: Int? = nil, taskId: String? = nil) {
         self.status = status
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.exitCode = status == .exited ? exitCode : nil
+        self.taskId = taskId
     }
 
     public var isRunning: Bool { status == .running }
@@ -41,13 +45,16 @@ public struct InboxStreamRun: Codable, Sendable, Equatable, Hashable {
             }
             exitCode = Int(d)
         }
-        return InboxStreamRun(status: status, startedAt: try o.int("startedAt"), endedAt: endedAt, exitCode: exitCode)
+        let taskId = o.isUnset("taskId") ? nil : try o.str("taskId")
+        return InboxStreamRun(status: status, startedAt: try o.int("startedAt"), endedAt: endedAt, exitCode: exitCode,
+                              taskId: taskId?.isEmpty == false ? taskId : nil)
     }
 
     var json: JSONValue {
         var o: JSONObject = ["status": .string(status.rawValue), "startedAt": .int(startedAt)]
         if let endedAt { o["endedAt"] = .int(endedAt) }
         if let exitCode { o["exitCode"] = .int(Int64(exitCode)) }
+        if let taskId { o["taskId"] = .string(taskId) }
         return .object(o)
     }
 }
@@ -64,22 +71,33 @@ public struct StreamRunParams: Sendable, Equatable {
     public var projectId: String
     public var streamId: String
     public var action: Action
+    /// `start`, `restart`: run in that task's own worktree (`stream.run.task`).
+    public var taskId: String?
 
-    public init(projectId: String, streamId: String, action: Action) {
+    public init(projectId: String, streamId: String, action: Action, taskId: String? = nil) {
         self.projectId = projectId
         self.streamId = streamId
         self.action = action
+        self.taskId = taskId
     }
 
-    /// The desktop's side: a missing `projectId` or `streamId`, or an unknown `action`, throws (`bad-request`).
+    /// The desktop's side: a missing `projectId` or `streamId`, an unknown
+    /// `action`, or an empty `taskId` throws (`bad-request`).
     public static func parse(_ value: JSONValue?) throws(ProtocolError) -> StreamRunParams {
         let o = try Fields(value, "params")
         let action = try o.oneOf("action", Action.allCases.map(\.rawValue))
-        return StreamRunParams(projectId: try o.str("projectId"), streamId: try o.str("streamId"), action: Action(rawValue: action)!)
+        var taskId: String?
+        if !o.isUnset("taskId") {
+            taskId = try o.str("taskId")
+            if taskId?.isEmpty == true { throw ProtocolError("taskId is empty") }
+        }
+        return StreamRunParams(projectId: try o.str("projectId"), streamId: try o.str("streamId"), action: Action(rawValue: action)!, taskId: taskId)
     }
 
     public var json: JSONValue {
-        .object(["projectId": .string(projectId), "streamId": .string(streamId), "action": .string(action.rawValue)])
+        var o: JSONObject = ["projectId": .string(projectId), "streamId": .string(streamId), "action": .string(action.rawValue)]
+        if let taskId { o["taskId"] = .string(taskId) }
+        return .object(o)
     }
 }
 
@@ -133,6 +151,15 @@ extension TaskOp {
     public static let streamRun = "stream.run"
     /// `stream.logs` (§8.19): the end of a stream's app run output.
     public static let streamLogs = "stream.logs"
+}
+
+extension InboxProject {
+    /// The task whose own worktree the stream's run is in (§8.19); nil when it
+    /// runs in the stream's folder or that task is no longer listed.
+    public func runTask(_ stream: InboxStream) -> InboxTask? {
+        guard let taskId = stream.run?.taskId else { return nil }
+        return tasks.first { $0.id == taskId && $0.streamId == stream.id }
+    }
 }
 
 extension InboxStreamRun {

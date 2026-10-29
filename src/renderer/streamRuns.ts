@@ -134,9 +134,12 @@ export function useProjectStreamRun(projectId: string, streamIds: readonly strin
   return failed
 }
 
-/** Run, Stop or Restart; a failure (no command, a folder that's gone) shows as a toast. */
-export async function controlStreamRun(projectId: string, streamId: string, action: StreamRunAction): Promise<void> {
-  const result = await window.api.streamRunControl(projectId, streamId, action)
+/**
+ * Run, Stop or Restart; a failure (no command, a folder that's gone) shows as a toast.
+ * `taskId` runs the app in that task's worktree (`StreamRuns.control`).
+ */
+export async function controlStreamRun(projectId: string, streamId: string, action: StreamRunAction, taskId?: string): Promise<void> {
+  const result = await (taskId ? window.api.streamRunControl(projectId, streamId, action, taskId) : window.api.streamRunControl(projectId, streamId, action))
     .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }))
   if (!result.ok) showToast(`Couldn't ${action === 'restart' ? 'restart' : action === 'stop' ? 'stop' : 'start'} the app: ${result.error}`)
 }

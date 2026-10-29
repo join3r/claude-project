@@ -1,9 +1,11 @@
-import { isShellCommandProject, type Project, type Stream } from './types'
+import { isShellCommandProject, type Project, type Stream, type Task } from './types'
 
 /**
  * A stream's app run: one command (the stream's own `runCommand`, else the
- * project's) started in the stream's folder, in a PTY of its own that no task
- * owns. Its output is the run's log, viewed on demand.
+ * project's) started in the stream's folder, or in the worktree of one of its
+ * tasks, in a PTY of its own that no task owns. Its output is the run's log,
+ * viewed on demand. A stream has one run at a time, wherever it runs, so two
+ * copies of a dev server never fight over a port.
  */
 
 /** `running` until the process ends; `stopped` when Stop (or Restart) ended it, `exited` when it ended by itself. */
@@ -17,6 +19,8 @@ export interface StreamRunState {
   endedAt?: number
   /** The process's exit code, once it has `exited`. */
   exitCode?: number
+  /** The task whose worktree it runs in; absent when it runs in the stream's folder. */
+  taskId?: string
 }
 
 export type StreamRunAction = 'start' | 'stop' | 'restart'
@@ -38,6 +42,16 @@ export function streamRunCommand(project: Project, stream: Stream | undefined): 
   const own = stream?.runCommand?.trim()
   if (own) return own
   return project.runCommand?.trim() || undefined
+}
+
+/** The task has a worktree of its own its stream's app can run in. */
+export function canRunAppInTask(project: Project, stream: Stream | undefined, task: Task): boolean {
+  return !!task.workspace && !!streamRunCommand(project, stream)
+}
+
+/** The task whose worktree the run is in; undefined when it runs in the stream's folder (or the task is gone). */
+export function streamRunTask(stream: Stream | undefined, run: StreamRunState | undefined): Task | undefined {
+  return run?.taskId ? stream?.tasks.find(task => task.id === run.taskId) : undefined
 }
 
 /**

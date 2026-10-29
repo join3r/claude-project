@@ -167,7 +167,8 @@ function buildStream(project: Project, stream: Stream, runs: StreamRunLookup): M
       status: run.status,
       startedAt: run.startedAt,
       ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
-      ...(run.status === 'exited' && run.exitCode !== undefined ? { exitCode: run.exitCode } : {})
+      ...(run.status === 'exited' && run.exitCode !== undefined ? { exitCode: run.exitCode } : {}),
+      ...(run.taskId ? { taskId: run.taskId } : {})
     }
   }
   return out

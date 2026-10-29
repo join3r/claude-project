@@ -310,8 +310,9 @@ extension DesktopConnection {
     /// arrives in the next inbox. Stop waits up to the desktop's grace period
     /// and a remote project may have to connect over SSH first, so this waits
     /// longer than other ops.
-    public func controlRun(projectId: String, streamId: String, action: StreamRunParams.Action) async throws {
-        let params = StreamRunParams(projectId: projectId, streamId: streamId, action: action)
+    /// `taskId` runs it in that task's own worktree (`stream.run.task`).
+    public func controlRun(projectId: String, streamId: String, action: StreamRunParams.Action, taskId: String? = nil) async throws {
+        let params = StreamRunParams(projectId: projectId, streamId: streamId, action: action, taskId: taskId)
         _ = try await request(TaskOp.streamRun, params: params.json, timeout: .seconds(60))
     }
 

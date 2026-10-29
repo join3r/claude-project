@@ -1,6 +1,7 @@
 import React from 'react'
 import { Play, RotateCw, Square } from 'lucide-react'
-import type { StreamRunAction, StreamRunState } from '../../shared/stream-run'
+import { canRunAppInTask, streamRunCommand, type StreamRunAction, type StreamRunState } from '../../shared/stream-run'
+import type { Project, Stream, Task } from '../../shared/types'
 import { controlStreamRun, openStreamRunLogs, useProjectStreamRun, useStreamRun } from '../streamRuns'
 import { RowAction } from './ui'
 
@@ -18,15 +19,45 @@ function runTone(run: StreamRunState | undefined): string {
   return 'text-text-subtle'
 }
 
-export function StreamRunStatusLabel({ run }: { run: StreamRunState | undefined }): React.ReactElement | null {
+/** `taskName`: the task whose worktree the run is in (`streamRunTask`). */
+export function StreamRunStatusLabel({ run, taskName }: { run: StreamRunState | undefined; taskName?: string }): React.ReactElement | null {
   const label = streamRunLabel(run)
   if (!label) return null
   return (
     <span className={`flex items-center gap-1.5 text-xs whitespace-nowrap ${runTone(run)}`} data-run-status={run?.status}>
       <span className="size-1.5 rounded-full bg-current" />
       {label}
+      {taskName && (
+        <span className="text-text-subtle min-w-0 truncate" title={`In ${taskName}'s worktree`} data-testid="run-task">
+          in <span className="font-mono">{taskName}</span>
+        </span>
+      )}
     </span>
   )
+}
+
+/** A task's own app entries (its menus): Run app here, or Restart, Stop and logs while the stream's app runs in it. */
+export interface TaskRunMenuEntry { label: string; title?: string; onSelect: () => void }
+
+export function taskRunMenuEntries(project: Project, stream: Stream | undefined, task: Task, run: StreamRunState | undefined): TaskRunMenuEntry[] {
+  if (!stream || !canRunAppInTask(project, stream, task)) return []
+  const command = streamRunCommand(project, stream)
+  const here = run?.taskId === task.id
+  if (here && run?.status === 'running') {
+    return [
+      { label: 'Restart app', onSelect: () => void controlStreamRun(project.id, stream.id, 'restart', task.id) },
+      { label: 'Stop app', onSelect: () => void controlStreamRun(project.id, stream.id, 'stop') },
+      { label: 'Show app logs', onSelect: () => openStreamRunLogs({ projectId: project.id, streamId: stream.id }) }
+    ]
+  }
+  const elsewhere = run?.status === 'running'
+  const entries: TaskRunMenuEntry[] = [{
+    label: 'Run app here',
+    title: elsewhere ? `Moves ${stream.name}'s app here: $ ${command}` : `$ ${command}`,
+    onSelect: () => void controlStreamRun(project.id, stream.id, 'start', task.id)
+  }]
+  if (here) entries.push({ label: 'Show app logs', onSelect: () => openStreamRunLogs({ projectId: project.id, streamId: stream.id }) })
+  return entries
 }
 
 interface ButtonsProps {
@@ -117,6 +148,29 @@ export function SidebarStreamRunAction({ projectId, streamId, command }: StreamP
     >
       {running ? <Square size={12} /> : <Play size={13} />}
     </RowAction>
+  )
+}
+
+/** {@link taskRunMenuEntries} as a menu section of buttons; nothing when the task can't run the app. */
+export function TaskRunMenuItems({ project, stream, task, itemClassName, onDone }: {
+  project: Project
+  stream: Stream | undefined
+  task: Task
+  itemClassName: string
+  /** Closes the menu; called before the item's action. */
+  onDone: () => void
+}): React.ReactElement | null {
+  const run = useStreamRun(project.id, stream?.id ?? '')
+  const entries = taskRunMenuEntries(project, stream, task, run)
+  if (entries.length === 0) return null
+  return (
+    <div className="border-b border-hair pb-1 mb-1" data-testid="task-menu-run">
+      {entries.map(entry => (
+        <button key={entry.label} className={itemClassName} title={entry.title} onClick={() => { onDone(); entry.onSelect() }}>
+          {entry.label}
+        </button>
+      ))}
+    </div>
   )
 }
 

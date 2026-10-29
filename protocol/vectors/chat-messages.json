@@ -1630,6 +1630,15 @@
           "streamId": "s-050",
           "action": "restart"
         }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"taskId\":\"t-auth\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-050",
+          "action": "start",
+          "taskId": "t-auth"
+        }
       }
     ],
     "results": [
@@ -1642,6 +1651,8 @@
         "{\"projectId\":\"p1\",\"streamId\":\"s-main\"}",
         "{\"projectId\":\"p1\",\"streamId\":\"s-main\",\"action\":\"pause\"}",
         "{\"projectId\":\"p1\",\"streamId\":7,\"action\":\"start\"}",
+        "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"taskId\":\"\"}",
+        "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"action\":\"start\",\"taskId\":7}",
         "null"
       ]
     }

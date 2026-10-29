@@ -52,7 +52,8 @@
         "status": { "enum": ["running", "exited", "stopped"] },
         "startedAt": { "type": "integer", "minimum": 0 },
         "endedAt": { "type": "integer", "minimum": 0 },
-        "exitCode": { "type": "integer", "description": "Only with `exited`." }
+        "exitCode": { "type": "integer", "description": "Only with `exited`." },
+        "taskId": { "type": "string", "description": "The task whose own worktree it runs in (stream.run.task); absent in the stream's folder." }
       }
     },
     "queuedPrompt": {

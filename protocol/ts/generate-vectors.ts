@@ -223,7 +223,7 @@ function appMessages(): unknown {
         streams: [
           // §8.19: `run` and `runCommand` (the stream's own, else the project's).
           { id: 's-main', name: 'main', main: true, runCommand: 'npm run dev', run: { status: 'running', startedAt: 1789999000000 } },
-          { id: 's-050', name: '0.5.0', branch: '0.5.0', queueAutoRun: true, queueTaskId: 't2', runCommand: 'npm run dev -- --port 5180', run: { status: 'exited', startedAt: 1789990000000, endedAt: 1789990500000, exitCode: 1 } },
+          { id: 's-050', name: '0.5.0', branch: '0.5.0', queueAutoRun: true, queueTaskId: 't2', runCommand: 'npm run dev -- --port 5180', run: { status: 'exited', startedAt: 1789990000000, endedAt: 1789990500000, exitCode: 1, taskId: 't2' } },
           { id: 's-bugs', name: 'bugfixes', queueAutoRun: true, runCommand: 'npm run dev', run: { status: 'stopped', startedAt: 1789980000000, endedAt: 1789980100000 } }
         ],
         lastStreamId: 's-050',
@@ -853,7 +853,9 @@ function chatMessages(): unknown {
       params: [
         text({ projectId: 'p1', streamId: 's-main', action: 'start' }),
         text({ projectId: 'p1', streamId: 's-main', action: 'stop', extra: 1 }),
-        text({ projectId: 'p1', streamId: 's-050', action: 'restart' })
+        text({ projectId: 'p1', streamId: 's-050', action: 'restart' }),
+        // `stream.run.task`: run in a task's own worktree.
+        text({ projectId: 'p1', streamId: 's-050', action: 'start', taskId: 't-auth' })
       ].map((json) => ({ json, expected: parseStreamRunParams(JSON.parse(json)) })),
       results: [text({})],
       invalid: {
@@ -863,6 +865,8 @@ function chatMessages(): unknown {
           text({ projectId: 'p1', streamId: 's-main' }),
           text({ projectId: 'p1', streamId: 's-main', action: 'pause' }),
           text({ projectId: 'p1', streamId: 7, action: 'start' }),
+          text({ projectId: 'p1', streamId: 's-050', action: 'start', taskId: '' }),
+          text({ projectId: 'p1', streamId: 's-050', action: 'start', taskId: 7 }),
           'null'
         ]
       }

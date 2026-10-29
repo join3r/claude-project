@@ -111,6 +111,7 @@ import {
   PIN_FEATURE,
   STREAM_NEW_FEATURE,
   STREAM_RUN_FEATURE,
+  STREAM_RUN_TASK_FEATURE,
   ChatLimits,
   PROJECT_NEW_FEATURE,
   TAB_CLOSE_FEATURE,
@@ -550,7 +551,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, CHAT_TASKS_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, CHAT_TASKS_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -660,9 +661,10 @@ export class HostServices {
       streamRuns: {
         state: (streamId) => this.streamRuns.state(streamId),
         subscribe: (listener) => this.streamRuns.subscribe(listener),
-        control: async ({ projectId, streamId, action }) => {
+        control: async ({ projectId, streamId, action, taskId }) => {
           if (!this.mobileStreamExists(projectId, streamId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such stream' }
-          const outcome = await this.streamRuns.control(projectId, streamId, action)
+          if (taskId && !this.mobileStreamHasTask(projectId, streamId, taskId)) return { ok: false, code: AppErrorCode.NotFound, message: 'No such task' }
+          const outcome = await this.streamRuns.control(projectId, streamId, action, taskId)
           return outcome.ok ? outcome : { ok: false, code: AppErrorCode.Internal, message: outcome.error }
         },
         logs: ({ projectId, streamId }) => {
@@ -682,6 +684,11 @@ export class HostServices {
   private mobileStreamExists(projectId: string, streamId: string): boolean {
     const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
     return !!project && isVisibleOnMobile(project) && project.streams.some(s => s.id === streamId)
+  }
+
+  private mobileStreamHasTask(projectId: string, streamId: string, taskId: string): boolean {
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    return !!project?.streams.find(s => s.id === streamId)?.tasks.some(t => t.id === taskId)
   }
 
   private mobileConfig(): MobileConfig {

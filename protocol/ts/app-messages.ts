@@ -135,6 +135,8 @@ export interface InboxStreamRun {
   startedAt: number
   endedAt?: number
   exitCode?: number
+  /** The task whose own worktree it runs in (`stream.run.task`); absent in the stream's folder. */
+  taskId?: string
 }
 
 /** A prompt in a project's queue (§4.4), waiting to become a task in stream `streamId`. */
@@ -474,6 +476,8 @@ function parseStreamRun(value: unknown): InboxStreamRun {
     if (typeof exitCode !== 'number' || !Number.isSafeInteger(exitCode)) fail('exitCode must be an integer')
     run.exitCode = exitCode
   }
+  const taskId = optStr(o, 'taskId')
+  if (taskId) run.taskId = taskId
   return run
 }
 

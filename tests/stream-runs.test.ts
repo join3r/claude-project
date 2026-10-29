@@ -141,6 +141,76 @@ describe('StreamRuns', () => {
     expect(states[states.length - 1]).toEqual(['p1', 's2', null])
   })
 
+  describe('in a task’s worktree', () => {
+    const taskWorkspace = { worktreePath: '/repo/.worktrees/0.5.0--fix-auth', branchName: '0.5.0--fix-auth', baseBranch: '0.5.0' }
+    function withTasks(): Project {
+      const p = project()
+      p.streams[1] = {
+        ...p.streams[1],
+        tasks: [
+          { id: 't-auth', name: 'fix-auth', tabs: [], workspace: taskWorkspace },
+          { id: 't-shared', name: 'shared', tabs: [] }
+        ]
+      } as never
+      return p
+    }
+
+    it('starts there and says which task it runs in', async () => {
+      const { runs, ptys } = setup(withTasks())
+      expect(await runs.control('p1', 's2', 'start', 't-auth')).toEqual({ ok: true })
+      expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({ id: streamRunTabId('s2'), cwd: '/repo/.worktrees/0.5.0--fix-auth' }))
+      expect(runs.state('s2')).toEqual({ status: 'running', command: 'npm run dev', startedAt: 1000, taskId: 't-auth' })
+    })
+
+    it('runs a task without a worktree of its own in the stream’s folder', async () => {
+      const { runs, ptys } = setup(withTasks())
+      await runs.control('p1', 's2', 'start', 't-shared')
+      expect(ptys.spawnDetached).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/repo/.worktrees/0.5.0' }))
+      expect(runs.state('s2')?.taskId).toBeUndefined()
+    })
+
+    it('refuses a task that isn’t in the stream', async () => {
+      const { runs, ptys } = setup(withTasks())
+      expect(await runs.control('p1', 's2', 'start', 't-nope')).toEqual({ ok: false, error: 'The task is gone' })
+      expect(ptys.spawnDetached).not.toHaveBeenCalled()
+    })
+
+    it('moves a running app there, and does nothing when it already runs there', async () => {
+      const { runs, ptys } = setup(withTasks())
+      await runs.control('p1', 's2', 'start')
+      const moved = runs.control('p1', 's2', 'start', 't-auth')
+      expect(ptys.writeFromMain).toHaveBeenCalledWith(streamRunTabId('s2'), '\x03')
+      runs.handleExit(streamRunTabId('s2'), 130)
+      expect(await moved).toEqual({ ok: true })
+      expect(ptys.spawnDetached).toHaveBeenLastCalledWith(expect.objectContaining({ cwd: '/repo/.worktrees/0.5.0--fix-auth' }))
+      await runs.control('p1', 's2', 'start', 't-auth')
+      expect(ptys.spawnDetached).toHaveBeenCalledTimes(2)
+    })
+
+    it('restarts where it ran', async () => {
+      const { runs, ptys } = setup(withTasks())
+      await runs.control('p1', 's2', 'start', 't-auth')
+      const restarted = runs.control('p1', 's2', 'restart')
+      runs.handleExit(streamRunTabId('s2'), 0)
+      await restarted
+      expect(ptys.spawnDetached).toHaveBeenLastCalledWith(expect.objectContaining({ cwd: '/repo/.worktrees/0.5.0--fix-auth' }))
+      expect(runs.state('s2')?.taskId).toBe('t-auth')
+    })
+
+    it('drops the run once its task leaves the stream', async () => {
+      const { runs, ptys, setData } = setup(withTasks())
+      await runs.control('p1', 's2', 'start', 't-auth')
+      runs.reconcile()
+      expect(ptys.discard).not.toHaveBeenCalled()
+      const closed = withTasks()
+      closed.streams[1].tasks = closed.streams[1].tasks.filter(t => t.id !== 't-auth')
+      setData({ projects: [closed] } as ProjectsData)
+      runs.reconcile()
+      expect(ptys.discard).toHaveBeenCalledWith(streamRunTabId('s2'))
+      expect(runs.state('s2')).toBeNull()
+    })
+  })
+
   it('lists one project’s runs', async () => {
     const { runs } = setup()
     await runs.control('p1', 's2', 'start')
