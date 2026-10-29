@@ -851,6 +851,31 @@ export interface CommitHistoryResult {
   commits: string[]
 }
 
+/** One commit of the project screen's branch graph (`git-branch-graph`). */
+export interface GitGraphCommit {
+  hash: string
+  /** First parent first, as git lists them. Parents past the limit are listed too. */
+  parents: string[]
+  subject: string
+  author: string
+  isoDate: string
+}
+
+/**
+ * The project's branches as a graph, newest first in topological order: the
+ * project folder's checked-out branch and the branches asked for (its streams'
+ * and tasks'), the ones that exist.
+ */
+export interface GitBranchGraph {
+  commits: GitGraphCommit[]
+  /** Each of those branches → its tip commit. */
+  tips: Record<string, string>
+  /** The project folder's checked-out branch; null when detached or not a repo. */
+  head: string | null
+  /** More commits than were asked for. */
+  more: boolean
+}
+
 export interface GitOperationResult {
   success: boolean
   message: string

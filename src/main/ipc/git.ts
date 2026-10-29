@@ -3,6 +3,7 @@ import path from 'path'
 import { promisify } from 'util'
 import type {
   CommitHistoryResult,
+  GitBranchGraph,
   GitDiffSummary,
   GitOperationResult,
   GitPostureLastCommit,
@@ -10,12 +11,14 @@ import type {
   GitRepoStatus,
   GitStatusResult
 } from '../../shared/types'
+import { EMPTY_BRANCH_GRAPH, readBranchGraph } from '../git-branch-graph'
 import { parseNumstat } from '../git-diff-summary'
 import { nestedGitRepos, repoForPath, toProjectEntries, toRepoPath } from '../git-repos'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from '../git-status-parse'
 import { findGitBashExe } from '../shell-env'
 import type { IpcRegistrar } from './registrar'
 import { optSafeId, optStr, str, stringList } from './schemas'
+import { v } from './validate'
 
 const execFileAsync = promisify(execFile)
 
@@ -263,6 +266,17 @@ export function registerGitHandlers(ipc: IpcRegistrar, deps: GitDeps): void {
       return { commits: [] }
     }
   })
+
+  ipc.handle('git-branch-graph', [str, v.array(v.string({ max: 256 }), { max: 500 }), v.number({ int: true, min: 1, max: 5000 }), optSafeId],
+    async (_event, projectCwd, branches, limit): Promise<GitBranchGraph> => {
+      const cwd = await rootOrNull(projectCwd)
+      if (!cwd) return { ...EMPTY_BRANCH_GRAPH }
+      try {
+        return await readBranchGraph(cwd, branches, limit)
+      } catch {
+        return { ...EMPTY_BRANCH_GRAPH }
+      }
+    })
 
   ipc.handle('fb-git-status', [str, optSafeId], async (_event, projectCwd): Promise<GitStatusResult> => {
     const result: GitStatusResult = { staged: [], unstaged: [], untracked: [], summary: { added: 0, deleted: 0 }, repos: [] }

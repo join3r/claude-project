@@ -102,7 +102,7 @@ describe('step 7 routes (files, editor, Git panel, chat, conda, notebooks, agent
       'fb-read-directory': 2, 'fb-read-file': 2, 'fb-write-file': 3, 'fb-create-file': 3, 'fb-create-directory': 3,
       'fb-rename': 3, 'fb-delete': 2, 'fb-git-status': 1, 'fb-git-diff': 2, 'fb-git-stage': 3, 'fb-git-unstage': 3,
       'fb-git-discard': 3, 'fb-git-pull': 2, 'fb-git-commit': 3, 'fb-git-push': 2, 'git-project-posture': 1,
-      'git-commit-history': 1, 'conda-list-envs': 0, 'chat-list-files': 1, 'chat-permissions-read': 1,
+      'git-commit-history': 1, 'git-branch-graph': 3, 'conda-list-envs': 0, 'chat-list-files': 1, 'chat-permissions-read': 1,
       'chat-permissions-update': 5, 'claude-session-exists': 2
     }
     for (const [channel, at] of Object.entries(byProject)) expect(routeKeys(channel), channel).toEqual([{ project: at }])

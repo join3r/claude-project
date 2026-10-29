@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppConfig,
   CommitHistoryResult,
+  GitBranchGraph,
   DirectoryEntry,
   GitOperationResult,
   GitDiffSummary,
@@ -470,6 +471,8 @@ const api = {
     ipcRenderer.invoke('git-task-diff-summary', taskCwd, baseBranch, projectId),
   gitCommitHistory: (projectCwd: string, projectId?: string): Promise<CommitHistoryResult> =>
     ipcRenderer.invoke('git-commit-history', projectCwd, projectId),
+  gitBranchGraph: (projectCwd: string, branches: string[], limit: number, projectId?: string): Promise<GitBranchGraph> =>
+    ipcRenderer.invoke('git-branch-graph', projectCwd, branches, limit, projectId),
   fbGitDiff: (projectCwd: string, relativeFilePath: string, projectId?: string): Promise<string> =>
     ipcRenderer.invoke('fb-git-diff', projectCwd, relativeFilePath, projectId),
   // `repo` is a GitRepoStatus.path (project-relative, '' for the root);

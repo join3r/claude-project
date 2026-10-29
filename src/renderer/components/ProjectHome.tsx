@@ -20,6 +20,7 @@ import { archivedTasksOf, visibleArchive } from '../../shared/archive'
 import { projectTasks, streamDirectory } from '../../shared/streams'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { paletteEvents } from '../palette/paletteEvents'
+import { BranchGraph } from './BranchGraph'
 import { CommitHeatmap } from './CommitHeatmap'
 import { PromptQueue } from './PromptQueue'
 import { CommitSparkline } from './CommitSparkline'
@@ -396,6 +397,15 @@ export function ProjectHome({ projectId }: Props): React.ReactElement | null {
                   )}
                 </div>
               )}
+            </FormGroup>
+          </>
+        )}
+
+        {isLocal && posture?.isGitRepo && (
+          <>
+            <GrpHead>Branches</GrpHead>
+            <FormGroup>
+              <BranchGraph project={project} projectDir={projectDir} enabled />
             </FormGroup>
           </>
         )}
