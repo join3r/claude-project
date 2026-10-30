@@ -1,5 +1,6 @@
 import type { PtyAttachResult, PtySessions } from '../pty-sessions'
 import type { StreamRuns, StreamRunResult } from '../stream-runs'
+import type { RunCommandSuggestResult, SuggestedRunCommand } from '../run-command-suggester'
 import { parseStreamRunTabId, type StreamRunState } from '../../shared/stream-run'
 import type { IpcRegistrar } from './registrar'
 import { optSafeId, safeId } from './schemas'
@@ -8,7 +9,11 @@ import { v } from './validate'
 export interface StreamRunDeps {
   streamRuns: StreamRuns
   ptySessions: PtySessions
+  /** Commands `claude` suggests for the project, or a stream when given (`run-command-suggester.ts`). */
+  suggestCommands: (projectId: string, streamId: string | undefined, current: SuggestedRunCommand[]) => Promise<RunCommandSuggestResult>
 }
+
+const suggestCurrent = v.array(v.object({ name: v.string({ max: 200 }), command: v.string({ max: 4000 }) }), { max: 50 })
 
 export interface StreamRunAttachResult extends PtyAttachResult {
   state: StreamRunState | null
@@ -18,10 +23,15 @@ export interface StreamRunAttachResult extends PtyAttachResult {
  * A stream's command runs (`src/shared/stream-run.ts`): Run (in a task's worktree
  * when given its id), Stop and Restart, and the logs view, which attaches to the
  * run's PTY like a terminal tab but never spawns one. Typing and resizing then go
- * through `pty-write` / `pty-resize`.
+ * through `pty-write` / `pty-resize`. Suggest asks `claude` for the commands
+ * themselves, which the editor shows before anything is saved.
  */
 export function registerStreamRunHandlers(ipc: IpcRegistrar, deps: StreamRunDeps): void {
   const { streamRuns, ptySessions } = deps
+
+  ipc.handle('run-commands-suggest', [safeId, optSafeId, suggestCurrent], (_ctx, projectId, streamId, current) =>
+    deps.suggestCommands(projectId, streamId, current)
+  )
 
   ipc.handle(
     'stream-run-control',

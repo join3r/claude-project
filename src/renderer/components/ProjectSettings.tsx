@@ -390,7 +390,11 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
 
       {!isShellCommandProject(project) && (
         <SetBlock label="Commands">
-          <RunCommandsEditor value={runCommands} onChange={setRunCommands} />
+          <RunCommandsEditor
+            value={runCommands}
+            onChange={setRunCommands}
+            suggest={isRemoteProject(project) ? undefined : (current) => window.api.runCommandsSuggest(project.id, undefined, current)}
+          />
           <HelperText>
             {runCommandsProblem
               ?? <>Install, run, run with another profile: each runs on its own from a stream&apos;s folder or a task&apos;s worktree, picked from Run on the stream&apos;s row or menu. A stream can add its own, or replace one by using the same name.</>}

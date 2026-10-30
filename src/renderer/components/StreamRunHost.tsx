@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { projectRunCommands, streamOwnRunCommands } from '../../shared/stream-run'
-import type { RunCommand } from '../../shared/types'
+import { isRemoteProject, type RunCommand } from '../../shared/types'
 import { closeStreamRunView, useStreamRunView, type StreamRunStreamTarget } from '../streamRuns'
 import StreamRunLogs from './StreamRunLogs'
 import { StreamRunPicker } from './StreamRunControls'
@@ -58,7 +58,14 @@ function StreamRunCommandsModal({ projectId, streamId }: StreamRunStreamTarget):
           ))}
         </div>
       )}
-      <RunCommandsEditor value={value} onChange={setValue} namePlaceholder={projectCommands[0]?.name ?? 'run'} onEnter={save} />
+      <RunCommandsEditor
+        value={value}
+        onChange={setValue}
+        namePlaceholder={projectCommands[0]?.name ?? 'run'}
+        onEnter={save}
+        suggest={isRemoteProject(project) ? undefined : (current) => window.api.runCommandsSuggest(projectId, streamId, current)}
+        inherited={projectCommands}
+      />
       <HelperText>
         {problem ?? (projectCommands.length > 0
           ? <>Only in this stream. Use a project command&apos;s name to replace it here; other names are added. They run in this stream&apos;s folder or a task&apos;s worktree.</>

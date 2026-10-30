@@ -128,6 +128,7 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'stream-run-states': project0,
   'stream-run-attach': { by: [{ project: 0 }, { tab: 1 }], pin: 'set' },
   'stream-run-detach': tab0,
+  'run-commands-suggest': project0,
 
   // workspaces (ipc/workspaces.ts)
   'workspace-list-branches': workspaceRequest,

@@ -364,6 +364,9 @@ const api = {
     taskId
       ? ipcRenderer.invoke('stream-run-control', projectId, streamId, commandId, action, taskId)
       : ipcRenderer.invoke('stream-run-control', projectId, streamId, commandId, action),
+  /** Install and run commands `claude` suggests for the project, or for `streamId`'s folder; nothing is saved. */
+  runCommandsSuggest: (projectId: string, streamId: string | undefined, current: Array<{ name: string; command: string }>): Promise<{ ok: true; commands: Array<{ name: string; command: string }> } | { ok: false; error: string }> =>
+    ipcRenderer.invoke('run-commands-suggest', projectId, streamId, current),
   streamRunStates: (projectId: string): Promise<Record<string, StreamRunState>> => ipcRenderer.invoke('stream-run-states', projectId),
   /** Starts showing a run's PTY (never spawns one); null when it has no output at all. */
   streamRunAttach: (projectId: string, tabId: string): Promise<{ cols: number; rows: number; scrollback: string; exitCode: number | null; state: StreamRunState | null } | null> =>

@@ -82,7 +82,8 @@ import { AutopilotRunner } from '../autopilot'
 import { runCodexReview } from '../codex-review'
 import { findAgentCli } from '../agent-clis'
 import { featureUnavailableReason } from '../../shared/project-features'
-import { findTaskInProject, removeTaskFromProject, taskTabs } from '../../shared/streams'
+import { findMainStream, findTaskInProject, removeTaskFromProject, streamDirectory, taskTabs } from '../../shared/streams'
+import { projectRunCommands } from '../../shared/stream-run'
 import { chatTabConfig } from '../../shared/chat-tab-config'
 import { MobileService } from '../mobile/mobile-service'
 import { PairingsStore } from '../mobile/pairings-store'
@@ -96,6 +97,7 @@ import { PushEmitter } from '../mobile/push-emitter'
 import { createStream, listProjectBranches, type StreamGit } from '../mobile/new-stream'
 import { addTaskWithChat } from '../mobile/new-task'
 import { suggestTaskName } from '../task-namer'
+import { suggestRunCommands, type RunCommandSuggestResult, type SuggestedRunCommand } from '../run-command-suggester'
 import { renameTaskIfStill } from '../../shared/task-name'
 import { registerTaskNameHandlers } from '../ipc/task-names'
 import { closeTask, findClosableTab, landTask, removeTabFromData } from '../mobile/close-task'
@@ -1109,6 +1111,34 @@ export class HostServices {
     })
   }
 
+  /**
+   * Install and run commands the user's `claude` suggests for the project (main's
+   * folder) or, with `streamId`, for that stream's folder, told what the stream
+   * already gets from the project. `current` is what the editor holds now. Nothing
+   * is saved: the editor shows them for the user to check.
+   */
+  suggestRunCommands(projectId: string, streamId: string | undefined, current: SuggestedRunCommand[]): Promise<RunCommandSuggestResult> {
+    const fail = (error: string): Promise<RunCommandSuggestResult> => Promise.resolve({ ok: false, error })
+    if (!this.isServer && !this.config.enableClaude) return fail('Claude is turned off in Settings')
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    if (!project) return fail('The project is gone')
+    if (isShellCommandProject(project)) return fail('A shell-command project runs one command')
+    if (isRemoteProject(project)) return fail('Not available for SSH projects yet')
+    const stream = streamId ? project.streams.find(s => s.id === streamId) : findMainStream(project)
+    if (streamId && !stream) return fail('The stream is gone')
+    // Main's commands are the project's; another stream's add to them.
+    const forStream = !!stream && stream !== findMainStream(project)
+    return suggestRunCommands({
+      dir: streamDirectory(project, stream),
+      current,
+      inherited: forStream ? projectRunCommands(project).map(({ name, command }) => ({ name, command })) : undefined
+    }, {
+      executable: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
+      env: () => getShellEnv(),
+      log: (message) => this.logDebug(message)
+    })
+  }
+
   /** Main-made tasks (a phone's `task.new`, the queue): retitled once a title comes back. */
   private nameTaskInBackground(projectId: string, taskId: string, prompt: string): void {
     const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
@@ -1235,7 +1265,11 @@ export class HostServices {
     })
 
     registerTerminalHandlers(ipc, { ptySessions: this.ptySessions, log })
-    registerStreamRunHandlers(ipc, { streamRuns: this.streamRuns, ptySessions: this.ptySessions })
+    registerStreamRunHandlers(ipc, {
+      streamRuns: this.streamRuns,
+      ptySessions: this.ptySessions,
+      suggestCommands: (projectId, streamId, current) => this.suggestRunCommands(projectId, streamId, current)
+    })
 
     registerProjectDirsHandlers(ipc, {
       getProjects: () => this.projectsStore.peek().projects,
