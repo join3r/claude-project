@@ -122,7 +122,8 @@ export interface TasksActions {
   deleteArchived: (projectId: string, ids: { tasks?: string[]; streams?: string[] }) => Promise<void>
   /** Rename a stream. Its branch keeps its name. */
   renameStream: (projectId: string, streamId: string, name: string) => void
-  setStreamRunCommands: (projectId: string, streamId: string, commands: RunCommand[]) => void
+  /** The stream's own commands and, with `projectCommands`, the project's too. */
+  setStreamRunCommands: (projectId: string, streamId: string, commands: RunCommand[], projectCommands?: RunCommand[]) => void
   /**
    * The task a tab opened with no task selected (the project's Home page) lands in:
    * `taskId` when it is one of the project's tasks, else the `main` stream's task
@@ -470,8 +471,8 @@ export function useTasks(
     mutateProjects(prev => renameStreamInData(prev, projectId, streamId, name))
   }, [mutateProjects])
 
-  const setStreamRunCommands = useCallback((projectId: string, streamId: string, commands: RunCommand[]) => {
-    mutateProjects(prev => setStreamRunCommandsInData(prev, projectId, streamId, commands))
+  const setStreamRunCommands = useCallback((projectId: string, streamId: string, commands: RunCommand[], projectCommands?: RunCommand[]) => {
+    mutateProjects(prev => setStreamRunCommandsInData(prev, projectId, streamId, commands, projectCommands))
   }, [mutateProjects])
 
   const taskForTab = useCallback((projectId: string, taskId: string | null, makeTab: () => Tab, name: string) => {

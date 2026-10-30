@@ -42,6 +42,8 @@ struct CommandsSheet: View {
     @State private var suggest: SuggestState = .idle
     /// Rows Suggest set or added, highlighted until saved.
     @State private var marked: Set<String> = []
+    /// The project's own Commands, opened from a stream's inherited list.
+    @State private var projectTarget: CommandsTarget?
     @FocusState private var focused: String?
 
     var body: some View {
@@ -90,6 +92,7 @@ struct CommandsSheet: View {
             }
             .interactiveDismissDisabled(saving || (loaded && changed))
             .task { await load() }
+            .sheet(item: $projectTarget, onDismiss: { Task { await reloadInherited() } }) { CommandsSheet(target: $0) }
         }
     }
 
@@ -126,6 +129,10 @@ struct CommandsSheet: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+            Button("Edit project commands", systemImage: "pencil") {
+                projectTarget = CommandsTarget(desktopId: target.desktopId, projectId: target.projectId, streamId: nil)
+            }
+            .disabled(locked)
         } header: {
             Text("From the project")
         } footer: {
@@ -239,6 +246,13 @@ struct CommandsSheet: View {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    /// After the project's commands were edited: only the inherited list changes, the rows stay as typed.
+    private func reloadInherited() async {
+        guard let result = try? await model.streamCommands(projectId: target.projectId, streamId: target.streamId, desktopId: target.desktopId)
+        else { return }
+        inherited = result.inherited
     }
 
     private func runSuggest() async {

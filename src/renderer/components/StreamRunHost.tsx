@@ -22,18 +22,25 @@ export default function StreamRunHost(): React.ReactElement | null {
   return <StreamRunCommandsModal key={`${view.projectId}:${view.streamId}`} projectId={view.projectId} streamId={view.streamId} />
 }
 
-/** The stream's own commands: one named like a project command replaces it here, the others are added. */
+/**
+ * A stream's commands: the project's, for every stream, and the stream's own,
+ * where one named like a project command replaces it here and the others are added.
+ * Both lists are edited here and saved together.
+ */
 function StreamRunCommandsModal({ projectId, streamId }: StreamRunStreamTarget): React.ReactElement | null {
   const { projects, setStreamRunCommands } = useApp()
   const project = projects.find(p => p.id === projectId)
   const stream = project?.streams.find(s => s.id === streamId)
+  const [projectValue, setProjectValue] = useState<RunCommand[]>(() => (project ? projectRunCommands(project) : []))
   const [value, setValue] = useState<RunCommand[]>(() => (project ? streamOwnRunCommands(project, stream) : []))
   if (!project || !stream) return null
+  const projectProblem = runCommandDraftsProblem(projectValue)
   const problem = runCommandDraftsProblem(value)
-  const projectCommands = projectRunCommands(project)
+  const projectCommands = cleanRunCommandDrafts(projectValue)
+  const canSuggest = !isRemoteProject(project)
   const save = () => {
-    if (problem) return
-    setStreamRunCommands(projectId, streamId, cleanRunCommandDrafts(value))
+    if (problem || projectProblem) return
+    setStreamRunCommands(projectId, streamId, cleanRunCommandDrafts(value), projectCommands)
     closeStreamRunView()
   }
   return (
@@ -43,34 +50,36 @@ function StreamRunCommandsModal({ projectId, streamId }: StreamRunStreamTarget):
       footer={
         <>
           <LinkBtn onClick={closeStreamRunView}>Cancel</LinkBtn>
-          <PrimaryButton onClick={save} disabled={!!problem}>Save</PrimaryButton>
+          <PrimaryButton onClick={save} disabled={!!problem || !!projectProblem}>Save</PrimaryButton>
         </>
       }
     >
-      {projectCommands.length > 0 && (
-        <div className="flex flex-col gap-0.5 mb-3" data-testid="stream-commands-project">
-          <div className="text-xs text-text-subtle">From the project</div>
-          {projectCommands.map(c => (
-            <div key={c.id} className="flex items-baseline gap-2 text-xs min-w-0">
-              <span className="text-text shrink-0">{c.name}</span>
-              <span className="font-mono text-text-subtle truncate" title={c.command}>{c.command}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      <RunCommandsEditor
-        value={value}
-        onChange={setValue}
-        namePlaceholder={projectCommands[0]?.name ?? 'run'}
-        onEnter={save}
-        suggest={isRemoteProject(project) ? undefined : (current) => window.api.runCommandsSuggest(projectId, streamId, current)}
-        inherited={projectCommands}
-      />
-      <HelperText>
-        {problem ?? (projectCommands.length > 0
-          ? <>Only in this stream. Use a project command&apos;s name to replace it here; other names are added. They run in this stream&apos;s folder or a task&apos;s worktree.</>
-          : <>Only in this stream; they run in its folder or a task&apos;s worktree. Set commands for every stream in Project settings.</>)}
-      </HelperText>
+      <div className="flex flex-col gap-1.5 mb-4" data-testid="stream-commands-project">
+        <div className="text-xs text-text-subtle">Every stream</div>
+        <RunCommandsEditor
+          value={projectValue}
+          onChange={setProjectValue}
+          onEnter={save}
+          suggest={canSuggest ? (current) => window.api.runCommandsSuggest(projectId, undefined, current) : undefined}
+        />
+        <HelperText>{projectProblem ?? <>The project&apos;s commands, the same as in Project settings.</>}</HelperText>
+      </div>
+      <div className="flex flex-col gap-1.5" data-testid="stream-commands-own">
+        <div className="text-xs text-text-subtle">Only in {stream.name}</div>
+        <RunCommandsEditor
+          value={value}
+          onChange={setValue}
+          namePlaceholder={projectCommands[0]?.name ?? 'run'}
+          onEnter={save}
+          suggest={canSuggest ? (current) => window.api.runCommandsSuggest(projectId, streamId, current) : undefined}
+          inherited={projectCommands}
+        />
+        <HelperText>
+          {problem ?? (projectCommands.length > 0
+            ? <>Use a project command&apos;s name to replace it here; other names are added. They run in this stream&apos;s folder or a task&apos;s worktree.</>
+            : <>They run in this stream&apos;s folder or a task&apos;s worktree.</>)}
+        </HelperText>
+      </div>
     </Modal>
   )
 }

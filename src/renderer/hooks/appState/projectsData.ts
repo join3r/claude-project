@@ -18,7 +18,7 @@ import {
   singlePane,
   taskTabIds
 } from '../../../shared/streams'
-import { withStreamRunCommands } from '../../../shared/stream-run'
+import { withProjectRunCommands, withStreamRunCommands } from '../../../shared/stream-run'
 import { addTabToPane, patchTabInTask } from '../../../shared/panes'
 import { dirBasename } from '../../../shared/paths'
 import { incrementLifetimeStat } from '../lifetimeStats'
@@ -241,11 +241,18 @@ export function renameStreamInData(data: ProjectsData, projectId: string, stream
 /**
  * Set (or, empty, clear) a stream's own commands: one named like a project
  * command replaces it in this stream, the others add to the project's. Older
- * data's single `runCommand` goes with it.
+ * data's single `runCommand` goes with it. With `projectCommands`, the
+ * project's own list is replaced too, in the same change.
  */
-export function setStreamRunCommandsInData(data: ProjectsData, projectId: string, streamId: string, commands: RunCommand[]): ProjectsData {
+export function setStreamRunCommandsInData(
+  data: ProjectsData,
+  projectId: string,
+  streamId: string,
+  commands: RunCommand[],
+  projectCommands?: RunCommand[]
+): ProjectsData {
   return mapProject(data, projectId, project => ({
-    ...project,
+    ...(projectCommands ? withProjectRunCommands(project, projectCommands) : project),
     streams: project.streams.map(stream => (stream.id === streamId ? withStreamRunCommands(stream, commands) : stream))
   }))
 }

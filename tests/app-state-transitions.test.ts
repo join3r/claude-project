@@ -29,6 +29,7 @@ import {
   removeProjectFromData,
   renameTabInData,
   reorderList,
+  setStreamRunCommandsInData,
   tabIdsOfTask,
   togglePinnedItemInData
 } from '../src/renderer/hooks/appState/projectsData'
@@ -101,6 +102,20 @@ describe('projectsData', () => {
     expect(typeof t.lastInteractedAt).toBe('number')
     expect(t).not.toHaveProperty('workspaceDraft')
     expect(tabIdsOfTask(task('x', [tab('a')], [tab('z')]))).toEqual(['a', 'z'])
+  })
+
+  it('setStreamRunCommandsInData sets the stream\'s commands and, given them, the project\'s', () => {
+    const project: Project = { ...fixtureProject({ id: 'p' }), runCommand: 'npm start' }
+    const data: ProjectsData = { projects: [project], tags: [] } as unknown as ProjectsData
+    const streamId = project.streams[0].id
+    const own = [{ id: 's1', name: 'test', command: 'npm test' }]
+    const kept = setStreamRunCommandsInData(data, 'p', streamId, own).projects[0]
+    expect(kept.runCommand).toBe('npm start')
+    expect(kept.streams[0].runCommands).toEqual(own)
+    const edited = setStreamRunCommandsInData(data, 'p', streamId, own, [{ id: 'c1', name: 'dev', command: 'npm run dev' }]).projects[0]
+    expect(edited.runCommand).toBeUndefined()
+    expect(edited.runCommands).toEqual([{ id: 'c1', name: 'dev', command: 'npm run dev' }])
+    expect(setStreamRunCommandsInData(data, 'p', streamId, own, []).projects[0]).not.toHaveProperty('runCommands')
   })
 
   it('getProjectDir prefers the remote directory', () => {
