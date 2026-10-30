@@ -32,7 +32,7 @@ interface Props {
   initialPrompt?: string
   getProjectDir: (project: Project) => string
   /** Which agents are switched on, and the last agent and mode a prompt went to. */
-  config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi' | 'promptBoxAgent' | 'promptBoxMode'>
+  config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi' | 'promptBoxAgent' | 'promptBoxMode'> & Partial<Pick<AppConfig, 'autopilotReview'>>
   allTags: readonly Tag[]
   onEnsureTag: (name: string) => string
   onAddProject: (name: string, directory: string, tagIds?: string[]) => Project
@@ -95,7 +95,8 @@ export default function NewTaskModal({
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
   const [kind, setKind] = useState<NewTaskKind>('agent')
-  const [autopilot, setAutopilot] = useState<DeskAutopilot>(AUTOPILOT_OFF)
+  // Off every time; "+ Codex review" starts the way Settings has it.
+  const [autopilot, setAutopilot] = useState<DeskAutopilot>({ ...AUTOPILOT_OFF, review: config.enableCodex && !!config.autopilotReview })
   // Null: the target project's current stream.
   const [pickedStreamId, setPickedStreamId] = useState<string | null>(defaultStreamId ?? null)
   // With one project there is no filter to type into, so the prompt keeps focus.
@@ -241,10 +242,10 @@ export default function NewTaskModal({
   const draft = { target, prompt: promptText }
   const valid = isNewTaskDraftValid(draft) && !imagesNeedPrompt
 
-  /** `withAutopilot`: ⌘↵, which turns Autopilot on for this one start (⇧⌘↵ with a Codex review). */
-  const handleCreate = (withAutopilot: DeskAutopilot | null = null): void => {
+  /** `forceAutopilot`: ⌘↵, which starts on Autopilot even with the chip off (the chip's review choice still holds). */
+  const handleCreate = (forceAutopilot = false): void => {
     if (!valid || !target) return
-    const run = canAutopilot && promptText ? (withAutopilot ?? (autopilot.on ? autopilot : null)) : null
+    const run = canAutopilot && promptText && (forceAutopilot || autopilot.on) ? autopilot : null
     const where = target.kind === 'project' && streamId ? { streamId } : {}
     if (terminal) {
       onCreate({ target, ...where, terminal: takesCommand && promptText ? { command: promptText } : {} })
@@ -269,7 +270,7 @@ export default function NewTaskModal({
   const onPromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
       e.preventDefault()
-      handleCreate(canAutopilot ? { on: true, review: e.shiftKey } : null)
+      handleCreate(true)
     } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleCreate()

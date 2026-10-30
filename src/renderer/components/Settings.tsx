@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
-import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, TerminalColorScheme } from '../../shared/types'
+import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, PromptBoxAgent, TerminalColorScheme } from '../../shared/types'
+import { PROMPT_BOX_AGENTS } from '../../shared/types'
+import { PROMPT_BOX_AGENT_LABEL } from './promptBox'
 import { useApp } from '../context/AppContext'
 import { TERMINAL_SCHEME_OPTIONS } from './terminalThemes'
 import {
@@ -374,6 +376,37 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                 }
               />
             </Group>
+
+            <GrpHead>Quick task</GrpHead>
+            <FormGroup>
+              <SetBlock label="Agent">
+                <Select
+                  value={config.deskAgent}
+                  onChange={(e) => updateConfig({ deskAgent: e.target.value as PromptBoxAgent })}
+                >
+                  {PROMPT_BOX_AGENTS.filter(agent => (agent === 'codex' ? config.enableCodex : agent === 'pi' ? config.enablePi : config.enableClaude) || agent === config.deskAgent).map(agent => (
+                    <option key={agent} value={agent}>{agent === 'claude-chat' ? 'Claude (chat)' : PROMPT_BOX_AGENT_LABEL[agent]}</option>
+                  ))}
+                </Select>
+                <HelperText>
+                  What the sidebar&apos;s &ldquo;Ask or give a task&hellip;&rdquo; box and the ⌘K bar start. Options&hellip; picks another for one task.
+                </HelperText>
+              </SetBlock>
+            </FormGroup>
+            {config.enableCodex && (
+              <Group>
+                <GroupRow
+                  label="Codex reviews Autopilot tasks"
+                  sub="A quick task fired with ⌘↵ goes on Autopilot; with this on, Codex reviews its changes before it lands. The New task form has its own switch."
+                  trailing={
+                    <Switch
+                      checked={config.autopilotReview}
+                      onChange={(autopilotReview) => updateConfig({ autopilotReview })}
+                    />
+                  }
+                />
+              </Group>
+            )}
 
             <GrpHead>Claude Code</GrpHead>
             {config.enableClaude && (

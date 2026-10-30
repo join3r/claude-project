@@ -32,16 +32,21 @@ export function writeLastProject(id: string): void {
   try { window.localStorage.setItem(LAST_PROJECT_KEY, id) } catch { /* storage blocked: the default just falls back */ }
 }
 
-/** The agents a project offers and the one a task starts with: a chip's pick, else Claude chat (the desk's agent), else the saved one. */
+/**
+ * The agents a project offers and the one a task starts with: a chip's pick,
+ * else Settings' quick-task agent (Claude chat unless changed), else the saved one.
+ * `isDefault`: it is the Settings one, so the compose box needn't name it.
+ */
 export function deskAgents(
   config: AppConfig,
   project: Project | undefined,
   override: PromptBoxAgent | null
-): { agents: PromptBoxAgent[]; agent: PromptBoxAgent | null } {
+): { agents: PromptBoxAgent[]; agent: PromptBoxAgent | null; isDefault: boolean } {
   const agents = project ? availablePromptAgents(config, project) : []
+  const preferred = config.deskAgent ?? 'claude-chat'
   const agent = (override && agents.includes(override) ? override : null)
-    ?? (agents.includes('claude-chat') ? 'claude-chat' : pickPromptAgent(config.promptBoxAgent, agents))
-  return { agents, agent }
+    ?? (agents.includes(preferred) ? preferred : pickPromptAgent(config.promptBoxAgent, agents))
+  return { agents, agent, isDefault: agent === preferred }
 }
 
 /**
@@ -66,6 +71,28 @@ export function deskSubmission(
   }
 }
 
+/** When you last worked in a stream: its most recently touched task. */
+function streamRecency(stream: Stream): number {
+  return stream.tasks.reduce((latest, task) => Math.max(latest, task.lastInteractedAt ?? 0), 0)
+}
+
+/** When you last worked in a project, across its streams. */
+export function projectRecency(project: Project): number {
+  return project.streams.reduce((latest, stream) => Math.max(latest, streamRecency(stream)), 0)
+}
+
+/**
+ * The `@project` being typed at the caret: an `@` at the start or after
+ * whitespace, with no whitespace between it and the caret. Null when there is none.
+ */
+export function mentionAt(text: string, caret: number): { start: number; query: string } | null {
+  const before = text.slice(0, caret)
+  const at = before.lastIndexOf('@')
+  if (at < 0 || (at > 0 && !/\s/.test(before[at - 1]))) return null
+  const query = before.slice(at + 1)
+  return /\s/.test(query) ? null : { start: at, query }
+}
+
 /** A row of the compose box's where picker: a project, or one of its non-main streams. */
 export interface WhereOption {
   key: string
@@ -74,13 +101,19 @@ export interface WhereOption {
 }
 
 /**
- * The where picker's rows, each project followed by its non-main streams.
+ * The where picker's rows, most recently worked in first, each project
+ * followed by its non-main streams.
  * Typed text narrows them (a stream matches on "project stream"), best first.
  */
 export function whereOptions(projects: readonly Project[], filter: string): WhereOption[] {
-  const all: WhereOption[] = projects.flatMap(project => [
+  const byRecency = <T>(items: readonly T[], at: (item: T) => number): T[] =>
+    items.map((item, index) => ({ item, index, at: at(item) }))
+      .sort((x, y) => y.at - x.at || x.index - y.index)
+      .map(entry => entry.item)
+  const all: WhereOption[] = byRecency(projects, projectRecency).flatMap(project => [
     { key: project.id, project },
-    ...project.streams.filter(stream => !stream.isMain).map(stream => ({ key: `${project.id}:${stream.id}`, project, stream }))
+    ...byRecency(project.streams.filter(stream => !stream.isMain), streamRecency)
+      .map(stream => ({ key: `${project.id}:${stream.id}`, project, stream }))
   ])
   const query = filter.trim()
   if (!query) return all

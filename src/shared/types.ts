@@ -746,6 +746,10 @@ export interface AppConfig {
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
   promptBoxMode: string
+  /** Settings → AI: the agent the sidebar's quick task (and the ⌘K bar) starts. */
+  deskAgent: PromptBoxAgent
+  /** Settings → AI: a quick task fired on Autopilot (⌘↵) has Codex review it before it lands. */
+  autopilotReview: boolean
   /**
    * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
    * window's stale copy cannot flip it back.
@@ -1034,6 +1038,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   showProjectIcons: false,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
+  deskAgent: 'claude-chat',
+  autopilotReview: false,
   externalEditors: { editors: [], defaultId: null },
   mobile: { ...DEFAULT_MOBILE_CONFIG },
   hosts: []

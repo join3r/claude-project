@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import type { AppConfig, DeskScope, Project, PromptBoxAgent } from '../../../shared/types'
+import type { AppConfig, DeskScope, Project } from '../../../shared/types'
 import ProjectTileBadge from '../ProjectTileBadge'
 import { PROMPT_BOX_AGENT_LABEL } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
@@ -7,19 +7,20 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { composeTarget } from './deskInbox'
 import { deskEvents } from './deskEvents'
-import { autopilotAvailable, deskAgents, deskSubmission, readLastProject, whereOptions, writeLastProject, type DeskAutopilot } from './deskStart'
+import { autopilotAvailable, deskAgents, deskSubmission, mentionAt, readLastProject, whereOptions, writeLastProject, type WhereOption } from './deskStart'
 import { paletteEvents } from '../../palette/paletteEvents'
 
 const chipCls = 'flex items-center gap-1.5 bg-surface-3 border border-border rounded-full px-2.5 py-[3px] text-sm text-body cursor-pointer hover:border-border-strong min-w-0'
 
 /**
- * The desk's compose box: "Ask or give a task…", a where chip (project › stream)
- * and an agent chip. Where comes first: ⌘N (and `@` in an empty box) opens the
- * where picker, type to narrow, ↵ picks and hands you to the prompt. ↵ fires
- * the task into the chosen stream and leaves you here; ⇧↵ is a new line. It
- * aims at the column's scope unless the picker says otherwise. Agent tasks
- * start in auto mode (decision 2 of the redesign); ⌘↵ fires one on Autopilot,
- * so main takes it to Done, and ⇧⌘↵ adds a Codex review.
+ * The desk's compose box: "Ask or give a task…" and a where chip (project ›
+ * stream). Typing `@` opens a search over projects and streams, most recently
+ * worked in first; ↵ or Tab picks one and drops the `@word` from the text. ↵
+ * fires the task into the chosen stream and leaves you here; ⇧↵ is a new line;
+ * ⌘↵ fires it on Autopilot (Settings says whether Codex reviews it). It aims at
+ * the column's scope unless a pick says otherwise. The agent is Settings'
+ * quick-task one, named on a chip only when a project can't run it. Agent tasks
+ * start in auto mode (decision 2 of the redesign).
  */
 export default function DeskCompose({ projects, scope, config, theme, onCompose }: {
   projects: readonly Project[]
@@ -29,31 +30,21 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   onCompose: (submission: NewTaskSubmission) => void
 }): React.ReactElement {
   const [text, setText] = useState('')
+  const [caret, setCaret] = useState(0)
   // A picked where overrides the scope until the next fire or scope change.
   const [override, setOverride] = useState<DeskScope | null>(null)
-  const [whereMenu, setWhereMenu] = useState<MenuAnchor | null>(null)
-  const [agentOverride, setAgentOverride] = useState<PromptBoxAgent | null>(null)
+  // Escape closes the search for the `@` at this offset until another one is typed.
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null)
+  const [cursor, setCursor] = useState(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const whereRef = useRef<HTMLButtonElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setOverride(null) }, [scope?.projectId, scope?.streamId])
 
-  const openWhere = (): void => {
-    const r = whereRef.current?.getBoundingClientRect()
-    if (r) setWhereMenu({ x: r.left, y: r.bottom + 4 })
-  }
-
-  // ⌘N with nowhere given starts on the picker; "New task in…" already said where.
   useEffect(() => deskEvents.onFocusCompose((where) => {
-    if (where) {
-      setOverride(where)
-      inputRef.current?.focus()
-    } else if (projects.length > 1) {
-      openWhere()
-    } else {
-      inputRef.current?.focus()
-    }
-  }), [projects.length])
+    if (where) setOverride(where)
+    inputRef.current?.focus()
+  }), [])
 
   // Options… keeps the text until the form files it: closing the form must not lose what you typed.
   useEffect(() => deskEvents.onClearCompose(() => { setText(''); setOverride(null) }), [])
@@ -62,9 +53,21 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     () => composeTarget(projects, override ?? scope, readLastProject()),
     [projects, override, scope]
   )
-  // Claude chat first: it is the agent the desk is built around.
-  const { agents, agent } = deskAgents(config, target?.project, agentOverride)
+  const { agent, isDefault } = deskAgents(config, target?.project, null)
   const canAutopilot = autopilotAvailable(target?.project, agent)
+
+  const found = mentionAt(text, caret)
+  const mention = found && found.start !== dismissedAt ? found : null
+  const query = mention ? mention.query : null
+  const options = useMemo(() => (query === null ? [] : whereOptions(projects, query)), [projects, query])
+  useEffect(() => { setCursor(0) }, [query, mention?.start])
+  // Under the box, placed once when the search opens.
+  const searching = mention !== null
+  const anchor = useMemo<MenuAnchor | null>(() => {
+    if (!searching) return null
+    const r = boxRef.current?.getBoundingClientRect()
+    return r ? { x: r.left, y: r.bottom + 4 } : null
+  }, [searching])
 
   useEffect(() => {
     const el = inputRef.current
@@ -73,77 +76,100 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`
   }, [text])
 
-  const fire = (autopilot: DeskAutopilot | null): void => {
+  const edit = (next: string, nextCaret: number): void => {
+    setText(next)
+    setCaret(nextCaret)
+    if (dismissedAt !== null && mentionAt(next, nextCaret)?.start !== dismissedAt) setDismissedAt(null)
+  }
+
+  /** Aim at the option and take its `@word` out of the text. */
+  const pick = (option: WhereOption | undefined): void => {
+    if (!option || !mention) return
+    setOverride(option.stream ? { projectId: option.project.id, streamId: option.stream.id } : { projectId: option.project.id })
+    const rest = text.slice(caret).replace(/^ /, '')
+    const head = text.slice(0, mention.start)
+    edit(head + rest, head.length)
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(head.length, head.length)
+    })
+  }
+
+  const fire = (onAutopilot: boolean): void => {
     const prompt = text.trim()
     if (!prompt || !target) return
     writeLastProject(target.project.id)
-    onCompose(deskSubmission(target.project, target.stream, agent, prompt, autopilot))
-    setText('')
+    onCompose(deskSubmission(target.project, target.stream, agent, prompt, onAutopilot && canAutopilot ? { on: true, review: config.autopilotReview } : null))
+    edit('', 0)
     setOverride(null)
   }
 
   const whereLabel = target
     ? (target.stream && !target.stream.isMain ? `${target.project.name} › ${target.stream.name}` : target.project.name)
     : 'No project yet'
+  const autopilotHint = canAutopilot ? ` · ⌘↵ on Autopilot${config.autopilotReview ? ' with a Codex review' : ''}` : ''
 
   return (
-    <div className="@container border border-line bg-row-hover rounded-[10px] px-3 py-2.5 flex flex-col gap-2 focus-within:border-border-strong" data-testid="desk-compose">
+    <div ref={boxRef} className="@container border border-line bg-row-hover rounded-[10px] px-3 py-2.5 flex flex-col gap-2 focus-within:border-border-strong" data-testid="desk-compose">
       <textarea
         ref={inputRef}
         rows={1}
         aria-label="New task"
-        placeholder={`Ask or give a task…   ${formatShortcutForApp('CmdOrCtrl+N')}`}
-        title={canAutopilot ? '↵ starts the task · ⌘↵ on Autopilot · ⇧⌘↵ Autopilot with a Codex review · @ picks the project' : '↵ starts the task · @ picks the project'}
+        placeholder="Ask or give a task… @ picks the project"
+        title={`↵ starts the task${autopilotHint} · @ picks the project · ${formatShortcutForApp('CmdOrCtrl+N')} comes back here`}
         className="bg-transparent border-0 outline-none text-text text-md resize-none leading-snug placeholder:text-text-muted"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => edit(e.target.value, e.target.selectionStart)}
+        onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+        onBlur={() => setDismissedAt(found?.start ?? null)}
+        onFocus={(e) => { setCaret(e.currentTarget.selectionStart); setDismissedAt(null) }}
         onKeyDown={(e) => {
           if (e.nativeEvent.isComposing) return
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            fire(canAutopilot ? { on: true, review: e.shiftKey } : null)
-          } else if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            fire(null)
-          } else if (e.key === '@' && !text && projects.length > 1) {
-            e.preventDefault()
-            openWhere()
-          } else if (e.key === 'Escape') {
-            e.currentTarget.blur()
+          if (mention) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(i => Math.min(i + 1, Math.max(0, options.length - 1))); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(i => Math.max(0, i - 1)); return }
+            if ((e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) || (e.key === 'Tab' && !e.shiftKey)) {
+              if (options.length > 0) { e.preventDefault(); pick(options[cursor]); return }
+            }
+            if (e.key === 'Escape') { e.preventDefault(); setDismissedAt(mention.start); return }
           }
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); fire(true) }
+          else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(false) }
+          else if (e.key === 'Escape') { e.currentTarget.blur() }
         }}
         data-testid="desk-compose-input"
       />
       <div className="flex gap-1.5 items-center min-w-0">
         <button
-          ref={whereRef}
           type="button"
           className={`${chipCls} shrink`}
-          onClick={openWhere}
-          title={`Where the task goes: ${whereLabel} (${formatShortcutForApp('CmdOrCtrl+N')} or @ to pick it from the keyboard)`}
+          onClick={() => {
+            const el = inputRef.current
+            const at = el?.selectionStart ?? text.length
+            const pad = at > 0 && !/\s/.test(text[at - 1]) ? ' ' : ''
+            edit(text.slice(0, at) + pad + '@' + text.slice(at), at + pad.length + 1)
+            setDismissedAt(null)
+            requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at + pad.length + 1, at + pad.length + 1) })
+          }}
+          title={`Where the task goes: ${whereLabel}. Type @ to pick another.`}
           data-testid="desk-compose-where"
         >
           {target && <ProjectTileBadge project={target.project} theme={theme} size={14} />}
           <span className="overflow-hidden text-ellipsis whitespace-nowrap">{whereLabel}</span>
         </button>
-        {agents.length > 1 ? (
-          <button
-            type="button"
-            className={`${chipCls} shrink-0 whitespace-nowrap`}
-            title="Agent (click to switch)"
-            onClick={() => {
-              const index = agent ? agents.indexOf(agent) : -1
-              setAgentOverride(agents[(index + 1) % agents.length])
-            }}
-          >{agent ? PROMPT_BOX_AGENT_LABEL[agent] : 'Terminal'}</button>
-        ) : (
-          <span className={`${chipCls} shrink-0 whitespace-nowrap cursor-default`}>{agent ? PROMPT_BOX_AGENT_LABEL[agent] : 'Terminal'}</span>
+        {/* Settings' agent goes unsaid; one a project falls back to is named. */}
+        {!isDefault && (
+          <span className={`${chipCls} shrink-0 whitespace-nowrap cursor-default`} title="This project can't run the agent picked in Settings">
+            {agent ? PROMPT_BOX_AGENT_LABEL[agent] : 'Terminal'}
+          </span>
         )}
         <span className="flex-1" />
         <button
           type="button"
           className="shrink-0 px-1.5 py-px rounded-md border-0 bg-transparent text-xs text-text-muted cursor-pointer hover:text-text hover:bg-surface-3 whitespace-nowrap"
-          title="The full form: model, permission mode, effort, Autopilot, pictures, a terminal task, any folder"
+          title="The full form: agent, model, permission mode, effort, Autopilot, pictures, a terminal task, any folder"
           onClick={() => {
             paletteEvents.emit('open-new-task-form', {
               ...(target ? { projectId: target.project.id, ...(target.stream ? { streamId: target.stream.id } : {}) } : {}),
@@ -152,53 +178,42 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
           }}
           data-testid="desk-compose-options"
         >Options…</button>
-        {/* A narrow sidebar keeps the chips and drops the key hint (it is the textarea's tooltip too). */}
+        {/* A narrow sidebar keeps the chip and drops the key hint (it is the textarea's tooltip too). */}
         <span className="hidden @[440px]:inline font-mono text-xs text-text-muted whitespace-nowrap">
           ↵ fire{canAutopilot && ' · ⌘↵ autopilot'}
         </span>
       </div>
       <WhereMenu
-        anchor={whereMenu}
-        projects={projects}
-        current={target ? (target.stream && !target.stream.isMain ? `${target.project.id}:${target.stream.id}` : target.project.id) : null}
+        anchor={anchor}
+        options={options}
+        cursor={cursor}
+        filtered={!!mention?.query}
         theme={theme}
-        onPick={(where) => { setOverride(where); setWhereMenu(null); inputRef.current?.focus() }}
-        onClose={() => { setWhereMenu(null); inputRef.current?.focus() }}
-        onDismiss={() => setWhereMenu(null)}
+        onHover={setCursor}
+        onPick={pick}
+        onDismiss={() => { if (mention) setDismissedAt(mention.start) }}
       />
     </div>
   )
 }
 
-/** Projects, each with its non-main streams under it; a filter field on top drives it from the keyboard. */
-function WhereMenu({ anchor, projects, current, theme, onPick, onClose, onDismiss }: {
+/** The `@` search's rows: projects, each with its non-main streams under it (flat, "project › stream", once filtered). */
+function WhereMenu({ anchor, options, cursor, filtered, theme, onHover, onPick, onDismiss }: {
   anchor: MenuAnchor | null
-  projects: readonly Project[]
-  current: string | null
+  options: readonly WhereOption[]
+  cursor: number
+  filtered: boolean
   theme: 'dark' | 'light'
-  onPick: (where: DeskScope) => void
-  /** Escape: back to the prompt. */
-  onClose: () => void
-  /** A click elsewhere: the click decides where focus goes. */
+  onHover: (index: number) => void
+  onPick: (option: WhereOption) => void
+  /** A click elsewhere. */
   onDismiss: () => void
 }): React.ReactElement | null {
   const pos = useMenuPosition<HTMLDivElement>(anchor)
-  const [filter, setFilter] = useState('')
-  const [cursor, setCursor] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
-  const options = useMemo(() => whereOptions(projects, filter), [projects, filter])
-
-  // Open on what the box already aims at, so ↵ alone keeps it.
-  useEffect(() => {
-    if (!anchor) return
-    setFilter('')
-    setCursor(Math.max(0, whereOptions(projects, '').findIndex(option => option.key === current)))
-  }, [anchor])
-  useEffect(() => { if (filter) setCursor(0) }, [filter])
   useEffect(() => {
     listRef.current?.querySelector(`[data-where-index="${cursor}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [cursor, options])
-
   useEffect(() => {
     if (!anchor) return
     window.addEventListener('mousedown', onDismiss)
@@ -206,50 +221,30 @@ function WhereMenu({ anchor, projects, current, theme, onPick, onClose, onDismis
   }, [anchor, onDismiss])
   if (!anchor) return null
 
-  const pick = (index: number): void => {
-    const option = options[index]
-    if (option) onPick(option.stream ? { projectId: option.project.id, streamId: option.stream.id } : { projectId: option.project.id })
-  }
-
   return (
     <div
       ref={pos.ref}
-      className="fixed z-(--z-menu) w-[260px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.5)] flex flex-col"
+      className="fixed z-(--z-menu) w-[260px] bg-surface-3 border border-border-strong rounded-[10px] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.5)] overflow-y-auto"
       style={pos.style}
-      onMouseDown={(e) => e.stopPropagation()}
+      // Keep focus (and the caret) in the textarea.
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
       data-testid="desk-compose-where-menu"
     >
-      <input
-        autoFocus
-        value={filter}
-        placeholder="Project or stream…"
-        aria-label="Where the task goes"
-        className="mb-1 px-2.5 py-1.5 rounded-md bg-field border border-border text-base text-text outline-none placeholder:text-text-muted focus:border-border-focus"
-        onChange={(e) => setFilter(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return
-          if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(i => Math.min(i + 1, Math.max(0, options.length - 1))) }
-          else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(i => Math.max(0, i - 1)) }
-          else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) { e.preventDefault(); pick(cursor) }
-          else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() }
-        }}
-        data-testid="desk-compose-where-filter"
-      />
-      <div ref={listRef} className="overflow-y-auto min-h-0">
-        {options.length === 0 && <div className="px-2.5 py-1.5 text-sm text-text-muted">No match</div>}
-        {options.map((option, index) => {
-          const sel = index === cursor ? 'bg-sel' : 'bg-transparent'
-          return option.stream ? (
-            <button key={option.key} type="button" data-where-index={index} className={`flex w-full items-center gap-2 pl-[34px] pr-2.5 py-1 rounded-md border-0 text-sm cursor-pointer hover:bg-sel hover:text-text text-left font-mono ${sel} ${index === cursor ? 'text-text' : 'text-text-muted'}`} onMouseMove={() => setCursor(index)} onClick={() => pick(index)}>
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{filter ? `${option.project.name} › ${option.stream.name}` : `› ${option.stream.name}`}</span>
-            </button>
-          ) : (
-            <button key={option.key} type="button" data-where-index={index} className={`flex w-full items-center gap-2 px-2.5 py-1.5 rounded-md border-0 text-base text-text cursor-pointer hover:bg-sel text-left ${sel}`} onMouseMove={() => setCursor(index)} onClick={() => pick(index)}>
-              <ProjectTileBadge project={option.project} theme={theme} size={16} />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{option.project.name}</span>
-            </button>
-          )
-        })}
+      <div ref={listRef}>
+      {options.length === 0 && <div className="px-2.5 py-1.5 text-sm text-text-muted">No project or stream matches</div>}
+      {options.map((option, index) => {
+        const selected = index === cursor
+        return option.stream ? (
+          <button key={option.key} type="button" data-where-index={index} className={`flex w-full items-center gap-2 ${filtered ? 'pl-2.5' : 'pl-[34px]'} pr-2.5 py-1 rounded-md border-0 text-sm cursor-pointer text-left font-mono ${selected ? 'bg-sel text-text' : 'bg-transparent text-text-muted'}`} onMouseMove={() => onHover(index)} onClick={() => onPick(option)}>
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap">{filtered ? `${option.project.name} › ${option.stream.name}` : `› ${option.stream.name}`}</span>
+          </button>
+        ) : (
+          <button key={option.key} type="button" data-where-index={index} className={`flex w-full items-center gap-2 px-2.5 py-1.5 rounded-md border-0 text-base text-text cursor-pointer text-left ${selected ? 'bg-sel' : 'bg-transparent'}`} onMouseMove={() => onHover(index)} onClick={() => onPick(option)}>
+            <ProjectTileBadge project={option.project} theme={theme} size={16} />
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap">{option.project.name}</span>
+          </button>
+        )
+      })}
       </div>
     </div>
   )

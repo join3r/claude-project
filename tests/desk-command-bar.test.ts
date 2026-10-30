@@ -15,7 +15,7 @@ import {
 import { createMainStream } from '../src/shared/types'
 import type { Project, Stream, Task } from '../src/shared/types'
 import { singlePane } from '../src/shared/streams'
-import { AUTOPILOT_OFF, autopilotAvailable, deskSubmission, whereOptions } from '../src/renderer/components/desk/deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, deskSubmission, mentionAt, whereOptions } from '../src/renderer/components/desk/deskStart'
 
 const NOW = new Date('2026-10-30T12:00:00').getTime()
 
@@ -209,5 +209,29 @@ describe('whereOptions (the compose box where picker)', () => {
     expect(whereOptions(projects, 'stem').map(option => option.key)).toContain('st')
     expect(whereOptions(projects, 'stem').map(option => option.key)).not.toContain('dt')
     expect(whereOptions(projects, 'dev 0.7').map(option => option.key)).toEqual(['dt:beta'])
+  })
+})
+
+describe('whereOptions recency', () => {
+  it('puts the project (and stream) worked in last first', () => {
+    const recent = project('st', 'Stem App', [task('t-stem', 'Ship the relay')], [
+      stream('st-old', 'old', [{ ...task('t-old', 'Old'), lastInteractedAt: 10 }]),
+      stream('st-new', 'new', [{ ...task('t-new', 'New'), lastInteractedAt: 20 }])
+    ])
+    expect(whereOptions([devtool, recent], '').map(option => option.key)).toEqual(['st', 'st:st-new', 'st:st-old', 'dt', 'dt:beta'])
+  })
+})
+
+describe('mentionAt', () => {
+  it('finds the @word at the caret', () => {
+    expect(mentionAt('@', 1)).toEqual({ start: 0, query: '' })
+    expect(mentionAt('fix it @dev', 11)).toEqual({ start: 7, query: 'dev' })
+    expect(mentionAt('fix @dev it', 8)).toEqual({ start: 4, query: 'dev' })
+  })
+
+  it('ignores an @ inside a word or one already finished', () => {
+    expect(mentionAt('mail me@x.com', 13)).toBeNull()
+    expect(mentionAt('@dev fix', 8)).toBeNull()
+    expect(mentionAt('no at here', 10)).toBeNull()
   })
 })
