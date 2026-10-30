@@ -201,6 +201,8 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
     public var isMain: Bool
     /// Set on a worktree stream: its branch.
     public var branch: String?
+    /// `main` only: its new tasks get worktrees of their own (§4.4 `taskWorktrees`).
+    public var taskWorktrees: Bool
     /// The stream starts its next queued prompt by itself (§8.16).
     public var queueAutoRun: Bool
     /// The task its queue started last, while that task holds the queue up.
@@ -215,13 +217,14 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
     public var runs: [InboxCommandRun]
 
     public init(id: String, name: String, isMain: Bool = false, branch: String? = nil,
-                queueAutoRun: Bool = false, queueTaskId: String? = nil,
+                taskWorktrees: Bool = false, queueAutoRun: Bool = false, queueTaskId: String? = nil,
                 runCommand: String? = nil, run: InboxStreamRun? = nil,
                 commands: [InboxRunCommand] = [], runs: [InboxCommandRun] = []) {
         self.id = id
         self.name = name
         self.isMain = isMain
         self.branch = branch
+        self.taskWorktrees = taskWorktrees
         self.queueAutoRun = queueAutoRun
         self.queueTaskId = queueTaskId
         self.runCommand = runCommand
@@ -236,6 +239,7 @@ public struct InboxStream: Codable, Sendable, Equatable, Hashable, Identifiable 
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
         isMain = (try? c.decodeIfPresent(Bool.self, forKey: .isMain)) == true
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        taskWorktrees = (try? c.decodeIfPresent(Bool.self, forKey: .taskWorktrees)) == true
         queueAutoRun = (try? c.decodeIfPresent(Bool.self, forKey: .queueAutoRun)) == true
         queueTaskId = try c.decodeIfPresent(String.self, forKey: .queueTaskId)
         runCommand = try? c.decodeIfPresent(String.self, forKey: .runCommand)

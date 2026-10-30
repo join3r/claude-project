@@ -82,6 +82,14 @@ export class WorkspaceManager {
     return this.getRepoRoot(projectDir)
   }
 
+  /** The branch `projectDir`'s checkout is on; throws when it is not on one (detached HEAD). */
+  async currentBranch(projectDir: string): Promise<string> {
+    const result = await this.runner.run(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: projectDir, timeoutMs: 5000 })
+    const branch = result.code === 0 ? result.stdout.trim() : ''
+    if (!branch) throw new Error('The project folder is not on a branch')
+    return branch
+  }
+
   async listBranches(projectDir: string): Promise<string[]> {
     const repoRoot = await this.getRepoRoot(projectDir)
     const stdout = await this.git(repoRoot, ['branch', '--format=%(refname:short)'])

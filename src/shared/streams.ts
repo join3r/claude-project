@@ -76,14 +76,61 @@ export function taskWorktreesSupported(project: Pick<Project, 'ssh' | 'host'>): 
 }
 
 /**
+ * Whether new tasks of `stream` get worktrees of their own: a worktree stream
+ * marked `taskWorktrees`, or `main` once the project turns them on there
+ * ({@link setMainTaskWorktrees}). Main's tasks branch off whatever branch the
+ * project folder has checked out and land back into it.
+ */
+export function streamGivesTaskWorktrees(stream: Stream | undefined): boolean {
+  return !!stream?.taskWorktrees && (!!stream.workspace || !!stream.isMain)
+}
+
+/**
+ * Where a task's own worktree lands: its stream's worktree, or for `main` the
+ * project folder. Main takes landings even with its task worktrees turned off
+ * again, so a task that got one meanwhile still closes the usual way.
+ */
+export function streamTakesLandings(stream: Stream | undefined): boolean {
+  return !!stream?.workspace || !!stream?.isMain
+}
+
+/** Whether `main` can be given task worktrees: a project that supports them, not a custom-shell one. */
+export function canHaveMainTaskWorktrees(project: Project): boolean {
+  return taskWorktreesSupported(project) && !project.shellCommand
+}
+
+/**
+ * The project with task worktrees on `main` turned on or off. Turning them on
+ * stamps main's tasks `sharesStreamWorktree` (as `adoptTaskWorktreesInStream`
+ * does for older worktree streams): they keep working in the project folder,
+ * and only tasks added from now on get worktrees of their own. Turning them off
+ * leaves the stamps and any task worktree alone.
+ */
+export function setMainTaskWorktrees(project: Project, on: boolean): Project {
+  const main = findMainStream(project)
+  if (!main || !!main.taskWorktrees === on) return project
+  let next: Stream
+  if (on) {
+    next = {
+      ...main,
+      taskWorktrees: true,
+      tasks: main.tasks.map(task => (task.workspace || task.sharesStreamWorktree ? task : { ...task, sharesStreamWorktree: true }))
+    }
+  } else {
+    const { taskWorktrees: _off, ...rest } = main
+    next = rest
+  }
+  return { ...project, streams: project.streams.map(stream => (stream === main ? next : stream)) }
+}
+
+/**
  * Whether `task` is still to get a worktree of its own before its first tab
- * spawns: its stream is a migrated worktree stream (`taskWorktrees`), the
+ * spawns: its stream gives them ({@link streamGivesTaskWorktrees}), the
  * project supports them ({@link taskWorktreesSupported}), and the task has no
  * worktree yet and does not share the stream's.
  */
 export function needsTaskWorktree(project: Project, stream: Stream, task: Task): boolean {
-  return !!stream.workspace
-    && !!stream.taskWorktrees
+  return streamGivesTaskWorktrees(stream)
     && taskWorktreesSupported(project)
     && !task.workspace
     && !task.sharesStreamWorktree
@@ -98,7 +145,7 @@ export function needsTaskWorktree(project: Project, stream: Stream, task: Task):
  * new one. Anywhere else it works in the stream's directory, as before.
  */
 export function reopensInOwnWorktree(project: Project, stream: Stream, task: Task): boolean {
-  return !!stream.workspace && !!stream.taskWorktrees && taskWorktreesSupported(project)
+  return streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project)
     && !task.sharesStreamWorktree
 }
 

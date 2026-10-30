@@ -578,7 +578,8 @@ export class TaskLandingManager {
     const branch = at.target.branchName
     const head = await this.deps.runner.run(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: streamRoot })
     if (head.stdout.trim() !== branch) {
-      return { status: 'blocked', files: [], message: `The stream's worktree is not on ${branch}` }
+      const where = at.stream.workspace ? 'The stream\'s worktree' : 'The project folder'
+      return { status: 'blocked', files: [], message: `${where} is not on ${branch}` }
     }
     const merged = await this.deps.runner.run(
       [...NO_HOOKS, 'merge', '--ff-only', '--no-verify-signatures', `refs/heads/${at.own.branchName}`],
@@ -741,8 +742,11 @@ export class TaskLandingManager {
     if (!project || !stream || !task) return 'No such task'
     if (!taskWorktreesSupported(project)) return 'Landing is not supported for SSH projects yet'
     if (!task.workspace) return 'This task has no worktree of its own'
-    if (!stream.workspace) return 'The task\'s stream has no worktree'
-    return { project, stream, task, own: task.workspace, target: stream.workspace }
+    if (stream.workspace) return { project, stream, task, own: task.workspace, target: stream.workspace }
+    if (!stream.isMain) return 'The task\'s stream has no worktree'
+    // Main lands into the project folder, on the branch the task left (fastForward checks the folder is still on it).
+    const branch = task.workspace.baseBranch
+    return { project, stream, task, own: task.workspace, target: { worktreePath: project.directory, branchName: branch, baseBranch: branch, relativeProjectPath: '' } }
   }
 
   /** The sidebar's `isTaskWorking`: an agent tab mid-turn. Terminals don't count (a dev server never stops). */

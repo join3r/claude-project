@@ -368,6 +368,7 @@ extension Inbox {
     private static func parseStream(_ value: JSONValue) throws(ProtocolError) -> InboxStream {
         let o = try Fields(value, "stream")
         return InboxStream(id: try o.str("id"), name: try o.str("name"), isMain: o["main"] == .bool(true), branch: try optStr(o, "branch"),
+                           taskWorktrees: o["taskWorktrees"] == .bool(true),
                            queueAutoRun: o["queueAutoRun"] == .bool(true), queueTaskId: try optStr(o, "queueTaskId"),
                            runCommand: try optStr(o, "runCommand"),
                            // A run this build can't read (an unknown status) is dropped, not the inbox.
@@ -479,6 +480,7 @@ extension InboxStream {
         var o: JSONObject = ["id": .string(id), "name": .string(name)]
         if isMain { o["main"] = .bool(true) }
         if let branch { o["branch"] = .string(branch) }
+        if taskWorktrees { o["taskWorktrees"] = .bool(true) }
         if queueAutoRun { o["queueAutoRun"] = .bool(true) }
         if let queueTaskId { o["queueTaskId"] = .string(queueTaskId) }
         if let runCommand { o["runCommand"] = .string(runCommand) }

@@ -1,6 +1,6 @@
 import type { AgentActivity } from '../shared/agent-activity'
 import { autopilotActive, autopilotSupported, stoppedAutopilot } from '../shared/autopilot'
-import { mapTaskInProject, needsTaskWorktree, taskDirectory, taskTabs, taskWorktreesSupported } from '../shared/streams'
+import { mapTaskInProject, needsTaskWorktree, streamTakesLandings, taskDirectory, taskTabs, taskWorktreesSupported } from '../shared/streams'
 import type { Project, ProjectsData, Stream, Tab, TabStatusValue, Task, TaskAutopilot, TaskLandingIntent, TaskLandingResult } from '../shared/types'
 import { codexFindingsPrompt, codexReviewPrompt, type CodexReview } from './codex-review'
 import type { GitRunner } from './git-runner'
@@ -275,7 +275,7 @@ export class AutopilotRunner {
     this.update(taskId, current => ({ ...current, phase: 'landing' }))
     const { project, stream, task } = found
     this.deps.log(`autopilot task=${taskId} landing`)
-    if (!(taskWorktreesSupported(project) && task.workspace && stream.workspace)) {
+    if (!(taskWorktreesSupported(project) && task.workspace && streamTakesLandings(stream))) {
       const latest = this.find(taskId)
       if (latest) await this.deps.archiveTask(latest.project, latest.task)
       return
@@ -297,10 +297,12 @@ export class AutopilotRunner {
     let root: string
     let base: string | null
     let target: string
-    if (task.workspace && stream.workspace) {
+    if (task.workspace && streamTakesLandings(stream)) {
       root = task.workspace.worktreePath
-      base = (await run(root, ['merge-base', `refs/heads/${stream.workspace.branchName}`, 'HEAD']))?.trim() ?? null
-      target = `the stream branch \`${stream.workspace.branchName}\``
+      // The stream's branch; main's is the one the task left.
+      const branch = stream.workspace?.branchName ?? task.workspace.baseBranch
+      base = (await run(root, ['merge-base', `refs/heads/${branch}`, 'HEAD']))?.trim() ?? null
+      target = `the ${stream.workspace ? 'stream ' : ''}branch \`${branch}\``
     } else {
       root = taskDirectory(project, task)
       base = autopilot.base ?? (await run(root, ['rev-parse', '--verify', '-q', 'HEAD']))?.trim() ?? null

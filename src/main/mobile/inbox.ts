@@ -157,6 +157,7 @@ function buildStream(project: Project, stream: Stream, runs: StreamRunLookup): M
   const out: MobileInboxStream = { id: stream.id, name: stream.name }
   if (stream.isMain) out.main = true
   if (stream.workspace) out.branch = stream.workspace.branchName
+  else if (stream.isMain && stream.taskWorktrees) out.taskWorktrees = true
   if (stream.promptQueueAutoRun) out.queueAutoRun = true
   const watched = promptQueueWatchedTask(stream)
   if (watched) out.queueTaskId = watched.taskId

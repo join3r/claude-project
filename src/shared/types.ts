@@ -742,6 +742,12 @@ export interface AppConfig {
   inboxLayout: 'flat' | 'grouped'
   /** A project's dashboard icon beside its name in the task header. */
   showProjectIcons: boolean
+  /**
+   * Settings → Inbox: new projects give main's new tasks worktrees of their own
+   * (`setMainTaskWorktrees`). Flipping it applies to every project once; Project
+   * Settings can change one afterwards.
+   */
+  mainTaskWorktrees: boolean
   /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
@@ -1038,6 +1044,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastTaskId: null,
   inboxLayout: 'flat',
   showProjectIcons: false,
+  mainTaskWorktrees: false,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
   deskAgent: 'claude-chat',

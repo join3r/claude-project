@@ -1,7 +1,7 @@
 import { isAgentTabType, type Project, type ProjectsData, type Stream, type Tab, type TabStatusValue, type Task, type TaskLanding, type TaskLandingResult } from '../../shared/types'
 import { AppErrorCode, INBOX_TAB_TYPES, PROTOCOL_VERSION } from '../../../protocol/ts/index.ts'
 import type { TaskCloseParams, TaskCloseQuestion, TaskCloseResult, TaskLandParams, TaskLandResult } from '../../../protocol/ts/index.ts'
-import { findStreamOfTask, findTaskInProject, isMainTab, mapTaskInProject, projectTasks, taskTabs, taskWorktreesSupported } from '../../shared/streams'
+import { findStreamOfTask, findTaskInProject, isMainTab, mapTaskInProject, projectTasks, streamTakesLandings, taskTabs, taskWorktreesSupported } from '../../shared/streams'
 import { landingStatusLabel } from '../../shared/inbox-state'
 import { taskLandingCloseQuestion, type TaskLandingCloseQuestion } from '../../shared/task-close-question'
 import { removeTabFromTask } from '../../shared/panes'
@@ -69,7 +69,7 @@ function findTask(data: ProjectsData, taskId: string): Found | null {
 
 /** The desktop's `canLandTask`: a task with a worktree of its own in a worktree stream (not over SSH). */
 function landsIntoStream({ project, stream, task }: Found): boolean {
-  return taskWorktreesSupported(project) && !!task.workspace && !!stream?.workspace
+  return taskWorktreesSupported(project) && !!task.workspace && streamTakesLandings(stream)
 }
 
 /** The sidebar's `isTaskWorking`: an agent tab mid-turn. */

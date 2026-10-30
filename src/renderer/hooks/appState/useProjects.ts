@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { v4 as uuid } from 'uuid'
 import { createMainStream } from '../../../shared/types'
-import { projectTasks, taskTabs } from '../../../shared/streams'
+import { canHaveMainTaskWorktrees, projectTasks, setMainTaskWorktrees, taskTabs } from '../../../shared/streams'
 import type {
   AiTabType,
   PinnedItem,
@@ -29,7 +29,10 @@ import { removeProjectView } from './viewState'
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage'
 import { applyPromptQueueOp, type PromptQueueOp } from '../../../shared/prompt-queue'
 
-export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral' | 'hideFromMobile' | 'runCommand' | 'runCommands' | 'shellCommand'>>
+export type ProjectUpdate = Partial<Pick<Project, 'directory' | 'aiToolArgs' | 'condaEnvName' | 'condaEnvPrefix' | 'tunnel' | 'emoji' | 'icon' | 'tagIds' | 'ephemeral' | 'hideFromMobile' | 'runCommand' | 'runCommands' | 'shellCommand'>> & {
+  /** New tasks in `main` get worktrees of their own (`setMainTaskWorktrees`). */
+  mainTaskWorktrees?: boolean
+}
 
 export interface ProjectsActions {
   addProject: (name: string, directory: string, tagIds?: string[]) => Project
@@ -61,6 +64,8 @@ export interface ProjectsActions {
   findOrCreateTagId: (data: ProjectsData, name: string) => { data: ProjectsData; tagId: string }
   togglePinnedItem: (item: PinnedItem) => void
   setPinnedOrder: (items: PinnedItem[]) => void
+  /** Settings' Worktrees on main: every project's main at once (`setMainTaskWorktrees`). */
+  setMainTaskWorktreesEverywhere: (on: boolean) => void
 }
 
 /**
@@ -85,6 +90,10 @@ export function useProjects(
   const { mutateProjects, projectsRef, projectsDataRef, updateWindowViewState } = core
   const { connectSsh, confirmDiscardDirty, selectProject } = deps
   const pendingTagsRef = useRef<Map<string, Tag>>(new Map())
+  // Settings' default for new projects, read when one is made.
+  const mainWorktreesRef = useRef(false)
+  mainWorktreesRef.current = !!core.config?.mainTaskWorktrees
+  const born = useCallback((project: Project): Project => setMainTaskWorktrees(project, mainWorktreesRef.current), [])
 
   const includePendingTags = useCallback((data: ProjectsData, tagIds?: readonly string[]): ProjectsData => {
     return includePendingTagsIn(data, tagIds, pendingTagsRef.current)
@@ -99,10 +108,10 @@ export function useProjects(
       streams: [createMainStream(id)],
       ...(tagIds && tagIds.length > 0 ? { tagIds } : {})
     }
-    mutateProjects(prev => appendProject(includePendingTags(prev, tagIds), project))
+    mutateProjects(prev => appendProject(includePendingTags(prev, tagIds), born(project)))
     selectProject(project.id)
     return project
-  }, [includePendingTags, mutateProjects, selectProject])
+  }, [born, includePendingTags, mutateProjects, selectProject])
 
   const addRemoteProject = useCallback((
     name: string,
@@ -132,10 +141,10 @@ export function useProjects(
       return { id, name, directory, host: serverId, streams: [createMainStream(id)] }
     })
     if (created.length === 0) return created
-    mutateProjects(prev => created.reduce((data, project) => appendProject(data, project), prev))
+    mutateProjects(prev => created.reduce((data, project) => appendProject(data, born(project)), prev))
     selectProject(created[0].id)
     return created
-  }, [mutateProjects, selectProject])
+  }, [born, mutateProjects, selectProject])
 
   const addShellCommandProject = useCallback((name: string, command: string, tagIds?: string[]) => {
     const id = uuid()
@@ -213,7 +222,11 @@ export function useProjects(
   }, [mutateProjects])
 
   const updateProject = useCallback((id: string, updates: ProjectUpdate) => {
-    mutateProjects(prev => mapProject(includePendingTags(prev, updates.tagIds), id, project => ({ ...project, ...updates })))
+    const { mainTaskWorktrees, ...fields } = updates
+    mutateProjects(prev => mapProject(includePendingTags(prev, updates.tagIds), id, project => {
+      const next = { ...project, ...fields }
+      return mainTaskWorktrees === undefined ? next : setMainTaskWorktrees(next, mainTaskWorktrees)
+    }))
   }, [includePendingTags, mutateProjects])
 
   const updatePromptQueue = useCallback((projectId: string, op: PromptQueueOp) => {
@@ -254,7 +267,21 @@ export function useProjects(
     mutateProjects(prev => ({ ...prev, pinnedItems: [...items] }))
   }, [mutateProjects])
 
+  const setMainTaskWorktreesEverywhere = useCallback((on: boolean) => {
+    mutateProjects(prev => {
+      let changed = false
+      const projects = prev.projects.map(project => {
+        // Only where Project Settings offers it; ad-hoc folders behind "Use a directory…" stay as they are.
+        const next = canHaveMainTaskWorktrees(project) && !project.ephemeral ? setMainTaskWorktrees(project, on) : project
+        if (next !== project) changed = true
+        return next
+      })
+      return changed ? { ...prev, projects } : prev
+    })
+  }, [mutateProjects])
+
   return {
+    setMainTaskWorktreesEverywhere,
     addProject,
     addRemoteProject,
     addShellCommandProject,

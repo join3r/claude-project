@@ -14,7 +14,7 @@ import type {
   WorktreeSetupDecision,
   WorktreeSetupOfferAnswer
 } from '../shared/types'
-import { findStreamOfTask, findTaskInProject, mapTaskInProject, needsTaskWorktree, taskWorktreesSupported } from '../shared/streams'
+import { findStreamOfTask, findTaskInProject, mapTaskInProject, needsTaskWorktree, streamGivesTaskWorktrees, taskWorktreesSupported } from '../shared/streams'
 import { taskBranchName } from '../shared/branch-name'
 import type { WorkspaceManager } from './workspace-manager'
 import type { WorktreeSetupResult } from './worktree-setup'
@@ -38,7 +38,7 @@ import type { WorktreeSetupResult } from './worktree-setup'
 
 export type TaskWorktreeGit = Pick<
   WorkspaceManager,
-  'listBranches' | 'create' | 'restore' | 'runSetup' | 'approveSetup' | 'delete' | 'repoRoot' |
+  'listBranches' | 'create' | 'restore' | 'runSetup' | 'approveSetup' | 'delete' | 'repoRoot' | 'currentBranch' |
   'setupOffer' | 'addSuggestedSetup' | 'declineSetupOffer'
 >
 
@@ -152,7 +152,7 @@ export class TaskWorktreeManager {
   async answerSetupOffer(taskId: string, answer: WorktreeSetupOfferAnswer): Promise<void> {
     const state = this.states.get(taskId)
     const found = this.locate(taskId)
-    const base = found?.stream.workspace
+    const base = found ? await this.baseOf(found.project, found.stream).catch(() => null) : null
     if (state?.phase !== 'setup-offer' || state.adding) return
     if (!found || !base) {
       this.setState(taskId, null)
@@ -252,8 +252,48 @@ export class TaskWorktreeManager {
       if (this.deps.isLanding?.(taskId)) return { status: 'failed', error: 'The task is being closed' }
       return this.restore(found, task.workspace, options)
     }
-    if (!needsTaskWorktree(project, stream, task) || !stream.workspace) return { status: 'not-needed' }
-    return this.create(found, stream.workspace, options)
+    if (!needsTaskWorktree(project, stream, task)) return { status: 'not-needed' }
+    return this.createOffBase(found, options)
+  }
+
+  /**
+   * Where the stream's tasks branch off and take their setup from: its
+   * worktree, or for `main` the project folder's checkout and the branch it is
+   * on now. Null for a main whose folder is not a git repository. Throws when
+   * main's folder is not on a branch.
+   */
+  private async baseOf(project: Project, stream: Stream): Promise<WorkspaceConfig | null> {
+    if (stream.workspace) return stream.workspace
+    if (!stream.isMain) return null
+    let worktreePath: string
+    try {
+      worktreePath = await this.deps.git.repoRoot(project.directory)
+    } catch {
+      return null
+    }
+    const branchName = await this.deps.git.currentBranch(project.directory)
+    return { worktreePath, branchName, baseBranch: branchName, relativeProjectPath: '' }
+  }
+
+  /** {@link create} off the stream's base, or the failure to find one. */
+  private async createOffBase(found: Located, options: EnsureTaskWorktreeOptions): Promise<TaskWorktreeResult> {
+    let base: WorkspaceConfig | null
+    try {
+      base = await this.baseOf(found.project, found.stream)
+    } catch (err) {
+      const error = errorMessage(err)
+      this.deps.log?.(`task worktree task=${found.task.id} base error=${error}`)
+      this.setState(found.task.id, { phase: 'failed', error })
+      return { status: 'failed', error }
+    }
+    if (!base) {
+      // Main in a folder that isn't a repository: the task works in the folder, and stops asking.
+      this.deps.log?.(`task worktree task=${found.task.id} project folder is not a repository, sharing it`)
+      this.commitTask(found.project.id, found.task.id, t => (t.workspace || t.sharesStreamWorktree ? t : { ...t, sharesStreamWorktree: true }))
+      this.setState(found.task.id, null)
+      return { status: 'not-needed' }
+    }
+    return this.create(found, base, options)
   }
 
   /** A new worktree and branch off the stream's tip, then setup. */
@@ -308,7 +348,7 @@ export class TaskWorktreeManager {
   /** A recorded worktree of a task in a task-worktree stream (not over SSH), whose folder is not there. */
   private isGone(found: Located, recorded: WorkspaceConfig): boolean {
     const { project, stream } = found
-    if (!taskWorktreesSupported(project) || !stream.workspace || !stream.taskWorktrees) return false
+    if (!taskWorktreesSupported(project) || !(streamGivesTaskWorktrees(stream) || stream.isMain)) return false
     return !(this.deps.exists ?? fs.existsSync)(recorded.worktreePath)
   }
 
@@ -320,10 +360,12 @@ export class TaskWorktreeManager {
    */
   private async restore(found: Located, recorded: WorkspaceConfig, options: EnsureTaskWorktreeOptions): Promise<TaskWorktreeResult> {
     const { project, stream, task } = found
-    const base = stream.workspace!
     this.setState(task.id, { phase: 'creating', branch: recorded.branchName })
+    let base: WorkspaceConfig | null
     let restored: WorkspaceRestoreResult
     try {
+      base = await this.baseOf(project, stream)
+      if (!base) throw new Error(stream.isMain ? 'The project folder is not a git repository' : 'The task\'s stream has no worktree')
       restored = await this.deps.git.restore(project.directory, recorded.worktreePath, recorded.branchName)
     } catch (err) {
       const error = errorMessage(err)
@@ -338,16 +380,17 @@ export class TaskWorktreeManager {
         return rest
       })
       const now = this.find(project.id, task.id)
-      if (!now?.stream.workspace || !needsTaskWorktree(now.project, now.stream, now.task)) {
+      if (!now || !needsTaskWorktree(now.project, now.stream, now.task)) {
         this.setState(task.id, null)
         return now ? { status: 'not-needed' } : { status: 'failed', error: 'The task was closed' }
       }
-      return this.create(now, now.stream.workspace, options)
+      return this.createOffBase(now, options)
     }
     const workspace: WorkspaceConfig = {
       worktreePath: restored.worktreePath,
       branchName: restored.branchName,
-      baseBranch: base.branchName,
+      // Main's base is the branch the task left, whatever the project folder is on now.
+      baseBranch: stream.workspace ? base.branchName : recorded.baseBranch,
       relativeProjectPath: restored.relativeProjectPath
     }
     const now = this.find(project.id, task.id)

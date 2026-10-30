@@ -13,6 +13,8 @@ import {
   tabSpawnDir,
   taskDirectory,
   needsTaskWorktree,
+  setMainTaskWorktrees,
+  streamTakesLandings,
   makeStreamWithId,
   findStreamOfTask,
   findTaskInProject,
@@ -201,5 +203,39 @@ describe('task moves', () => {
     expect(tabSpawnDir({ ...tab('sub'), cwd: '/wt/src' }, '/wt')).toBe('/wt/src')
     expect(tabSpawnDir(tab('c', 'claude-chat'), '/wt')).toBe('/wt')
     expect(tabSpawnDir(tab('e', 'editor'), '/wt')).toBeNull()
+  })
+})
+
+describe('setMainTaskWorktrees', () => {
+  const ownWorkspace = { worktreePath: '/repo/.worktrees/master--x', branchName: 'master--x', baseBranch: 'master', relativeProjectPath: '' }
+  const project = () => {
+    const base = fixtureProject({ id: 'p', directory: '/repo', tasks: [{ id: 'old' }] })
+    return base
+  }
+
+  it('turns them on for new tasks only: the tasks already in main keep the folder', () => {
+    const on = setMainTaskWorktrees(project(), true)
+    const main = on.streams[0]
+    expect(main.taskWorktrees).toBe(true)
+    expect(main.tasks[0].sharesStreamWorktree).toBe(true)
+    expect(needsTaskWorktree(on, main, main.tasks[0])).toBe(false)
+    const fresh = fixtureTask({ id: 'new' })
+    expect(needsTaskWorktree(on, main, fresh)).toBe(true)
+  })
+
+  it('turns them off and leaves a task worktree landing into the folder', () => {
+    const on = setMainTaskWorktrees(project(), true)
+    const withOwn = { ...on, streams: [{ ...on.streams[0], tasks: [...on.streams[0].tasks, { ...fixtureTask({ id: 'own' }), workspace: ownWorkspace }] }] }
+    const off = setMainTaskWorktrees(withOwn, false)
+    const main = off.streams[0]
+    expect(main.taskWorktrees).toBeUndefined()
+    expect(needsTaskWorktree(off, main, fixtureTask({ id: 'new' }))).toBe(false)
+    expect(main.tasks[1].workspace).toEqual(ownWorkspace)
+    expect(streamTakesLandings(main)).toBe(true)
+  })
+
+  it('returns the project itself when nothing changes', () => {
+    const p = project()
+    expect(setMainTaskWorktrees(p, false)).toBe(p)
   })
 })

@@ -4,6 +4,7 @@ import path from 'path'
 import { createMainStream, type Project, type ProjectsData } from '../shared/types'
 import { type GitRunner, gitErrorText } from './git-runner'
 import { isPathInside } from './ipc/path-allowlist'
+import { setMainTaskWorktrees } from '../shared/streams'
 
 /**
  * A local project's own folder: finding the ones that are gone, making a new
@@ -80,9 +81,13 @@ export async function createProjectDir(projectsDir: string, name: string, git: G
   return target
 }
 
-/** A local project for a folder just made by {@link createProjectDir}, appended to the list. */
-export function appendNewProject(data: ProjectsData, id: string, name: string, directory: string): ProjectsData {
-  const project: Project = { id, name, directory, streams: [createMainStream(id)] }
+/**
+ * A local project for a folder just made by {@link createProjectDir}, appended to
+ * the list; `mainTaskWorktrees` is Settings' default for new projects.
+ */
+export function appendNewProject(data: ProjectsData, id: string, name: string, directory: string, mainTaskWorktrees = false): ProjectsData {
+  const made: Project = { id, name, directory, streams: [createMainStream(id)] }
+  const project = setMainTaskWorktrees(made, mainTaskWorktrees)
   return { ...data, projects: [...data.projects, project], projectOrder: [...data.projectOrder, id] }
 }
 

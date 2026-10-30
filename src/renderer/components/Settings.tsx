@@ -104,7 +104,7 @@ function resolveTab(id: string | undefined): { tab: SettingsTab; focus?: 'server
 }
 
 export default function Settings({ onClose, initialTab }: Props): React.ReactElement {
-  const { config, updateConfig } = useApp()
+  const { config, updateConfig, setMainTaskWorktreesEverywhere } = useApp()
   const [initial] = useState(() => resolveTab(initialTab))
   const [activeTab, setActiveTab] = useState<SettingsTab>(initial.tab)
   const page = tabs.find(t => t.id === activeTab) ?? tabs[0]
@@ -616,6 +616,22 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                 <HelperText>New project… makes a folder here and runs git init in it.</HelperText>
               </SetBlock>
             </FormGroup>
+
+            <Group>
+              <GroupRow
+                label="Worktrees on main"
+                sub="Every project's new tasks in main get a worktree of their own, branched off the project folder's branch, and Done lands them back. Applies to all projects now and to new ones; Project Settings can still change one."
+                trailing={
+                  <Switch
+                    checked={config.mainTaskWorktrees}
+                    onChange={(mainTaskWorktrees) => {
+                      updateConfig({ mainTaskWorktrees })
+                      setMainTaskWorktreesEverywhere(mainTaskWorktrees)
+                    }}
+                  />
+                }
+              />
+            </Group>
 
             <Group>
               <GroupRow

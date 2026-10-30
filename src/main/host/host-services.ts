@@ -676,7 +676,7 @@ export class HostServices {
           return { ok: false, code: err.kind === 'no-projects-dir' ? AppErrorCode.Unsupported : AppErrorCode.BadRequest, message }
         }
         const projectId = randomUUID()
-        this.commitProjects(appendNewProject(this.projectsStore.peek(), projectId, name.trim(), directory))
+        this.commitProjects(appendNewProject(this.projectsStore.peek(), projectId, name.trim(), directory, !!this.config.mainTaskWorktrees))
         return { ok: true, projectId }
       },
       newStream: (params) => createStream({

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { featureAvailable } from '../../shared/project-features'
 import { canMoveToServer } from '../../shared/project-move'
+import { canHaveMainTaskWorktrees, findMainStream } from '../../shared/streams'
 import type { Project, AiTabType, RunCommand, ShellCommandConfig } from '../../shared/types'
 import { projectRunCommands } from '../../shared/stream-run'
 import RunCommandsEditor, { cleanRunCommandDrafts, runCommandDraftsProblem } from './RunCommandsEditor'
@@ -38,6 +39,8 @@ interface Props {
     condaEnvName?: string
     condaEnvPrefix?: string
     hideFromMobile?: true
+    /** New tasks in `main` get worktrees of their own; absent where the project can't have them. */
+    mainTaskWorktrees?: boolean
     /** Saved as the project's list; `runCommand` (older data) is cleared alongside. */
     runCommands?: RunCommand[]
     runCommand?: string
@@ -80,6 +83,8 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
   const [condaError, setCondaError] = useState<string | null>(null)
   const [condaLoading, setCondaLoading] = useState(false)
   const [hideFromMobile, setHideFromMobile] = useState(!!project.hideFromMobile)
+  const canMainTaskWorktrees = canHaveMainTaskWorktrees(project)
+  const [mainTaskWorktrees, setMainTaskWorktrees] = useState(() => !!findMainStream(project)?.taskWorktrees)
   const [runCommands, setRunCommands] = useState<RunCommand[]>(() => projectRunCommands(project))
   const runCommandsProblem = runCommandDraftsProblem(runCommands)
   const suggestionsRef = useRef<HTMLDivElement>(null)
@@ -161,6 +166,7 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
       updates.runCommand = undefined
     }
     if (canEditDirectory) updates.directory = cleanedDirectory
+    if (canMainTaskWorktrees) updates.mainTaskWorktrees = mainTaskWorktrees
     if (pickedHost?.kind === 'shell' && pickedHost.command && pickedHost.key !== projectHostKey(project)) {
       updates.shellCommand = { command: pickedHost.command }
     }
@@ -399,6 +405,17 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
             {runCommandsProblem
               ?? <>Install, run, run with another profile: each runs on its own from a stream&apos;s folder or a task&apos;s worktree, picked from Run on the stream&apos;s row or menu. A stream can add its own, or replace one by using the same name.</>}
           </HelperText>
+        </SetBlock>
+      )}
+
+      {canMainTaskWorktrees && (
+        <SetBlock label="Worktrees on main" divider>
+          <div className="flex items-center justify-between gap-3">
+            <HelperText>
+              Each new task in main gets its own worktree, branched off the branch the project folder is on. Done lands it back into the project folder. Tasks already in main stay in the folder.
+            </HelperText>
+            <Switch checked={mainTaskWorktrees} onChange={setMainTaskWorktrees} />
+          </div>
         </SetBlock>
       )}
 

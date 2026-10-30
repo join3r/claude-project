@@ -8,6 +8,7 @@ import type { ServerEvent } from './server-hub'
 import type { ChatImage } from '../../shared/claude-chat'
 import type { ImageCodec } from '../mobile/chat-image'
 import { fitChatImagesForLink } from './link-chat-images'
+import { streamGivesTaskWorktrees } from '../../shared/streams'
 import { LinkError, LinkErrorCode } from '../host/link/errors'
 
 /** The part of ServerHub the desktop's routing uses. */
@@ -183,9 +184,11 @@ export class DesktopRouting {
     for (const project of this.projects.foreignProjects()) {
       if (project.host !== serverId) continue
       for (const stream of project.streams) {
-        if (!stream.workspace || !stream.taskWorktrees) continue
+        // Main with its task worktrees turned off again: only the tasks that got one meanwhile.
+        const gives = streamGivesTaskWorktrees(stream)
+        if (!gives && !stream.isMain) continue
         for (const task of stream.tasks) {
-          if (!task.sharesStreamWorktree && this.index.taskOf(task.id, serverId)) ids.push(task.id)
+          if ((gives || task.workspace) && !task.sharesStreamWorktree && this.index.taskOf(task.id, serverId)) ids.push(task.id)
         }
       }
     }

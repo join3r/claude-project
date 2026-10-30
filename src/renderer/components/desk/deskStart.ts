@@ -1,5 +1,5 @@
 import type { AppConfig, DeskScope, Project, PromptBoxAgent, Stream, Task } from '../../../shared/types'
-import { findMainStream, streamDirectory, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
+import { findMainStream, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
 import { isTaskWorking, type StatusOf } from '../sidebar/closeRules'
 import { availablePromptAgents, pickPromptAgent } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
@@ -85,7 +85,7 @@ export function deskSubmission(
 
 /** Whether a new task in `stream` gets a worktree of its own (a task-worktree stream in a project that has them). */
 export function startsInOwnWorktree(project: Project, stream: Stream | undefined): boolean {
-  return !!stream?.workspace && !!stream.taskWorktrees && taskWorktreesSupported(project)
+  return streamGivesTaskWorktrees(stream) && taskWorktreesSupported(project)
 }
 
 /**

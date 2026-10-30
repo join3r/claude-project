@@ -26,6 +26,13 @@ import Testing
         #expect(project.busyInSameFolder(release).isEmpty)
     }
 
+    @Test func quietInMainWithTaskWorktrees() {
+        let own = InboxStream(id: "main", name: "main", isMain: true, taskWorktrees: true)
+        let project = InboxProject(id: "p", name: "p", streams: [own, release], tasks: [task("a", own)])
+        #expect(project.busyInSameFolder(nil).isEmpty)
+        #expect(project.busyInSameFolder(own).isEmpty)
+    }
+
     @Test func overSSHAWorktreeStreamIsShared() {
         let project = InboxProject(id: "p", name: "p", remote: true, streams: [main, release], tasks: [
             task("x", release), task("m", main)

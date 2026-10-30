@@ -139,6 +139,12 @@ describe('appendNewProject', () => {
     expect(data.projectOrder).toEqual(['x', 'p-new'])
     expect(data.projects[0]).toMatchObject({ id: 'p-new', name: 'app', directory: '/code/app' })
     expect(data.projects[0].streams.map(s => s.isMain)).toEqual([true])
+    expect(data.projects[0].streams[0].taskWorktrees).toBeUndefined()
+  })
+
+  it('gives main task worktrees when Settings has them on for new projects', () => {
+    const data = appendNewProject({ projects: [], tags: [], projectOrder: [], pinnedItems: [] }, 'p-new', 'app', '/code/app', true)
+    expect(data.projects[0].streams[0].taskWorktrees).toBe(true)
   })
 })
 

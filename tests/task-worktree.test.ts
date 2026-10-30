@@ -451,4 +451,83 @@ describe('TaskWorktreeManager', () => {
     expect(await manager.runStreamSetup('p1', 'stream-next', created.setup.pending)).toEqual({ status: 'ok' })
     expect(fs.existsSync(path.join(created.worktreePath, 'stream-ran.txt'))).toBe(true)
   })
+
+  describe('main with task worktrees', () => {
+    function mainProject(tasks: Task[], extra: Partial<Stream> = {}): Project {
+      const base = fixtureProject({ id: 'p1', name: 'P', directory: repo })
+      const main = { ...base.streams[0], taskWorktrees: true as const, tasks, ...extra }
+      return { ...base, streams: [main] }
+    }
+
+    function lander(): TaskLandingManager {
+      return new TaskLandingManager({
+        projects: store,
+        runner: new LocalGitRunner(),
+        git: git_,
+        activity: { getStatus: () => null, subscribe: () => () => {} }
+      })
+    }
+
+    it('branches off the project folder\'s branch and lands back into the folder', async () => {
+      setProjects([mainProject([fixtureTask({ id: 't1', name: 'Tidy up', tabs: { left: [tab('a')] } })])])
+
+      const made = await manager.ensureTaskWorktree('p1', 't1')
+      if (made.status !== 'ready') throw new Error(`expected ready, got ${made.status}`)
+      expect(made.workspace).toEqual({
+        worktreePath: canonicalFilePath(path.join(repo, '.worktrees', 'master--tidy-up')),
+        branchName: 'master--tidy-up',
+        baseBranch: 'master',
+        relativeProjectPath: ''
+      })
+      fs.writeFileSync(path.join(made.workspace.worktreePath, 'work.txt'), 'done\n')
+
+      expect(await lander().landTask('p1', 't1')).toEqual({ status: 'landed' })
+
+      expect(fs.readFileSync(path.join(repo, 'work.txt'), 'utf8')).toBe('done\n')
+      expect(git(repo, 'log', '-1', '--format=%s').trim()).toBe('Tidy up')
+      expect(branches(repo)).not.toContain('master--tidy-up')
+    })
+
+    it('leaves the tasks main had before it was turned on in the folder', async () => {
+      const shared = fixtureTask({ id: 't1', name: 'Old', tabs: { left: [tab('a')] } })
+      setProjects([mainProject([{ ...shared, sharesStreamWorktree: true }])])
+
+      expect(await manager.ensureTaskWorktree('p1', 't1')).toEqual({ status: 'not-needed' })
+    })
+
+    it('lets a task in a folder that is not a repository work there', async () => {
+      const plain = canonicalFilePath(fs.mkdtempSync(path.join(os.tmpdir(), 'task-wt-plain-')))
+      try {
+        const base = mainProject([fixtureTask({ id: 't1', name: 'Plain', tabs: { left: [tab('a')] } })])
+        setProjects([{ ...base, directory: plain }])
+
+        expect(await manager.ensureTaskWorktree('p1', 't1')).toEqual({ status: 'not-needed' })
+        expect(taskOf('t1')?.sharesStreamWorktree).toBe(true)
+        expect(states.has('t1')).toBe(false)
+      } finally {
+        fs.rmSync(plain, { recursive: true, force: true })
+      }
+    })
+
+    it('fails while the project folder is not on a branch', async () => {
+      git(repo, 'checkout', '-q', '--detach')
+      setProjects([mainProject([fixtureTask({ id: 't1', name: 'Detached', tabs: { left: [tab('a')] } })])])
+
+      expect(await manager.ensureTaskWorktree('p1', 't1')).toEqual({ status: 'failed', error: 'The project folder is not on a branch' })
+      expect(states.get('t1')?.phase).toBe('failed')
+    })
+
+    it('won\'t land while the project folder is on another branch', async () => {
+      setProjects([mainProject([fixtureTask({ id: 't1', name: 'Moved', tabs: { left: [tab('a')] } })])])
+      const made = await manager.ensureTaskWorktree('p1', 't1')
+      if (made.status !== 'ready') throw new Error(`expected ready, got ${made.status}`)
+      fs.writeFileSync(path.join(made.workspace.worktreePath, 'work.txt'), 'x\n')
+      git(repo, 'checkout', '-q', '-b', 'elsewhere')
+
+      const result = await lander().landTask('p1', 't1')
+
+      expect(result).toMatchObject({ status: 'blocked', message: 'The project folder is not on master' })
+      expect(fs.existsSync(path.join(repo, 'work.txt'))).toBe(false)
+    })
+  })
 })

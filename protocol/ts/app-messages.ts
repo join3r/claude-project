@@ -118,6 +118,8 @@ export interface InboxStream {
   main?: true
   /** Present on a worktree stream: the branch its worktree is on. */
   branch?: string
+  /** `main` only: its new tasks get worktrees of their own, as a worktree stream's do (§4.4). */
+  taskWorktrees?: true
   /** The stream starts its next queued prompt by itself (§4.4 `queue`). */
   queueAutoRun?: true
   /** The task its queue started last, while it still runs: the next prompt waits for it. */

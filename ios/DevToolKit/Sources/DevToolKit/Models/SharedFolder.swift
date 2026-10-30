@@ -4,9 +4,11 @@ import Foundation
 /// another task's agent already working in the folder a new task would start in.
 extension InboxProject {
     /// Whether a new task in `stream` gets a worktree of its own: a worktree
-    /// stream (`branch`) in a project that isn't over SSH (§11).
+    /// stream (`branch`), or `main` with `taskWorktrees`, in a project that
+    /// isn't over SSH (§11).
     public func startsInOwnWorktree(_ stream: InboxStream?) -> Bool {
-        stream?.branch != nil && !remote
+        guard let stream, !remote else { return false }
+        return stream.branch != nil || stream.taskWorktrees
     }
 
     /// The working tasks in the folder a new task in `stream` (nil: `main`)
