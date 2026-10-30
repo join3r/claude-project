@@ -75,7 +75,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
 const actionCls = 'px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong whitespace-nowrap'
 
 export default function DeskRow({
-  entry, kind, agent, activity, background = null, diff, selected, checked = false, checking = false, pinned = false, offline = false, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
+  entry, kind, agent, activity, background = null, diff, selected, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
 }: {
   entry: InboxEntry
   kind: DeskRowKind
@@ -94,6 +94,8 @@ export default function DeskRow({
   pinned?: boolean
   /** Its project's DevTool server isn't online: the row is greyed. */
   offline?: boolean
+  /** Settings → Show project icons: off leaves the project name to lead on its own. */
+  showTile?: boolean
   now: number
   theme: 'dark' | 'light'
   /** A click on the row; ⌘ and ⇧ held tick rows instead of opening (the column decides). */
@@ -150,7 +152,7 @@ export default function DeskRow({
         >
           <Check size={14} strokeWidth={3} />
         </button>
-      ) : (
+      ) : showTile && (
         <button
           type="button"
           className="shrink-0 p-0 border-0 bg-transparent cursor-pointer rounded-md"

@@ -745,7 +745,7 @@ export interface AppConfig {
   lastTaskId: string | null
   /** The inbox column's rows by status (Needs you, Answered…), or under a heading per project. */
   inboxLayout: 'flat' | 'grouped'
-  /** A project's dashboard icon beside its name in the task header. */
+  /** A project's tile beside its name in the sidebar and the task header. */
   showProjectIcons: boolean
   /**
    * Settings → Inbox: new projects give main's new tasks worktrees of their own

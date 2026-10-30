@@ -636,7 +636,7 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
             <Group>
               <GroupRow
                 label="Show project icons"
-                sub="A project's dashboard icon in place of its initials, in the task header."
+                sub="A project's tile beside its name in the sidebar and the task header."
                 trailing={
                   <Switch
                     checked={config.showProjectIcons}

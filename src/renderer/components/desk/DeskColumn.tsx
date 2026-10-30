@@ -52,7 +52,7 @@ function GroupHead({ label, count, tone, hint }: { label: string; count: number;
 }
 
 /** A project header in "Group by project": tile and name; a click scopes the column to it. */
-function ProjectGroupHead({ project, count, theme, onScope }: { project: Project; count: number; theme: 'dark' | 'light'; onScope: () => void }): React.ReactElement {
+function ProjectGroupHead({ project, count, theme, showTile, onScope }: { project: Project; count: number; theme: 'dark' | 'light'; showTile: boolean; onScope: () => void }): React.ReactElement {
   return (
     <button
       type="button"
@@ -61,7 +61,7 @@ function ProjectGroupHead({ project, count, theme, onScope }: { project: Project
       onClick={onScope}
       data-testid="desk-project-group"
     >
-      <ProjectTileBadge project={project} theme={theme} size={14} />
+      {showTile && <ProjectTileBadge project={project} theme={theme} size={14} />}
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{project.name} · {count}</span>
     </button>
   )
@@ -186,6 +186,7 @@ export default function DeskColumn({
   )
   const diffs = useTaskDiffSummaries(diffSources)
   const grouped = config?.inboxLayout === 'grouped'
+  const showTiles = config?.showProjectIcons ?? false
   const counts = deskTabCounts(lists)
 
   const [showOlder, setShowOlder] = useState(false)
@@ -366,6 +367,7 @@ export default function DeskColumn({
         checking={checking}
         pinned={pinnedTaskIds.has(entry.task.id)}
         offline={offlineIds.has(entry.project.id)}
+        showTile={showTiles}
         now={now}
         theme={effectiveTheme}
         onSelect={(e) => {
@@ -407,7 +409,7 @@ export default function DeskColumn({
           onMouseDown={(e) => e.stopPropagation()}
           data-testid="desk-scope"
         >
-          {scope && (() => {
+          {scope && showTiles && (() => {
             const project = projects.find(p => p.id === scope.projectId)
             return project ? <ProjectTileBadge project={project} theme={effectiveTheme} size={14} /> : null
           })()}
@@ -480,7 +482,7 @@ export default function DeskColumn({
           ? empty(tab === 'inbox' ? (scope ? 'Nothing here. Ask something above.' : 'Inbox zero. Ask something above.') : tab === 'working' ? 'No agent is working.' : 'Nothing snoozed.')
           : groupInboxByProject(listed, [...pinnedIds]).map(group => (
             <React.Fragment key={group.project.id}>
-              <ProjectGroupHead project={group.project} count={group.entries.length} theme={effectiveTheme} onScope={() => pickScope({ projectId: group.project.id })} />
+              <ProjectGroupHead project={group.project} count={group.entries.length} theme={effectiveTheme} showTile={showTiles} onScope={() => pickScope({ projectId: group.project.id })} />
               {group.entries.map(entry => renderRow(entry, tab === 'inbox' ? inboxKind(lists, entry) : tab === 'working' ? 'working' : 'snoozed'))}
             </React.Fragment>
           )))}
@@ -504,6 +506,7 @@ export default function DeskColumn({
             loading={archiveIds.some(id => !archives.has(id))}
             now={now}
             theme={effectiveTheme}
+            showTiles={showTiles}
             showingOlder={showOlder}
             onShowOlder={() => setShowOlder(true)}
             onOpen={(entry) => showArchived({ projectId: entry.project.id, kind: 'task', id: entry.entry.task.id })}
@@ -541,11 +544,12 @@ export default function DeskColumn({
   )
 }
 
-function DoneList({ entries, loading, now, theme, showingOlder, onShowOlder, onOpen, onReopen }: {
+function DoneList({ entries, loading, now, theme, showTiles, showingOlder, onShowOlder, onOpen, onReopen }: {
   entries: DoneEntry[]
   loading: boolean
   now: number
   theme: 'dark' | 'light'
+  showTiles: boolean
   showingOlder: boolean
   onShowOlder: () => void
   onOpen: (entry: DoneEntry) => void
@@ -565,7 +569,7 @@ function DoneList({ entries, loading, now, theme, showingOlder, onShowOlder, onO
             onClick={() => onOpen(item)}
             data-testid="desk-done-row"
           >
-            <ProjectTileBadge project={project} theme={theme} size={24} />
+            {showTiles && <ProjectTileBadge project={project} theme={theme} size={24} />}
             <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
               <div className="flex justify-between gap-2 text-xs text-text-muted">
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap">
