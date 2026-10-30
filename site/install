@@ -27,7 +27,7 @@ main() {
   set -eu
 
   NODE_DEFAULT='24.21.0'
-  BOOTSTRAP_SHA256='8fd23bb4cb9222d996ca683a51b8efaa32c067f1d90007ee4604f05e9495262e'
+  BOOTSTRAP_SHA256='dfb9a3552fe82f8c852dfd2688be5fe20a889229da7c8eb368e98386cc3e0867'
 
   BASE="${DEVTOOL_INSTALL_URL:-https://devtool.awantech.sk}"
   BASE="${BASE%/}"

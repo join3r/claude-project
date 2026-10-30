@@ -1744,6 +1744,206 @@
       ]
     }
   },
+  "streamCommands": {
+    "params": [
+      {
+        "json": "{\"projectId\":\"p1\"}",
+        "expected": {
+          "projectId": "p1"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\"}",
+        "expected": {
+          "projectId": "p1",
+          "streamId": "s-050"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":null,\"extra\":1}",
+        "expected": {
+          "projectId": "p1"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"commands\":[]}",
+        "expected": {
+          "commands": []
+        }
+      },
+      {
+        "json": "{\"commands\":[{\"id\":\"c-run\",\"name\":\"run\",\"command\":\"npm run dev\"},{\"id\":\"c-install\",\"name\":\"install\",\"command\":\"npm ci\",\"extra\":1}]}",
+        "expected": {
+          "commands": [
+            {
+              "id": "c-run",
+              "name": "run",
+              "command": "npm run dev"
+            },
+            {
+              "id": "c-install",
+              "name": "install",
+              "command": "npm ci"
+            }
+          ]
+        }
+      },
+      {
+        "json": "{\"commands\":[{\"id\":\"c-run\",\"name\":\"run\",\"command\":\"npm run dev -- --port 3001\"}],\"inherited\":[{\"id\":\"c-run\",\"name\":\"run\",\"command\":\"npm run dev\"},{\"id\":\"c-install\",\"name\":\"install\",\"command\":\"npm ci\"}]}",
+        "expected": {
+          "commands": [
+            {
+              "id": "c-run",
+              "name": "run",
+              "command": "npm run dev -- --port 3001"
+            }
+          ],
+          "inherited": [
+            {
+              "id": "c-run",
+              "name": "run",
+              "command": "npm run dev"
+            },
+            {
+              "id": "c-install",
+              "name": "install",
+              "command": "npm ci"
+            }
+          ]
+        }
+      },
+      {
+        "json": "{\"commands\":[],\"inherited\":[]}",
+        "expected": {
+          "commands": []
+        }
+      },
+      {
+        "json": "{\"commands\":[],\"inherited\":null}",
+        "expected": {
+          "commands": []
+        }
+      }
+    ],
+    "setParams": [
+      {
+        "json": "{\"projectId\":\"p1\",\"commands\":[]}",
+        "expected": {
+          "projectId": "p1",
+          "commands": []
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"streamId\":\"s-050\",\"commands\":[{\"id\":\"c-run\",\"name\":\" run \",\"command\":\"  npm run dev -- --port 3001 \"},{\"name\":\"test\",\"command\":\"npm test\",\"id\":null}]}",
+        "expected": {
+          "projectId": "p1",
+          "commands": [
+            {
+              "id": "c-run",
+              "name": "run",
+              "command": "npm run dev -- --port 3001"
+            },
+            {
+              "name": "test",
+              "command": "npm test"
+            }
+          ],
+          "streamId": "s-050"
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"run\",\"command\":\"npm run dev\",\"extra\":1},{\"name\":\"Run (staging)\",\"command\":\"npm run dev -- --mode staging\"}]}",
+        "expected": {
+          "projectId": "p1",
+          "commands": [
+            {
+              "name": "run",
+              "command": "npm run dev"
+            },
+            {
+              "name": "Run (staging)",
+              "command": "npm run dev -- --mode staging"
+            }
+          ]
+        }
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"command\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}",
+        "expected": {
+          "projectId": "p1",
+          "commands": [
+            {
+              "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "command": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+            }
+          ]
+        }
+      }
+    ],
+    "setResults": [
+      "{}"
+    ],
+    "suggestResults": [
+      {
+        "json": "{\"commands\":[]}",
+        "expected": {
+          "commands": []
+        }
+      },
+      {
+        "json": "{\"commands\":[{\"name\":\"install\",\"command\":\"pnpm install\"},{\"name\":\"run\",\"command\":\"pnpm dev\",\"id\":\"ignored\"}]}",
+        "expected": {
+          "commands": [
+            {
+              "name": "install",
+              "command": "pnpm install"
+            },
+            {
+              "name": "run",
+              "command": "pnpm dev"
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{}",
+        "{\"projectId\":7}",
+        "{\"projectId\":\"p1\",\"streamId\":\"\"}",
+        "{\"projectId\":\"p1\",\"streamId\":7}",
+        "null"
+      ],
+      "results": [
+        "{}",
+        "{\"commands\":[{\"id\":\"c1\",\"name\":\"run\"}]}",
+        "{\"commands\":[],\"inherited\":[{\"name\":\"run\",\"command\":\"x\"}]}",
+        "{\"commands\":\"npm ci\"}",
+        "[]"
+      ],
+      "setParams": [
+        "{\"projectId\":\"p1\"}",
+        "{\"commands\":[]}",
+        "{\"projectId\":\"p1\",\"streamId\":\"\",\"commands\":[]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"  \",\"command\":\"npm ci\"}]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"install\",\"command\":\"\"}]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"install\"}]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"id\":\"\",\"name\":\"install\",\"command\":\"npm ci\"}]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"run\",\"command\":\"a\"},{\"name\":\"RUN \",\"command\":\"b\"}]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"command\":\"y\"}]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"x\",\"command\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}]}",
+        "{\"projectId\":\"p1\",\"commands\":[{\"name\":\"c0\",\"command\":\"true\"},{\"name\":\"c1\",\"command\":\"true\"},{\"name\":\"c2\",\"command\":\"true\"},{\"name\":\"c3\",\"command\":\"true\"},{\"name\":\"c4\",\"command\":\"true\"},{\"name\":\"c5\",\"command\":\"true\"},{\"name\":\"c6\",\"command\":\"true\"},{\"name\":\"c7\",\"command\":\"true\"},{\"name\":\"c8\",\"command\":\"true\"},{\"name\":\"c9\",\"command\":\"true\"},{\"name\":\"c10\",\"command\":\"true\"},{\"name\":\"c11\",\"command\":\"true\"},{\"name\":\"c12\",\"command\":\"true\"},{\"name\":\"c13\",\"command\":\"true\"},{\"name\":\"c14\",\"command\":\"true\"},{\"name\":\"c15\",\"command\":\"true\"},{\"name\":\"c16\",\"command\":\"true\"},{\"name\":\"c17\",\"command\":\"true\"},{\"name\":\"c18\",\"command\":\"true\"},{\"name\":\"c19\",\"command\":\"true\"},{\"name\":\"c20\",\"command\":\"true\"}]}",
+        "null"
+      ],
+      "suggestResults": [
+        "{}",
+        "{\"commands\":[{\"name\":\"run\"}]}",
+        "[]"
+      ]
+    }
+  },
   "queueUpdate": {
     "params": [
       {

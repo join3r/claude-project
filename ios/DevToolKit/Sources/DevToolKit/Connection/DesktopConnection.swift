@@ -326,6 +326,33 @@ extension DesktopConnection {
         return try decode(result, StreamLogsResult.parse)
     }
 
+    /// `stream.commands.get` (§8.21): the project's own commands (`streamId`
+    /// nil) or a stream's own, with the project's as `inherited`.
+    public func streamCommands(projectId: String, streamId: String? = nil) async throws -> StreamCommandsResult {
+        let result = try await request(TaskOp.streamCommandsGet, params: StreamCommandsParams(projectId: projectId, streamId: streamId).json)
+        return try decode(result, StreamCommandsResult.parse)
+    }
+
+    /// `stream.commands.set` (§8.21): replace that list. The streams' merged
+    /// `commands` come back in the next inbox.
+    public func setStreamCommands(projectId: String, streamId: String? = nil, commands: [StreamCommandEntry]) async throws {
+        let params = StreamCommandsSetParams(projectId: projectId, streamId: streamId, commands: commands)
+        _ = try await request(TaskOp.streamCommandsSet, params: params.json)
+    }
+
+    /// How long Suggest with Claude may take: the desktop gives Claude 3
+    /// minutes, plus the relay round trip.
+    public static var suggestCommandsTimeout: Duration { .seconds(210) }
+
+    /// `stream.commands.suggest` (§8.21): what Claude suggests for that list,
+    /// told what is saved there now. Nothing is saved. Claude reads the
+    /// project first, so this waits up to `suggestCommandsTimeout`.
+    public func suggestStreamCommands(projectId: String, streamId: String? = nil) async throws -> [SuggestedCommand] {
+        let result = try await request(TaskOp.streamCommandsSuggest, params: StreamCommandsParams(projectId: projectId, streamId: streamId).json,
+                                       timeout: Self.suggestCommandsTimeout)
+        return try decode(result, StreamCommandsSuggestResult.parse).commands
+    }
+
     /// `project.new` (§8.18): a folder `name` in the desktop's projects folder,
     /// `git init` in it, and a project for it. Returns its ID; the project
     /// shows up in the next inbox. Throws `.remote(code: "unsupported")` when

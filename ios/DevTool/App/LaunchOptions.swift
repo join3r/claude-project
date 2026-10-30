@@ -16,6 +16,9 @@ import Foundation
 /// - `-demoRoute streamLogs [-demoProject <projectId>] [-demoStream <streamId>]`: that
 ///   project with the stream's app run logs open (§8.19); the first stream with a
 ///   run command without `-demoStream`.
+/// - `-demoRoute commands [-demoProject <projectId>] [-demoStream <streamId>]`: that
+///   project with the Commands sheet up (§8.21): the stream's own commands, or the
+///   project's without `-demoStream` (or for `main`).
 /// - `-demoRoute compose [-demoNewProject <name>]`: the first desktop's screen with
 ///   the toolbar's New task sheet up; `-demoNewProject` then makes that project
 ///   through its New project… (`project.new`) and picks it.
@@ -70,6 +73,8 @@ struct LaunchOptions: Sendable {
         /// `project` with a stream's app run logs pushed (`-demoStream`, else
         /// the first stream with a run command).
         case streamLogs
+        /// `project` with the Commands sheet up: `-demoStream`'s own commands, else the project's.
+        case commands
         /// The first task of the first desktop.
         case task
         /// The first terminal agent's task: its status screen.

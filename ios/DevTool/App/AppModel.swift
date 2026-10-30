@@ -343,6 +343,26 @@ final class AppModel {
         return try await connection.runLogs(projectId: projectId, streamId: streamId, commandId: commandId)
     }
 
+    // MARK: - Commands (§8.21)
+
+    /// `stream.commands.get`: the project's own commands (`streamId` nil) or a stream's own.
+    func streamCommands(projectId: String, streamId: String?, desktopId: String) async throws -> StreamCommandsResult {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.streamCommands(projectId: projectId, streamId: streamId)
+    }
+
+    /// `stream.commands.set`: saves the Commands sheet. The merged commands come with the next inbox.
+    func setStreamCommands(_ commands: [StreamCommandEntry], projectId: String, streamId: String?, desktopId: String) async throws {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        try await connection.setStreamCommands(projectId: projectId, streamId: streamId, commands: commands)
+    }
+
+    /// `stream.commands.suggest`: what Claude suggests; nothing is saved.
+    func suggestStreamCommands(projectId: String, streamId: String?, desktopId: String) async throws -> [SuggestedCommand] {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.suggestStreamCommands(projectId: projectId, streamId: streamId)
+    }
+
     private func project(_ projectId: String, desktopId: String) -> InboxProject? {
         inboxes[desktopId]?.projects.first { $0.id == projectId }
     }

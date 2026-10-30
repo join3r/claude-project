@@ -215,6 +215,28 @@ export interface StreamLogsParams { projectId: string; streamId: string; command
 /** The run's output, terminal escapes stripped, at most {@link ChatLimits.runLogs} characters from its end. */
 export interface StreamLogsResult { text: string; truncated?: true }
 
+/**
+ * `stream.commands.get`, `.set` and `.suggest` (SPEC.md §8.21): the commands a
+ * project or a stream runs (§8.19), as Project settings and a stream's Commands…
+ * edit them, and Suggest with Claude. No `streamId` means the project's own list.
+ */
+export const STREAM_COMMANDS_GET_OP = 'stream.commands.get'
+export const STREAM_COMMANDS_SET_OP = 'stream.commands.set'
+export const STREAM_COMMANDS_SUGGEST_OP = 'stream.commands.suggest'
+/** The handshake feature (§8.1) a desktop lists when it answers the three. */
+export const STREAM_COMMANDS_FEATURE = 'stream.commands'
+
+/** A saved command (§8.19): `id` is what runs are keyed by. */
+export interface StreamCommand { id: string; name: string; command: string }
+/** `stream.commands.get` and `stream.commands.suggest` params. */
+export interface StreamCommandsParams { projectId: string; streamId?: string }
+/** `inherited`: with `streamId`, the project's commands; absent when there are none. */
+export interface StreamCommandsResult { commands: StreamCommand[]; inherited?: StreamCommand[] }
+/** `id` keeps a command already in that list; without one it gets a fresh id. */
+export interface StreamCommandsSetParams { projectId: string; streamId?: string; commands: Array<{ id?: string; name: string; command: string }> }
+/** What Claude suggests; nothing is saved. */
+export interface StreamCommandsSuggestResult { commands: Array<{ name: string; command: string }> }
+
 /** `branch` and `baseBranch` are only kept with `worktree: true`. */
 export interface StreamNewParams { projectId: string; name: string; worktree: boolean; branch?: string; baseBranch?: string }
 export interface StreamNewResult { streamId: string }
@@ -437,6 +459,10 @@ export const ChatLimits = {
   queueText: 32000,
   /** `stream.logs` text (§8.19): the end of the run's output. */
   runLogs: 200_000,
+  /** `stream.commands.set` (§8.21): commands per list, and each one's name and command line. */
+  streamCommands: 20,
+  commandName: 60,
+  commandLine: 2000,
   /** `tasks` in the view (§8.20), and the agents listed per workflow. */
   tasks: 20,
   workflowAgents: 100,
@@ -1449,6 +1475,78 @@ export function parseStreamLogsResult(value: unknown): StreamLogsResult {
   const out: StreamLogsResult = { text: str(o, 'text') }
   if (o.truncated === true) out.truncated = true
   return out
+}
+
+/**
+ * `stream.commands.get` and `stream.commands.suggest` params (the desktop's side).
+ * Throws ProtocolError — `bad-request` — on a missing `projectId` or an empty `streamId`.
+ */
+export function parseStreamCommandsParams(params: unknown): StreamCommandsParams {
+  const o = obj(params, 'params')
+  const out: StreamCommandsParams = { projectId: str(o, 'projectId') }
+  const streamId = optNonEmpty(o, 'streamId')
+  if (streamId !== undefined) out.streamId = streamId
+  return out
+}
+
+function parseStreamCommand(value: unknown): StreamCommand {
+  const o = obj(value, 'command')
+  return { id: str(o, 'id'), name: str(o, 'name'), command: str(o, 'command') }
+}
+
+/** `stream.commands.get` result (the phone's side). An empty `inherited` is absent. */
+export function parseStreamCommandsResult(value: unknown): StreamCommandsResult {
+  const o = obj(value, 'result')
+  const out: StreamCommandsResult = { commands: arr(o, 'commands').map(parseStreamCommand) }
+  if (!absent(o, 'inherited')) {
+    const inherited = arr(o, 'inherited').map(parseStreamCommand)
+    if (inherited.length > 0) out.inherited = inherited
+  }
+  return out
+}
+
+/**
+ * `stream.commands.set` params (the desktop's side). Throws ProtocolError —
+ * `bad-request` — on a missing `projectId`, an empty `streamId` or `id`, a blank
+ * name or command, one over {@link ChatLimits.commandName} or
+ * {@link ChatLimits.commandLine} characters, more than {@link ChatLimits.streamCommands}
+ * commands, or two names that are the same ignoring case. Names and commands come
+ * back trimmed.
+ */
+export function parseStreamCommandsSetParams(params: unknown): StreamCommandsSetParams {
+  const o = obj(params, 'params')
+  const list = arr(o, 'commands')
+  if (list.length > ChatLimits.streamCommands) fail(`more than ${ChatLimits.streamCommands} commands`)
+  const seen = new Set<string>()
+  const commands = list.map((value) => {
+    const c = obj(value, 'command')
+    const name = str(c, 'name').trim()
+    const command = str(c, 'command').trim()
+    if (!name) fail('name is empty')
+    if (!command) fail('command is empty')
+    if (name.length > ChatLimits.commandName) fail(`name over ${ChatLimits.commandName} characters`)
+    if (command.length > ChatLimits.commandLine) fail(`command over ${ChatLimits.commandLine} characters`)
+    const key = name.toLowerCase()
+    if (seen.has(key)) fail(`two commands are named "${name}"`)
+    seen.add(key)
+    const id = optNonEmpty(c, 'id')
+    return id !== undefined ? { id, name, command } : { name, command }
+  })
+  const out: StreamCommandsSetParams = { projectId: str(o, 'projectId'), commands }
+  const streamId = optNonEmpty(o, 'streamId')
+  if (streamId !== undefined) out.streamId = streamId
+  return out
+}
+
+/** `stream.commands.suggest` result (the phone's side). */
+export function parseStreamCommandsSuggestResult(value: unknown): StreamCommandsSuggestResult {
+  const o = obj(value, 'result')
+  return {
+    commands: arr(o, 'commands').map((item) => {
+      const c = obj(item, 'command')
+      return { name: str(c, 'name'), command: str(c, 'command') }
+    })
+  }
 }
 
 /** `project.new` result (the phone's side). */

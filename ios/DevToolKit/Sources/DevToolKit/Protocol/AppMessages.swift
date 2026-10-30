@@ -244,6 +244,8 @@ public enum DesktopFeature {
     public static let streamRunTask = "stream.run.task"
     /// Streams carry `commands` and `runs`, and `stream.run` and `stream.logs` take `commandId` (§8.19).
     public static let streamRunCommands = "stream.run.commands"
+    /// The desktop answers `stream.commands.get`, `.set` and `.suggest` (§8.21).
+    public static let streamCommands = "stream.commands"
     /// The desktop answers `tokens.usage` (§8.22).
     public static let tokensUsage = "tokens.usage"
 }

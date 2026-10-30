@@ -24,6 +24,8 @@ import {
   parseStreamRunParams,
   parseStreamLogsParams,
   parseStreamLogsResult,
+  parseStreamCommandsParams,
+  parseStreamCommandsSetParams,
   parseTaskNewParams,
   parseChatParams,
   parseChatResult,
@@ -218,6 +220,19 @@ describe('chat parsers', () => {
       .toEqual({ today: '2026-10-30', scannedAt: 5, projects: [{ projectId: 'p1', rows: [row] }] })
     expect(() => parseTokensUsageResult({ today: '2026-10-30', scannedAt: 5, projects: [{ projectId: 'p1', rows: [{ ...row, day: 'today' }] }] })).toThrow(ProtocolError)
     expect(parseChatParams('tokens.usage', {})).toBeNull()
+  })
+
+  it('parses stream.commands (§8.21): trimmed rows, limits, names unique ignoring case', () => {
+    expect(parseStreamCommandsParams({ projectId: 'p1' })).toEqual({ projectId: 'p1' })
+    expect(parseStreamCommandsParams({ projectId: 'p1', streamId: 's1' })).toEqual({ projectId: 'p1', streamId: 's1' })
+    expect(() => parseStreamCommandsParams({ projectId: 'p1', streamId: '' })).toThrow(ProtocolError)
+    expect(parseStreamCommandsSetParams({ projectId: 'p1', commands: [{ id: 'c1', name: ' run ', command: ' npm run dev ' }, { name: 'test', command: 'npm test' }] }))
+      .toEqual({ projectId: 'p1', commands: [{ id: 'c1', name: 'run', command: 'npm run dev' }, { name: 'test', command: 'npm test' }] })
+    expect(() => parseStreamCommandsSetParams({ projectId: 'p1', commands: [{ name: 'Run', command: 'a' }, { name: 'run', command: 'b' }] })).toThrow(ProtocolError)
+    expect(() => parseStreamCommandsSetParams({ projectId: 'p1', commands: [{ name: 'run', command: '   ' }] })).toThrow(ProtocolError)
+    expect(() => parseStreamCommandsSetParams({ projectId: 'p1', commands: Array.from({ length: 21 }, (_, i) => ({ name: `c${i}`, command: 'x' })) })).toThrow(ProtocolError)
+    expect(ChatLimits.streamCommands).toBe(20)
+    expect(parseChatParams('stream.commands.get', { projectId: 'p1' })).toBeNull()
   })
 
   it('parses branches.list (§8.13)', () => {

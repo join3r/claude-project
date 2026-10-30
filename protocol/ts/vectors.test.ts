@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { negotiateVersion, parseAppMessage, parseDesktopHello, parseInbox, parsePhoneHello } from './app-messages.ts'
 import type { VersionInfo } from './app-messages.ts'
 import { Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
 
 /**
  * Two jobs: the committed vectors must be exactly what the generator produces today,
@@ -169,6 +169,14 @@ describe('M2 vectors', () => {
     for (const s of file.streamLogs.results) expect(parseStreamLogsResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.streamLogs.invalid.params) expect(() => parseStreamLogsParams(JSON.parse(s)), s).toThrow()
     for (const s of file.streamLogs.invalid.results) expect(() => parseStreamLogsResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.streamCommands.params) expect(parseStreamCommandsParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.streamCommands.results) expect(parseStreamCommandsResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.streamCommands.setParams) expect(parseStreamCommandsSetParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.streamCommands.suggestResults) expect(parseStreamCommandsSuggestResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
+    for (const s of file.streamCommands.invalid.params) expect(() => parseStreamCommandsParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.streamCommands.invalid.results) expect(() => parseStreamCommandsResult(JSON.parse(s)), s).toThrow()
+    for (const s of file.streamCommands.invalid.setParams) expect(() => parseStreamCommandsSetParams(JSON.parse(s)), s).toThrow()
+    for (const s of file.streamCommands.invalid.suggestResults) expect(() => parseStreamCommandsSuggestResult(JSON.parse(s)), s).toThrow()
     for (const s of file.branchesList.params) expect(parseBranchesListParams(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.branchesList.results) expect(parseBranchesListResult(JSON.parse(s.json)), s.json).toEqual(s.expected)
     for (const s of file.branchesList.invalid.params) expect(() => parseBranchesListParams(JSON.parse(s)), s).toThrow()

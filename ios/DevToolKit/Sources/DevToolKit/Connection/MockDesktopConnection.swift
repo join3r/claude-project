@@ -44,6 +44,10 @@ public actor MockDesktopConnection: DesktopConnection {
     private let streamStep: Duration
     /// Each stream's app run output (§8.19), by stream ID.
     private var runLogs: [String: String] = MockInbox.runLogs
+    /// Commands saved by `stream.commands.set` (§8.21): "project:<id>" or "stream:<id>".
+    private var savedCommands: [String: [InboxRunCommand]] = [:]
+    /// How long `stream.commands.suggest` "reads the project".
+    private let suggestDelay: Duration
 
     public init(
         desktopId: String,
@@ -52,9 +56,11 @@ public actor MockDesktopConnection: DesktopConnection {
         flipInterval: Duration = .seconds(4),
         inbox: Inbox? = nil,
         streamStep: Duration = .milliseconds(250),
-        hostKind: HostKind = .desktop
+        hostKind: HostKind = .desktop,
+        suggestDelay: Duration = .seconds(2)
     ) {
         self.streamStep = streamStep
+        self.suggestDelay = suggestDelay
         self.hostKind = hostKind
         chats = MockChats.all()
         self.desktopId = desktopId
@@ -239,6 +245,31 @@ public actor MockDesktopConnection: DesktopConnection {
                 throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
             }
             return try logs(parsed).json
+        case TaskOp.streamCommandsGet:
+            let parsed: StreamCommandsParams
+            do {
+                parsed = try StreamCommandsParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return try commandsResult(parsed).json
+        case TaskOp.streamCommandsSet:
+            let parsed: StreamCommandsSetParams
+            do {
+                parsed = try StreamCommandsSetParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            try setCommands(parsed)
+            return .object([:])
+        case TaskOp.streamCommandsSuggest:
+            let parsed: StreamCommandsParams
+            do {
+                parsed = try StreamCommandsParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return StreamCommandsSuggestResult(commands: try await suggestCommands(parsed)).json
         case TaskOp.newProject:
             let parsed: ProjectNewParams
             do {
@@ -575,6 +606,95 @@ public actor MockDesktopConnection: DesktopConnection {
         }
         inbox.generatedAt = now
         continuation.yield(.inbox(inbox))
+    }
+
+    // MARK: Commands (§8.21)
+
+    /// The project and, when named, the stream a commands op points at.
+    private func commandsPlace(_ projectId: String, _ streamId: String?) throws -> (Int, Int?) {
+        guard let p = inbox.projects.firstIndex(where: { $0.id == projectId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+        }
+        if projectId == Self.shellProjectId {
+            throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "A shell-command project runs one command, not named commands.")
+        }
+        guard let streamId else { return (p, nil) }
+        guard let s = inbox.projects[p].streams.firstIndex(where: { $0.id == streamId }) else {
+            throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such stream")
+        }
+        return (p, s)
+    }
+
+    /// The project's own list: saved, else what `main` runs in the sample.
+    private func projectCommands(_ p: Int) -> [InboxRunCommand] {
+        let project = inbox.projects[p]
+        if let saved = savedCommands["project:\(project.id)"] { return saved }
+        return project.streams.first(where: \.isMain)?.commands ?? []
+    }
+
+    /// A stream's own list: saved, else the sample's commands that differ from the project's.
+    private func streamOwnCommands(_ p: Int, _ s: Int) -> [InboxRunCommand] {
+        let stream = inbox.projects[p].streams[s]
+        if let saved = savedCommands["stream:\(stream.id)"] { return saved }
+        if stream.isMain { return [] }
+        let base = projectCommands(p)
+        return stream.commands.filter { c in !base.contains { $0.name == c.name && $0.command == c.command } }
+    }
+
+    private func commandsResult(_ params: StreamCommandsParams) throws -> StreamCommandsResult {
+        let (p, s) = try commandsPlace(params.projectId, params.streamId)
+        guard let s else { return StreamCommandsResult(commands: projectCommands(p)) }
+        return StreamCommandsResult(commands: streamOwnCommands(p, s), inherited: projectCommands(p))
+    }
+
+    /// `stream.commands.set`: saves the list (known ids kept), then every
+    /// stream's merged `commands` again, as the desktop's next inbox has them.
+    private func setCommands(_ params: StreamCommandsSetParams) throws {
+        let (p, s) = try commandsPlace(params.projectId, params.streamId)
+        let current = s.map { streamOwnCommands(p, $0) } ?? projectCommands(p)
+        var used = Set<String>()
+        let list = params.commands.map { entry in
+            var id = entry.id.flatMap { id in current.contains { $0.id == id } && !used.contains(id) ? id : nil }
+                ?? "c\(UUID().uuidString.prefix(8).lowercased())"
+            while used.contains(id) { id = "c\(UUID().uuidString.prefix(8).lowercased())" }
+            used.insert(id)
+            return InboxRunCommand(id: id, name: entry.name, command: entry.command)
+        }
+        // Every stream's own list as it is now, before the project's changes under it.
+        let own = inbox.projects[p].streams.indices.map { streamOwnCommands(p, $0) }
+        if let s {
+            savedCommands["stream:\(inbox.projects[p].streams[s].id)"] = list
+        } else {
+            savedCommands["project:\(inbox.projects[p].id)"] = list
+        }
+        let base = projectCommands(p)
+        for index in inbox.projects[p].streams.indices {
+            let streamOwn = index == s ? list : own[index]
+            savedCommands["stream:\(inbox.projects[p].streams[index].id)"] = streamOwn
+            var merged = base.map { command in
+                streamOwn.first { $0.name.lowercased() == command.name.lowercased() }.map { InboxRunCommand(id: command.id, name: command.name, command: $0.command) } ?? command
+            }
+            merged += streamOwn.filter { c in !base.contains { $0.name.lowercased() == c.name.lowercased() } }
+            inbox.projects[p].streams[index].commands = merged
+            inbox.projects[p].streams[index] = Self.withLegacyRun(inbox.projects[p].streams[index])
+        }
+        inbox.generatedAt = Date().unixMilliseconds
+        continuation.yield(.inbox(inbox))
+    }
+
+    /// `stream.commands.suggest`: canned commands after a pause; the remote
+    /// project answers `unsupported`, as SSH projects do.
+    private func suggestCommands(_ params: StreamCommandsParams) async throws -> [SuggestedCommand] {
+        let (p, s) = try commandsPlace(params.projectId, params.streamId)
+        if inbox.projects[p].remote {
+            throw DesktopConnectionError.remote(code: AppErrorCode.unsupported, message: "Suggest with Claude isn't available for SSH projects yet.")
+        }
+        try? await Task.sleep(for: suggestDelay)
+        if let s, !inbox.projects[p].streams[s].isMain {
+            return [SuggestedCommand(name: "run", command: "npm run dev -- --port 3002")]
+        }
+        return [SuggestedCommand(name: "install", command: "npm ci"), SuggestedCommand(name: "run", command: "npm run dev"),
+                SuggestedCommand(name: "test", command: "npm test")]
     }
 
     /// `stream.logs`: a command's output so far; a running one prints a line per ask.
@@ -1113,7 +1233,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.streamNew, DesktopFeature.branchesList, DesktopFeature.chatCommands,
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
-            DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.chatTasks,
+            DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.streamCommands, DesktopFeature.chatTasks,
             DesktopFeature.tokensUsage,
         ]))
         set(.online)

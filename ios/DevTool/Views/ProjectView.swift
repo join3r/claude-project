@@ -18,6 +18,8 @@ struct ProjectView: View {
     @State private var createdStream: String?
     /// The stream whose app run logs are pushed (§8.19).
     @State private var logs: StreamLogsTarget?
+    /// The Commands sheet (§8.21): the project's or a stream's commands.
+    @State private var commands: CommandsTarget?
 
     var body: some View {
         if let inbox = model.inboxes[ref.desktopId], let project = inbox.projects.first(where: { $0.id == ref.projectId }) {
@@ -39,6 +41,18 @@ struct ProjectView: View {
                         .disabled(offline)
                     }
                 }
+                if canEditCommands {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button("Commands…", systemImage: "terminal") {
+                                commands = CommandsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: nil)
+                            }
+                            .disabled(offline)
+                        } label: {
+                            Label("More", systemImage: "ellipsis.circle")
+                        }
+                    }
+                }
                 if model.supports(DesktopFeature.streamNew, on: ref.desktopId) {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("New stream", systemImage: "plus") {
@@ -54,6 +68,9 @@ struct ProjectView: View {
             .sheet(item: $queuePrompt) { target in
                 QueueSheet(target: target)
             }
+            .sheet(item: $commands) { target in
+                CommandsSheet(target: target)
+            }
             .sheet(item: $newStream) { target in
                 NewStreamSheet(target: target, streams: project.streams) { createdStream = $0 }
             }
@@ -61,6 +78,11 @@ struct ProjectView: View {
                 switch demoSheet {
                 case .newStream: newStream = NewStreamTarget(desktopId: ref.desktopId, projectId: project.id)
                 case .newTask: newTask = NewTaskTarget(desktopId: ref.desktopId, projectId: project.id, streamId: project.streams.last?.id)
+                case .commands:
+                    let wanted = LaunchOptions.current.demoStream
+                    let stream = project.streams.first { $0.id == wanted }
+                    commands = stream.map { CommandsTarget.of($0, desktopId: ref.desktopId, projectId: project.id) }
+                        ?? CommandsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: nil)
                 case .streamLogs:
                     let wanted = LaunchOptions.current.demoStream
                     if let stream = project.streams.first(where: { $0.id == wanted }) ?? project.streams.first(where: { $0.runCommand != nil }) {
@@ -83,6 +105,7 @@ struct ProjectView: View {
     }
 
     private var offline: Bool { model.isOffline(ref.desktopId) }
+    private var canEditCommands: Bool { model.supports(DesktopFeature.streamCommands, on: ref.desktopId) }
 
     private func list(_ project: InboxProject, inbox: Inbox, now: Date) -> some View {
         ScrollViewReader { proxy in
@@ -182,6 +205,8 @@ struct ProjectView: View {
                 }
                 if !stream.runCommands.isEmpty {
                     runPickerRow(stream, project: project)
+                } else if canEditCommands {
+                    setUpRunRow(stream, project: project)
                 }
             }
             ForEach(tasks) { task in
@@ -249,6 +274,13 @@ struct ProjectView: View {
                 }
                 .disabled(offline)
             }
+            // `main`'s commands are the project's, in the toolbar's menu.
+            if canEditCommands, !stream.isMain {
+                Button("Commands…", systemImage: "terminal") {
+                    commands = CommandsTarget.of(stream, desktopId: ref.desktopId, projectId: project.id)
+                }
+                .disabled(offline)
+            }
         }
     }
 
@@ -278,9 +310,24 @@ struct ProjectView: View {
             }
     }
 
-    /// Run…: picks one of the stream's commands to start (§8.19).
+    /// Set up Run…: a stream with no commands yet opens the Commands sheet
+    /// (§8.21), for the project's commands on `main`, the stream's own elsewhere.
+    private func setUpRunRow(_ stream: InboxStream, project: InboxProject) -> some View {
+        Button {
+            commands = CommandsTarget.of(stream, desktopId: ref.desktopId, projectId: project.id)
+        } label: {
+            Label("Set up Run…", systemImage: "play")
+                .font(.subheadline)
+        }
+        .disabled(offline)
+        .accessibilityHint("Sets the commands \(stream.name) can run")
+    }
+
+    /// Run…: picks one of the stream's commands to start (§8.19), or Commands… to edit them.
     private func runPickerRow(_ stream: InboxStream, project: InboxProject) -> some View {
-        RunCommandMenu(desktopId: ref.desktopId, projectId: project.id, stream: stream) {
+        RunCommandMenu(desktopId: ref.desktopId, projectId: project.id, stream: stream, onCommands: {
+            commands = CommandsTarget.of(stream, desktopId: ref.desktopId, projectId: project.id)
+        }) {
             Label(stream.commandRuns.isEmpty ? "Run…" : "Run another…", systemImage: "play")
                 .font(.subheadline)
         }
