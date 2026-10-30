@@ -7,6 +7,7 @@ import { useAllTabStatuses, useAllTabStatusSince } from '../../context/TabStatus
 import { useAllAgentActivity } from '../../agentActivity'
 import { useProjectArchives } from '../../hooks/archiveStore'
 import { useResizeHandle } from '../../hooks/useResizeHandle'
+import { useTaskDiffSummaries } from '../../hooks/useTaskDiffSummaries'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import type { MenuAnchor } from '../../hooks/useMenuPosition'
@@ -134,6 +135,12 @@ export default function DeskColumn({
       snoozed: pinnedFirst(raw.snoozed, pinnedTaskIds)
     }
   }, [projects, scope, allStatuses, statusSince, now, pinnedTaskIds])
+  // Lines added and removed on every row but the snoozed ones, as on the phone.
+  const diffSources = useMemo(
+    () => [...lists.needsYou, ...lists.answered, ...lists.waiting, ...lists.working].map(({ project, task }) => ({ project, task })),
+    [lists]
+  )
+  const diffs = useTaskDiffSummaries(diffSources)
   const grouped = config?.inboxLayout === 'grouped'
   const counts = deskTabCounts(lists)
 
@@ -229,6 +236,7 @@ export default function DeskColumn({
         agent={taskActivity(entry.task, allStatuses, activities)}
         activity={bestActivity(entry, activities)}
         background={background}
+        diff={kind === 'snoozed' ? undefined : diffs.get(entry.task.id)}
         onStopBackground={background && background.tasks.length > 0 ? () => { void stopBackground(background) } : undefined}
         selected={selectedTaskId === entry.task.id}
         pinned={pinnedTaskIds.has(entry.task.id)}

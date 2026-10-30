@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import type { Project, Task } from '../../../shared/types'
-import { useTaskDiffSummaries } from '../../hooks/useTaskDiffSummaries'
+import { formatLineCount, useTaskDiffSummaries } from '../../hooks/useTaskDiffSummaries'
 import { canLandTask, useLandingOp } from '../../taskLanding'
 import { useTaskLandingActions } from '../useTaskLandingActions'
 import { findStreamOfTask } from '../../../shared/streams'
@@ -52,11 +52,13 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
         <button
           type="button"
           className="shrink-0 mr-1.5 bg-transparent border-0 p-0 font-mono text-xs text-info cursor-pointer hover:underline [-webkit-app-region:no-drag]"
-          title={`+${diff?.added ?? 0} −${diff?.deleted ?? 0} lines. Opens Changes in the Bench.`}
+          title={`${diff?.added ?? 0} lines added, ${diff?.deleted ?? 0} removed. Opens Changes in the Bench.`}
           onClick={() => openBench(task.id, 'changes')}
           data-testid="desk-files-changed"
         >
-          {files === 1 ? '1 file changed' : `${files} files changed`}
+          {files === 1 ? '1 file' : `${files} files`}
+          {' '}<span className="text-running">+{formatLineCount(diff?.added ?? 0)}</span>
+          {' '}<span className="text-crashed">−{formatLineCount(diff?.deleted ?? 0)}</span>
         </button>
       )}
       {snoozed ? (

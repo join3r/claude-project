@@ -1,6 +1,7 @@
 import React from 'react'
 import { MoreHorizontal, Pin } from 'lucide-react'
-import type { Project } from '../../../shared/types'
+import type { GitDiffSummary, Project } from '../../../shared/types'
+import { formatLineCount } from '../../hooks/useTaskDiffSummaries'
 import type { AgentActivity } from '../../../shared/agent-activity'
 import ProjectTileBadge from '../ProjectTileBadge'
 import {
@@ -74,7 +75,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
 const actionCls = 'px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong whitespace-nowrap'
 
 export default function DeskRow({
-  entry, kind, agent, activity, background = null, selected, pinned = false, offline = false, now, theme, onSelect, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
+  entry, kind, agent, activity, background = null, diff, selected, pinned = false, offline = false, now, theme, onSelect, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
 }: {
   entry: InboxEntry
   kind: DeskRowKind
@@ -82,6 +83,8 @@ export default function DeskRow({
   activity: AgentActivity | undefined
   /** Working rows: the Background state, when the turn ended but its work still runs. */
   background?: TaskBackground | null
+  /** Lines the task added and removed, shown before its age. */
+  diff?: GitDiffSummary
   selected: boolean
   /** A pinned task: a pin beside its title. */
   pinned?: boolean
@@ -144,6 +147,11 @@ export default function DeskRow({
               ? <span className="w-[7px] h-[7px] rounded-full bg-status-working" aria-label="background" data-testid="desk-row-background" />
               : <span className="w-[7px] h-[7px] rounded-full bg-status-working desk-pulse" aria-label="working" />)}
             {unread && <span className="w-[7px] h-[7px] rounded-full bg-answered" aria-label="unread" />}
+            {diff && (diff.added > 0 || diff.deleted > 0) && (
+              <span className="font-mono" title={`${diff.added} lines added, ${diff.deleted} removed${diff.files ? ` in ${diff.files === 1 ? '1 file' : `${diff.files} files`}` : ''}`} data-testid="desk-row-diff">
+                <span className="text-running">+{formatLineCount(diff.added)}</span> <span className="text-crashed">−{formatLineCount(diff.deleted)}</span>
+              </span>
+            )}
             {at > 0 ? formatRelativeAge(now - at) : ''}
           </span>
         </div>
