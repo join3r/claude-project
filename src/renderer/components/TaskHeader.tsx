@@ -1,15 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { ChevronDown, MoreHorizontal } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { useAllTabStatuses, useAllTabStatusSince } from '../context/TabStatusContext'
-import { useAllAgentActivity } from '../agentActivity'
 import { pinnedItemKey } from '../../shared/types'
 import type { PinnedItem, Project, Stream, Task } from '../../shared/types'
 import { ContextMenu, type ContextMenuItem } from './ui'
 import type { MenuAnchor } from '../hooks/useMenuPosition'
 import ProjectTileBadge from './ProjectTileBadge'
-import { isSnoozed, snoozePresets, taskActivity } from './inbox'
-import { taskAgentTab, taskStatusChip, type TaskChipTone } from './taskHeaderState'
+import { isSnoozed, snoozePresets } from './inbox'
+import { taskAgentTab } from './taskHeaderState'
 import { useCloseTask } from './sidebar/useCloseTask'
 import { landingActionBlocker } from './sidebar/closeRules'
 import { useTaskLandingActions } from './useTaskLandingActions'
@@ -33,19 +31,11 @@ function belowAnchor(e: React.MouseEvent): MenuAnchor {
   return { x: rect.left, y: rect.bottom + 4 }
 }
 
-/** The state label's dot, in the sidebar's colours. */
-const STATE_DOT_CLS: Record<TaskChipTone, string> = {
-  attention: 'bg-status-attention',
-  working: 'bg-status-working status-pulse',
-  turn: 'bg-info',
-  quiet: 'bg-border-strong'
-}
-
 /**
  * The bar above a task, on one line: **project** › stream › task (the stream is
- * left out when it is `main`), then a quiet state label. Right side: the
- * caller's tools (new terminal / browser, Files / Git / Notes, IDE) and the
- * task menu, which also closes the task. The project name opens the project's
+ * left out when it is `main`). Right side: the caller's tools (new terminal /
+ * browser, Files / Git / Notes, IDE) and the task menu, which also closes the
+ * task. Status and lines changed stay off this bar: the sidebar row shows them. The project name opens the project's
  * Home; its chevron (or a right-click) opens the project menu, which for a task
  * in `main` also leads to main's stream menu. The stream name opens the stream
  * menu, and its app's ▶ badge shows beside it while the app runs or after it
@@ -72,9 +62,6 @@ export default function TaskHeader({
     config, effectiveTheme, renameTask, convertClaudeTab, pinnedItems, togglePinnedItem,
     snoozeTask, unsnoozeTask, setSelectedTaskId
   } = useApp()
-  const allStatuses = useAllTabStatuses()
-  const statusSince = useAllTabStatusSince()
-  const activities = useAllAgentActivity()
   const closeTaskFlow = useCloseTask()
   const landingActions = useTaskLandingActions()
   const tabStatusStore = useTabStatusStore()
@@ -87,18 +74,6 @@ export default function TaskHeader({
   const moveTask = useMoveTask()
   const [renaming, setRenaming] = useState<string | null>(null)
   const renameRef = useRef<HTMLInputElement>(null)
-  const [now, setNow] = useState(() => Date.now())
-
-  const chip = task ? taskStatusChip(task, allStatuses, statusSince, now) : null
-  const waiting = chip?.tone === 'attention'
-  // "Needs you · 4m" counts up while it waits.
-  useEffect(() => {
-    if (!waiting) return
-    setNow(Date.now())
-    const id = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(id)
-  }, [waiting])
-
   useEffect(() => { setRenaming(null) }, [task?.id])
   useEffect(() => {
     if (renaming !== null) renameRef.current?.select()
@@ -117,8 +92,6 @@ export default function TaskHeader({
   const showIcon = config?.showProjectIcons ?? false
 
   const agentTab = task ? taskAgentTab(task) : undefined
-  const activity = task ? taskActivity(task, allStatuses, activities) : {}
-  const chipTitle = [activity.line, activity.tooltip].filter(Boolean).join('\n') || undefined
 
   const commitRename = () => {
     if (!task || renaming === null) return
@@ -284,12 +257,6 @@ export default function TaskHeader({
             <span className="text-text truncate min-w-0" data-testid="task-header-name">{task.name}</span>
           ))}
         </div>
-        {chip && (
-          <span className="shrink-0 inline-flex items-center gap-1.5 text-xs text-text-muted tabular-nums" title={chipTitle}>
-            <span className={`w-1.5 h-1.5 rounded-full ${STATE_DOT_CLS[chip.tone]}`} />
-            {chip.label}
-          </span>
-        )}
         <div className="flex items-center gap-0.5 shrink-0">
           {tools}
           {task && (

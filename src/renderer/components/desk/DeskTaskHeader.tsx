@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import type { Project, Task } from '../../../shared/types'
-import { formatLineCount, useTaskDiffSummaries } from '../../hooks/useTaskDiffSummaries'
 import { canLandTask, useLandingOp } from '../../taskLanding'
 import { useTaskLandingActions } from '../useTaskLandingActions'
 import { findStreamOfTask } from '../../../shared/streams'
@@ -12,21 +11,16 @@ import { useCloseTask } from '../sidebar/useCloseTask'
 import { isSnoozed } from '../inbox'
 import { useDeskDone } from './useDeskDone'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
-import { openBench } from './benchState'
 
 const ghostCls = 'shrink-0 h-[26px] px-2.5 rounded-[7px] border border-border-strong bg-transparent text-sm text-text cursor-pointer hover:bg-sel [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast)'
 
 /**
- * Left of the task menu in the desk's task header: a quiet "N files changed"
- * that opens Changes in the Bench (the one way, besides a status-bar run, the
- * Bench opens by itself), and Snooze (Wake while snoozed).
+ * Left of the task menu in the desk's task header: the Autopilot pill and
+ * Snooze (Wake while snoozed). Lines changed live on the sidebar row only.
  */
 export function DeskTaskTools({ project, task }: { project: Project; task: Task }): React.ReactElement {
   const { snoozeTask, unsnoozeTask, endAutopilot } = useApp()
-  const sources = useMemo(() => [{ project, task }], [project, task])
-  const diff = useTaskDiffSummaries(sources).get(task.id)
   const [snoozeAt, setSnoozeAt] = useState<DeskSnoozeRequest | null>(null)
-  const files = diff?.files ?? 0
   const snoozed = isSnoozed(task, Date.now())
 
   return (
@@ -47,19 +41,6 @@ export function DeskTaskTools({ project, task }: { project: Project; task: Task 
             data-testid="desk-task-autopilot-off"
           >×</button>
         </span>
-      )}
-      {files > 0 && (
-        <button
-          type="button"
-          className="shrink-0 mr-1.5 bg-transparent border-0 p-0 font-mono text-xs text-info cursor-pointer hover:underline [-webkit-app-region:no-drag]"
-          title={`${diff?.added ?? 0} lines added, ${diff?.deleted ?? 0} removed. Opens Changes in the Bench.`}
-          onClick={() => openBench(task.id, 'changes')}
-          data-testid="desk-files-changed"
-        >
-          {files === 1 ? '1 file' : `${files} files`}
-          {' '}<span className="text-running">+{formatLineCount(diff?.added ?? 0)}</span>
-          {' '}<span className="text-crashed">−{formatLineCount(diff?.deleted ?? 0)}</span>
-        </button>
       )}
       {snoozed ? (
         <button type="button" className={ghostCls} onClick={() => unsnoozeTask(project.id, task.id)} title="Back to the Inbox now">Wake</button>
