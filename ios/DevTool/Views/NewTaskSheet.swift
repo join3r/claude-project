@@ -110,6 +110,10 @@ struct NewTaskSheet: View {
     @State private var newProjectDesktopId: String?
     @State private var newProjectName = ""
     @State private var creatingProject = false
+    /// The same-folder warning's New stream…, and the stream it made (picked
+    /// before the inbox that lists it arrives).
+    @State private var newStream: NewStreamTarget?
+    @State private var createdStreamId: String?
 
     init(target: NewTaskTarget) {
         self.target = target
@@ -138,6 +142,7 @@ struct NewTaskSheet: View {
                         } else if let stream = selectedStream ?? streams.first {
                             LabeledContent("Stream") { StreamLabel(stream: stream) }
                         }
+                        sameFolderWarning
                     } footer: {
                         if let selection, model.isOffline(selection.desktopId) {
                             Text("\(model.desktop(selection.desktopId)?.name ?? "This desktop") is offline.")
@@ -244,6 +249,12 @@ struct NewTaskSheet: View {
             .onChange(of: selection) {
                 // Another project: its own most recently used stream.
                 streamId = selectedProject?.defaultStream?.id
+            }
+            .sheet(item: $newStream) { target in
+                NewStreamSheet(target: target, streams: selectedProject?.streams ?? []) { created in
+                    createdStreamId = created
+                    streamId = created
+                }
             }
         }
     }
@@ -352,6 +363,40 @@ struct NewTaskSheet: View {
     private var selectedStream: InboxStream? {
         selectedProject?.streams.first { $0.id == streamId }
     }
+
+    /// The stream `task.new` names: the picked one, or one New stream… just
+    /// made that the inbox doesn't list yet.
+    private var targetStreamId: String? {
+        selectedStream?.id ?? (streamId != nil && streamId == createdStreamId ? streamId : nil)
+    }
+
+    /// Another agent already working in the folder this task would start in
+    /// (the desktop's same-folder warning), with New stream… when the desktop takes `stream.new`.
+    @ViewBuilder
+    private var sameFolderWarning: some View {
+        if let project = selectedProject, let selection, targetStreamId == selectedStream?.id {
+            let busy = project.busyInSameFolder(selectedStream)
+            if !busy.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label {
+                        Text(project.sameFolderWarning(selectedStream, busy: busy))
+                            .font(.footnote)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    if model.supports(DesktopFeature.streamNew, on: selection.desktopId) {
+                        Button("New stream…") {
+                            newStream = NewStreamTarget(desktopId: selection.desktopId, projectId: project.id)
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .disabled(sending || offline)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
     private var trimmed: String { prompt.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var offline: Bool { selection.map { model.isOffline($0.desktopId) } ?? true }
     /// The picked desktop takes pictures with `task.new`.
@@ -386,7 +431,7 @@ struct NewTaskSheet: View {
             let encoded = await Task.detached(priority: .userInitiated) { PickedImage.encode(picked) }.value
             // A stream that has gone since the picker was filled: let the desktop pick.
             let route = try await model.newTask(
-                desktopId: selection.desktopId, projectId: selection.projectId, streamId: selectedStream?.id,
+                desktopId: selection.desktopId, projectId: selection.projectId, streamId: targetStreamId,
                 prompt: trimmed, mode: mode.isEmpty ? nil : mode, images: encoded
             )
             lastProject = selection.id
