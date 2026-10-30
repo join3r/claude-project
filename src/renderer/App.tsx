@@ -14,6 +14,7 @@ import { useTaskPreviewSync } from './components/desk/useTaskPreviewSync'
 import { toggleBench, toggleBenchView } from './components/desk/benchState'
 import DeskStatusBar from './components/desk/DeskStatusBar'
 import DeskCommandBar from './components/desk/DeskCommandBar'
+import { TokenUsageModal } from './components/TokenUsage'
 
 function AppInner(): React.ReactElement {
   const {
@@ -85,6 +86,8 @@ function AppInner(): React.ReactElement {
     replay()
   }, [replay, sidebarHidden])
 
+  const [tokenUsageOpen, setTokenUsageOpen] = useState(false)
+  useEffect(() => paletteEvents.on('open-token-usage', () => setTokenUsageOpen(true)), [])
   useEffect(() => paletteEvents.on('toggle-sidebar', () => setSidebarHidden(p => !p)), [])
   useEffect(() => paletteEvents.on('toggle-file-browser', () => toggleFileBrowser()), [toggleFileBrowser])
   useEffect(() => paletteEvents.on('reload-window', () => window.location.reload()), [])
@@ -123,6 +126,7 @@ function AppInner(): React.ReactElement {
       <ServerIdeConsentModal />
       <StreamRunHost />
       <EntityActionsHost />
+      {tokenUsageOpen && <TokenUsageModal onClose={() => setTokenUsageOpen(false)} />}
       <Toasts />
     </div>
   )

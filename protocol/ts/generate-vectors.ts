@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult, parseTokensUsageParams, parseTokensUsageResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -956,6 +956,34 @@ function chatMessages(): unknown {
       invalid: {
         params: [text({}), text({ projectId: 7 }), 'null'],
         results: [text({ branches: ['main'] }), text({ defaultBase: 'main' }), text({ branches: ['main', 7], defaultBase: 'main' }), text({ branches: 'main', defaultBase: 'main' }), '[]']
+      }
+    },
+    // §8.22: `tokens.usage` sums the agents' tokens per project, by day, agent and model.
+    tokensUsage: {
+      params: [text({}), text({ projectId: 'p1' }), text({ projectId: null }), text({ projectId: 'p1', range: '7d' })].map((json) => ({ json, expected: parseTokensUsageParams(JSON.parse(json)) })),
+      results: [
+        text({ today: '2026-10-30', scannedAt: 1793350000000, projects: [] }),
+        text({
+          today: '2026-10-30',
+          scannedAt: 1793350000000,
+          projects: [
+            { projectId: 'p1', rows: [{ day: '2026-10-30', agent: 'claude', model: 'claude-opus-5-5', input: 1200, output: 48000, cacheRead: 3400000, cacheWrite: 91000 }, { day: '2026-08-02', agent: 'codex', model: 'gpt-5.5-codex', input: 900, output: 300, cacheRead: 0, cacheWrite: 0 }] },
+            { projectId: 'p2', rows: [], unavailable: true },
+            { projectId: 'p3', rows: [{ day: '2026-10-29', agent: 'gemini', model: 'gemini-3', input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: 0.5 }], unavailable: false }
+          ]
+        })
+      ].map((json) => ({ json, expected: parseTokensUsageResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({ projectId: '' }), text({ projectId: 7 }), 'null'],
+        results: [
+          text({ scannedAt: 1, projects: [] }),
+          text({ today: '30.10.2026', scannedAt: 1, projects: [] }),
+          text({ today: '2026-10-30', scannedAt: 1 }),
+          text({ today: '2026-10-30', scannedAt: 1, projects: [{ projectId: 'p1' }] }),
+          text({ today: '2026-10-30', scannedAt: 1, projects: [{ projectId: 'p1', rows: [{ day: '2026-10-30', agent: 'claude', model: 'm', input: 1, output: 2, cacheRead: 3 }] }] }),
+          text({ today: '2026-10-30', scannedAt: 1, projects: [{ projectId: 'p1', rows: [{ day: '2026-10-30', agent: 'claude', model: 'm', input: -1, output: 2, cacheRead: 3, cacheWrite: 4 }] }] }),
+          '[]'
+        ]
       }
     },
     // §8.9: `chat.image` fetches one tool-result image.

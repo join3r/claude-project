@@ -100,10 +100,14 @@ import { suggestTaskName } from '../task-namer'
 import { suggestRunCommands, type RunCommandSuggestResult, type SuggestedRunCommand } from '../run-command-suggester'
 import { renameTaskIfStill } from '../../shared/task-name'
 import { registerTaskNameHandlers } from '../ipc/task-names'
+import { registerTokenUsageHandlers } from '../ipc/token-usage'
+import { TokenUsageIndex } from '../token-usage-index'
+import type { TokenUsageReport } from '../../shared/token-usage'
 import { closeTask, findClosableTab, landTask, removeTabFromData } from '../mobile/close-task'
 import { setPinInData } from '../mobile/pin'
 import { triageTaskInData } from '../mobile/triage'
 import { queuedPromptForRun, updateQueueInData } from '../mobile/queue'
+import { tokensUsage } from '../mobile/token-usage'
 import {
   AppErrorCode,
   BRANCHES_LIST_FEATURE,
@@ -127,6 +131,7 @@ import {
   TASK_NEW_FEATURE,
   TASK_TRIAGE_FEATURE,
   QUEUE_FEATURE,
+  TOKENS_USAGE_FEATURE,
   SERVER_APP_NAME
 } from '../../../protocol/ts/index.ts'
 import { normalizeMobileConfig, normalizeRelayUrl, type MobileConfig } from '../../shared/mobile'
@@ -213,6 +218,7 @@ export class HostServices {
   private readonly archiveStorage: ArchiveStorage
   private readonly notesStorage: NotesStorage
   private readonly paletteFrecencyStorage: PaletteFrecencyStorage
+  private readonly tokenUsage: TokenUsageIndex
   private readonly ptyManager = new PtyManager()
   /** Native notebook tabs' Jupyter kernels, one per tab. */
   private readonly notebookKernels: NotebookKernelManager
@@ -309,6 +315,7 @@ export class HostServices {
     this.archiveStorage = new ArchiveStorage(path.join(configDir, 'archive'))
     this.notesStorage = new NotesStorage(configDir)
     this.paletteFrecencyStorage = new PaletteFrecencyStorage(configDir)
+    this.tokenUsage = new TokenUsageIndex(path.join(configDir, 'token-usage.json'), undefined, (message) => this.logDebug(message))
     this.notebookKernels = new NotebookKernelManager({ helperPath: env.resourcePath(NOTEBOOK_KERNEL_HELPER_RESOURCE) })
     this.workspaceManager = new WorkspaceManager({ approvals: new FileSetupApprovals(configDir) })
 
@@ -581,7 +588,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, CHAT_TASKS_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, CHAT_TASKS_FEATURE, TOKENS_USAGE_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -683,6 +690,10 @@ export class HostServices {
         ...this.streamGit(),
         peek: () => this.projectsStore.peek(),
         commit: (data) => this.commitProjects(data)
+      }, params),
+      tokensUsage: (params) => tokensUsage({
+        peek: () => this.projectsStore.peek(),
+        usage: (projectId) => this.projectTokenUsage(projectId)
       }, params),
       listBranches: (projectId) => listProjectBranches({
         ...this.streamGit(),
@@ -1101,6 +1112,21 @@ export class HostServices {
     }
   }
 
+  /**
+   * The tokens the agents spent in a project's folder and its worktrees on this
+   * host. A project nested in another's folder counts its own sessions, not the
+   * outer one. Null when its sessions live elsewhere (SSH) or there are none (shell command).
+   */
+  private async projectTokenUsage(projectId: string): Promise<TokenUsageReport | null> {
+    const projects = this.projectsStore.peek().projects
+    const project = projects.find(p => p.id === projectId)
+    if (!project || isRemoteProject(project) || isShellCommandProject(project) || project.host) return null
+    await this.tokenUsage.refresh()
+    const roots = allowedLocalRoots([project])
+    const others = allowedLocalRoots(projects.filter(p => p.id !== projectId))
+    return { rows: this.tokenUsage.rowsFor(roots, others), scannedAt: this.tokenUsage.scannedAt }
+  }
+
   /** A short title for a task's first prompt from the user's `claude`; null when Claude is off. */
   private suggestTaskName(prompt: string): Promise<string | null> {
     if (!this.isServer && !this.config.enableClaude) return Promise.resolve(null)
@@ -1321,6 +1347,7 @@ export class HostServices {
     })
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
     registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })
+    registerTokenUsageHandlers(ipc, { projectUsage: (projectId) => this.projectTokenUsage(projectId) })
     registerHostFsHandlers(ipc, {
       send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       env: () => getShellEnv()

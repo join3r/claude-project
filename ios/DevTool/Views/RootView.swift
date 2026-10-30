@@ -265,6 +265,8 @@ struct RootView: View {
         case .settings:
             try? await Task.sleep(for: .milliseconds(400))
             showSettings = true
+        case .tokenUsage:
+            break // InboxView puts the sheet up.
         case .chat, .taskInfo:
             demoInfo = demoRoute == .taskInfo
             for _ in 0..<150 {

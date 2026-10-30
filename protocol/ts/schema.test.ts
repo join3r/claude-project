@@ -151,6 +151,14 @@ describe('JSON Schema', () => {
     for (const text of chat.branchesList.invalid.results) expect(check('branchesListResult', JSON.parse(text)), text).not.toEqual([])
   })
 
+  it('accepts the tokens.usage samples and rejects the invalid ones (§8.22)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
+    for (const s of chat.tokensUsage.params) expect(check('tokensUsageParams', s.expected), s.json).toEqual([])
+    for (const s of chat.tokensUsage.results) expect(check('tokensUsageResult', s.expected), s.json).toEqual([])
+    for (const text of chat.tokensUsage.invalid.params) expect(check('tokensUsageParams', JSON.parse(text)), text).not.toEqual([])
+    for (const text of chat.tokensUsage.invalid.results) expect(check('tokensUsageResult', JSON.parse(text)), text).not.toEqual([])
+  })
+
   it('accepts the stream.run and stream.logs samples and rejects the invalid ones (§8.19)', () => {
     const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
     for (const s of chat.streamRun.params) expect(check('streamRunParams', s.expected), s.json).toEqual([])

@@ -1960,6 +1960,107 @@
       ]
     }
   },
+  "tokensUsage": {
+    "params": [
+      {
+        "json": "{}",
+        "expected": {}
+      },
+      {
+        "json": "{\"projectId\":\"p1\"}",
+        "expected": {
+          "projectId": "p1"
+        }
+      },
+      {
+        "json": "{\"projectId\":null}",
+        "expected": {}
+      },
+      {
+        "json": "{\"projectId\":\"p1\",\"range\":\"7d\"}",
+        "expected": {
+          "projectId": "p1"
+        }
+      }
+    ],
+    "results": [
+      {
+        "json": "{\"today\":\"2026-10-30\",\"scannedAt\":1793350000000,\"projects\":[]}",
+        "expected": {
+          "today": "2026-10-30",
+          "scannedAt": 1793350000000,
+          "projects": []
+        }
+      },
+      {
+        "json": "{\"today\":\"2026-10-30\",\"scannedAt\":1793350000000,\"projects\":[{\"projectId\":\"p1\",\"rows\":[{\"day\":\"2026-10-30\",\"agent\":\"claude\",\"model\":\"claude-opus-5-5\",\"input\":1200,\"output\":48000,\"cacheRead\":3400000,\"cacheWrite\":91000},{\"day\":\"2026-08-02\",\"agent\":\"codex\",\"model\":\"gpt-5.5-codex\",\"input\":900,\"output\":300,\"cacheRead\":0,\"cacheWrite\":0}]},{\"projectId\":\"p2\",\"rows\":[],\"unavailable\":true},{\"projectId\":\"p3\",\"rows\":[{\"day\":\"2026-10-29\",\"agent\":\"gemini\",\"model\":\"gemini-3\",\"input\":1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4,\"cost\":0.5}],\"unavailable\":false}]}",
+        "expected": {
+          "today": "2026-10-30",
+          "scannedAt": 1793350000000,
+          "projects": [
+            {
+              "projectId": "p1",
+              "rows": [
+                {
+                  "day": "2026-10-30",
+                  "agent": "claude",
+                  "model": "claude-opus-5-5",
+                  "input": 1200,
+                  "output": 48000,
+                  "cacheRead": 3400000,
+                  "cacheWrite": 91000
+                },
+                {
+                  "day": "2026-08-02",
+                  "agent": "codex",
+                  "model": "gpt-5.5-codex",
+                  "input": 900,
+                  "output": 300,
+                  "cacheRead": 0,
+                  "cacheWrite": 0
+                }
+              ]
+            },
+            {
+              "projectId": "p2",
+              "rows": [],
+              "unavailable": true
+            },
+            {
+              "projectId": "p3",
+              "rows": [
+                {
+                  "day": "2026-10-29",
+                  "agent": "gemini",
+                  "model": "gemini-3",
+                  "input": 1,
+                  "output": 2,
+                  "cacheRead": 3,
+                  "cacheWrite": 4
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": {
+      "params": [
+        "{\"projectId\":\"\"}",
+        "{\"projectId\":7}",
+        "null"
+      ],
+      "results": [
+        "{\"scannedAt\":1,\"projects\":[]}",
+        "{\"today\":\"30.10.2026\",\"scannedAt\":1,\"projects\":[]}",
+        "{\"today\":\"2026-10-30\",\"scannedAt\":1}",
+        "{\"today\":\"2026-10-30\",\"scannedAt\":1,\"projects\":[{\"projectId\":\"p1\"}]}",
+        "{\"today\":\"2026-10-30\",\"scannedAt\":1,\"projects\":[{\"projectId\":\"p1\",\"rows\":[{\"day\":\"2026-10-30\",\"agent\":\"claude\",\"model\":\"m\",\"input\":1,\"output\":2,\"cacheRead\":3}]}]}",
+        "{\"today\":\"2026-10-30\",\"scannedAt\":1,\"projects\":[{\"projectId\":\"p1\",\"rows\":[{\"day\":\"2026-10-30\",\"agent\":\"claude\",\"model\":\"m\",\"input\":-1,\"output\":2,\"cacheRead\":3,\"cacheWrite\":4}]}]}",
+        "[]"
+      ]
+    }
+  },
   "image": {
     "params": [
       {

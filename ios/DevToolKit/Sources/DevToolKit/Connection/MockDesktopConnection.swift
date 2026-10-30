@@ -249,6 +249,14 @@ public actor MockDesktopConnection: DesktopConnection {
             return ProjectNewResult(projectId: try addProject(parsed)).json
         case TaskOp.listBranches:
             return try branchList(projectId: try string("projectId")).json
+        case TaskOp.tokensUsage:
+            let parsed: TokensUsageParams
+            do {
+                parsed = try TokensUsageParams.parse(params)
+            } catch {
+                throw DesktopConnectionError.remote(code: AppErrorCode.badRequest, message: error.message)
+            }
+            return try tokenUsage(parsed).json
         case TaskOp.new:
             let parsed: TaskNewParams
             do {
@@ -406,6 +414,42 @@ public actor MockDesktopConnection: DesktopConnection {
     /// The mock's stand-in for a shell-command project: no worktrees (§8.13).
     static let shellProjectId = "p-dotfiles"
     static let noWorktrees = "This project runs a shell command, so it has no folder to make a worktree in"
+
+    /// `tokens.usage`: made-up rows over the last 45 days, the same every
+    /// time for a project. The remote and shell-command projects aren't counted.
+    private func tokenUsage(_ params: TokensUsageParams) throws -> TokensUsageResult {
+        var projects = inbox.projects
+        if let projectId = params.projectId {
+            guard let project = projects.first(where: { $0.id == projectId }) else {
+                throw DesktopConnectionError.remote(code: AppErrorCode.notFound, message: "No such project")
+            }
+            projects = [project]
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let now = calendar.dateComponents([.year, .month, .day], from: Date())
+        let today = String(format: "%04d-%02d-%02d", now.year ?? 2026, now.month ?? 1, now.day ?? 1)
+        return TokensUsageResult(today: today, scannedAt: Date().unixMilliseconds, projects: projects.map { project in
+            if project.remote || project.id == Self.shellProjectId { return TokenUsageProject(projectId: project.id, rows: [], unavailable: true) }
+            let seed = Int64(ProjectTile.fnv1a32(project.id) % 97) + 3
+            var rows: [TokenUsageRow] = []
+            for back in 0..<45 where (Int64(back) + seed) % 4 != 0 {
+                let day = TokenDay.adding(-back, to: today)
+                let scale = seed * Int64(45 - back % 17)
+                rows.append(TokenUsageRow(day: day, agent: "claude", model: "claude-opus-5-5",
+                                          counts: TokenCounts(input: scale * 40, output: scale * 900, cacheRead: scale * 52_000, cacheWrite: scale * 1_800)))
+                if back % 3 == 0 {
+                    rows.append(TokenUsageRow(day: day, agent: "claude", model: "claude-haiku-4-5",
+                                              counts: TokenCounts(input: scale * 12, output: scale * 80, cacheRead: scale * 3_000, cacheWrite: 0)))
+                }
+                if project.id == "p-api", back % 5 == 1 {
+                    rows.append(TokenUsageRow(day: day, agent: "codex", model: "gpt-5.5-codex",
+                                              counts: TokenCounts(input: scale * 300, output: scale * 200, cacheRead: scale * 9_000, cacheWrite: 0)))
+                }
+            }
+            return TokenUsageProject(projectId: project.id, rows: rows)
+        })
+    }
 
     /// `branches.list`: `main`, then every worktree stream's branch, then any
     /// made with `stream.new`.
@@ -1070,6 +1114,7 @@ public actor MockDesktopConnection: DesktopConnection {
             DesktopFeature.taskLand, DesktopFeature.sendImages, DesktopFeature.queue,
             DesktopFeature.chatBash, DesktopFeature.projectNew, DesktopFeature.streamRun,
             DesktopFeature.streamRunTask, DesktopFeature.streamRunCommands, DesktopFeature.chatTasks,
+            DesktopFeature.tokensUsage,
         ]))
         set(.online)
         continuation.yield(.lastSeen(Date()))

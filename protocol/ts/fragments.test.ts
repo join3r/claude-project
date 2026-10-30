@@ -18,6 +18,8 @@ import {
   capText,
   parseBranchesListParams,
   parseBranchesListResult,
+  parseTokensUsageParams,
+  parseTokensUsageResult,
   parseStreamNewParams,
   parseStreamRunParams,
   parseStreamLogsParams,
@@ -205,6 +207,17 @@ describe('chat parsers', () => {
     expect(ChatLimits.runLogs).toBe(200_000)
     expect(parseChatParams('stream.run', { projectId: 'p1', streamId: 's1', action: 'start' })).toBeNull()
     expect(parseChatParams('stream.logs', { projectId: 'p1', streamId: 's1' })).toBeNull()
+  })
+
+  it('parses tokens.usage (§8.22), which names no tab', () => {
+    expect(parseTokensUsageParams({})).toEqual({})
+    expect(parseTokensUsageParams({ projectId: 'p1', extra: 1 })).toEqual({ projectId: 'p1' })
+    expect(() => parseTokensUsageParams({ projectId: '' })).toThrow(ProtocolError)
+    const row = { day: '2026-10-30', agent: 'pi', model: 'm', input: 1, output: 2, cacheRead: 3, cacheWrite: 4 }
+    expect(parseTokensUsageResult({ today: '2026-10-30', scannedAt: 5, projects: [{ projectId: 'p1', rows: [{ ...row, cost: 1 }], unavailable: 'no' }] }))
+      .toEqual({ today: '2026-10-30', scannedAt: 5, projects: [{ projectId: 'p1', rows: [row] }] })
+    expect(() => parseTokensUsageResult({ today: '2026-10-30', scannedAt: 5, projects: [{ projectId: 'p1', rows: [{ ...row, day: 'today' }] }] })).toThrow(ProtocolError)
+    expect(parseChatParams('tokens.usage', {})).toBeNull()
   })
 
   it('parses branches.list (§8.13)', () => {

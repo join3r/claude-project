@@ -2,7 +2,8 @@ import DevToolKit
 import SwiftUI
 
 /// A project's screen (§8.3): its tile and name, then a section per stream
-/// with its open tasks. The toolbar's + adds a stream; each stream's + a task in it.
+/// with its open tasks, then its Tokens (§8.22). The toolbar's + adds a
+/// stream; each stream's + a task in it.
 struct ProjectView: View {
     @Environment(AppModel.self) private var model
     let ref: ProjectRef
@@ -125,6 +126,9 @@ struct ProjectView: View {
             queueSections(project)
             ForEach(streams(project)) { stream in
                 streamSection(stream, project: project, inbox: inbox, now: now)
+            }
+            if model.supports(DesktopFeature.tokensUsage, on: ref.desktopId) {
+                ProjectTokensSection(ref: ref, project: project)
             }
         }
         .listStyle(.insetGrouped)

@@ -142,7 +142,7 @@ function hello(
   }
 }
 
-function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; tokensUsage?: MobileServiceDeps['tokensUsage']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const timers = new FakeTimers()
   let config: MobileConfig = { ...DEFAULT_MOBILE_CONFIG, enabled: options.enabled ?? false }
   let projects: ProjectsData = options.projects ?? {
@@ -195,6 +195,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject
     missingFolders: options.missingFolders,
     streamRuns: options.streamRuns,
     listBranches: options.listBranches,
+    tokensUsage: options.tokensUsage,
     newTask: options.newTask,
     closeTask: options.closeTask,
     landTask: options.landTask,
@@ -221,7 +222,7 @@ function setup(options: { enabled?: boolean; projects?: ProjectsData; newProject
   }
 }
 
-function pairedSetup(options: { newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
+function pairedSetup(options: { newProject?: MobileServiceDeps['newProject']; missingFolders?: MobileServiceDeps['missingFolders']; streamRuns?: MobileServiceDeps['streamRuns']; newStream?: MobileServiceDeps['newStream']; listBranches?: MobileServiceDeps['listBranches']; tokensUsage?: MobileServiceDeps['tokensUsage']; newTask?: MobileServiceDeps['newTask']; closeTask?: MobileServiceDeps['closeTask']; landTask?: MobileServiceDeps['landTask']; closeTab?: MobileServiceDeps['closeTab']; setPin?: MobileServiceDeps['setPin']; triageTask?: MobileServiceDeps['triageTask']; updateQueue?: MobileServiceDeps['updateQueue']; runQueued?: MobileServiceDeps['runQueued']; chat?: MobileServiceDeps['chat'] } = {}) {
   const env = setup({ enabled: true, ...options })
   const keys = phoneKeys(1)
   env.pairings.add({ id: keys.id, name: 'Phone', x25519Pub: keys.x, ed25519Pub: keys.ed, pairedAt: 1, lastSeen: null })
@@ -702,6 +703,38 @@ describe('MobileService stream.new and branches.list (SPEC.md §8.12, §8.13)', 
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
     env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'branches.list', params: { projectId: 'p1' } })
     expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 2, ok: false, error: { code: 'unsupported' } })
+  })
+})
+
+describe('MobileService tokens.usage (SPEC.md §8.22)', () => {
+  it('passes the parsed params through, answers with the result, and rejects bad params', async () => {
+    const calls: unknown[] = []
+    const result = { today: '2026-10-30', scannedAt: 5, projects: [{ projectId: 'p1', rows: [{ day: '2026-10-30', agent: 'claude', model: 'opus', input: 1, output: 2, cacheRead: 3, cacheWrite: 4 }] }] }
+    const env = pairedSetup({
+      tokensUsage: async (params) => {
+        calls.push(params)
+        return params.projectId === 'nope' ? { ok: false, code: 'not-found', message: 'No such project' } : { ok: true, result }
+      }
+    })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'tokens.usage', params: {} })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: true, result })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 2, op: 'tokens.usage', params: { projectId: 'nope' } })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 2, ok: false, error: { code: 'not-found', message: 'No such project' } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 3, op: 'tokens.usage', params: { projectId: '' } })
+    expect(env.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 3, ok: false, error: { code: 'bad-request' } })
+    expect(calls).toEqual([{}, { projectId: 'nope' }])
+  })
+
+  it('answers internal when reading the sessions throws, and unsupported without the dependency', async () => {
+    const env = pairedSetup({ tokensUsage: async () => { throw new Error('EACCES') } })
+    env.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'tokens.usage', params: {} })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(env.channel.sent.at(-1)).toEqual({ t: 'res', id: 1, ok: false, error: { code: 'internal', message: 'EACCES' } })
+    const bare = pairedSetup()
+    bare.channel.hooks.onAppMessage({ t: 'req', id: 1, op: 'tokens.usage', params: {} })
+    expect(bare.channel.sent.at(-1)).toMatchObject({ t: 'res', id: 1, ok: false, error: { code: 'unsupported' } })
   })
 })
 

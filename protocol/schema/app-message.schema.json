@@ -20,7 +20,7 @@
         "t": { "const": "req" },
         "id": { "$ref": "#/$defs/id" },
         "op": { "type": "string", "description": "inbox.get, a chat.* op (SPEC.md §6.3), or a §7.4/§8 op such as task.new or stream.new" },
-        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams, stream.run #/$defs/streamRunParams, stream.logs #/$defs/streamLogsParams." }
+        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams, stream.run #/$defs/streamRunParams, stream.logs #/$defs/streamLogsParams, tokens.usage #/$defs/tokensUsageParams." }
       }
     },
     "resOk": {
@@ -30,7 +30,7 @@
         "t": { "const": "res" },
         "id": { "$ref": "#/$defs/id" },
         "ok": { "const": true },
-        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run, #/$defs/streamRunResult and #/$defs/streamLogsResult for stream.run and stream.logs." }
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run, #/$defs/streamRunResult and #/$defs/streamLogsResult for stream.run and stream.logs, #/$defs/tokensUsageResult for tokens.usage." }
       }
     },
     "resErr": {
@@ -138,6 +138,46 @@
       "properties": {
         "branches": { "type": "array", "items": { "type": "string" } },
         "defaultBase": { "type": "string" }
+      }
+    },
+    "tokensUsageParams": {
+      "description": "tokens.usage params (SPEC.md §8.22): absent projectId means every project the phone sees.",
+      "type": "object",
+      "properties": { "projectId": { "type": "string", "pattern": "^.+$" } }
+    },
+    "tokensUsageResult": {
+      "description": "tokens.usage result (SPEC.md §8.22): per project, the tokens by day, agent and model; unavailable when the desktop can't read the project's sessions.",
+      "type": "object",
+      "required": ["today", "scannedAt", "projects"],
+      "properties": {
+        "today": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "scannedAt": { "type": "integer", "minimum": 0 },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["projectId", "rows"],
+            "properties": {
+              "projectId": { "type": "string" },
+              "rows": { "type": "array", "items": { "$ref": "#/$defs/tokensUsageRow" } },
+              "unavailable": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    "tokensUsageRow": {
+      "description": "One day's tokens of one agent (claude, codex, pi, or a newer one) and model (SPEC.md §8.22). input is fresh input, not read from the cache.",
+      "type": "object",
+      "required": ["day", "agent", "model", "input", "output", "cacheRead", "cacheWrite"],
+      "properties": {
+        "day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "agent": { "type": "string" },
+        "model": { "type": "string" },
+        "input": { "type": "integer", "minimum": 0 },
+        "output": { "type": "integer", "minimum": 0 },
+        "cacheRead": { "type": "integer", "minimum": 0 },
+        "cacheWrite": { "type": "integer", "minimum": 0 }
       }
     },
     "queueUpdateParams": {

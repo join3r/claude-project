@@ -26,6 +26,9 @@ import {
   parseStreamLogsParams,
   parseProjectNewParams,
   parseBranchesListParams,
+  parseTokensUsageParams,
+  type TokensUsageParams,
+  type TokensUsageResult,
   type StreamNewParams,
   type StreamRunParams,
   type StreamLogsParams,
@@ -259,6 +262,8 @@ export interface MobileServiceDeps {
   }
   /** `branches.list` (SPEC.md §8.13). Without it the op answers `unsupported`. */
   listBranches?(projectId: string): Promise<({ ok: true } & BranchesListResult) | { ok: false; code: string; message: string }>
+  /** `tokens.usage` (SPEC.md §8.22). Without it the op answers `unsupported`. */
+  tokensUsage?(params: TokensUsageParams): Promise<{ ok: true; result: TokensUsageResult } | { ok: false; code: string; message: string }>
   /** `queue.update` (SPEC.md §8.16). Without it (or `runQueued`) both queue ops answer `unsupported`. */
   updateQueue?(params: QueueUpdateParams): { ok: true; itemId?: string } | { ok: false; code: string; message: string }
   /** `queue.run` (SPEC.md §8.16): starts a queued prompt as a new task. */
@@ -995,6 +1000,16 @@ export class MobileService {
         const outcome = await listBranches(projectId)
         return outcome.ok
           ? { ok: true, result: { branches: outcome.branches, defaultBase: outcome.defaultBase }, log: `project=${projectId} branches=${outcome.branches.length}` }
+          : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.TokensUsage && this.deps.tokensUsage) {
+      const tokensUsage = this.deps.tokensUsage
+      this.answerLater(session, id, message.op, () => parseTokensUsageParams(message.params), async (params) => {
+        const outcome = await tokensUsage(params)
+        return outcome.ok
+          ? { ok: true, result: outcome.result, log: `project=${params.projectId ?? 'all'} projects=${outcome.result.projects.length}` }
           : outcome
       })
       return

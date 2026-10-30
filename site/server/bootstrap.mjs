@@ -624,6 +624,7 @@ var STREAM_LOGS_OP = "stream.logs";
 var QUEUE_UPDATE_OP = "queue.update";
 var QUEUE_RUN_OP = "queue.run";
 var BRANCHES_LIST_OP = "branches.list";
+var TOKENS_USAGE_OP = "tokens.usage";
 var CHAT_SETTINGS_OP = "chat.settings";
 var CHAT_IMAGE_OP = "chat.image";
 var CHAT_COMMANDS_OP = "chat.commands";
@@ -656,6 +657,7 @@ var AppOp = {
   StreamLogs: STREAM_LOGS_OP,
   ProjectNew: PROJECT_NEW_OP,
   BranchesList: BRANCHES_LIST_OP,
+  TokensUsage: TOKENS_USAGE_OP,
   ChatSettings: CHAT_SETTINGS_OP,
   ChatImage: CHAT_IMAGE_OP,
   ChatCommands: CHAT_COMMANDS_OP,

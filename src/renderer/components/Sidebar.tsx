@@ -262,6 +262,7 @@ export default function Sidebar(): React.ReactElement {
         onCompose={handleComposedTask}
         footer={[
           { label: '+ New project…', onClick: () => setNewProjectOpen(true) },
+          { label: 'Token usage…', onClick: () => paletteEvents.emit('open-token-usage') },
           { label: 'Hosts…', onClick: () => { setSettingsTab('hosts'); setSettingsOpen(true) } },
           { label: 'Settings', onClick: () => { setSettingsTab(null); setSettingsOpen(true) } }
         ]}

@@ -19,6 +19,9 @@ struct InboxView: View {
     @State private var closing: CloseTaskRequest?
     /// The app run whose logs are pushed (§8.19).
     @State private var logs: StreamLogsTarget?
+    @State private var showTokens = false
+    /// The project a Token usage row asked for, opened once the sheet is gone.
+    @State private var openAfterTokens: ProjectRef?
 
     var body: some View {
         // Wait times and snooze expiry are worked out against the clock; the
@@ -37,12 +40,27 @@ struct InboxView: View {
                           systemImage: grouped ? "list.bullet" : "rectangle.stack")
                 }
             }
+            if model.desktops.contains(where: { model.supports(DesktopFeature.tokensUsage, on: $0.id) }) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Token usage", systemImage: "chart.bar.xaxis") { showTokens = true }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NewTaskToolbarButton(desktopIds: model.desktops.map(\.id), newTask: $newTask)
             }
         }
         .sheet(item: $newTask) { target in
             NewTaskSheet(target: target)
+        }
+        .sheet(isPresented: $showTokens, onDismiss: {
+            if let ref = openAfterTokens {
+                openAfterTokens = nil
+                onOpenProject(ref)
+            }
+        }) {
+            NavigationStack {
+                TokenUsageView { openAfterTokens = $0 }
+            }
         }
         .navigationDestination(item: $logs) { target in
             StreamLogsView(target: target)
@@ -52,6 +70,11 @@ struct InboxView: View {
         }
         #if DEBUG
         .task { await demoClose() }
+        .task {
+            guard LaunchOptions.current.demoRoute == .tokenUsage else { return }
+            try? await Task.sleep(for: .seconds(1))
+            showTokens = true
+        }
         #endif
         .confirmationDialog(
             snoozing.map { "Snooze “\($0.task.name)”" } ?? "",

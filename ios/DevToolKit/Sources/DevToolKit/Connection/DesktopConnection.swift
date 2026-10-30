@@ -336,6 +336,15 @@ extension DesktopConnection {
         return try decode(result, ProjectNewResult.parse).projectId
     }
 
+    /// `tokens.usage` (§8.22): the agents' tokens by day, agent and model,
+    /// for one project or (nil) every project the desktop shows this phone.
+    /// The desktop may read new session files first, so this waits longer
+    /// than other ops.
+    public func tokensUsage(projectId: String? = nil) async throws -> TokensUsageResult {
+        let result = try await request(TaskOp.tokensUsage, params: TokensUsageParams(projectId: projectId).json, timeout: .seconds(60))
+        return try decode(result, TokensUsageResult.parse)
+    }
+
     /// `branches.list` (§8.13): the project's local branches for the From
     /// picker, and the one to pick first. Throws `.remote(code: "unsupported")`
     /// for a project that can't have worktrees (a shell-command project).

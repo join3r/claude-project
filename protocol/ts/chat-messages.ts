@@ -258,6 +258,42 @@ export interface BranchesListParams { projectId: string }
 export interface BranchesListResult { branches: string[]; defaultBase: string }
 
 /**
+ * `tokens.usage` (SPEC.md §8.22): the tokens the agents spent per project, read from
+ * their session files on the desktop, by day, agent and model, as the desktop's Tokens
+ * card and Token usage window show them.
+ */
+export const TOKENS_USAGE_OP = 'tokens.usage'
+/** The handshake feature (§8.1) a desktop lists when it answers `tokens.usage`. */
+export const TOKENS_USAGE_FEATURE = 'tokens.usage'
+/** The agents a desktop counts today; a phone shows any other `agent` as it came. */
+export const TOKEN_AGENTS = ['claude', 'codex', 'pi'] as const
+/** Days before this many (counting `today`) are summed into one row per agent and model (§8.22). */
+export const TOKENS_USAGE_DAILY_DAYS = 30
+
+/** Absent `projectId`: every project the phone sees. */
+export interface TokensUsageParams { projectId?: string }
+/** One day's tokens of one agent and model; `day` is `YYYY-MM-DD` on the desktop's clock. */
+export interface TokensUsageRow {
+  day: string
+  agent: string
+  model: string
+  /** Fresh input, not read from the prompt cache. */
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+}
+/** `unavailable`: the desktop can't read this project's sessions (SSH, shell command); `rows` is empty then. */
+export interface TokensUsageProject { projectId: string; rows: TokensUsageRow[]; unavailable?: true }
+export interface TokensUsageResult {
+  /** The desktop's own day (`YYYY-MM-DD`): ranges count back from it. */
+  today: string
+  /** When the desktop last read the session files (unix ms). */
+  scannedAt: number
+  projects: TokensUsageProject[]
+}
+
+/**
  * `chat.settings` (SPEC.md §8.5): change an open chat's permission mode, model or
  * effort, as the desktop composer's pickers do. An absent field stays as it is; an
  * empty `model` or `effort` goes back to Claude's settings default.
@@ -1487,6 +1523,45 @@ export function parseBranchesListResult(value: unknown): BranchesListResult {
     return branch
   })
   return { branches, defaultBase: str(o, 'defaultBase') }
+}
+
+/** `tokens.usage` params (the desktop's side). Throws ProtocolError on an empty `projectId`. */
+export function parseTokensUsageParams(params: unknown): TokensUsageParams {
+  const projectId = optNonEmpty(obj(params, 'params'), 'projectId')
+  return projectId === undefined ? {} : { projectId }
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function day(o: Obj, key: string): string {
+  const value = str(o, key)
+  if (!DAY_RE.test(value)) fail(`${key} must be YYYY-MM-DD`)
+  return value
+}
+
+function parseTokensUsageRow(value: unknown): TokensUsageRow {
+  const o = obj(value, 'row')
+  return {
+    day: day(o, 'day'),
+    agent: str(o, 'agent'),
+    model: str(o, 'model'),
+    input: int(o, 'input'),
+    output: int(o, 'output'),
+    cacheRead: int(o, 'cacheRead'),
+    cacheWrite: int(o, 'cacheWrite')
+  }
+}
+
+/** `tokens.usage` result (the phone's side). A day that isn't `YYYY-MM-DD`, or a missing or negative count, throws. */
+export function parseTokensUsageResult(value: unknown): TokensUsageResult {
+  const o = obj(value, 'result')
+  const projects = arr(o, 'projects').map((entry): TokensUsageProject => {
+    const p = obj(entry, 'project')
+    const out: TokensUsageProject = { projectId: str(p, 'projectId'), rows: arr(p, 'rows').map(parseTokensUsageRow) }
+    if (flag(p, 'unavailable')) out.unavailable = true
+    return out
+  })
+  return { today: day(o, 'today'), scannedAt: int(o, 'scannedAt'), projects }
 }
 
 export function parseChatOpenResult(value: unknown): ChatOpenResult {

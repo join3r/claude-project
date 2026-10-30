@@ -191,6 +191,13 @@ final class AppModel {
         return try await connection.listBranches(projectId: projectId)
     }
 
+    /// `tokens.usage` (§8.22): the agents' tokens per project, for one
+    /// project or (nil) every project the desktop shows this phone.
+    func tokensUsage(desktopId: String, projectId: String? = nil) async throws -> TokensUsageResult {
+        guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }
+        return try await connection.tokensUsage(projectId: projectId)
+    }
+
     /// `task.close` (§8.7): archives the task. It leaves with the next inbox.
     func closeTask(desktopId: String, _ params: TaskCloseParams) async throws -> TaskCloseResult {
         guard let connection = connections[desktopId] else { throw DesktopConnectionError.notConnected }

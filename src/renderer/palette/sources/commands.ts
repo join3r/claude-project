@@ -38,6 +38,13 @@ commandRegistry.register({
 })
 
 commandRegistry.register({
+  id: 'cmd.openTokenUsage',
+  title: 'Token Usage',
+  aliases: ['tokens', 'usage', 'cost'],
+  run: () => paletteEvents.emit('open-token-usage')
+})
+
+commandRegistry.register({
   id: 'cmd.openProjectSettings',
   title: 'Open Project Settings',
   aliases: ['project settings'],

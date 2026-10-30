@@ -23,6 +23,7 @@ import ProjectTileBadge from '../ProjectTileBadge'
 import { BranchGraph, projectBranchLabels, useBranchGraph } from '../BranchGraph'
 import { CommitHeatmap } from '../CommitHeatmap'
 import { PromptQueue } from '../PromptQueue'
+import { ProjectTokensCard, tokenUsageAvailable } from '../TokenUsage'
 import { ArchivedStreamsLine, DoneTaskItem } from './DoneItems'
 import { StreamRunButtons } from '../StreamRunControls'
 import { bucketByDay, formatRelativeTime, quartileBins } from '../projectStats'
@@ -461,6 +462,7 @@ export default function DeskProjectMap({ projectId }: { projectId: string }): Re
             {lifetime.tasksCreated} {plural(lifetime.tasksCreated, 'task')} created · {lifetime.notesCreated} {plural(lifetime.notesCreated, 'note')} written
           </span>
         </div>
+        {tokenUsageAvailable(project) && <ProjectTokensCard project={project} />}
       </div>
 
       {history && local && (

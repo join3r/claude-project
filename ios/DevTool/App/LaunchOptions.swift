@@ -27,6 +27,7 @@ import Foundation
 /// - `-demoInboxClose <taskId> [-demoInboxRemove]` (Debug builds, Inbox): that row's Close
 ///   (or Remove) swipe, through the real close flow: a worktree task gets the
 ///   desktop's close question (mock: `t-cache`).
+/// - `-demoRoute tokenUsage` (Debug builds): the Inbox with the Token usage sheet up.
 /// - `-demoRoute chat [-demoTab <tabId>]` (Debug builds): open a claude-chat tab
 ///   (the first one that needs attention when `-demoTab` is absent). Works
 ///   against mock and real desktops. With `-demoToolDetail <itemId>` the item's
@@ -83,6 +84,8 @@ struct LaunchOptions: Sendable {
         case pairWait
         /// A claude-chat tab (`-demoTab`).
         case chat
+        /// The Inbox with its Token usage sheet up (§8.22).
+        case tokenUsage
     }
 
     var mockDesktop: Bool

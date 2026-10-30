@@ -208,6 +208,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   // Project Home's queue (ipc/prompt-queue.ts)
   'prompt-queue-run': project0,
   'task-worktree-close': project0,
+  // token usage per project (ipc/token-usage.ts): the host it lives on read its agents' sessions
+  'token-usage-project': project0,
   // a task's title from its first prompt (ipc/task-names.ts): this desktop's claude names it
   'task-name-suggest': 'local',
 

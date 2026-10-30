@@ -3,6 +3,8 @@ type EventMap = {
   'open-settings': void
   /** Settings on one of its pages, by id ('servers', 'mobile'…): the desk's status bar. */
   'open-settings-tab': string
+  /** Token usage of every project (⌘K, the Inbox footer, a Project page's Tokens card). */
+  'open-token-usage': void
   /** Add server: the install command for a new DevTool server. */
   'open-add-server': void
   'open-project-settings': void

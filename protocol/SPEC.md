@@ -462,7 +462,7 @@ Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push
 
 ### 8.1 Features in the handshake
 
-The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"`, §8.19 `"stream.run"` (and `"stream.run.task"` when it takes `taskId`, `"stream.run.commands"` when streams have named commands) and §8.20 `"chat.tasks"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
+The `features` array of both hellos (§4.3) names optional ops a side supports, so a newer phone can hide what an older desktop can't do. A desktop that implements §8.4 sends `"task.new"`, and one that implements §8.5 adds `"chat.settings"`. §8.7 adds `"task.close"` and `"task.close.choice"`, §8.8 `"tab.close"`, §8.9 `"chat.image"`, §8.10 `"pin"`, §8.11 `"task.triage"`, §8.12 `"stream.new"`, §8.13 `"branches.list"`, §8.14 `"chat.commands"`, §8.15 `"task.land"`, §8.16 `"queue"`, §8.17 `"chat.bash"`, §8.18 `"project.new"`, §8.19 `"stream.run"` (and `"stream.run.task"` when it takes `taskId`, `"stream.run.commands"` when streams have named commands) §8.20 `"chat.tasks"` and §8.22 `"tokens.usage"`. `"send.images"` marks a desktop whose `chat.send` and `task.new` take `images` (§8.4). (Version 1's `"task.workspace"`, §8.6, is gone, and so is `"chat.new"`, §8.2: a current desktop doesn't list it.) A phone shows "New task" only for a desktop that lists `task.new`, "New stream" only for one that lists `stream.new`, and the close actions only for one that lists the matching op. A desktop answers an op it doesn't know `unsupported` anyway. Unknown feature strings are ignored.
 
 ### 8.2 `chat.new` (retired)
 
@@ -761,6 +761,34 @@ ChatViewWorkflow = {
 - The chat need not be open on this phone. When it has no runtime yet, the desktop attaches one first, as for `chat.detail`.
 - A desktop that implements this lists `"chat.tasks"` in its features (§8.1) and sends `tasks`. A phone shows the task list only for such a desktop.
 - Errors: unknown tab, as §6.3, or a `taskId` the chat doesn't list → `not-found`. Missing or malformed params → `bad-request`. The CLI refusing or Claude not running → `internal`; the desktop also puts a notice in the chat.
+
+### 8.22 `tokens.usage` (phone → desktop `req`)
+
+| op | params | result |
+|---|---|---|
+| `tokens.usage` | `{ projectId? }` | `{ today, scannedAt, projects: [{ projectId, rows, unavailable? }] }` |
+
+The tokens the agents spent per project, as the desktop's Tokens card (Project page) and Token usage window count them: the desktop reads the Claude Code, Codex and Pi session files that ran in the project's folder or one of its worktrees (a project nested in another's folder counts its own sessions, not the outer one), and sums them per day, agent and model. With `projectId` the result has that one project; without it, every project the phone sees (§4.4), in no particular order.
+
+```ts
+TokensUsageRow = {
+  day: string,              // YYYY-MM-DD on the desktop's clock
+  agent: string,            // 'claude' | 'codex' | 'pi'; a phone shows any other as it came
+  model: string,            // as the agent wrote it ("claude-opus-5-5"), "unknown" when it named none
+  input: number,            // fresh input, not read from the prompt cache
+  output: number,
+  cacheRead: number,
+  cacheWrite: number
+}
+```
+- `today` is the desktop's own day. A phone counts its ranges back from it, not from its own clock: Today is `day == today`, 7 and 30 days are the last 7 and 30 days up to `today`, All time is every row.
+- Rows from the last **30** days (`today` and the 29 before) come one per day, agent and model. Older days are summed into one row per agent and model, dated with the earliest day it covers, so All time stays right and the answer small. A phone draws its daily chart from the last 30 days only.
+- `scannedAt` (unix ms) is when the desktop last read the session files. It reads only what the agents appended since, and reads again for a request more than 30 s after the last read.
+- `unavailable: true` (with `rows: []`) marks a project whose sessions the desktop can't read: an SSH project (they are on the remote host) or a shell-command project (it runs no agent). A phone says "Not counted" for it rather than zero. A project with nothing spent yet has `rows: []` and no flag.
+- A DevTool server answers for its own projects. A desktop's phone never sees a server's projects (they aren't in the desktop's inbox); a phone paired with the server asks the server, which reads the sessions on its own disk.
+- The desktop keeps its tallies after an agent deletes old session files, so history goes back to when the desktop first read them, or as far as the agents kept it before that.
+- A desktop that implements this op lists `"tokens.usage"` in its features (§8.1). A phone shows token usage only for such a desktop. There is no event for it: a phone asks again to refresh.
+- Errors: a `projectId` that is unknown or names a project hidden from mobile → `not-found`. An empty or non-string `projectId` → `bad-request`. Reading the session files failing → `internal`.
 
 ## 9. Version 2: streams
 

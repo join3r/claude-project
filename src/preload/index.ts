@@ -51,6 +51,7 @@ import type { HostCloneResult, HostDirListing, HostRepoDiscovery } from '../shar
 import type { AgentClisReport } from '../shared/agent-clis'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { PromptQueueRunResult } from '../shared/prompt-queue'
+import type { TokenUsageReport } from '../shared/token-usage'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
@@ -544,6 +545,10 @@ const api = {
   /** A short title for a task's first prompt, or null when none could be had (main's `task-namer.ts`). */
   taskNameSuggest: (prompt: string): Promise<string | null> =>
     ipcRenderer.invoke('task-name-suggest', prompt),
+
+  /** A project's tokens by day, agent and model, from its host's agent session files; null when they aren't readable there. */
+  tokenUsageProject: (projectId: string): Promise<TokenUsageReport | null> =>
+    ipcRenderer.invoke('token-usage-project', projectId),
 
   /** Project Home's queue: start the queued prompt `itemId` as a new Claude chat task (main's PromptQueueRunner). */
   promptQueueRun: (projectId: string, itemId: string): Promise<PromptQueueRunResult> =>
