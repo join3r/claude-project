@@ -21,7 +21,7 @@ import {
   useWindowTitle
 } from './appState/useWindowEffects'
 import { useConnectSsh } from './appState/remote'
-import { useLeaveOnPutAway, useTaskInbox, type TaskInboxActions } from './appState/useTaskInbox'
+import { useLeaveOnPutAway, useTaskInbox, type PutAwayActions, type TaskInboxActions } from './appState/useTaskInbox'
 import { useSelection, type SelectionActions } from './appState/useSelection'
 import { useProjects, type ProjectsActions } from './appState/useProjects'
 import { useTasks, type TasksActions } from './appState/useTasks'
@@ -58,6 +58,7 @@ export type AppActions =
   & AppDataState
   & SelectionActions
   & TaskInboxActions
+  & PutAwayActions
   & ProjectsActions
   & TasksActions
   & TabsActions
@@ -81,7 +82,7 @@ export function useAppState(): AppActions {
 
   const inbox = useTaskInbox(core)
   const selection = useSelection(core, connectSsh, inbox.markTaskVisited)
-  const putAway = useLeaveOnPutAway(core, inbox, selection.selectProjectHome)
+  const putAway = useLeaveOnPutAway(core, inbox, selection.selectProjectHome, selection.setSelectedProjectId)
   const projectActions = useProjects(core, {
     connectSsh,
     confirmDiscardDirty: dirty.confirmDiscardDirty,

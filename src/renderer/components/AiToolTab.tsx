@@ -151,7 +151,7 @@ function ensureBeforeUnloadHandler(): void {
 export default function AiToolTab({ tabId, toolType, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
-  const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta, markTaskInteracted, markTaskEvent } = useApp()
+  const { addTab, config, effectiveTerminalTheme, updateTabSessionId, terminalZoomDelta, markTaskInteracted, markTaskEvent, leaveAfterSend } = useApp()
   const statusStore = useTabStatusStore()
   const initializedRef = useRef(false)
   const spawnedRef = useRef(false)
@@ -766,6 +766,9 @@ export default function AiToolTab({ tabId, toolType, visible, sessionId, project
             if (attachResult.exitCode !== null) {
               exitCallbacks.get(tabId)?.(attachResult.exitCode)
             }
+
+            // The first prompt is on its way (an argument, or pasted once the TUI is up).
+            if (first && attachResult.exitCode === null) leaveAfterSend(projectId, taskId)
 
             if (isCodexTab) {
               startCodexSessionPolling()

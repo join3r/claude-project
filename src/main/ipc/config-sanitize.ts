@@ -74,6 +74,7 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   promptBoxMode: v.literal('', 'default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'),
   deskAgent: v.literal('claude-chat', 'claude', 'codex', 'pi'),
   autopilotReview: bool,
+  leaveTaskOnSend: bool,
   mobile: v.optional(mobileConfig),
   hosts: v.optional(v.array(v.union(
     v.object({

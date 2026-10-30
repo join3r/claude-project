@@ -52,7 +52,7 @@ interface Props {
  * the channels the curl hooks use.
  */
 export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
-  const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab } = useApp()
+  const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab, leaveAfterSend } = useApp()
   const statusStore = useTabStatusStore()
   const state = useChatState(tabId)
   const attachedRef = useRef(false)
@@ -164,6 +164,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
         if (first.model) await window.api.chatSetModel(tabId, first.model)
         if (first.effort) await window.api.chatSetEffort(tabId, first.effort)
         await window.api.chatSend(tabId, first.text, first.images)
+        leaveAfterSend(projectId, taskId)
       })().catch((err: unknown) => {
         setAttachError(err instanceof Error ? err.message : String(err))
       })
@@ -171,7 +172,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       attachedRef.current = false
       setAttachError(err instanceof Error ? err.message : String(err))
     })
-  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, taskId, serverOnline, attachEpoch, cliReady])
+  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, leaveAfterSend, taskId, serverOnline, attachEpoch, cliReady])
 
   useEffect(() => {
     if (visible) applyStatus('visit')
@@ -237,10 +238,10 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   const send = useCallback((text: string, images: ChatImage[]) => {
     markTaskInteracted(projectId, taskId)
     stickRef.current = true
-    void window.api.chatSend(tabId, text, images).catch((err: unknown) => {
+    void window.api.chatSend(tabId, text, images).then(() => leaveAfterSend(projectId, taskId), (err: unknown) => {
       setAttachError(err instanceof Error ? err.message : String(err))
     })
-  }, [tabId, projectId, taskId, markTaskInteracted])
+  }, [tabId, projectId, taskId, markTaskInteracted, leaveAfterSend])
 
   // One side question at a time, like the CLI: a new one replaces the last, and a
   // dismissed one's late answer is dropped.

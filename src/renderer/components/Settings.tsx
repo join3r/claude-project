@@ -581,6 +581,19 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
               </SetBlock>
             </FormGroup>
 
+            <Group>
+              <GroupRow
+                label="Leave the task after sending"
+                sub="Once a prompt goes to the agent, the window empties so you can pick another task or start a new one. The answer comes back unread in the Inbox."
+                trailing={
+                  <Switch
+                    checked={config.leaveTaskOnSend}
+                    onChange={(leaveTaskOnSend) => updateConfig({ leaveTaskOnSend })}
+                  />
+                }
+              />
+            </Group>
+
             <FormGroup>
               <SetBlock label="Projects folder">
                 <div className="flex items-center gap-2.5">

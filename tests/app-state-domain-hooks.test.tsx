@@ -123,7 +123,7 @@ describe('useLeaveOnPutAway', () => {
     const hook = renderHook(() => {
       const core = useAppStateCore()
       const inbox = useTaskInbox(core)
-      return { core, putAway: useLeaveOnPutAway(core, inbox, selectProjectHome) }
+      return { core, putAway: useLeaveOnPutAway(core, inbox, selectProjectHome, vi.fn()) }
     })
     await loaded(hook)
 
@@ -138,6 +138,31 @@ describe('useLeaveOnPutAway', () => {
     act(() => { hook.result.current.putAway.snoozeTask('p1', 't1', { until: Date.now() + 60_000 }) })
     expect(selectProjectHome).toHaveBeenCalledWith('p1')
     expect(workTask(hook.result.current.core.projectsData).inbox?.snoozedUntil).toBeTypeOf('number')
+  })
+
+  it('leaves the task on screen after a send only with Settings\' switch on', async () => {
+    const selectProject = vi.fn()
+    const hook = renderHook(() => {
+      const core = useAppStateCore()
+      const inbox = useTaskInbox(core)
+      return { core, putAway: useLeaveOnPutAway(core, inbox, vi.fn(), selectProject) }
+    })
+    await loaded(hook)
+    act(() => {
+      hook.result.current.core.updateWindowViewState(prev => ({ ...prev, selectedProjectId: 'p1', selectedTaskId: 't1' }))
+    })
+
+    // Off (the default): the task stays.
+    act(() => { hook.result.current.putAway.leaveAfterSend('p1', 't1') })
+    expect(selectProject).not.toHaveBeenCalled()
+
+    act(() => { hook.result.current.core.updateConfig({ leaveTaskOnSend: true }) })
+    // Another task's send (a hidden tab) leaves this view alone.
+    act(() => { hook.result.current.putAway.leaveAfterSend('p1', 'other') })
+    expect(selectProject).not.toHaveBeenCalled()
+
+    act(() => { hook.result.current.putAway.leaveAfterSend('p1', 't1') })
+    expect(selectProject).toHaveBeenCalledWith(null)
   })
 })
 

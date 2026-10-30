@@ -13,6 +13,7 @@ import {
   type SnoozeOptions,
   type TaskEventKind
 } from './inbox'
+import { deskEvents } from '../../components/desk/deskEvents'
 
 export interface TaskInboxActions {
   markTaskInteracted: (projectId: string, taskId: string) => void
@@ -106,6 +107,17 @@ export function useTaskInbox(core: AppStateCore): TaskInboxActions {
   }
 }
 
+/** Actions that also take this window off the task it is looking at. */
+export interface PutAwayActions extends Pick<TaskInboxActions, 'snoozeTask'> {
+  /**
+   * A prompt just went to the task's agent: with Settings' "Leave the task
+   * after sending" on, this window lets go of it (nothing selected) and the
+   * compose box takes focus for the next one. The agent works on unseen; its
+   * answer comes back unread in the Inbox.
+   */
+  leaveAfterSend: (projectId: string, taskId: string) => void
+}
+
 /**
  * Snooze that also leaves the task when this window is looking at it: the
  * task drops into a group the Inbox keeps folded, so it should not stay
@@ -116,10 +128,14 @@ export function useTaskInbox(core: AppStateCore): TaskInboxActions {
 export function useLeaveOnPutAway(
   core: AppStateCore,
   inbox: Pick<TaskInboxActions, 'snoozeTask'>,
-  selectProjectHome: (projectId: string) => void
-): Pick<TaskInboxActions, 'snoozeTask'> {
-  const { windowViewStateRef } = core
+  selectProjectHome: (projectId: string) => void,
+  selectProject: (id: string | null) => void
+): PutAwayActions {
+  const { windowViewStateRef, config } = core
   const { snoozeTask: snooze } = inbox
+  // Read when the prompt goes, not when the sending tab rendered.
+  const leaveOnSendRef = useRef(false)
+  leaveOnSendRef.current = !!config?.leaveTaskOnSend
 
   const leaveIfSelected = useCallback((projectId: string, taskId: string) => {
     if (windowViewStateRef.current.selectedTaskId === taskId) selectProjectHome(projectId)
@@ -130,5 +146,13 @@ export function useLeaveOnPutAway(
     leaveIfSelected(projectId, taskId)
   }, [snooze, leaveIfSelected])
 
-  return { snoozeTask }
+  const leaveAfterSend = useCallback((projectId: string, taskId: string) => {
+    if (!leaveOnSendRef.current) return
+    const view = windowViewStateRef.current
+    if (view.selectedProjectId !== projectId || view.selectedTaskId !== taskId) return
+    selectProject(null)
+    deskEvents.focusCompose()
+  }, [windowViewStateRef, selectProject])
+
+  return { snoozeTask, leaveAfterSend }
 }

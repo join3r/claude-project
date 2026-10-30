@@ -750,6 +750,8 @@ export interface AppConfig {
   deskAgent: PromptBoxAgent
   /** Settings → AI: a quick task fired on Autopilot (⌘↵) has Codex review it before it lands. */
   autopilotReview: boolean
+  /** Settings → AI: sending a prompt leaves the task, so the window goes empty for the next one. */
+  leaveTaskOnSend: boolean
   /**
    * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
    * window's stale copy cannot flip it back.
@@ -1040,6 +1042,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   promptBoxMode: '',
   deskAgent: 'claude-chat',
   autopilotReview: false,
+  leaveTaskOnSend: false,
   externalEditors: { editors: [], defaultId: null },
   mobile: { ...DEFAULT_MOBILE_CONFIG },
   hosts: []
