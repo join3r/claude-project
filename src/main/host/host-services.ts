@@ -23,6 +23,7 @@ import { FileSetupApprovals } from '../worktree-setup-approvals'
 import { TaskWorktreeManager } from '../task-worktree'
 import { recordSetupArtifacts, TaskLandingManager } from '../task-landing'
 import { mergeStream } from '../stream-merge'
+import { startStreamMergeFix } from '../stream-merge-fix'
 import { LocalGitRunner } from '../git-runner'
 import { MissingFolderWatch, ProjectDirError, appendNewProject, createProjectDir } from '../project-dirs'
 import { registerProjectDirsHandlers } from '../ipc/project-dirs'
@@ -396,33 +397,13 @@ export class HostServices {
       subscribeProjects: (listener) => this.projectsStore.subscribe(() => listener()),
       statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
       subscribe: (listener) => this.activityRegistry.subscribe(listener),
-      blocker: (project) => {
-        if (isShellCommandProject(project)) return 'A shell-command project runs one command, not Claude.'
-        // A server has no Claude switch: its desktops' settings are theirs.
-        if (!this.isServer && !this.config.enableClaude) return 'Claude is turned off in Settings.'
-        return featureUnavailableReason(project, 'chat')
-      },
+      blocker: (project) => this.chatTaskBlocker(project),
       ensureWorktree: async (projectId, taskId) => {
         const result = await this.taskWorktrees.ensureTaskWorktree(projectId, taskId)
         return result.status === 'failed' ? { ok: false, error: result.error } : { ok: true }
       },
       nameTask: (projectId, taskId, prompt) => { this.nameTaskInBackground(projectId, taskId, prompt) },
-      sendFirstPrompt: async (projectId, taskId, tabId, prompt) => {
-        const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
-        const task = findTaskInProject(project, taskId)
-        const tab = task ? taskTabs(task).find(t => t.id === tabId) : undefined
-        if (!project || !task || !tab) throw new Error('The task is gone')
-        // The permission mode the New task composer last used, as a window's first prompt carries it.
-        const mode = this.config.promptBoxMode
-        if (mode && tab.sessionId) {
-          if (!this.chatManager.snapshot(tab.id)) {
-            const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
-            stop()
-          }
-          await this.chatManager.setPermissionMode(tab.id, mode)
-        }
-        await this.sendToAgentTab(project, task, tab, prompt)
-      },
+      sendFirstPrompt: (projectId, taskId, tabId, prompt) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt),
       log: (message) => this.logDebug(message)
     })
     this.forgetArchivesOfVanishedProjects()
@@ -943,6 +924,32 @@ export class HostServices {
    * it; a terminal agent gets it pasted (bracketed, as a window's link insert
    * does, control characters replaced) and Enter a beat later. A terminal agent must be running already.
    */
+  /** Why main can't start a Claude chat task in the project now (queue, stream merge fix), or null. */
+  private chatTaskBlocker(project: Project): string | null {
+    if (isShellCommandProject(project)) return 'A shell-command project runs one command, not Claude.'
+    // A server has no Claude switch: its desktops' settings are theirs.
+    if (!this.isServer && !this.config.enableClaude) return 'Claude is turned off in Settings.'
+    return featureUnavailableReason(project, 'chat')
+  }
+
+  /** A chat task main just added: start its runtime and send the first prompt, no window needed. */
+  private async sendFirstChatPrompt(projectId: string, taskId: string, tabId: string, prompt: string): Promise<void> {
+    const project = this.projectsStore.peek().projects.find(p => p.id === projectId)
+    const task = findTaskInProject(project, taskId)
+    const tab = task ? taskTabs(task).find(t => t.id === tabId) : undefined
+    if (!project || !task || !tab) throw new Error('The task is gone')
+    // The permission mode the New task composer last used, as a window's first prompt carries it.
+    const mode = this.config.promptBoxMode
+    if (mode && tab.sessionId) {
+      if (!this.chatManager.snapshot(tab.id)) {
+        const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
+        stop()
+      }
+      await this.chatManager.setPermissionMode(tab.id, mode)
+    }
+    await this.sendToAgentTab(project, task, tab, prompt)
+  }
+
   private async sendToAgentTab(project: Project, task: Task, tab: Tab, text: string): Promise<void> {
     if (tab.type === 'claude-chat') {
       if (!tab.sessionId) throw new Error('Open the task\'s chat once, then ask again')
@@ -1343,7 +1350,14 @@ export class HostServices {
         projects: this.projectsStore,
         runner: this.gitRunner,
         log: (message) => this.logDebug(message)
-      }, projectId, streamId)
+      }, projectId, streamId),
+      fixStreamMerge: (projectId, streamId, files) => startStreamMergeFix({
+        peek: () => this.projectsStore.peek(),
+        commit: (data) => { this.commitProjects(data) },
+        blocker: (project) => this.chatTaskBlocker(project),
+        sendFirstPrompt: (projectId, taskId, tabId, prompt) => this.sendFirstChatPrompt(projectId, taskId, tabId, prompt),
+        log: (message) => this.logDebug(message)
+      }, projectId, streamId, files)
     })
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
     registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })

@@ -108,7 +108,7 @@ export function streamMergeFailure(result: StreamMergeResult, branch: string, ba
       return null
     case 'conflict':
       return `Merging "${branch}" into "${base}" conflicts${result.files.length ? ` in:\n\n${result.files.join('\n')}` : ''}.\n\n`
-        + `Nothing was merged and the stream stays open. Merge "${base}" into the stream and resolve the conflicts there, then close it again.`
+        + `Nothing was merged and the stream stays open. Resolve with AI starts a Claude task in the stream that merges "${base}" into it and resolves the conflicts (or do that yourself). Then close the stream again.`
     case 'blocked':
       return `"${base}" has local changes in files the merge touches${result.files.length ? `:\n\n${result.files.join('\n')}` : ''}.\n\n`
         + `Nothing was merged and the stream stays open. Commit or stash them, then close the stream again.`

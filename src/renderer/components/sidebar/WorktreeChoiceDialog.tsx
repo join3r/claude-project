@@ -190,3 +190,62 @@ export function useStreamTasksChoice(): {
 
   return { ask, dialog: dialog || null }
 }
+
+export type MergeConflictChoice = 'fix' | 'close'
+
+/**
+ * A closing stream's merge into its base branch conflicted: say so (the
+ * files, the stream staying open) and offer Resolve with AI, which starts a
+ * Claude task in the stream to merge the base branch in. OK (Escape) just
+ * closes the dialog. `ask` resolves with the choice; `dialog` is rendered by
+ * the caller.
+ */
+export function useMergeConflictChoice(): {
+  ask: (question: { title: string; message: string }) => Promise<MergeConflictChoice>
+  dialog: React.ReactElement | null
+} {
+  const [question, setQuestion] = useState<{ title: string; message: string } | null>(null)
+  const resolveRef = useRef<((choice: MergeConflictChoice) => void) | null>(null)
+
+  const settle = useCallback((choice: MergeConflictChoice) => {
+    const resolve = resolveRef.current
+    resolveRef.current = null
+    setQuestion(null)
+    resolve?.(choice)
+  }, [])
+
+  const ask = useCallback((next: { title: string; message: string }) => {
+    resolveRef.current?.('close')
+    return new Promise<MergeConflictChoice>(resolve => {
+      resolveRef.current = resolve
+      setQuestion(next)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!question) return
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') settle('close')
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [question, settle])
+
+  const dialog = question && (
+    <Modal
+      title={question.title}
+      width="w-[520px]"
+      onClose={() => settle('close')}
+      footer={
+        <>
+          <LinkBtn onClick={() => settle('close')}>OK</LinkBtn>
+          <PrimaryButton onClick={() => settle('fix')}>Resolve with AI</PrimaryButton>
+        </>
+      }
+    >
+      <div className="text-base text-text whitespace-pre-wrap break-words" data-testid="stream-merge-conflict">{question.message}</div>
+    </Modal>
+  )
+
+  return { ask, dialog: dialog || null }
+}

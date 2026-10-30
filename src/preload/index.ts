@@ -31,6 +31,7 @@ import type {
   StreamSetupResult,
   TaskLanding,
   TaskLandingPreview,
+  StreamMergeFixResult,
   StreamMergeResult,
   TaskLandingResult,
   TaskWorktreeResult,
@@ -581,6 +582,9 @@ const api = {
   /** Merge a closing stream's branch into its base branch (a merge commit); nothing changes on a conflict. */
   streamMerge: (projectId: string, streamId: string): Promise<StreamMergeResult> =>
     ipcRenderer.invoke('stream-merge', projectId, streamId),
+  /** After a conflicting `streamMerge`: a Claude task in the stream's worktree merges the base branch in and resolves the conflicts. */
+  streamMergeFix: (projectId: string, streamId: string, files: string[]): Promise<StreamMergeFixResult> =>
+    ipcRenderer.invoke('stream-merge-fix', projectId, streamId, files),
   onTaskLandingState: (callback: (taskId: string, landing: TaskLanding | null) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, taskId: string, landing: TaskLanding | null) => callback(taskId, landing)
     ipcRenderer.on('task-landing-state', handler)

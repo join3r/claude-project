@@ -295,9 +295,24 @@ describe('closing a stream whose tasks have worktrees of their own', () => {
       await closeStream()
       fireEvent.click(await screen.findByRole('button', { name: 'Merge into main' }))
 
-      await waitFor(() => expect(window.alert).toHaveBeenCalledWith(expect.stringContaining('a.txt')))
+      expect((await screen.findByTestId('stream-merge-conflict')).textContent).toContain('a.txt')
+      fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+      await waitFor(() => expect(screen.queryByTestId('stream-merge-conflict')).toBeNull())
       expect(api.archiveAddStream).not.toHaveBeenCalled()
       expect(api.workspaceDelete).not.toHaveBeenCalledWith(expect.objectContaining({ force: true }))
+      expect(lastStreams()).toContain('stream-rel')
+    })
+
+    it('a conflict offers Resolve with AI, which starts a task in the stream and leaves it open', async () => {
+      api.streamMerge.mockResolvedValue({ status: 'conflict', files: ['a.txt', 'b.txt'] })
+      api.streamMergeFix = vi.fn().mockResolvedValue({ ok: true, taskId: 'fix-task' })
+      renderSidebar()
+      await closeStream()
+      fireEvent.click(await screen.findByRole('button', { name: 'Merge into main' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Resolve with AI' }))
+
+      await waitFor(() => expect(api.streamMergeFix).toHaveBeenCalledWith('p1', 'stream-rel', ['a.txt', 'b.txt']))
+      expect(api.archiveAddStream).not.toHaveBeenCalled()
       expect(lastStreams()).toContain('stream-rel')
     })
   })

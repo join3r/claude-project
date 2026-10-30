@@ -8,9 +8,9 @@ import { canLandTask, getLandingOp, markTaskClosing, runLandingOp, setLandingNot
 import { landingResultNotice } from '../useTaskLandingActions'
 import { confirmWorktreeRemoval, forceRemoveWorktree } from './workspaceRemoval'
 import { isTaskWorking, streamCloseQuestion, streamMergeFailure, streamTasksCloseQuestion, type StreamTaskCheck } from './closeRules'
-import { useStreamTasksChoice, useWorktreeChoice, type StreamTasksChoice } from './WorktreeChoiceDialog'
+import { useMergeConflictChoice, useStreamTasksChoice, useWorktreeChoice, type StreamTasksChoice } from './WorktreeChoiceDialog'
 
-/** How long to wait for main's archive of a landed task to reach this window. */
+/** How long to wait for main's change to a task (archived, or added) to reach this window. */
 const LANDED_WAIT_MS = 2000
 
 /**
@@ -33,7 +33,9 @@ const LANDED_WAIT_MS = 2000
  * quietly (its branch too, unless the tasks kept theirs, which branch off it),
  * anything else asks keep branch / discard / cancel, plus Merge into the base
  * branch when the branch has commits it lacks. A merge that conflicts, is
- * blocked or fails leaves the stream open.
+ * blocked or fails leaves the stream open; a conflict offers Resolve with AI,
+ * a Claude task in the stream's worktree that merges the base branch in
+ * (`stream-merge-fix.ts`), after which closing again merges cleanly.
  */
 export function useCloseStream(): {
   closeStream: (projectId: string, streamId: string) => Promise<void>
@@ -47,6 +49,8 @@ export function useCloseStream(): {
   const askWorktree = worktreeChoice.ask
   const tasksChoice = useStreamTasksChoice()
   const askTasks = tasksChoice.ask
+  const conflictChoice = useMergeConflictChoice()
+  const askConflict = conflictChoice.ask
 
   /** Main archived these tasks; resolves once this window's projects have caught up (or after a while). */
   const landedGone = useCallback(async (projectId: string, taskIds: string[]) => {
@@ -54,6 +58,20 @@ export function useCloseStream(): {
     const live = () => taskIds.some(taskId => findTaskInProject(projectsRef.current.find(p => p.id === projectId), taskId))
     while (live() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50))
   }, [])
+
+  /** Resolve with AI: main adds the task and sends its prompt; switch to it once this window has it. */
+  const startMergeFix = useCallback(async (projectId: string, streamId: string, files: string[]) => {
+    const started = await window.api.streamMergeFix(projectId, streamId, files)
+      .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }))
+    if (!started.ok) {
+      window.alert(`Couldn't start Claude on the conflicts: ${started.error}`)
+      return
+    }
+    const deadline = Date.now() + LANDED_WAIT_MS
+    const arrived = () => !!findTaskInProject(projectsRef.current.find(p => p.id === projectId), started.taskId)
+    while (!arrived() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50))
+    if (arrived()) switchToTask(projectId, started.taskId)
+  }, [switchToTask])
 
   const closeStream = useCallback(async (projectId: string, streamId: string) => {
     const project = projects.find(p => p.id === projectId)
@@ -115,6 +133,12 @@ export function useCloseStream(): {
         const merged = await window.api.streamMerge(project.id, stream.id)
           .catch((err: unknown): StreamMergeResult => ({ status: 'failed', error: err instanceof Error ? err.message : String(err) }))
         const failure = streamMergeFailure(merged, workspace.branchName, workspace.baseBranch)
+        if (failure && merged.status === 'conflict') {
+          if (await askConflict({ title: `Merge into ${workspace.baseBranch} conflicts`, message: failure }) === 'fix') {
+            await startMergeFix(project.id, stream.id, merged.files)
+          }
+          return
+        }
         if (failure) {
           window.alert(failure)
           return
@@ -135,7 +159,7 @@ export function useCloseStream(): {
     } finally {
       releases.forEach(release => release())
     }
-  }, [projects, tabStatusStore, askTasks, askWorktree, confirmDiscardDirty, switchToTask, archiveStream, landedGone])
+  }, [projects, tabStatusStore, askTasks, askWorktree, askConflict, startMergeFix, confirmDiscardDirty, switchToTask, archiveStream, landedGone])
 
   return {
     closeStream,
@@ -143,6 +167,7 @@ export function useCloseStream(): {
       <>
         {worktreeChoice.dialog}
         {tasksChoice.dialog}
+        {conflictChoice.dialog}
       </>
     )
   }

@@ -1,4 +1,4 @@
-import type { StreamMergeResult } from '../../shared/types'
+import type { StreamMergeFixResult, StreamMergeResult } from '../../shared/types'
 import type { TaskLandingManager } from '../task-landing'
 import type { IpcRegistrar } from './registrar'
 import { safeId } from './schemas'
@@ -8,6 +8,8 @@ export interface TaskLandingIpcDeps {
   taskLanding: TaskLandingManager
   /** A closing stream's branch into its base branch (`stream-merge.ts`). */
   mergeStream(projectId: string, streamId: string): Promise<StreamMergeResult>
+  /** A Claude task in the stream's worktree that merges the base branch in and resolves the conflicts (`stream-merge-fix.ts`). */
+  fixStreamMerge(projectId: string, streamId: string, files: string[]): Promise<StreamMergeFixResult>
 }
 
 const landOptions = v.object({
@@ -50,4 +52,7 @@ export function registerTaskLandingHandlers(ipc: IpcRegistrar, deps: TaskLanding
 
   ipc.handle('stream-merge', [safeId, safeId], (_event, projectId, streamId) =>
     deps.mergeStream(projectId, streamId))
+
+  ipc.handle('stream-merge-fix', [safeId, safeId, v.array(v.string(), { max: 1000 })], (_event, projectId, streamId, files) =>
+    deps.fixStreamMerge(projectId, streamId, files))
 }

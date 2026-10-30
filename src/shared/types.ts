@@ -181,6 +181,11 @@ export type StreamMergeResult =
   | { status: 'blocked'; files: string[]; message: string }
   | { status: 'failed'; error: string }
 
+/** Asking Claude to resolve a closing stream's merge conflict (`stream-merge-fix.ts`): the task it started. */
+export type StreamMergeFixResult =
+  | { ok: true; taskId: string }
+  | { ok: false; error: string }
+
 /**
  * One agent session (or one terminal) and the tabs that came with it. Lives in a
  * stream. In a worktree stream it gets a worktree of its own, on a branch off the
