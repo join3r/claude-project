@@ -23,6 +23,8 @@ export interface TaskInboxActions {
   setTaskPreview: (projectId: string, taskId: string, preview: string) => void
   snoozeTask: (projectId: string, taskId: string, options: SnoozeOptions) => void
   unsnoozeTask: (projectId: string, taskId: string) => void
+  /** Take the task off Autopilot (`Task.autopilot` goes): it is yours from here, like any task. */
+  endAutopilot: (projectId: string, taskId: string) => void
 }
 
 /** Task recency and inbox triage: interaction stamps, events, read/unread and snooze. */
@@ -84,7 +86,16 @@ export function useTaskInbox(core: AppStateCore): TaskInboxActions {
     updateTaskInbox(projectId, taskId, inboxUnsnoozed)
   }, [updateTaskInbox])
 
+  const endAutopilot = useCallback((projectId: string, taskId: string) => {
+    mutateProjects(prev => mapTask(prev, projectId, taskId, task => {
+      if (!task.autopilot) return task
+      const { autopilot: _autopilot, ...rest } = task
+      return rest
+    }))
+  }, [mutateProjects])
+
   return {
+    endAutopilot,
     markTaskInteracted,
     markTaskEvent,
     markTaskVisited,

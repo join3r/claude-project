@@ -497,6 +497,13 @@ const api = {
     return () => ipcRenderer.removeListener('menu-toggle-file-browser', handler)
   },
 
+  // Menu: the desk's Bench drawer (⌘`)
+  onMenuToggleBench: (callback: () => void): (() => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('menu-toggle-bench', handler)
+    return () => ipcRenderer.removeListener('menu-toggle-bench', handler)
+  },
+
   // Workspaces
   workspaceListBranches: (request: WorkspaceListBranchesRequest): Promise<string[]> =>
     ipcRenderer.invoke('workspace-list-branches', request),

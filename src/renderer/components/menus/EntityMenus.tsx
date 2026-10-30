@@ -21,10 +21,10 @@ import {
 } from './projectMenuRules'
 
 /**
- * The project and stream menus, drawn the same wherever they show: the tree's
- * right-click, the Inbox's task menu (as pages), the task header's breadcrumb,
- * the Inbox's group headers and Project Home. Their dialogs open through
- * `entityActions` so none of them needs the tree on screen.
+ * The project and stream menus, drawn the same wherever they show: an inbox
+ * row's menu (as pages), the task header's breadcrumb and the Project map's
+ * lanes. Their dialogs open through `entityActions`, so none of them needs
+ * its opener on screen.
  */
 
 const sectionCls = 'border-b border-hair pb-1 mb-1'

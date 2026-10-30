@@ -14,6 +14,7 @@ import {
   taskStatus
 } from '../../shared/inbox-state'
 import { describeActivity, type AgentActivity } from '../../shared/agent-activity'
+import { autopilotBusy, autopilotNeedsYou } from '../../shared/autopilot'
 
 // The triage predicates themselves moved to shared/inbox-state.ts when idle
 // cleanup moved into main — both processes must answer them identically. They
@@ -139,11 +140,12 @@ export function partitionInbox(
     if (status === 'attention') {
       entry.yourTurn = true
       partition.needsYou.push(entry)
-    } else if (landingNeedsYou(task)) {
-      // A stopped landing waits for you whatever else goes on (a busy terminal) or was put away.
+    } else if (landingNeedsYou(task) || autopilotNeedsYou(task)) {
+      // A stopped landing, or an Autopilot run handed back, waits for you whatever
+      // else goes on (a busy terminal) or was put away.
       entry.yourTurn = true
       yourTurn.push(entry)
-    } else if (status === 'working') partition.working.push(entry)
+    } else if (status === 'working' || autopilotBusy(task)) partition.working.push(entry)
     else if (isSnoozed(task, now)) partition.snoozed.push(entry)
     else {
       entry.yourTurn = isYourTurn(task, status)
@@ -184,11 +186,11 @@ export interface InboxProjectGroup {
 }
 
 /**
- * Rows gathered by project for the grouped Inbox layout (the stream is a label on
- * each row). A group sits where its most urgent row would sit in the flat list
+ * Rows gathered by project for the column's "Group by project" (the stream is a
+ * label on each row). A group sits where its most urgent row would sit in the flat list
  * and keeps that list's order inside, so grouping never buries a task that needs
  * you under a busier project. Pinned projects come first, in pin order, as they
- * do in the sidebar tree.
+ * do in the scope menu.
  */
 export function groupInboxByProject(
   entries: readonly InboxEntry[],

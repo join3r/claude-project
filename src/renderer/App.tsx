@@ -1,10 +1,9 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { TabStatusProvider } from './context/TabStatusContext'
 import Sidebar from './components/Sidebar'
 import ContentArea from './components/ContentArea'
 import FileBrowserPanel from './components/FileBrowserPanel'
-import { Palette } from './palette/Palette'
 import MobilePairingPrompt from './components/MobilePairingPrompt'
 import ServerIdeConsentModal from './components/servers/ServerIdeConsentModal'
 import Toasts from './components/Toasts'
@@ -12,15 +11,21 @@ import StreamRunHost from './components/StreamRunHost'
 import EntityActionsHost from './components/EntityActionsHost'
 import { paletteEvents } from './palette/paletteEvents'
 import { useTaskPreviewSync } from './components/desk/useTaskPreviewSync'
+import { toggleBench, toggleBenchView } from './components/desk/benchState'
+import DeskStatusBar from './components/desk/DeskStatusBar'
+import DeskCommandBar from './components/desk/DeskCommandBar'
 
 function AppInner(): React.ReactElement {
   const {
-    effectiveTheme, exportWindowViewState, toggleFileBrowser, config
+    effectiveTheme, exportWindowViewState, toggleFileBrowser: toggleSidePanel, selectedTaskId, selectedProjectId
   } = useApp()
-  const desk = config?.layout === 'desk'
+  // A task's Files are a Bench tab; the side panel serves a project's map.
+  const toggleFileBrowser = useCallback(() => {
+    if (selectedTaskId) toggleBenchView(selectedTaskId, 'files')
+    else toggleSidePanel()
+  }, [selectedTaskId, toggleSidePanel])
   useTaskPreviewSync()
   const [sidebarHidden, setSidebarHidden] = useState(false)
-  const [switcherRequested, setSwitcherRequested] = useState(false)
 
   useEffect(() => {
     return window.api.onMenuToggleSidebar(() => {
@@ -28,15 +33,8 @@ function AppInner(): React.ReactElement {
     })
   }, [])
 
-  useEffect(() => {
-    return window.api.onMenuProjectSwitcher(() => {
-      if (sidebarHidden) {
-        setSidebarHidden(false)
-        setSwitcherRequested(true)
-      }
-      // When sidebar is visible, the Sidebar's own listener handles it
-    })
-  }, [sidebarHidden])
+  // ⌘P (the menu's Go to…) opens the bar, like ⌘K, even with the column hidden.
+  useEffect(() => window.api.onMenuProjectSwitcher(() => paletteEvents.emit('palette-prefix-set', '')), [])
 
   useEffect(() => {
     return window.api.onMenuToggleFileBrowser(() => {
@@ -45,14 +43,20 @@ function AppInner(): React.ReactElement {
   }, [toggleFileBrowser])
 
   useEffect(() => {
+    return window.api.onMenuToggleBench(() => {
+      if (selectedTaskId) toggleBench(selectedTaskId)
+    })
+  }, [selectedTaskId])
+
+  useEffect(() => {
     return window.api.onMenuNewWindow(() => {
       void window.api.openWindow(exportWindowViewState())
     })
   }, [exportWindowViewState])
 
-  // The New task composer and New stream dialog live in the Sidebar. With it hidden,
-  // Project Home's buttons, the tab bar's "New task in…" and ⌘N show it and replay
-  // the request once its listeners are mounted (child effects run first).
+  // The compose box, Settings and the New stream / project / task dialogs live in the Sidebar.
+  // With it hidden, the map's buttons, the tab bar's "New task in…", ⌘N, ⌘, and the status bar show it
+  // and replay the request once its listeners are mounted (child effects run first).
   const [replay, setReplay] = useState<(() => void) | null>(null)
   useEffect(() => {
     if (!sidebarHidden) return
@@ -60,11 +64,21 @@ function AppInner(): React.ReactElement {
     const offs = [
       paletteEvents.on('open-new-task', () => show(() => paletteEvents.emit('open-new-task'))),
       paletteEvents.on('open-new-task-in', where => show(() => paletteEvents.emit('open-new-task-in', where))),
+      paletteEvents.on('open-new-task-form', request => show(() => paletteEvents.emit('open-new-task-form', request))),
       paletteEvents.on('open-new-stream', projectId => show(() => paletteEvents.emit('open-new-stream', projectId))),
-      window.api.onMenuNewTask(() => show(() => paletteEvents.emit('open-new-task')))
+      paletteEvents.on('open-new-project', () => show(() => paletteEvents.emit('open-new-project'))),
+      // Settings is the Sidebar's too: ⌘, , ⌘K's >Settings and the status bar's hosts and phone.
+      paletteEvents.on('open-settings', () => show(() => paletteEvents.emit('open-settings'))),
+      paletteEvents.on('open-settings-tab', tab => show(() => paletteEvents.emit('open-settings-tab', tab))),
+      paletteEvents.on('open-add-server', () => show(() => paletteEvents.emit('open-add-server'))),
+      window.api.onMenuOpenSettings(() => show(() => paletteEvents.emit('open-settings'))),
+      window.api.onMenuNewTask(() => show(() => paletteEvents.emit('open-new-task'))),
+      window.api.onMenuNewStream(() => {
+        if (selectedProjectId) show(() => paletteEvents.emit('open-new-stream', selectedProjectId))
+      })
     ]
     return () => offs.forEach(off => off())
-  }, [sidebarHidden])
+  }, [sidebarHidden, selectedProjectId])
   useEffect(() => {
     if (!replay || sidebarHidden) return
     setReplay(null)
@@ -91,22 +105,20 @@ function AppInner(): React.ReactElement {
     document.documentElement.classList.toggle('theme-light', effectiveTheme === 'light')
   }, [effectiveTheme])
 
-  // The desk layout's graphite tokens (styles.css) hang off <html>, for the same CSS-var readers.
+  // The desk's graphite tokens (styles.css) hang off <html>, for the same CSS-var readers.
   useLayoutEffect(() => {
-    document.documentElement.classList.toggle('layout-desk', desk)
-  }, [desk])
+    document.documentElement.classList.add('layout-desk')
+  }, [])
 
   return (
-    <div className={`h-full w-full flex bg-bg text-text font-sans${effectiveTheme === 'light' ? ' theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}${desk ? ' layout-desk' : ''}`}>
-      {!sidebarHidden && (
-        <Sidebar
-          switcherRequested={switcherRequested}
-          onSwitcherConsumed={() => setSwitcherRequested(false)}
-        />
-      )}
-      <ContentArea />
-      <FileBrowserPanel />
-      <Palette />
+    <div className={`h-full w-full flex flex-col bg-bg text-text font-sans${effectiveTheme === 'light' ? ' theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''} layout-desk`}>
+      <div className="flex-1 min-h-0 flex">
+        {!sidebarHidden && <Sidebar />}
+        <ContentArea />
+        <FileBrowserPanel />
+      </div>
+      <DeskStatusBar />
+      <DeskCommandBar />
       <MobilePairingPrompt />
       <ServerIdeConsentModal />
       <StreamRunHost />

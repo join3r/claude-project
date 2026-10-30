@@ -129,25 +129,6 @@ export function badgeRun(runs: readonly StreamRunState[]): StreamRunState | unde
 }
 
 /**
- * The project's stream that shows an app badge (a run running, else one that
- * failed), with that run: what a row standing for the whole project (an Inbox
- * group header) shows.
- */
-export function useProjectStreamRun(projectId: string, streamIds: readonly string[]): { streamId: string; run: StreamRunState } | null {
-  useEffect(() => { fetchProject(projectId) }, [projectId])
-  const all = useSyncExternalStore(subscribe, () => states)
-  let failed: { streamId: string; run: StreamRunState } | null = null
-  for (const streamId of streamIds) {
-    const runs = runsOfStream(all, streamId)
-    const running = runs.find(run => run.status === 'running')
-    if (running) return { streamId, run: running }
-    const crashed = runs.find(streamRunCrashed)
-    if (!failed && crashed) failed = { streamId, run: crashed }
-  }
-  return failed
-}
-
-/**
  * Run, Stop or Restart one of the stream's commands; a failure (no such command,
  * a folder that's gone) shows as a toast. `taskId` runs it in that task's
  * worktree (`StreamRuns.control`).

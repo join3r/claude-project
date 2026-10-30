@@ -1,6 +1,8 @@
 // src/renderer/palette/paletteEvents.ts
 type EventMap = {
   'open-settings': void
+  /** Settings on one of its pages, by id ('servers', 'mobile'…): the desk's status bar. */
+  'open-settings-tab': string
   /** Add server: the install command for a new DevTool server. */
   'open-add-server': void
   'open-project-settings': void
@@ -8,8 +10,12 @@ type EventMap = {
   'open-new-task': void
   /** The New Task composer on a given project, and stream when named (Project Home's buttons). */
   'open-new-task-in': { projectId: string; streamId?: string }
+  /** The full New task form (model, mode, images, terminal, any folder), on a project, stream and prompt when given. */
+  'open-new-task-form': NewTaskFormRequest
   /** The New stream dialog for a project (Project Home's button). */
   'open-new-stream': string
+  /** The New project dialog (the palette's New Project…). */
+  'open-new-project': void
   'toggle-sidebar': void
   'toggle-file-browser': void
   'reload-window': void
@@ -25,6 +31,13 @@ type EventMap = {
   'link-to-agent': LinkToAgentRequest
   /** Short message for the agent-link banner (no agent tab, save failed). */
   'agent-link-notice': string
+}
+
+/** What the full New task form opens on: compose's aim and text, or nothing (the selection). */
+export interface NewTaskFormRequest {
+  projectId?: string
+  streamId?: string
+  prompt?: string
 }
 
 export interface LinkToAgentRequest {

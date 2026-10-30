@@ -33,14 +33,17 @@ export interface ChatToolItem {
   lastChild?: string
   /** An Artifact publish: the page it went to. */
   artifact?: { url: string; title?: string }
+  /** When the row first appeared (live only; history rows have none). */
+  at?: number
 }
 
+/** Every row may carry `at`: when it first appeared (live only; history rows have none). */
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string; images: number; queued?: boolean; failed?: boolean }
-  | { kind: 'text'; id: string; text: string; streaming?: boolean }
-  | { kind: 'thinking'; id: string; text: string; streaming?: boolean }
+  | { kind: 'user'; id: string; text: string; images: number; queued?: boolean; failed?: boolean; at?: number }
+  | { kind: 'text'; id: string; text: string; streaming?: boolean; at?: number }
+  | { kind: 'thinking'; id: string; text: string; streaming?: boolean; at?: number }
   | ChatToolItem
-  | { kind: 'notice'; id: string; text: string; tone: 'muted' | 'warning' | 'error' }
+  | { kind: 'notice'; id: string; text: string; tone: 'muted' | 'warning' | 'error'; at?: number }
   | ChatBashItem
 
 /**
@@ -58,6 +61,7 @@ export interface ChatBashItem {
   exitCode?: number | null
   /** Waiting to go out with your next message; false once Claude has it. */
   pendingContext?: boolean
+  at?: number
 }
 
 export type ChatPromptKind = 'permission' | 'question' | 'plan'
@@ -480,7 +484,8 @@ class Draft {
   private copiedIndex = false
   private copiedBlocks = false
 
-  constructor(private readonly state: ChatState, private readonly idPrefix: string) {
+  /** `at`: when the event arrived; stamped on the rows it adds. */
+  constructor(private readonly state: ChatState, private readonly idPrefix: string, private readonly at?: number) {
     this.items = state.items
     this.toolIndex = state.toolIndex
     this.openBlocks = state.openBlocks
@@ -516,7 +521,7 @@ class Draft {
 
   push(item: ChatItem): number {
     const items = this.itemsMut()
-    items.push(item)
+    items.push(this.at !== undefined && item.at === undefined ? { ...item, at: this.at } : item)
     const index = items.length - 1
     if (item.kind === 'tool') this.indexMut()[item.id] = index
     return index
@@ -1249,7 +1254,7 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
         // /clear starts a new conversation in the same process; its tasks run on.
         return { ...emptyChatState(), process: state.process, info: state.info, models: state.models, commands: state.commands, usage: state.usage, tasks: state.tasks, login: state.login }
       }
-      const draft = new Draft(state, `i${state.items.length}-`)
+      const draft = new Draft(state, `i${state.items.length}-`, event.at)
       return draft.result(applySdkMessage(state, event.m, event.at, false, draft))
     }
     case 'history': {
@@ -1266,7 +1271,7 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
       return { ...next, items, busy: false, openBlocks: {} }
     }
     case 'sent': {
-      const draft = new Draft(state, 's')
+      const draft = new Draft(state, 's', event.at)
       draft.push({ kind: 'user', id: event.uuid, text: event.text, images: event.images, queued: true })
       return draft.result({ busy: true, turnStartedAt: state.busy ? state.turnStartedAt : (event.at ?? Date.now()), coldCache: undefined })
     }

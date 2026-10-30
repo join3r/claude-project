@@ -57,7 +57,7 @@ export function projectBranchLabels(project: Project, head: string | null): Map<
 }
 
 /** `projectId` routes the call to a DevTool server's project. */
-function useBranchGraph(projectDir: string, branches: string[], limit: number, enabled: boolean, projectId?: string): GitBranchGraph | null {
+export function useBranchGraph(projectDir: string, branches: string[], limit: number, enabled: boolean, projectId?: string): GitBranchGraph | null {
   const [graph, setGraph] = useState<GitBranchGraph | null>(null)
   const requestIdRef = useRef(0)
   const branchKey = branches.join('\n')

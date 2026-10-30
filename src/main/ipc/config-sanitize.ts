@@ -68,20 +68,25 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   claudeDefaultView: v.literal('terminal', 'chat'),
   lastProjectId: nullableStr,
   lastTaskId: nullableStr,
-  defaultSidebarTab: v.literal('projects', 'inbox'),
   inboxLayout: v.literal('flat', 'grouped'),
-  layout: v.literal('classic', 'desk'),
-  autoCollapseQuietStreams: bool,
   showProjectIcons: bool,
   promptBoxAgent: v.literal('claude-chat', 'claude', 'codex', 'pi'),
   promptBoxMode: v.literal('', 'default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'),
-  taskRecencyHighlight: v.object({
-    enabled: bool,
-    mode: v.literal('rank', 'time'),
-    rankCount: num,
-    timeWindowMinutes: num
-  }),
-  mobile: v.optional(mobileConfig)
+  mobile: v.optional(mobileConfig),
+  hosts: v.optional(v.array(v.union(
+    v.object({
+      kind: v.literal('ssh'),
+      host: v.string({ nonEmpty: true, max: 255 }),
+      port: num,
+      username: v.string({ max: 255 }),
+      keyFile: v.optional(v.string({ max: 4096 }))
+    }),
+    v.object({
+      kind: v.literal('shell'),
+      name: v.string({ max: 200 }),
+      command: v.string({ nonEmpty: true, max: 4096 })
+    })
+  ), { max: 200 }))
 }
 
 /**

@@ -68,9 +68,9 @@ vi.mock('@monaco-editor/react', async () => {
   return { default: MockEditor }
 })
 
-// The project Home page is irrelevant here and drags in git/stat plumbing.
-vi.mock('../src/renderer/components/ProjectHome', () => ({
-  ProjectHome: () => null
+// The Project map is irrelevant here and drags in git/stat plumbing.
+vi.mock('../src/renderer/components/desk/DeskProjectMap', () => ({
+  default: () => null
 }))
 
 import { AppProvider, useApp } from '../src/renderer/context/AppContext'
@@ -244,10 +244,8 @@ describe('closing an editor with unsaved changes', () => {
     ;(window as any).api.platform = 'win32'
     await mountApp()
     const close = `Close tab (${formatShortcutForApp('CmdOrCtrl+W')})`
-    const split = `Split right (${formatShortcutForApp('CmdOrCtrl+D')})`
     expect(close).not.toContain('⌘')
     expect(screen.getAllByTitle(close).length).toBeGreaterThan(0)
-    expect(screen.getByTitle(split)).toBeTruthy()
     // The + menu lists Terminal with its shortcut.
     vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect(): void {} })
     fireEvent.click(screen.getAllByTitle('New tab or task')[0])

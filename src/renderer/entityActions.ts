@@ -3,8 +3,8 @@ import type { PendingWorktreeSetup, Project } from '../shared/types'
 
 /**
  * The window's one place for the dialogs a project or stream menu opens, so
- * those menus work wherever they are shown (the tree, the Inbox, the task
- * header, Project Home), with the sidebar on the Inbox tab or hidden.
+ * those menus work wherever they are shown (an inbox row's menu, the task
+ * header, the Project map), with the inbox column shown or hidden.
  * `EntityActionsHost` (mounted by App) draws them.
  */
 export type EntityDialog =

@@ -271,6 +271,21 @@ describe('ChatBridge', () => {
     expect(events()).toMatchObject([{ upserts: [{ id: 'i5', markdown: 'edited again' }], removes: [] }])
   })
 
+  it('tells the host about a phone Stop before interrupting (Autopilot hands the task back)', async () => {
+    const order: string[] = []
+    const interrupt = chats.interrupt.bind(chats)
+    chats.interrupt = async (tabId: string) => { order.push(`interrupt:${tabId}`); await interrupt(tabId) }
+    bridge = new ChatBridge({
+      chats,
+      projects: { peek: () => data },
+      timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) },
+      log: () => {},
+      onInterrupt: (tabId) => order.push(`stop:${tabId}`)
+    })
+    expect(await req('chat.interrupt', { tabId: 'tab-chat' })).toMatchObject({ ok: true })
+    expect(order).toEqual(['stop:tab-chat', 'interrupt:tab-chat'])
+  })
+
   it('reports the open tab per phone and announces phone sends before they happen (push, §7.6)', async () => {
     const sends: string[] = []
     bridge = new ChatBridge({

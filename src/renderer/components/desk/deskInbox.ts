@@ -1,18 +1,33 @@
 /**
- * The desk column's lists (2026-10-30 redesign): the classic Inbox partition
- * regrouped into mail-style tabs. Pure, so the rules can be tested without a
+ * The desk column's lists (2026-10-30 redesign): the inbox partition
+ * (`partitionInbox`) regrouped into mail-style tabs. Pure, so the rules can be tested without a
  * renderer.
  *
- *  - Inbox: Needs you (a question, a permission, a landing that stopped) ·
+ *  - Inbox: Needs you (a question, a permission, a landing that stopped, an
+ *    Autopilot run handed back) ·
  *    Answered (the agent finished and you haven't replied) · Waiting on you
  *    (idle: you had the last word, or nothing ran yet).
- *  - Working: agents running, a landing being fixed by its agent included.
- *  - Snoozed: as the classic Inbox; a live agent still wins over snooze.
+ *  - Working: agents running, a landing being fixed by its agent and an
+ *    Autopilot run between turns (Codex reviewing, landing) included, and
+ *    Background: the turn ended but work it started still runs.
+ *  - Snoozed: put away until they wake; a live agent still wins over snooze.
  *  - Done: archived tasks, read separately (see `doneEntries`).
  */
-import type { DeskScope, DeskTab, Project, Stream } from '../../../shared/types'
+import type { DeskScope, DeskTab, Project, Stream, Task } from '../../../shared/types'
+import { backgroundWork, type AgentActivity, type BackgroundWork } from '../../../shared/agent-activity'
+import { statusTabs } from '../../../shared/inbox-state'
 import type { ArchivedTask, ProjectArchive } from '../../../shared/archive'
-import { landingNeedsYou, type InboxEntry, type InboxPartition, type InboxSource } from '../inbox'
+import { autopilotNeedsYou } from '../../../shared/autopilot'
+import { groupInboxByProject, landingNeedsYou, type InboxEntry, type InboxPartition, type InboxSource } from '../inbox'
+
+/** A row's name being edited in place (the row menu's Rename): the value typed so far and what Enter, blur and Escape do. */
+export interface InboxRename {
+  taskId: string
+  value: string
+  onChange: (value: string) => void
+  onSubmit: () => void
+  onCancel: () => void
+}
 
 export interface DeskLists {
   needsYou: InboxEntry[]
@@ -34,7 +49,7 @@ export function deskLists(partition: InboxPartition): DeskLists {
   const answered: InboxEntry[] = []
   const waiting: InboxEntry[] = []
   for (const entry of partition.ready) {
-    if (landingNeedsYou(entry.task)) needsYou.push(entry)
+    if (landingNeedsYou(entry.task) || autopilotNeedsYou(entry.task)) needsYou.push(entry)
     else if (entry.yourTurn) answered.push(entry)
     else waiting.push(entry)
   }
@@ -60,6 +75,28 @@ export function deskTabEntries(lists: DeskLists, tab: DeskTab): InboxEntry[] {
     case 'snoozed': return lists.snoozed
     case 'done': return []
   }
+}
+
+/** A task in the Background state: which tab holds the work, and what runs. */
+export interface TaskBackground extends BackgroundWork {
+  tabId: string
+}
+
+/**
+ * The task's Background state (redesign decision 6), or null when it is not in it:
+ * some tab has work running past its turn, and no tab has a turn in flight or is
+ * waiting on you (that is plain Working, or Needs you).
+ */
+export function taskBackground(task: Task, activities: Readonly<Record<string, AgentActivity>>): TaskBackground | null {
+  let found: TaskBackground | null = null
+  for (const tab of statusTabs(task)) {
+    const activity = activities[tab.id]
+    if (!activity) continue
+    if (activity.turnStartedAt !== undefined || activity.waiting) return null
+    const work = backgroundWork(activity)
+    if (work && (!found || work.since < found.since)) found = { ...work, tabId: tab.id }
+  }
+  return found
 }
 
 export interface DoneEntry {
@@ -103,6 +140,19 @@ export function doneEntries(
   return out.sort((a, b) => b.entry.archivedAt - a.entry.archivedAt)
 }
 
+/**
+ * The scope as the column applies it: a project that is gone (deleted, or a
+ * server's not loaded) reads as All, a stream that is gone (closed) as its
+ * project. The stored scope stays, so it comes back with its project.
+ */
+export function liveScope(projects: readonly Project[], scope: DeskScope | null | undefined): DeskScope | null {
+  if (!scope) return null
+  const project = projects.find(p => p.id === scope.projectId)
+  if (!project) return null
+  if (!scope.streamId || project.streams.some(s => s.id === scope.streamId)) return scope
+  return { projectId: project.id }
+}
+
 /** What the scope menu and compose chip say: "All projects", "devtool", "devtool › 0.7.0". */
 export function scopeLabel(projects: readonly Project[], scope: DeskScope | null | undefined): string {
   if (!scope) return 'All projects'
@@ -136,3 +186,32 @@ export function keyTarget(entries: readonly InboxEntry[], hoveredTaskId: string 
   return find(hoveredTaskId) ?? find(selectedTaskId) ?? null
 }
 
+
+/** Pinned tasks first, the rest in their order: the board's "pins on top", inside each group. */
+export function pinnedFirst(entries: readonly InboxEntry[], pinnedTaskIds: ReadonlySet<string>): InboxEntry[] {
+  if (pinnedTaskIds.size === 0) return [...entries]
+  return [...entries.filter(entry => pinnedTaskIds.has(entry.task.id)), ...entries.filter(entry => !pinnedTaskIds.has(entry.task.id))]
+}
+
+/**
+ * The rows in the order the column draws them, for ⌥↓ / ⌥↑: grouped by project
+ * (pinned projects first) the list reads project by project, not status by status.
+ */
+export function shownRows(entries: readonly InboxEntry[], grouped: boolean, pinnedProjectIds: readonly string[]): InboxEntry[] {
+  return grouped ? groupInboxByProject(entries, pinnedProjectIds).flatMap(group => group.entries) : [...entries]
+}
+
+/** ⌥↓ / ⌥↑: the row after (or before) the selected one, else the first (or last) row. */
+export function stepRow(entries: readonly InboxEntry[], selectedTaskId: string | null, step: 1 | -1): InboxEntry | null {
+  if (entries.length === 0) return null
+  const index = selectedTaskId ? entries.findIndex(entry => entry.task.id === selectedTaskId) : -1
+  if (index < 0) return step === 1 ? entries[0] : entries[entries.length - 1]
+  return entries[index + step] ?? null
+}
+
+/** ⌘J: the next task that needs you after the selected one, wrapping round; null when none does. */
+export function nextNeedsYou(needsYou: readonly InboxEntry[], selectedTaskId: string | null): InboxEntry | null {
+  if (needsYou.length === 0) return null
+  const index = selectedTaskId ? needsYou.findIndex(entry => entry.task.id === selectedTaskId) : -1
+  return needsYou[(index + 1) % needsYou.length]
+}

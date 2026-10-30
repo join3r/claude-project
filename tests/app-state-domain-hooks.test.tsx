@@ -245,9 +245,7 @@ describe('useWindowLayout', () => {
     })
     await loaded(hook)
 
-    act(() => { hook.result.current.layout.setSidebarWidth(10) })
     act(() => { hook.result.current.layout.setFileBrowserWidth(9999) })
-    expect(hook.result.current.layout.sidebarWidth).toBe(180)
     expect(hook.result.current.layout.fileBrowserWidth).toBe(400)
 
     act(() => {

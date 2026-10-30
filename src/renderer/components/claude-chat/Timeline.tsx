@@ -1,8 +1,9 @@
 import React, { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, CircleSlash, X } from 'lucide-react'
-import type { ChatBashItem, ChatImage, ChatItem, ChatToolItem } from '../../../shared/claude-chat'
+import type { ChatBashItem, ChatImage, ChatItem, ChatTask, ChatToolItem } from '../../../shared/claude-chat'
 import { firstLine } from '../../../shared/agent-activity'
 import { buildTimeline, summarizeGroup, type TimelineRow } from './timelineRows'
+import { buildConversation, foldedLine, latestTodos, progressSteps, type Turn } from './turns'
 import { renderChatMarkdown } from './markdown'
 import { diffLines, diffStats, editPairs } from './diff'
 import DiffView from './DiffView'
@@ -20,6 +21,11 @@ interface Props {
   taskTools?: ReadonlySet<string>
   /** Scroll to this tool call and flash it; a new `seq` asks again. */
   focus?: TimelineFocus | null
+  /** Desk layout: each turn's work folds away, leaving your message and the answer. */
+  folded?: boolean
+  /** Desk layout: background tasks still running; the last turn's card stays open for them. */
+  backgroundTasks?: readonly ChatTask[]
+  onStopTask?: (taskId: string) => void
 }
 
 export interface TimelineFocus {
@@ -35,12 +41,18 @@ interface TimelineContextValue {
 }
 
 const NO_TOOLS: ReadonlySet<string> = new Set()
+const NO_TASKS: readonly ChatTask[] = []
 const TimelineContext = createContext<TimelineContextValue>({ taskTools: NO_TOOLS, focus: null, claim: () => false })
 
 const FLASH_MS = 1400
 
-export default function Timeline({ items, busy, compacting, waiting, turnStartedAt, onOpenLink, taskTools = NO_TOOLS, focus = null }: Props): React.ReactElement {
-  const rows = useMemo(() => buildTimeline(items, busy), [items, busy])
+export default function Timeline({
+  items, busy, compacting, waiting, turnStartedAt, onOpenLink, taskTools = NO_TOOLS, focus = null, folded = false,
+  backgroundTasks = NO_TASKS, onStopTask
+}: Props): React.ReactElement {
+  const rows = useMemo(() => folded ? [] : buildTimeline(items, busy), [items, busy, folded])
+  const inBackground = backgroundTasks.length > 0
+  const blocks = useMemo(() => folded ? buildConversation(items, busy, inBackground) : [], [items, busy, folded, inBackground])
   const claimed = useRef(-1)
   const context = useMemo<TimelineContextValue>(() => ({
     taskTools,
@@ -72,8 +84,12 @@ export default function Timeline({ items, busy, compacting, waiting, turnStarted
           if (/^https?:\/\//i.test(href)) onOpenLink(href)
         }}
       >
-        {rows.map((row) => <Row key={row.key} row={row} />)}
-        {busy && <WorkingLine compacting={compacting} waiting={waiting} since={turnStartedAt} tool={activeTool} />}
+        {folded
+          ? blocks.map((block) => block.type === 'bash'
+            ? <BashRow key={block.key} item={block.item} />
+            : <TurnBlock key={block.key} turn={block.turn} compacting={compacting} waiting={waiting} since={turnStartedAt} backgroundTasks={backgroundTasks} onStopTask={onStopTask} />)
+          : rows.map((row) => <Row key={row.key} row={row} />)}
+        {busy && !folded && <WorkingLine compacting={compacting} waiting={waiting} since={turnStartedAt} tool={activeTool} />}
       </div>
     </TimelineContext.Provider>
   )
@@ -405,6 +421,158 @@ function WorkingLine({ compacting, waiting, since, tool }: { compacting: boolean
       <span className="truncate">{label}</span>
       {elapsed && <span className="text-xs text-text-subtle tabular-nums">{elapsed}</span>}
       {!waiting && <span className="text-xs text-text-subtle">· esc to stop</span>}
+    </div>
+  )
+}
+
+/** Desk layout: your message, the work (a live card, or one folded line), then the answer. */
+const TurnBlock = memo(function TurnBlock({ turn, compacting, waiting, since, backgroundTasks, onStopTask }: {
+  turn: Turn
+  compacting: boolean
+  waiting: boolean
+  since?: number
+  backgroundTasks: readonly ChatTask[]
+  onStopTask?: (taskId: string) => void
+}): React.ReactElement {
+  return (
+    <>
+      {turn.user && <UserMessage item={turn.user} />}
+      {turn.live
+        ? <ProgressCard
+            turn={turn}
+            compacting={compacting}
+            waiting={waiting}
+            since={turn.background ? turn.startedAt : since ?? turn.startedAt}
+            backgroundTasks={turn.background ? backgroundTasks : NO_TASKS}
+            onStopTask={onStopTask}
+          />
+        : turn.work.length > 0 && <FoldedWork turn={turn} />}
+      {turn.answer.map((item) => <AssistantText key={item.id} text={item.text} streaming={item.streaming} />)}
+      {turn.tail.map((item) => <Notice key={item.id} text={item.text} tone={item.tone} />)}
+    </>
+  )
+})
+
+/** A finished turn's work as one line; open, it is the classic timeline of that turn. */
+function FoldedWork({ turn }: { turn: Turn }): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const { focus } = useContext(TimelineContext)
+  const openedFor = useRef(-1)
+  // Jumping to a call in here opens the fold; the row then scrolls and flashes.
+  useEffect(() => {
+    if (!focus || openedFor.current >= focus.seq || !turn.work.some((item) => item.id === focus.toolId)) return
+    openedFor.current = focus.seq
+    setOpen(true)
+  }, [focus, turn.work])
+  const rows = useMemo(() => open ? buildTimeline(turn.work) : [], [open, turn.work])
+  const failed = turn.work.some((item) => item.kind === 'tool' && item.status === 'error')
+  return (
+    <div className="text-sm">
+      <button type="button" className="chat-row-btn w-full" onClick={() => setOpen(!open)}>
+        <ChevronRight size={12} className={`shrink-0 text-text-subtle transition-transform duration-(--motion-fast) ${open ? 'rotate-90' : ''}`} />
+        <span className="truncate text-text-muted">{foldedLine(turn)}</span>
+        {failed && <span className="ml-auto pl-3 shrink-0 text-xs text-text-subtle">some calls failed</span>}
+      </button>
+      {open && (
+        <div className="ml-1.5 mt-1 mb-1 flex flex-col gap-1.5 border-l border-border pl-3">
+          {rows.map((row) => <Row key={row.key} row={row} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function clock(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+/** Steps kept on the live card; older ones fold into "N earlier steps". */
+const CARD_STEPS = 8
+
+/**
+ * The turn in flight: what Claude is doing, in plain words, until it folds into the
+ * answer. With `backgroundTasks` the turn has ended but work it started still runs:
+ * a steady dot (Claude is idle), what runs and for how long, each with a Stop.
+ */
+function ProgressCard({ turn, compacting, waiting, since, backgroundTasks, onStopTask }: {
+  turn: Turn
+  compacting: boolean
+  waiting: boolean
+  since?: number
+  backgroundTasks: readonly ChatTask[]
+  onStopTask?: (taskId: string) => void
+}): React.ReactElement {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const steps = useMemo(() => progressSteps(turn.work), [turn.work])
+  const todos = useMemo(() => latestTodos(turn.work), [turn.work])
+  const [showAll, setShowAll] = useState(false)
+  const hidden = showAll ? 0 : Math.max(0, steps.length - CARD_STEPS)
+  const shown = steps.slice(hidden)
+  const background = backgroundTasks.length > 0
+  // In the background the header times the work still running, not the turn.
+  const starts = backgroundTasks.map((task) => task.startedAt).filter((at): at is number => at !== undefined)
+  const headSince = background && starts.length > 0 ? Math.min(...starts) : since
+  const elapsed = headSince !== undefined ? clock(now - headSince) : undefined
+  const label = waiting ? 'Waiting for you' : compacting ? 'Compacting context' : background ? 'Background' : 'Working'
+  const hint = waiting
+    ? 'Answer below'
+    : background ? 'Claude picks it up when it finishes' : "Folds into the answer when it's done · esc to stop"
+  return (
+    <div className="rounded-lg border-[0.5px] border-border bg-surface-2 px-3 py-2.5 text-sm" data-testid="progress-card" data-background={background || undefined}>
+      <div className="flex items-center gap-2">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${waiting ? 'bg-status-attention' : background ? 'bg-text-muted' : 'bg-text-muted desk-pulse'}`} />
+        <span className="text-text">{label}</span>
+        {elapsed && <span className="text-text-subtle tabular-nums">· {elapsed}</span>}
+        <span className="ml-auto pl-3 text-xs text-text-subtle truncate">{hint}</span>
+      </div>
+      {(shown.length > 0 || hidden > 0) && (
+        <div className="mt-2 flex flex-col gap-1">
+          {hidden > 0 && (
+            <button type="button" className="self-start text-xs text-text-subtle hover:text-text-muted cursor-pointer" onClick={() => setShowAll(true)}>
+              {hidden === 1 ? '1 earlier step' : `${hidden} earlier steps`}
+            </button>
+          )}
+          {shown.map((step, index) => {
+            const last = index === shown.length - 1
+            return (
+              <div key={step.key} className="flex items-baseline gap-3 min-w-0">
+                <span className="w-9 shrink-0 text-right font-mono text-xs text-text-subtle tabular-nums">
+                  {step.at !== undefined && since !== undefined ? clock(step.at - since) : ''}
+                </span>
+                <span className={`min-w-0 break-words ${last && !waiting ? 'text-text' : step.calls ? 'text-text-subtle' : 'text-text-muted'}`}>{step.text}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {todos && <div className="mt-2"><TodoList tool={todos} /></div>}
+      {background && (
+        <div className="mt-2 pt-2 border-t-[0.5px] border-border flex flex-col gap-1">
+          {backgroundTasks.map((task) => (
+            <div key={task.id} className="flex items-center gap-3 min-w-0" title={task.command ?? task.description}>
+              <span className="w-9 shrink-0 text-right font-mono text-xs text-text-subtle tabular-nums">
+                {task.startedAt !== undefined ? clock(now - task.startedAt) : ''}
+              </span>
+              <span className="min-w-0 truncate text-text-muted">{task.description}</span>
+              {onStopTask && (
+                <button
+                  type="button"
+                  className="ml-auto shrink-0 px-1.5 py-px rounded-md border-0 bg-transparent text-xs text-text-subtle hover:text-text hover:bg-surface-3 cursor-pointer"
+                  onClick={() => onStopTask(task.id)}
+                  data-testid="progress-card-stop"
+                >
+                  ■ Stop
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

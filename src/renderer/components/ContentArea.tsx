@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Folder, GitBranch, Globe, StickyNote, Columns2, SquareTerminal } from 'lucide-react'
+import { Folder, GitBranch, StickyNote } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { useMetaHeld } from '../hooks/useMetaHeld'
 import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import { featureAvailable, openInIdeAvailable } from '../../shared/project-features'
 import { localProjectFolder } from '../../shared/external-editors'
-import TaskPanes from './TaskPanes'
+import DeskTaskBody from './desk/DeskTaskBody'
+import DeskProjectMap from './desk/DeskProjectMap'
+import { DeskDoneButton, DeskTaskTools } from './desk/DeskTaskHeader'
+import { getBench, openBench } from './desk/benchState'
+import { benchTabClosable, conversationTabId } from './desk/benchLayout'
 import TaskLandingBanner from './TaskLandingBanner'
 import { canLandTask } from '../taskLanding'
 import TaskHeader from './TaskHeader'
-import { ProjectHome } from './ProjectHome'
 import { ArchivedView } from './ArchivedView'
 import { useArchivedView } from './archivedViewTarget'
 import TunnelPopup from './TunnelPopup'
@@ -18,11 +21,10 @@ import UnsavedChangesModal from './UnsavedChangesModal'
 import StateSyncErrorModal from './StateSyncErrorModal'
 import OpenInIdeButton from './OpenInIdeButton'
 import { desktopPlatform } from '../hostPlatform'
-import { focusedPaneOf, paneIndexOfElement, setFocusedPane, useFocusedPane } from './paneFocus'
+import { focusedPaneOf, paneIndexOfElement, setFocusedPane } from './paneFocus'
 import { zoomTargetForTabType } from './zoom'
 import type { TunnelConfig, TunnelState } from '../../shared/types'
 
-import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { paletteEvents } from '../palette/paletteEvents'
 import { findStreamOfTask, findTaskInProject, projectTasks, taskDirectory } from '../../shared/streams'
 import { showsTabBars } from '../../shared/panes'
@@ -30,8 +32,6 @@ import type { Task } from '../../shared/types'
 
 const toolBtnCls = 'bg-transparent border-0 cursor-pointer w-[28px] h-[26px] rounded-md leading-none inline-flex items-center justify-center [-webkit-app-region:no-drag] transition-colors duration-(--motion-fast) disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent'
 
-/** A hairline between the toolbar's groups of buttons. */
-const ToolbarSep = (): React.ReactElement => <span className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden />
 
 function FileBrowserTabButton({
   icon,
@@ -87,7 +87,6 @@ export default function ContentArea(): React.ReactElement {
   useMetaHeld()
   const archivedView = useArchivedView()
   const showsArchived = !!archivedView && !!selectedProject && !selectedTask && archivedView.projectId === selectedProject.id
-  const selectedFocusedPane = Math.max(0, Math.min((selectedTask?.panes.length ?? 1) - 1, useFocusedPane(selectedTaskId ?? '')))
   const [sshStatuses, setSshStatuses] = useState<Record<string, string>>({})
   const [tunnelStates, setTunnelStates] = useState<Record<string, TunnelState>>({})
   const [tunnelPopupOpen, setTunnelPopupOpen] = useState(false)
@@ -218,6 +217,8 @@ export default function ContentArea(): React.ReactElement {
       if (tab) {
         e.preventDefault()
         setActiveTab(selectedProjectId, selectedTaskId, tab.id)
+        // Every tab but the conversation is in the Bench: show the one picked.
+        if (tab.id !== conversationTabId(task)) openBench(task.id, 'panes')
       }
     }
 
@@ -258,8 +259,9 @@ export default function ContentArea(): React.ReactElement {
 
     const cleanupClose = window.api.onMenuCloseTab(() => {
       const info = getActiveTabInfo()
-      // The main tab has no close: the task closes from the sidebar or Inbox.
-      if (selectedProjectId && info?.activeTabId && info.activeTabId !== info.task.mainTabId) {
+      // The main tab has no close: the task closes from the inbox. Nor does a tab you can't see in the Bench.
+      if (selectedProjectId && info?.activeTabId && info.activeTabId !== info.task.mainTabId
+        && benchTabClosable(info.task, getBench(info.task.id), info.activeTabId)) {
         // May park on the unsaved-changes dialog before anything is removed.
         void removeTab(selectedProjectId, info.task.id, info.activeTabId)
       }
@@ -284,6 +286,8 @@ export default function ContentArea(): React.ReactElement {
       if (!selectedProjectId || !selectedTaskId) return
       const info = getActiveTabInfo()
       addTab(selectedProjectId, selectedTaskId, info?.pane ?? 0, 'terminal')
+      // Terminals live in the Bench: show the one just asked for.
+      openBench(selectedTaskId, 'panes')
     })
 
     const handleZoom = (direction: 'in' | 'out' | 'reset') => {
@@ -338,7 +342,6 @@ export default function ContentArea(): React.ReactElement {
     && !!selectedProject.directory
   // Notes are always available (including remote / shell-command projects); the
   // Files/Git tabs are local-only.
-  const hasFileBrowserTabs = !!selectedProject
   const handleFileBrowserActivate = useCallback((tab: FileBrowserTab) => {
     if (fileBrowserOpen && fileBrowserActiveTab === tab) {
       setFileBrowserOpen(false)
@@ -367,80 +370,12 @@ export default function ContentArea(): React.ReactElement {
           task={selectedTask}
           stream={selectedStream}
           title={windowBarTitle}
-          tools={(
+          trailing={selectedTask ? <DeskDoneButton project={selectedProject} task={selectedTask} /> : undefined}
+          tools={selectedTask ? (
+            // A task's header: Files, Changes, Notes, terminals and browsers are Bench tabs.
             <>
               {isRemoteProject(selectedProject) && (
-                <button
-                  className={tunnelButtonClassName}
-                  onClick={() => setTunnelPopupOpen(true)}
-                  title="Tunnel"
-                >
-                  &#8596;
-                </button>
-              )}
-              {selectedTask && (
-                <>
-                  <button
-                    className={`${toolBtnCls} text-text-muted hover:text-text hover:bg-surface-3`}
-                    onClick={() => addTab(selectedProject.id, selectedTask.id, selectedFocusedPane, 'terminal')}
-                    title={`New terminal (${formatShortcutForApp('CmdOrCtrl+T')})`}
-                  >
-                    <SquareTerminal size={15} />
-                  </button>
-                  <button
-                    className={`${toolBtnCls} text-text-muted hover:text-text hover:bg-surface-3`}
-                    onClick={() => addTab(selectedProject.id, selectedTask.id, selectedFocusedPane, 'browser')}
-                    title="New browser tab"
-                  >
-                    <Globe size={15} />
-                  </button>
-                  {showsTabBars(selectedTask) && (
-                    <button
-                      className={`${toolBtnCls} text-text-muted hover:text-text hover:bg-surface-3`}
-                      disabled={(selectedTask.panes[selectedFocusedPane]?.tabs.length ?? 0) < 2}
-                      onClick={() => {
-                        const pane = selectedTask.panes[selectedFocusedPane]
-                        if (pane) splitTabRight(selectedProject.id, selectedTask.id, pane.activeTabId)
-                      }}
-                      title={`Split right (${formatShortcutForApp('CmdOrCtrl+D')})`}
-                    >
-                      <Columns2 size={15} />
-                    </button>
-                  )}
-                  <ToolbarSep />
-                </>
-              )}
-              {hasFileBrowserTabs && (
-                <>
-                  {canShowLocalTabs && (
-                    <FileBrowserTabButton
-                      icon={<Folder size={15} />}
-                      tab="files"
-                      label="Files"
-                      fileBrowserOpen={fileBrowserOpen}
-                      fileBrowserActiveTab={fileBrowserActiveTab}
-                      onActivate={handleFileBrowserActivate}
-                    />
-                  )}
-                  {canShowLocalTabs && (
-                    <FileBrowserTabButton
-                      icon={<GitBranch size={15} />}
-                      tab="git"
-                      label="Git"
-                      fileBrowserOpen={fileBrowserOpen}
-                      fileBrowserActiveTab={fileBrowserActiveTab}
-                      onActivate={handleFileBrowserActivate}
-                    />
-                  )}
-                  <FileBrowserTabButton
-                    icon={<StickyNote size={15} />}
-                    tab="notes"
-                    label="Notes"
-                    fileBrowserOpen={fileBrowserOpen}
-                    fileBrowserActiveTab={fileBrowserActiveTab}
-                    onActivate={handleFileBrowserActivate}
-                  />
-                </>
+                <button className={tunnelButtonClassName} onClick={() => setTunnelPopupOpen(true)} title="Tunnel">&#8596;</button>
               )}
               {canShowLocalTabs && openInIdeAvailable(selectedProject, desktopPlatform()) && (
                 <OpenInIdeButton
@@ -452,7 +387,52 @@ export default function ContentArea(): React.ReactElement {
                   onError={setOpenInIdeError}
                 />
               )}
-              {selectedTask && <ToolbarSep />}
+              <DeskTaskTools project={selectedProject} task={selectedTask} />
+            </>
+          ) : (
+            // A project's map has no Bench: Files, Git and Notes open in the side panel.
+            <>
+              {isRemoteProject(selectedProject) && (
+                <button className={tunnelButtonClassName} onClick={() => setTunnelPopupOpen(true)} title="Tunnel">&#8596;</button>
+              )}
+              {canShowLocalTabs && (
+                <FileBrowserTabButton
+                  icon={<Folder size={15} />}
+                  tab="files"
+                  label="Files"
+                  fileBrowserOpen={fileBrowserOpen}
+                  fileBrowserActiveTab={fileBrowserActiveTab}
+                  onActivate={handleFileBrowserActivate}
+                />
+              )}
+              {canShowLocalTabs && (
+                <FileBrowserTabButton
+                  icon={<GitBranch size={15} />}
+                  tab="git"
+                  label="Git"
+                  fileBrowserOpen={fileBrowserOpen}
+                  fileBrowserActiveTab={fileBrowserActiveTab}
+                  onActivate={handleFileBrowserActivate}
+                />
+              )}
+              <FileBrowserTabButton
+                icon={<StickyNote size={15} />}
+                tab="notes"
+                label="Notes"
+                fileBrowserOpen={fileBrowserOpen}
+                fileBrowserActiveTab={fileBrowserActiveTab}
+                onActivate={handleFileBrowserActivate}
+              />
+              {canShowLocalTabs && openInIdeAvailable(selectedProject, desktopPlatform()) && (
+                <OpenInIdeButton
+                  editors={config?.externalEditors?.editors ?? []}
+                  defaultId={config?.externalEditors?.defaultId ?? null}
+                  folder={localProjectFolder(selectedProject, selectedTask, desktopPlatform())}
+                  projectId={selectedProject?.id}
+                  serverId={selectedProject?.host}
+                  onError={setOpenInIdeError}
+                />
+              )}
             </>
           )}
         />
@@ -471,12 +451,12 @@ export default function ContentArea(): React.ReactElement {
       {!hasProjectSelection && (
         <div className="flex-1 flex items-center justify-center text-text-muted text-md">Select or create a task to get started</div>
       )}
-      {/* A project with no task selected shows its Home page (clicking the project name lands here). */}
+      {/* A project with no task selected shows its Project map (the scope menu, ⌘K or a row's tile lands here). */}
       {/* An archived task or stream opened from a Done row shows read-only in Home's place. */}
       {showsArchived && archivedView && <ArchivedView key={`${archivedView.kind}:${archivedView.id}`} target={archivedView} />}
       {selectedProject && !selectedTask && !showsArchived && (
         <div className="flex-1 min-h-0 flex overflow-hidden" data-testid="project-home">
-          <ProjectHome projectId={selectedProject.id} />
+          <DeskProjectMap projectId={selectedProject.id} />
         </div>
       )}
       {projects.flatMap((project) =>
@@ -510,7 +490,7 @@ export default function ContentArea(): React.ReactElement {
               {canLandTask(project, task) && (
                 <TaskLandingBanner project={project} stream={findStreamOfTask(project, task.id)!} task={task} />
               )}
-              <TaskPanes project={project} task={task} visible={isVisible} projectDir={effectiveDir} />
+              <DeskTaskBody project={project} task={task} visible={isVisible} projectDir={effectiveDir} />
             </div>
           )
         })

@@ -206,6 +206,17 @@ describe('TaskLandingManager', () => {
     expect(git(repo, 'log', '-1', '--format=%b', 'release').trim()).toBe('')
   })
 
+  it('Autopilot\'s summary opens the body, above the commits it took in', async () => {
+    const ws = taskWorktree('t1')
+    write(ws.worktreePath, 'c.txt', 'agent\n')
+    commitAll(ws.worktreePath, 'Add c')
+    write(ws.worktreePath, 'd.txt', 'x\n')
+    setTasks([task('t1', 'Add c and d', ws)])
+
+    expect(await manager.landTask('p1', 't1', { summary: 'Added c and d.' })).toEqual({ status: 'landed' })
+    expect(git(repo, 'log', '-1', '--format=%b', 'release').trim()).toBe('Added c and d.\n\n- Add c')
+  })
+
   it('leaves a new link out of the worktree (an agent\'s node_modules) out of the auto-commit', async () => {
     const ws = taskWorktree('t1')
     fs.mkdirSync(path.join(repo, 'node_modules'))

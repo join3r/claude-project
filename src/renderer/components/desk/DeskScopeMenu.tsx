@@ -7,14 +7,16 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 const itemCls = 'flex w-full items-center gap-2 px-2.5 py-1.5 rounded-md bg-transparent border-0 text-base text-text cursor-pointer hover:bg-sel text-left'
 
 /**
- * The column's scope menu (decision 8): All projects, then the projects with
- * pinned ones first, each with its non-main streams under it. Picking a project
+ * The column's scope menu (decision 8): All projects, pinned streams, then the
+ * projects with pinned ones first, each with its non-main streams under it. Picking a project
  * narrows the list and opens its page; the footer adds projects and opens Settings.
  */
-export default function DeskScopeMenu({ anchor, projects, pinnedIds, missingDirIds, scope, theme, onPick, footer, onClose }: {
+export default function DeskScopeMenu({ anchor, projects, pinnedIds, pinnedStreams = [], missingDirIds, scope, theme, onPick, footer, onClose }: {
   anchor: MenuAnchor | null
   projects: readonly Project[]
   pinnedIds: ReadonlySet<string>
+  /** Streams pinned from their menu: listed first, as `project › stream`. */
+  pinnedStreams?: ReadonlyArray<{ projectId: string; streamId: string }>
   missingDirIds: ReadonlySet<string>
   scope: DeskScope | null
   theme: 'dark' | 'light'
@@ -55,6 +57,27 @@ export default function DeskScopeMenu({ anchor, projects, pinnedIds, missingDirI
         <span className="flex-1">All projects</span>
         {isScope(null) && <Check size={13} className="text-text-muted" />}
       </button>
+      {(() => {
+        const pins = pinnedStreams.flatMap(pin => {
+          const project = projects.find(p => p.id === pin.projectId)
+          const stream = project?.streams.find(s => s.id === pin.streamId)
+          return project && stream ? [{ project, stream }] : []
+        })
+        if (pins.length === 0) return null
+        return (
+          <>
+            <div className="h-px bg-hair my-1" />
+            {pins.map(({ project, stream }) => (
+              <button key={stream.id} type="button" role="menuitem" className={itemCls} onClick={() => onPick({ projectId: project.id, ...(stream.isMain ? {} : { streamId: stream.id }) })} data-testid="desk-scope-pinned-stream">
+                <ProjectTileBadge project={project} theme={theme} size={16} />
+                <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{project.name} <span className="text-text-muted">›</span> <span className="font-mono">{stream.name}</span></span>
+                <span className="text-2xs text-text-subtle">pinned</span>
+                {isScope(project.id, stream.isMain ? undefined : stream.id) && <Check size={13} className="text-text-muted" />}
+              </button>
+            ))}
+          </>
+        )
+      })()}
       {ordered.length > 0 && <div className="h-px bg-hair my-1" />}
       {ordered.map(project => (
         <React.Fragment key={project.id}>

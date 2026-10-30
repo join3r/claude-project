@@ -121,6 +121,8 @@ export interface ChatBridgeDeps {
   log(message: string): void
   /** A phone is about to send into a chat: the turn it starts is that phone's (push "done", §7.6). */
   onPhoneSend?(phoneId: string, tabId: string): void
+  /** A phone pressed Stop in a chat (Autopilot hands the task back, as for a window's Stop). */
+  onInterrupt?(tabId: string): void
   /**
    * Makes a task's own worktree before its chat starts there (`task-worktree.ts`).
    * Without it a task still to get one starts in its stream's worktree.
@@ -297,6 +299,7 @@ export class ChatBridge {
       }
       case ChatOp.Interrupt:
         await this.ensureRuntime(resolved)
+        this.deps.onInterrupt?.(params.tabId)
         await this.deps.chats.interrupt(params.tabId)
         return {}
       case ChatOp.Detail: {

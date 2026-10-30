@@ -132,27 +132,36 @@ function limitWindow(raw: { utilization: number | null; resets_at: string | null
   return { utilization: raw.utilization, ...(raw.resets_at ? { resetsAt: raw.resets_at } : {}) }
 }
 
-/**
- * Background task types that end on their own and hand the turn back to Claude:
- * agents and workflows. A shell may be a dev server or a watcher that never ends,
- * so it must not keep the task working.
- */
-const RESUMING_TASK_TYPES = new Set(['local_agent', 'remote_agent', 'in_process_teammate', 'local_workflow'])
+/** One live background task from a `background_tasks_changed` level. */
+export interface BackgroundTaskEntry {
+  id: string
+  /** The CLI's task_type: `local_bash`, `local_agent`, `local_workflow`, … */
+  type: string
+  description: string
+}
 
 /**
- * How many live background tasks hold the agent's turn open, from a
- * `background_tasks_changed` level, or null for any other message. Ambient ones
- * (watchers, skip-transcript tasks) are not activity, and shells may never end,
- * so neither counts.
+ * The live background tasks that hold the agent's turn open, from a
+ * `background_tasks_changed` level, or null for any other message. Every
+ * non-ambient task counts, shells too: a build or a test run in the background is
+ * work, and a dev server that never ends shows as Background with a Stop, not as
+ * idle. Ambient ones (watchers, skip-transcript tasks) are not activity.
  */
-export function backgroundTaskCount(message: unknown): number | null {
+export function backgroundTasksOf(message: unknown): BackgroundTaskEntry[] | null {
   const m = message as { type?: unknown; subtype?: unknown; tasks?: unknown } | null
   if (!m || m.type !== 'system' || m.subtype !== 'background_tasks_changed') return null
   const tasks = Array.isArray(m.tasks) ? m.tasks : []
-  return tasks.filter((task) => {
-    const t = task as { ambient?: unknown; task_type?: unknown } | null
-    return !!t && typeof t === 'object' && t.ambient !== true && typeof t.task_type === 'string' && RESUMING_TASK_TYPES.has(t.task_type)
-  }).length
+  const out: BackgroundTaskEntry[] = []
+  for (const task of tasks) {
+    const t = task as { ambient?: unknown; task_type?: unknown; task_id?: unknown; description?: unknown } | null
+    if (!t || typeof t !== 'object' || t.ambient === true || typeof t.task_id !== 'string') continue
+    out.push({
+      id: t.task_id,
+      type: typeof t.task_type === 'string' ? t.task_type : 'unknown',
+      description: typeof t.description === 'string' ? t.description : ''
+    })
+  }
+  return out
 }
 
 /** SDK messages no window draws; dropped before they cost an IPC hop. */
@@ -383,9 +392,9 @@ export class ChatSession {
         if (isDisplayRelevant(message)) this.options.onEvent({ t: 'sdk', m: message, at: Date.now() })
         const started = sessionStartInput(message)
         if (started) this.onSessionStart(started)
-        const background = backgroundTaskCount(message)
+        const background = backgroundTasksOf(message)
         if (background !== null) {
-          try { this.options.onHook({ hook_event_name: 'DevtoolBackgroundTasks', count: background }) } catch { /* status is best-effort */ }
+          try { this.options.onHook({ hook_event_name: 'DevtoolBackgroundTasks', count: background.length, tasks: background }) } catch { /* status is best-effort */ }
         }
         if ((message as { type?: string }).type === 'result' && this.turnStop.result()) {
           const sessionId = (message as { session_id?: unknown }).session_id

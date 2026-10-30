@@ -57,6 +57,8 @@ export interface AgentDeps {
   hookInjector: () => HookInjector
   codexSessionManager: CodexSessionManager
   chatManager: () => ClaudeChatManager
+  /** A window or phone pressed Stop in a chat (Autopilot hands the task back). */
+  onChatInterrupt?: (tabId: string) => void
   ensureSshConnected: (projectId: string, sshConfig: SshConfig) => Promise<void>
   cleanupRemoteHooks: (projectId: string, sshConfig: SshConfig, remoteDir: string | undefined, tabId: string) => Promise<void>
   /** Drop a tab's agent activity and tell every window. */
@@ -211,7 +213,10 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   ipc.handle('chat-logout', [safeId], (_event, tabId) => deps.chatManager().logout(tabId))
   ipc.handle('chat-side-question', [safeId, v.string({ nonEmpty: true, max: 20_000 })], (_event, tabId, question) =>
     deps.chatManager().askSideQuestion(tabId, question))
-  ipc.handle('chat-interrupt', [safeId], (_event, tabId) => deps.chatManager().interrupt(tabId))
+  ipc.handle('chat-interrupt', [safeId], (_event, tabId) => {
+    deps.onChatInterrupt?.(tabId)
+    return deps.chatManager().interrupt(tabId)
+  })
   ipc.handle('chat-stop-task', chatTaskArgs, (_event, tabId, taskId) => deps.chatManager().stopTask(tabId, taskId))
   ipc.handle('chat-background-task', chatTaskArgs, (_event, tabId, toolUseId) =>
     deps.chatManager().backgroundTask(tabId, toolUseId))

@@ -34,7 +34,7 @@ describe('readTaskDiffSummary', () => {
   it('counts only what is not committed, without a base branch', async () => {
     write(repo, 'a.txt', 12)
     write(repo, 'new.txt', 3)
-    expect(await readTaskDiffSummary(repo)).toEqual({ added: 5, deleted: 0 })
+    expect(await readTaskDiffSummary(repo)).toEqual({ added: 5, deleted: 0, files: 2 })
   })
 
   it("counts a task worktree's commits and changes since it branched off, not the stream's later commits", async () => {
@@ -52,12 +52,12 @@ describe('readTaskDiffSummary', () => {
     git(repo, 'add', '.')
     git(repo, 'commit', '-q', '-m', 'stream work')
 
-    expect(await readTaskDiffSummary(wt, 'stream')).toEqual({ added: 7, deleted: 0 })
+    expect(await readTaskDiffSummary(wt, 'stream')).toEqual({ added: 7, deleted: 0, files: 2 })
   })
 
   it('falls back to uncommitted changes when the base branch is gone', async () => {
     write(repo, 'a.txt', 11)
-    expect(await readTaskDiffSummary(repo, 'no-such-branch')).toEqual({ added: 1, deleted: 0 })
+    expect(await readTaskDiffSummary(repo, 'no-such-branch')).toEqual({ added: 1, deleted: 0, files: 1 })
   })
 
   it('is null outside a git repo', async () => {

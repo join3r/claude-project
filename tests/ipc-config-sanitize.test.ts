@@ -39,16 +39,16 @@ describe('sanitizeConfigUpdate', () => {
       claudeCommand: ['rm', '-rf'],
       theme: 'neon',
       lastProjectId: 3,
-      taskRecencyHighlight: { ...DEFAULT_CONFIG.taskRecencyHighlight, enabled: 'yes' },
+      inboxLayout: 'columns',
       externalEditors: { editors: [{ id: 'x', name: 'X', command: 5 }], defaultId: null },
       editorFontSize: 18,
       theme2: 'ignored'
     })
     expect(config).toEqual({ editorFontSize: 18 })
     expect(rejectedKeys.map(r => r.key).sort()).toEqual(
-      ['claudeCommand', 'externalEditors', 'fontSize', 'lastProjectId', 'taskRecencyHighlight', 'theme']
+      ['claudeCommand', 'externalEditors', 'fontSize', 'inboxLayout', 'lastProjectId', 'theme']
     )
-    expect(rejectedKeys.find(r => r.key === 'taskRecencyHighlight')!.reason).toMatch(/enabled/)
+    expect(rejectedKeys.find(r => r.key === 'externalEditors')!.reason).toMatch(/command/)
   })
 
   it('leaves the stored value in place for a rejected key when merged', () => {
@@ -67,12 +67,21 @@ describe('sanitizeConfigUpdate', () => {
 
   it('strips unknown keys inside nested settings', () => {
     const { config } = sanitizeConfigUpdate({
-      taskRecencyHighlight: { enabled: true, mode: 'rank', rankCount: 5, timeWindowMinutes: 60, extra: 1 }
+      externalEditors: { editors: [], defaultId: null, extra: 1 }
     })
-    expect(config.taskRecencyHighlight).toEqual({ enabled: true, mode: 'rank', rankCount: 5, timeWindowMinutes: 60 })
+    expect(config.externalEditors).toEqual({ editors: [], defaultId: null })
   })
 
   it('coerces windowsTerminal like loadConfig does', () => {
     expect(sanitizeConfigUpdate({ windowsTerminal: 'powershell' }).config.windowsTerminal).toBe('git-bash')
+  })
+
+  it('keeps saved hosts and refuses a malformed one', () => {
+    const hosts = [
+      { kind: 'ssh', host: 'box', port: 22, username: 'me', keyFile: '/k' },
+      { kind: 'shell', name: 'web', command: 'docker exec -it web sh' }
+    ]
+    expect(sanitizeConfigUpdate({ hosts }).config.hosts).toEqual(hosts)
+    expect(sanitizeConfigUpdate({ hosts: [{ kind: 'ssh', host: '', port: 22, username: 'me' }] }).rejectedKeys.map(r => r.key)).toEqual(['hosts'])
   })
 })

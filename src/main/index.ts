@@ -220,7 +220,8 @@ function buildAppMenu(): void {
           click: () => sendToRenderer('menu-reopen-closed-tab')
         },
         {
-          label: 'Project Switcher',
+          // Opens the ⌘K bar, which replaced the project switcher.
+          label: 'Go to…',
           accelerator: 'CmdOrCtrl+P',
           click: () => sendToRenderer('menu-project-switcher')
         },
@@ -244,7 +245,7 @@ function buildAppMenu(): void {
       label: 'View',
       submenu: [
         {
-          label: 'Toggle Sidebar',
+          label: 'Toggle Inbox Column',
           accelerator: 'CmdOrCtrl+B',
           click: () => sendToRenderer('menu-toggle-sidebar')
         },
@@ -252,6 +253,12 @@ function buildAppMenu(): void {
           label: 'Toggle File Browser',
           accelerator: 'CmdOrCtrl+Shift+E',
           click: () => sendToRenderer('menu-toggle-file-browser')
+        },
+        {
+          // The drawer under a task's conversation.
+          label: 'Toggle Bench',
+          accelerator: 'CmdOrCtrl+`',
+          click: () => sendToRenderer('menu-toggle-bench')
         },
         { type: 'separator' },
         {
@@ -383,6 +390,7 @@ function createWindow(initialViewState?: WindowViewState | null, geometry?: Wind
         else if (key === 'p') send('menu-project-switcher')
         else if (key === 'b') send('menu-toggle-sidebar')
         else if (key === 'r') send('menu-reload-tab')
+        else if (key === '`') send('menu-toggle-bench')
         else if (key === '-') send('menu-zoom-out')
         else if (key === '0') send('menu-zoom-reset')
         else if (key === 'q') { app.quit() }

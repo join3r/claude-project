@@ -15,7 +15,6 @@ import {
 } from '../src/renderer/components/sidebar/closeRules'
 import { isYourTurn, landingNeedsYou, landingStatusLabel, partitionInbox } from '../src/renderer/components/inbox'
 import { taskStatusChip } from '../src/renderer/components/taskHeaderState'
-import { isQuietStream } from '../src/renderer/components/sidebar/streamTree'
 
 void React
 
@@ -105,14 +104,9 @@ describe('a stopped landing in the inbox', () => {
     expect(taskStatusChip(fixing, { 'tab-agent': 'working' }, {}, NOW)).toEqual({ label: 'Fixing conflicts', tone: 'working' })
   })
 
-  it('keeps its stream unfolded', () => {
-    const stream = worktreeProject(landingTask({ landing: { state: 'blocked' } })).streams[1]
-    expect(isQuietStream(stream, () => null)).toBe(false)
-    expect(isQuietStream({ ...stream, tasks: [landingTask()] }, () => null)).toBe(true)
-  })
 })
 
-describe('the close question in the sidebar', () => {
+describe('the close question from an inbox row', () => {
   let saved: ProjectsData[]
   let projectsFixture: () => Project[]
   let api: Record<string, ReturnType<typeof vi.fn>>
@@ -125,8 +119,7 @@ describe('the close question in the sidebar', () => {
         revision: 0,
         data: { projects: projectsFixture(), tags: [], projectOrder: ['p1'], pinnedItems: [] }
       } })),
-      loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG, autoCollapseQuietStreams: false }),
-      loadWindowState: vi.fn().mockResolvedValue({ expandedProjectIds: ['p1'], sidebarTab: 'projects' }),
+      loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG }),
       notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
       saveProjects: vi.fn().mockImplementation((_source: string, payload: { data: ProjectsData }) => {
         saved.push(payload.data)
@@ -231,12 +224,11 @@ describe('the close question in the sidebar', () => {
     expect(api.taskLand).not.toHaveBeenCalled()
   })
 
-  it('lands from the menu without closing, and shows how far the stream is ahead', async () => {
+  it('lands from the menu without closing, and asks how far the stream is ahead', async () => {
     renderSidebar()
-    // Asked when the task is selected.
+    // Asked when the task is selected (the task header shows it).
     fireEvent.click(await screen.findByText('Fix it'))
     await waitFor(() => expect(api.taskStreamAhead).toHaveBeenCalledWith('p1', 't1'))
-    expect((await screen.findByTestId('task-stream-ahead')).textContent).toBe('0.5.0 +3')
     fireEvent.contextMenu(screen.getByText('Fix it'))
     fireEvent.click(await screen.findByRole('button', { name: 'Land into 0.5.0' }))
     await waitFor(() => expect(api.taskLand).toHaveBeenCalledWith('p1', 't1', { keepWorktree: true }))

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { DEFAULT_CONFIG, type Project, type ProjectsData, type Stream, type Tab, type Task, type TaskLandingPreview, type TaskLandingResult, type WorkspaceConfig } from '../src/shared/types'
 import type { ArchivedStream } from '../src/shared/archive'
 import { removeTaskFromProject } from '../src/shared/streams'
@@ -9,6 +9,8 @@ import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
 import { AppProvider } from '../src/renderer/context/AppContext'
 import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
 import Sidebar from '../src/renderer/components/Sidebar'
+import EntityActionsHost from '../src/renderer/components/EntityActionsHost'
+import { requestCloseStream } from '../src/renderer/entityActions'
 import { streamTasksCloseQuestion, taskHasWork } from '../src/renderer/components/sidebar/closeRules'
 
 void React
@@ -95,8 +97,7 @@ describe('closing a stream whose tasks have worktrees of their own', () => {
     let revision = 100
     api = {
       loadProjects: vi.fn().mockImplementation(async () => ({ local: { revision: 0, data: current } })),
-      loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG, autoCollapseQuietStreams: false }),
-      loadWindowState: vi.fn().mockResolvedValue({ expandedProjectIds: ['p1'], sidebarTab: 'projects' }),
+      loadConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CONFIG }),
       notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
       saveProjects: vi.fn().mockImplementation((_source: string, payload: { data: ProjectsData }) => {
         saved.push(payload.data)
@@ -150,18 +151,19 @@ describe('closing a stream whose tasks have worktrees of their own', () => {
       <TabStatusProvider>
         <AppProvider>
           <Sidebar />
+          <EntityActionsHost />
         </AppProvider>
       </TabStatusProvider>
     )
   }
 
-  const streamRow = (id: string) => document.querySelector<HTMLElement>(`[data-tree-row="stream"][data-stream-id="${id}"]`)!
   const lastStreams = () => (saved[saved.length - 1] ?? current).projects[0].streams.map(stream => stream.id)
   const archivedStream = (): ArchivedStream => api.archiveAddStream.mock.calls[0][1] as ArchivedStream
 
+  /** The stream menu's Close stream (the Project map's lane menu, the task header's). */
   async function closeStream(): Promise<void> {
     await screen.findByText('Login')
-    fireEvent.click(within(streamRow('stream-rel')).getByTitle('Close stream'))
+    act(() => requestCloseStream('p1', 'stream-rel'))
   }
 
   it('lists the tasks with work; Land all lands them in order, then the rest go with the stream', async () => {

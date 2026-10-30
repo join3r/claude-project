@@ -1,39 +1,11 @@
 /**
- * Pure helpers behind Project Home: a stream card's rolled-up status and the
- * Open tasks / Agents counts. Task status comes from `taskStatusChip`, so Home,
+ * Pure helpers behind the Project map's counts: open tasks, how many need you
+ * or work, and agents. Task status comes from `taskStatusChip`, so the map,
  * the task header and the Inbox agree on what a task is doing.
  */
-import type { Project, Stream, TabStatusValue } from '../../shared/types'
+import type { Project, TabStatusValue } from '../../shared/types'
 import { projectTasks } from '../../shared/streams'
-import { taskAgentLabel, taskStatusChip, type TaskChipTone } from './taskHeaderState'
-
-const TONE_RANK: Record<TaskChipTone, number> = { attention: 3, working: 2, turn: 1, quiet: 0 }
-
-export const STREAM_TONE_LABEL: Record<TaskChipTone, string> = {
-  attention: 'Needs you',
-  working: 'Working',
-  turn: 'Your turn',
-  quiet: 'Quiet'
-}
-
-/**
- * The strongest status among the stream's tasks, as their header chips read:
- * needs you, else working, else your turn, else quiet. A snoozed task
- * adds nothing unless its agent is live again.
- */
-export function streamTone(
-  stream: Stream,
-  allStatuses: Record<string, TabStatusValue>,
-  statusSince: Record<string, number>,
-  now: number
-): TaskChipTone {
-  let best: TaskChipTone = 'quiet'
-  for (const task of stream.tasks) {
-    const tone = taskStatusChip(task, allStatuses, statusSince, now)?.tone ?? 'quiet'
-    if (TONE_RANK[tone] > TONE_RANK[best]) best = tone
-  }
-  return best
-}
+import { taskAgentLabel, taskStatusChip } from './taskHeaderState'
 
 /** The order the Agents card lists agents in; any other label follows, by count. */
 const AGENT_ORDER = ['Claude', 'Claude Code', 'Codex', 'Pi', 'Terminal']

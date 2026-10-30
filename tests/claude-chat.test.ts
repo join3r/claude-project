@@ -5,7 +5,7 @@ import { buildTimeline, summarizeGroup } from '../src/renderer/components/claude
 import { contextTone, formatCost, formatResetAt, formatResetIn, formatTokens, limitTone } from '../src/renderer/components/claude-chat/UsageMeter'
 import { diffLines, diffStats, editPairs } from '../src/renderer/components/claude-chat/diff'
 import { JsonLineGate, sdkAddedEnv } from '../src/main/claude-chat/remote-spawn'
-import { backgroundTaskCount, coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput, TurnStopTracker } from '../src/main/claude-chat/chat-session'
+import { backgroundTasksOf, coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput, TurnStopTracker } from '../src/main/claude-chat/chat-session'
 import { coldCacheText, formatIdle } from '../src/renderer/components/claude-chat/ColdCacheNotice'
 import { parseTranscriptLines, remoteTranscriptScript } from '../src/main/claude-chat/transcript'
 import { claudeTabType, createTab } from '../src/renderer/components/newTaskTabs'
@@ -422,34 +422,33 @@ describe('chat tabs', () => {
   })
 })
 
-describe('backgroundTaskCount', () => {
-  it('counts the live agents and workflows in a background_tasks_changed level', () => {
-    expect(backgroundTaskCount({
+describe('backgroundTasksOf', () => {
+  it('lists every live non-ambient task in a background_tasks_changed level, shells included', () => {
+    expect(backgroundTasksOf({
       type: 'system',
       subtype: 'background_tasks_changed',
       tasks: [
-        { task_id: 'b1', task_type: 'local_bash', description: 'eval' },
+        { task_id: 'b1', task_type: 'local_bash', description: 'xcodebuild' },
         { task_id: 'w1', task_type: 'monitor', description: 'watch', ambient: true },
         { task_id: 'a1', task_type: 'local_agent', description: 'review' },
         { task_id: 'f1', task_type: 'local_workflow', description: 'audit' }
       ]
-    })).toBe(2)
-    expect(backgroundTaskCount({ type: 'system', subtype: 'background_tasks_changed', tasks: [] })).toBe(0)
+    })).toEqual([
+      { id: 'b1', type: 'local_bash', description: 'xcodebuild' },
+      { id: 'a1', type: 'local_agent', description: 'review' },
+      { id: 'f1', type: 'local_workflow', description: 'audit' }
+    ])
+    expect(backgroundTasksOf({ type: 'system', subtype: 'background_tasks_changed', tasks: [] })).toEqual([])
   })
 
-  // A dev server left running in a background shell kept the task working for good.
-  it('does not count background shells, which may never end', () => {
-    expect(backgroundTaskCount({
-      type: 'system',
-      subtype: 'background_tasks_changed',
-      tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'npm run dev' }]
-    })).toBe(0)
+  it('skips entries without an id', () => {
+    expect(backgroundTasksOf({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_type: 'local_bash' }, null] })).toEqual([])
   })
 
   it('ignores every other message', () => {
-    expect(backgroundTaskCount({ type: 'system', subtype: 'task_started', task_id: 'b1' })).toBeNull()
-    expect(backgroundTaskCount({ type: 'result' })).toBeNull()
-    expect(backgroundTaskCount(null)).toBeNull()
+    expect(backgroundTasksOf({ type: 'system', subtype: 'task_started', task_id: 'b1' })).toBeNull()
+    expect(backgroundTasksOf({ type: 'result' })).toBeNull()
+    expect(backgroundTasksOf(null)).toBeNull()
   })
 })
 

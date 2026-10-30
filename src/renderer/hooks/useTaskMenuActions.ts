@@ -9,24 +9,21 @@ import {
 /**
  * An empty task in `streamId`, or in the project's current stream (the one this
  * window is in, else the one last worked in, else `main`). No inline rename:
- * the task opens on its prompt box, and the first prompt names it. Its project
- * and stream open in the tree so switching to it doesn't hide the new row.
+ * the task opens on its prompt box, and the first prompt names it.
  */
 export function useAddEmptyTask(): (projectId: string, streamId?: string) => void {
-  const { projects, selectedTaskId, addTask, setProjectExpanded, setStreamExpanded } = useApp()
+  const { projects, selectedTaskId, addTask } = useApp()
   return useCallback((projectId: string, streamId?: string) => {
     const project = projects.find(p => p.id === projectId)
     if (!project) return
     const target = streamId ?? currentStreamId(project, selectedTaskId)
     addTask(projectId, NEW_TASK_NAME, [], target)
-    setProjectExpanded(projectId, true)
-    if (target) setStreamExpanded(target, true)
-  }, [projects, selectedTaskId, addTask, setProjectExpanded, setStreamExpanded])
+  }, [projects, selectedTaskId, addTask])
 }
 
 /**
- * Move a task to a place in another (or its own) stream: the tree's drag and
- * drop, and the menus' "Move to stream". Into a stream with another folder it
+ * Move a task to a place in another (or its own) stream: the menus' "Move to
+ * stream". Into a stream with another folder it
  * asks first: the task's agent and terminals start again over there. A task
  * with its own worktree stays in its stream (it says why).
  */
