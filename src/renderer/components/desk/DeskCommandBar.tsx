@@ -22,7 +22,7 @@ import { createTab } from '../newTaskTabs'
 import { inboxApps } from '../inbox'
 import { openBench } from './benchState'
 import { openRunLog } from './DeskStatusBar'
-import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, deskAgents, startsInOwnWorktree, deskSubmission, readLastProject, writeLastProject, type DeskAutopilot } from './deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, deskAgents, startsInOwnWorktree, deskSubmission, readLastWhere, writeLastWhere, type DeskAutopilot } from './deskStart'
 import AutopilotChips from './AutopilotChips'
 import {
   barSections, canQueue, completeToken, queuedPromptFor, resolveBar, targetLabel, targetStreamName,
@@ -98,7 +98,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
   const dismissed = useDismissedStreamRunCrashes()
 
   const here: BarHere = useMemo(
-    () => ({ projectId: selectedProjectId, taskId: selectedTaskId, scope: desk.scope ?? null, lastProjectId: open ? readLastProject() : null }),
+    () => ({ projectId: selectedProjectId, taskId: selectedTaskId, scope: desk.scope ?? null, last: open ? readLastWhere() : null }),
     [selectedProjectId, selectedTaskId, desk.scope, open]
   )
   const bar = useMemo(() => resolveBar(input, composeProjects, here), [input, composeProjects, here])
@@ -157,7 +157,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
   const close = (): void => setOpen(false)
 
   const startTask = (target: BarTarget, prompt: string): void => {
-    writeLastProject(target.project.id)
+    writeLastWhere(target.project, target.stream)
     fileNewTask(deskSubmission(target.project, target.stream, agent, prompt, autopilot))
     close()
   }

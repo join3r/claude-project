@@ -163,20 +163,22 @@ export function scopeLabel(projects: readonly Project[], scope: DeskScope | null
 }
 
 /**
- * Where compose sends a task by default: the scope's stream, the scope's
- * project (its main stream), or with no scope the project last fired into.
+ * Where compose sends a task by default: the scope's stream, else the stream
+ * last fired into when it is in the scope's project (or there is no scope),
+ * else that project's main stream.
  */
 export function composeTarget(
   projects: readonly Project[],
   scope: DeskScope | null | undefined,
-  lastProjectId: string | null | undefined
+  last: DeskScope | null | undefined
 ): { project: Project; stream: Stream | undefined } | null {
   const pick = (id: string | null | undefined): Project | undefined => (id ? projects.find(p => p.id === id) : undefined)
-  const project = pick(scope?.projectId) ?? pick(lastProjectId) ?? projects[0]
+  const project = pick(scope?.projectId) ?? pick(last?.projectId) ?? projects[0]
   if (!project) return null
-  const stream = scope?.projectId === project.id && scope.streamId
-    ? project.streams.find(s => s.id === scope.streamId)
-    : undefined
+  const streamId = scope?.projectId === project.id && scope.streamId
+    ? scope.streamId
+    : last?.projectId === project.id ? last.streamId : undefined
+  const stream = streamId ? project.streams.find(s => s.id === streamId) : undefined
   return { project, stream }
 }
 

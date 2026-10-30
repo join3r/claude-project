@@ -80,12 +80,12 @@ function matchToken<T>(items: readonly T[], text: string, name: (item: T) => str
     ?? items.find(item => tokenKey(name(item)).includes(want))
 }
 
-/** Where the window is: the open task, the column's scope, the project last fired into. */
+/** Where the window is: the open task, the column's scope, the project and stream last fired into. */
 export interface BarHere {
   projectId: string | null
   taskId: string | null
   scope: DeskScope | null
-  lastProjectId: string | null
+  last: DeskScope | null
 }
 
 export interface BarTarget {
@@ -154,7 +154,7 @@ function defaultProject(projects: readonly Project[], here: BarHere): Project | 
   const pick = (id: string | null | undefined): Project | undefined => (id ? projects.find(p => p.id === id) : undefined)
   const taskProject = here.taskId ? pick(here.projectId) : undefined
   return (taskProject && findTaskInProject(taskProject, here.taskId) ? taskProject : undefined)
-    ?? pick(here.scope?.projectId) ?? pick(here.projectId) ?? pick(here.lastProjectId) ?? projects[0]
+    ?? pick(here.scope?.projectId) ?? pick(here.projectId) ?? pick(here.last?.projectId) ?? projects[0]
 }
 
 function barTarget(
@@ -174,6 +174,10 @@ function barTarget(
   if (here.scope?.projectId === project.id && here.scope.streamId) {
     const scoped = project.streams.find(s => s.id === here.scope?.streamId)
     if (scoped) return { project, stream: scoped }
+  }
+  if (here.last?.projectId === project.id && here.last.streamId) {
+    const last = project.streams.find(s => s.id === here.last?.streamId)
+    if (last) return { project, stream: last }
   }
   return { project, stream: undefined }
 }

@@ -7,7 +7,7 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { composeTarget } from './deskInbox'
 import { deskEvents } from './deskEvents'
-import { autopilotAvailable, busyInSameFolder, deskAgents, deskSubmission, mentionAt, readLastProject, whereOptions, writeLastProject, type WhereOption } from './deskStart'
+import { autopilotAvailable, busyInSameFolder, deskAgents, deskSubmission, mentionAt, readLastWhere, whereOptions, writeLastWhere, type WhereOption } from './deskStart'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import SameFolderWarning from './SameFolderWarning'
@@ -52,7 +52,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   useEffect(() => deskEvents.onClearCompose(() => { setText(''); setOverride(null) }), [])
 
   const target = useMemo(
-    () => composeTarget(projects, override ?? scope, readLastProject()),
+    () => composeTarget(projects, override ?? scope, readLastWhere()),
     [projects, override, scope]
   )
   const { agent, isDefault } = deskAgents(config, target?.project, null)
@@ -107,7 +107,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   const fire = (onAutopilot: boolean): void => {
     const prompt = text.trim()
     if (!prompt || !target) return
-    writeLastProject(target.project.id)
+    writeLastWhere(target.project, target.stream)
     onCompose(deskSubmission(target.project, target.stream, agent, prompt, onAutopilot && canAutopilot ? { on: true, review: config.autopilotReview } : null))
     edit('', 0)
     setOverride(null)

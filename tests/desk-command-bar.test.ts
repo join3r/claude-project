@@ -36,7 +36,7 @@ const devtool = project('dt', 'devtool', [task('t-main', 'Fix the login bug')], 
 const stem = project('st', 'Stem App', [task('t-stem', 'Ship the relay')], [stream('st-next', 'next')])
 const projects = [devtool, stem]
 
-const nowhere: BarHere = { projectId: null, taskId: null, scope: null, lastProjectId: null }
+const nowhere: BarHere = { projectId: null, taskId: null, scope: null, last: null }
 
 function sources(extra: Partial<BarSources> = {}): BarSources {
   return { projects, composeProjects: projects, apps: [], commands: [], notes: {}, files: null, ...extra }
@@ -81,7 +81,7 @@ describe('resolveBar', () => {
   })
 
   it('finds a #stream in another project when there is no @', () => {
-    const bar = resolveBar('do it #next', projects, { ...nowhere, lastProjectId: 'dt' })
+    const bar = resolveBar('do it #next', projects, { ...nowhere, last: { projectId: 'dt' } })
     expect(bar.target?.project.id).toBe('st')
     expect(bar.target?.stream?.id).toBe('st-next')
   })
@@ -91,7 +91,9 @@ describe('resolveBar', () => {
       .toMatchObject({ project: { id: 'dt' }, stream: { id: 'beta' } })
     expect(resolveBar('x', projects, { ...nowhere, scope: { projectId: 'st', streamId: 'st-next' } }).target)
       .toMatchObject({ project: { id: 'st' }, stream: { id: 'st-next' } })
-    expect(resolveBar('x', projects, { ...nowhere, lastProjectId: 'st' }).target?.project.id).toBe('st')
+    expect(resolveBar('x', projects, { ...nowhere, last: { projectId: 'st' } }).target?.project.id).toBe('st')
+    expect(resolveBar('x', projects, { ...nowhere, last: { projectId: 'st', streamId: 'st-next' } }).target)
+      .toMatchObject({ project: { id: 'st' }, stream: { id: 'st-next' } })
     expect(resolveBar('x', projects, nowhere).target?.project.id).toBe('dt')
     // @ to another project drops the open task's stream: its main.
     expect(resolveBar('x @stem', projects, { ...nowhere, projectId: 'dt', taskId: 't-beta' }).target?.stream).toBeUndefined()
@@ -129,7 +131,7 @@ describe('barSections', () => {
     const at = sections('fix @')
     expect(at[0].key).toBe('complete')
     expect(at[0].items.map(i => (i.kind === 'complete' ? i.value : ''))).toEqual(['devtool', 'stem-app'])
-    const hash = sections('fix #', { ...nowhere, lastProjectId: 'st' })
+    const hash = sections('fix #', { ...nowhere, last: { projectId: 'st' } })
     expect(hash[0].items.map(i => (i.kind === 'complete' ? i.value : ''))).toEqual(['main', 'next', '0.7.0'])
   })
 

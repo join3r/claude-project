@@ -1,4 +1,4 @@
-import type { AppConfig, Project, PromptBoxAgent, Stream, Task } from '../../../shared/types'
+import type { AppConfig, DeskScope, Project, PromptBoxAgent, Stream, Task } from '../../../shared/types'
 import { findMainStream, streamDirectory, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
 import { isTaskWorking, type StatusOf } from '../sidebar/closeRules'
 import { availablePromptAgents, pickPromptAgent } from '../promptBox'
@@ -21,17 +21,27 @@ export function autopilotAvailable(project: Project | undefined, agent: PromptBo
 
 /**
  * Starting a task from the desk (its compose box and the ⌘K bar): which agent,
- * what gets filed, and the project you last fired into (the default aim when
- * the column shows All).
+ * what gets filed, and the project and stream you last fired into (the default
+ * aim when the column shows All, or the project without a stream).
  */
 const LAST_PROJECT_KEY = 'devtool.desk.lastProjectId'
+const LAST_STREAM_KEY = 'devtool.desk.lastStreamId'
 
-export function readLastProject(): string | null {
-  try { return window.localStorage.getItem(LAST_PROJECT_KEY) } catch { return null }
+export function readLastWhere(): DeskScope | null {
+  try {
+    const projectId = window.localStorage.getItem(LAST_PROJECT_KEY)
+    if (!projectId) return null
+    const streamId = window.localStorage.getItem(LAST_STREAM_KEY)
+    return streamId ? { projectId, streamId } : { projectId }
+  } catch { return null }
 }
 
-export function writeLastProject(id: string): void {
-  try { window.localStorage.setItem(LAST_PROJECT_KEY, id) } catch { /* storage blocked: the default just falls back */ }
+export function writeLastWhere(project: Project, stream: Stream | undefined): void {
+  try {
+    window.localStorage.setItem(LAST_PROJECT_KEY, project.id)
+    if (stream && !stream.isMain) window.localStorage.setItem(LAST_STREAM_KEY, stream.id)
+    else window.localStorage.removeItem(LAST_STREAM_KEY)
+  } catch { /* storage blocked: the default just falls back */ }
 }
 
 /**
