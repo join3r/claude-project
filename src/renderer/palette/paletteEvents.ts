@@ -1,4 +1,6 @@
 // src/renderer/palette/paletteEvents.ts
+import type { Attachment } from '../components/claude-chat/imageAttachments'
+
 type EventMap = {
   'open-settings': void
   /** Settings on one of its pages, by id ('servers', 'mobile'…): the desk's status bar. */
@@ -37,11 +39,12 @@ type EventMap = {
   'agent-link-notice': string
 }
 
-/** What the full New task form opens on: compose's aim and text, or nothing (the selection). */
+/** What the full New task form opens on: compose's aim, text and images, or nothing (the selection). */
 export interface NewTaskFormRequest {
   projectId?: string
   streamId?: string
   prompt?: string
+  images?: Attachment[]
 }
 
 export interface LinkToAgentRequest {

@@ -1,4 +1,5 @@
 import type { AppConfig, DeskScope, Project, PromptBoxAgent, Stream, Task } from '../../../shared/types'
+import type { ChatImage } from '../../../shared/claude-chat'
 import { findMainStream, streamDirectory, streamGivesTaskWorktrees, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
 import { isTaskWorking, type StatusOf } from '../sidebar/closeRules'
 import { availablePromptAgents, pickPromptAgent } from '../promptBox'
@@ -63,22 +64,28 @@ export function deskAgents(
 
 /**
  * A task on `prompt` in `project` (and `stream`), in auto mode (decision 2 of
- * the redesign); no agent → a terminal running it. `autopilot` holds only for a
- * Claude chat in a project Autopilot can run in.
+ * the redesign); no agent → a terminal running it. `autopilot` and `images`
+ * hold only for a Claude chat (Autopilot also needs a project it can run in).
  */
 export function deskSubmission(
   project: Project,
   stream: Stream | undefined,
   agent: PromptBoxAgent | null,
   prompt: string,
-  autopilot?: DeskAutopilot | null
+  autopilot?: DeskAutopilot | null,
+  images?: readonly ChatImage[]
 ): NewTaskSubmission {
+  const chat = agent === 'claude-chat'
   return {
     target: { kind: 'project', projectId: project.id },
     ...(stream ? { streamId: stream.id } : {}),
-    ...(autopilot?.on && agent === 'claude-chat' && autopilotSupported(project) ? { autopilot: { review: autopilot.review } } : {}),
+    ...(autopilot?.on && chat && autopilotSupported(project) ? { autopilot: { review: autopilot.review } } : {}),
     ...(agent
-      ? { start: { agent, prompt: { text: prompt, ...(agent === 'claude-chat' || agent === 'claude' ? { mode: 'auto' as const } : {}) } } }
+      ? { start: { agent, prompt: {
+          text: prompt,
+          ...(chat || agent === 'claude' ? { mode: 'auto' as const } : {}),
+          ...(chat && images?.length ? { images: [...images] } : {})
+        } } }
       : { terminal: { command: prompt } })
   }
 }

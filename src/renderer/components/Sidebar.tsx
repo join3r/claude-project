@@ -363,6 +363,7 @@ export default function Sidebar(): React.ReactElement {
           selectedTaskId={selectedTaskId}
           defaultStreamId={newTaskForm.streamId ?? null}
           initialPrompt={newTaskForm.prompt}
+          initialImages={newTaskForm.images}
           pickProjectFirst={!newTaskForm.projectId}
           getProjectDir={getProjectDir}
           config={config}

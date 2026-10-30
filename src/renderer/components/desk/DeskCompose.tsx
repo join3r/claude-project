@@ -11,6 +11,7 @@ import { autopilotAvailable, busyInSameFolder, deskAgents, deskSubmission, menti
 import { paletteEvents } from '../../palette/paletteEvents'
 import { useAllTabStatuses } from '../../context/TabStatusContext'
 import SameFolderWarning from './SameFolderWarning'
+import { AttachmentStrip, toChatImages, useImageAttachments } from '../claude-chat/imageAttachments'
 
 const chipCls = 'flex items-center gap-1.5 bg-surface-3 border border-border rounded-full px-2.5 py-[3px] text-sm text-body cursor-pointer hover:border-border-strong min-w-0'
 
@@ -22,7 +23,8 @@ const chipCls = 'flex items-center gap-1.5 bg-surface-3 border border-border rou
  * ⌘↵ fires it on Autopilot (Settings says whether Codex reviews it). It aims at
  * the column's scope unless a pick says otherwise. The agent is Settings'
  * quick-task one, named on a chip only when a project can't run it. Agent tasks
- * start in auto mode (decision 2 of the redesign).
+ * start in auto mode (decision 2 of the redesign). A Claude chat takes pasted
+ * or dropped images; they go with the prompt, and Options… carries them over.
  */
 export default function DeskCompose({ projects, scope, config, theme, onCompose }: {
   projects: readonly Project[]
@@ -48,15 +50,21 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     inputRef.current?.focus()
   }), [])
 
-  // Options… keeps the text until the form files it: closing the form must not lose what you typed.
-  useEffect(() => deskEvents.onClearCompose(() => { setText(''); setOverride(null) }), [])
-
   const target = useMemo(
     () => composeTarget(projects, override ?? scope, readLastWhere()),
     [projects, override, scope]
   )
   const { agent, isDefault } = deskAgents(config, target?.project, null)
   const canAutopilot = autopilotAvailable(target?.project, agent)
+  // Only the chat view takes images; aiming elsewhere hides them rather than dropping them.
+  const takesImages = agent === 'claude-chat'
+  const attachments = useImageAttachments(takesImages)
+  const images = takesImages ? attachments.images : []
+
+  // Options… keeps the text and images until the form files it: closing the form must not lose them.
+  const clearImages = attachments.clear
+  useEffect(() => deskEvents.onClearCompose(() => { setText(''); setOverride(null); clearImages() }), [clearImages])
+
   const statuses = useAllTabStatuses()
   const busy = useMemo(
     () => (target && agent ? busyInSameFolder(target.project, target.stream, (tabId) => statuses[tabId]) : []),
@@ -108,8 +116,9 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
     const prompt = text.trim()
     if (!prompt || !target) return
     writeLastWhere(target.project, target.stream)
-    onCompose(deskSubmission(target.project, target.stream, agent, prompt, onAutopilot && canAutopilot ? { on: true, review: config.autopilotReview } : null))
+    onCompose(deskSubmission(target.project, target.stream, agent, prompt, onAutopilot && canAutopilot ? { on: true, review: config.autopilotReview } : null, toChatImages(images)))
     edit('', 0)
+    attachments.clear()
     setOverride(null)
   }
 
@@ -119,17 +128,23 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   const autopilotHint = canAutopilot ? ` · ⌘↵ on Autopilot${config.autopilotReview ? ' with a Codex review' : ''}` : ''
 
   return (
-    <div ref={boxRef} className="@container border border-line bg-row-hover rounded-[10px] px-3 py-2.5 flex flex-col gap-2 focus-within:border-border-strong" data-testid="desk-compose">
+    <div ref={boxRef} className="@container border border-line bg-row-hover rounded-[10px] px-3 py-2.5 flex flex-col gap-2 focus-within:border-border-strong" data-testid="desk-compose" {...attachments.dropProps}>
+      {images.length > 0 && (
+        <div className="-mx-2.5 -mt-2.5">
+          <AttachmentStrip images={images} onRemove={attachments.remove} />
+        </div>
+      )}
       <textarea
         ref={inputRef}
         rows={1}
         aria-label="New task"
         placeholder="Ask or give a task… @ picks the project"
-        title={`↵ starts the task${autopilotHint} · @ picks the project · ${formatShortcutForApp('CmdOrCtrl+N')} comes back here`}
+        title={`↵ starts the task${autopilotHint} · @ picks the project${takesImages ? ' · paste or drop images to send them' : ''} · ${formatShortcutForApp('CmdOrCtrl+N')} comes back here`}
         className="bg-transparent border-0 outline-none text-text text-md resize-none leading-snug placeholder:text-text-muted"
         value={text}
         onChange={(e) => edit(e.target.value, e.target.selectionStart)}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+        onPaste={attachments.onPaste}
         onBlur={() => setDismissedAt(found?.start ?? null)}
         onFocus={(e) => { setCaret(e.currentTarget.selectionStart); setDismissedAt(null) }}
         onKeyDown={(e) => {
@@ -180,7 +195,8 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
           onClick={() => {
             paletteEvents.emit('open-new-task-form', {
               ...(target ? { projectId: target.project.id, ...(target.stream ? { streamId: target.stream.id } : {}) } : {}),
-              prompt: text
+              prompt: text,
+              ...(images.length > 0 ? { images } : {})
             })
           }}
           data-testid="desk-compose-options"

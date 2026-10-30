@@ -189,6 +189,15 @@ describe('helpers', () => {
   })
 })
 
+describe('Images on a start', () => {
+  it('go with a Claude chat prompt only', () => {
+    const images = [{ mediaType: 'image/png', data: 'aGk=' }]
+    expect(deskSubmission(devtool, beta, 'claude-chat', 'look', null, images).start?.prompt?.images).toEqual(images)
+    expect(deskSubmission(devtool, beta, 'claude-chat', 'look', null, []).start?.prompt?.images).toBeUndefined()
+    expect(deskSubmission(devtool, beta, 'codex', 'look', null, images).start?.prompt?.images).toBeUndefined()
+  })
+})
+
 describe('Autopilot on a start', () => {
   it('goes with a Claude chat in a project on this Mac only', () => {
     const on = { on: true, review: true }

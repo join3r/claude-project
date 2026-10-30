@@ -5,7 +5,7 @@ import { dirBasename } from '../../shared/paths'
 import { Field, HelperText, SegCtl, menuItemCls } from './ui'
 import AddLocalProject from './AddLocalProject'
 import ChipMenu from './claude-chat/ChipMenu'
-import { AttachmentStrip, toChatImages, useImageAttachments } from './claude-chat/imageAttachments'
+import { AttachmentStrip, toChatImages, useImageAttachments, type Attachment } from './claude-chat/imageAttachments'
 import { isNewTaskDraftValid, matchProjects } from './newTask'
 import type { NewTaskKind, NewTaskSubmission, NewTaskTarget } from './newTask'
 import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickPromptAgent } from './promptBox'
@@ -32,6 +32,8 @@ interface Props {
   pickProjectFirst?: boolean
   /** The prompt to start with (the compose box's text, when it opened this form). */
   initialPrompt?: string
+  /** Images to start with (the compose box's, likewise). */
+  initialImages?: Attachment[]
   getProjectDir: (project: Project) => string
   /** Which agents are switched on, and the last agent and mode a prompt went to. */
   config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi' | 'promptBoxAgent' | 'promptBoxMode'> & Partial<Pick<AppConfig, 'autopilotReview'>>
@@ -77,6 +79,7 @@ export default function NewTaskModal({
   defaultStreamId,
   pickProjectFirst = false,
   initialPrompt = '',
+  initialImages,
   getProjectDir,
   config,
   allTags,
@@ -173,7 +176,7 @@ export default function NewTaskModal({
   const promptText = agent || takesCommand ? prompt.trim() : ''
   // Only the chat view takes images; switching away hides them rather than dropping them.
   const takesImages = agent === 'claude-chat'
-  const attachments = useImageAttachments(takesImages)
+  const attachments = useImageAttachments(takesImages, initialImages)
   const images = takesImages ? attachments.images : []
   // Images go with a prompt: one alone would name the task and branch after nothing.
   const imagesNeedPrompt = images.length > 0 && !promptText

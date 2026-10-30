@@ -49,9 +49,12 @@ export interface ImageAttachments {
   }
 }
 
-/** `enabled` false ignores pastes and drops, leaving them to the browser. */
-export function useImageAttachments(enabled = true): ImageAttachments {
-  const [images, setImages] = useState<Attachment[]>([])
+/**
+ * `enabled` false ignores pastes and drops, leaving them to the browser.
+ * `initial`: images another box already holds (the desk compose handing over to the full form).
+ */
+export function useImageAttachments(enabled = true, initial: readonly Attachment[] = []): ImageAttachments {
+  const [images, setImages] = useState<Attachment[]>(() => [...initial])
 
   const addFiles = useCallback(async (list: FileList | File[]): Promise<void> => {
     const read = await Promise.all(Array.from(list).map(readImage))
