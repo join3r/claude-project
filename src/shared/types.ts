@@ -91,6 +91,11 @@ export interface TaskInboxState {
   snoozeUntilAttention?: boolean
   /** Manual "mark unread"; cleared on the next visit. */
   forcedUnread?: boolean
+  /**
+   * The start of the agent's last answer (`AgentActivity.lastAnswer`), kept so the
+   * desk inbox can preview it after a restart, when live activity is gone.
+   */
+  preview?: string
 }
 
 /**
@@ -710,6 +715,11 @@ export interface AppConfig {
   defaultSidebarTab: SidebarTab
   /** Inbox rows as one list, or the open ones under a heading per project. */
   inboxLayout: 'flat' | 'grouped'
+  /**
+   * The window's shell: `classic` (Projects tree / Inbox sidebar, warm palette) or
+   * `desk` (the 2026-10-30 redesign: mail-style inbox column, graphite palette).
+   */
+  layout: AppLayout
   /** Sidebar: fold streams where no task needs you, runs or has news. */
   autoCollapseQuietStreams: boolean
   /** Project tiles and icons beside project names in the sidebar, Inbox and task header. */
@@ -896,9 +906,57 @@ export interface WindowViewState {
   fileBrowserActiveTab: FileBrowserTab
   sidebarWidth: number
   sidebarTab: SidebarTab
+  /** The desk layout's column (absent until this window first used it). */
+  desk?: DeskViewState
 }
 
 export type SidebarTab = 'projects' | 'inbox'
+
+/** Which list the desk column shows. */
+export type DeskTab = 'inbox' | 'working' | 'snoozed' | 'done'
+
+/** What the desk column narrows to: everything, a project, or one of its streams. */
+export interface DeskScope {
+  projectId: string
+  streamId?: string
+}
+
+export interface DeskViewState {
+  width?: number
+  tab?: DeskTab
+  /** Null or absent: all projects. */
+  scope?: DeskScope | null
+}
+
+export function cloneDeskViewState(desk: DeskViewState): DeskViewState {
+  return {
+    ...(desk.width !== undefined ? { width: desk.width } : {}),
+    ...(desk.tab ? { tab: desk.tab } : {}),
+    ...(desk.scope ? { scope: { ...desk.scope } } : {})
+  }
+}
+
+const DESK_TABS: readonly DeskTab[] = ['inbox', 'working', 'snoozed', 'done']
+
+/** A stored desk state with anything malformed dropped, and a scope whose project or stream is gone cleared. */
+export function normalizeDeskViewState(value: unknown, projects: readonly Project[]): DeskViewState | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as { width?: unknown; tab?: unknown; scope?: unknown }
+  const desk: DeskViewState = {}
+  if (typeof raw.width === 'number' && Number.isFinite(raw.width)) desk.width = raw.width
+  if (typeof raw.tab === 'string' && (DESK_TABS as readonly string[]).includes(raw.tab)) desk.tab = raw.tab as DeskTab
+  const scope = raw.scope as { projectId?: unknown; streamId?: unknown } | null | undefined
+  if (scope && typeof scope.projectId === 'string') {
+    const project = projects.find(p => p.id === scope.projectId)
+    if (project) {
+      const streamId = typeof scope.streamId === 'string' && project.streams.some(s => s.id === scope.streamId) ? scope.streamId : undefined
+      desk.scope = { projectId: project.id, ...(streamId ? { streamId } : {}) }
+    }
+  }
+  return desk
+}
+
+export type AppLayout = 'classic' | 'desk'
 
 export interface WindowGeometry {
   x: number
@@ -951,6 +1009,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   lastTaskId: null,
   defaultSidebarTab: 'inbox',
   inboxLayout: 'flat',
+  layout: 'classic',
   autoCollapseQuietStreams: true,
   showProjectIcons: false,
   promptBoxAgent: 'claude-chat',
@@ -1008,7 +1067,8 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     fileBrowserWidth: state.fileBrowserWidth,
     fileBrowserActiveTab: state.fileBrowserActiveTab,
     sidebarWidth: state.sidebarWidth,
-    sidebarTab: state.sidebarTab
+    sidebarTab: state.sidebarTab,
+    ...(state.desk ? { desk: cloneDeskViewState(state.desk) } : {})
   }
 }
 
@@ -1101,7 +1161,8 @@ export function reconcileWindowViewState(
     fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
     sidebarWidth: state.sidebarWidth ?? 240,
     // only normalise unrecognised values — buildWindowViewState already applied the configured default
-    sidebarTab: state.sidebarTab === 'inbox' || state.sidebarTab === 'projects' ? state.sidebarTab : 'projects'
+    sidebarTab: state.sidebarTab === 'inbox' || state.sidebarTab === 'projects' ? state.sidebarTab : 'projects',
+    ...(state.desk ? { desk: normalizeDeskViewState(state.desk, projects) } : {})
   }
 }
 
@@ -1135,6 +1196,7 @@ export function buildWindowViewState(
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
     sidebarWidth: seed?.sidebarWidth ?? 240,
-    sidebarTab: seed?.sidebarTab ?? config.defaultSidebarTab
+    sidebarTab: seed?.sidebarTab ?? config.defaultSidebarTab,
+    ...(seed?.desk ? { desk: cloneDeskViewState(seed.desk) } : {})
   }, projects)
 }

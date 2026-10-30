@@ -11,11 +11,14 @@ import Toasts from './components/Toasts'
 import StreamRunHost from './components/StreamRunHost'
 import EntityActionsHost from './components/EntityActionsHost'
 import { paletteEvents } from './palette/paletteEvents'
+import { useTaskPreviewSync } from './components/desk/useTaskPreviewSync'
 
 function AppInner(): React.ReactElement {
   const {
-    effectiveTheme, exportWindowViewState, toggleFileBrowser
+    effectiveTheme, exportWindowViewState, toggleFileBrowser, config
   } = useApp()
+  const desk = config?.layout === 'desk'
+  useTaskPreviewSync()
   const [sidebarHidden, setSidebarHidden] = useState(false)
   const [switcherRequested, setSwitcherRequested] = useState(false)
 
@@ -88,8 +91,13 @@ function AppInner(): React.ReactElement {
     document.documentElement.classList.toggle('theme-light', effectiveTheme === 'light')
   }, [effectiveTheme])
 
+  // The desk layout's graphite tokens (styles.css) hang off <html>, for the same CSS-var readers.
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle('layout-desk', desk)
+  }, [desk])
+
   return (
-    <div className={`h-full w-full flex bg-bg text-text font-sans${effectiveTheme === 'light' ? ' theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}`}>
+    <div className={`h-full w-full flex bg-bg text-text font-sans${effectiveTheme === 'light' ? ' theme-light' : ''}${sidebarHidden ? ' sidebar-hidden' : ''}${desk ? ' layout-desk' : ''}`}>
       {!sidebarHidden && (
         <Sidebar
           switcherRequested={switcherRequested}

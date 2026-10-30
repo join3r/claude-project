@@ -21,6 +21,8 @@ export interface AgentActivity {
   lastPrompt?: string
   /** First line of Claude's final reply for the last finished turn. */
   lastMessage?: string
+  /** The start of that reply as one paragraph: the desk inbox's two-line preview. */
+  lastAnswer?: string
   /** The main-thread tool call in flight. Subagent tools are only counted. */
   tool?: { id?: string; name: string; label: string; startedAt: number }
   /** Why the agent is blocked on you, when it is. */
@@ -57,6 +59,28 @@ function str(value: unknown): string | undefined {
 }
 
 /** First non-empty line, collapsed and truncated — sidebar rows are one line tall. */
+const ANSWER_LIMIT = 320
+
+/**
+ * The opening of a reply flattened to one paragraph: Markdown marks, headings and
+ * list bullets stripped, whitespace collapsed. Code fences are dropped whole.
+ */
+export function answerPreview(text: string | undefined, limit = ANSWER_LIMIT): string | undefined {
+  if (!text) return undefined
+  const prose = text
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .split('\n')
+    .map((l) => l.trim().replace(/^#+\s*/, '').replace(/^([-*+]|\d+\.)\s+/, '').replace(/^>\s?/, ''))
+    .filter((l) => l.length > 0 && !/^\|?[\s:|-]+\|?$/.test(l))
+    .join(' ')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!prose) return undefined
+  return prose.length > limit ? `${prose.slice(0, limit - 1)}…` : prose
+}
+
 export function firstLine(text: string | undefined, limit = TEXT_LIMIT): string | undefined {
   if (!text) return undefined
   const line = text.split('\n').map((l) => l.trim()).find((l) => l.length > 0)
@@ -186,6 +210,7 @@ export function reduceAgentActivity(
       if (source === 'clear' || source === 'startup') {
         next.lastPrompt = undefined
         next.lastMessage = undefined
+        next.lastAnswer = undefined
       }
       next.tool = undefined
       next.waiting = undefined
@@ -198,6 +223,7 @@ export function reduceAgentActivity(
     case 'UserPromptSubmit':
       next.lastPrompt = promptLine(str(body.prompt)) ?? next.lastPrompt
       next.lastMessage = undefined
+      next.lastAnswer = undefined
       next.tool = undefined
       next.waiting = undefined
       next.subagents = 0
@@ -309,6 +335,7 @@ export function reduceAgentActivity(
 
     case 'Stop':
       next.lastMessage = firstLine(str(body.last_assistant_message)) ?? next.lastMessage
+      next.lastAnswer = answerPreview(str(body.last_assistant_message)) ?? next.lastAnswer
       next.tool = undefined
       next.waiting = undefined
       next.subagents = 0
@@ -319,6 +346,7 @@ export function reduceAgentActivity(
     case 'StopFailure': {
       const error = str(body.error) ?? 'unknown'
       next.lastMessage = firstLine(str(body.last_assistant_message)) ?? next.lastMessage
+      next.lastAnswer = answerPreview(str(body.last_assistant_message)) ?? next.lastAnswer
       next.tool = undefined
       next.subagents = 0
       next.compacting = false

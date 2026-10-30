@@ -3,6 +3,7 @@ import type { TaskInboxState } from '../../../shared/types'
 import { createInteractionStampGate } from '../../components/taskRecency'
 import type { AppStateCore } from './useAppStateCore'
 import { mapTask } from './projectsData'
+import { findTaskInProject } from '../../../shared/streams'
 import {
   inboxSnoozed,
   inboxUnread,
@@ -18,13 +19,15 @@ export interface TaskInboxActions {
   markTaskEvent: (projectId: string, taskId: string, kind?: TaskEventKind) => void
   markTaskVisited: (projectId: string, taskId: string) => void
   markTaskUnread: (projectId: string, taskId: string) => void
+  /** Keep the agent's last answer on the task (`TaskInboxState.preview`); a no-op when unchanged. */
+  setTaskPreview: (projectId: string, taskId: string, preview: string) => void
   snoozeTask: (projectId: string, taskId: string, options: SnoozeOptions) => void
   unsnoozeTask: (projectId: string, taskId: string) => void
 }
 
 /** Task recency and inbox triage: interaction stamps, events, read/unread and snooze. */
 export function useTaskInbox(core: AppStateCore): TaskInboxActions {
-  const { mutateProjects, windowViewStateRef } = core
+  const { mutateProjects, windowViewStateRef, projectsRef } = core
   const interactionGateRef = useRef(createInteractionStampGate())
 
   const markTaskInteracted = useCallback((projectId: string, taskId: string) => {
@@ -61,6 +64,17 @@ export function useTaskInbox(core: AppStateCore): TaskInboxActions {
     updateTaskInbox(projectId, taskId, inboxUnread)
   }, [updateTaskInbox])
 
+  const setTaskPreview = useCallback((projectId: string, taskId: string, preview: string) => {
+    // Unchanged leaves the data alone: every window sees the same answer, and a no-op must not save.
+    const current = findTaskInProject(projectsRef.current.find(p => p.id === projectId), taskId)
+    if (!current || current.inbox?.preview === preview) return
+    mutateProjects(prev => {
+      const task = findTaskInProject(prev.projects.find(p => p.id === projectId), taskId)
+      if (!task || task.inbox?.preview === preview) return prev
+      return mapTask(prev, projectId, taskId, t => ({ ...t, inbox: { ...t.inbox, preview } }))
+    })
+  }, [mutateProjects])
+
   const snoozeTask = useCallback((projectId: string, taskId: string, options: SnoozeOptions) => {
     const now = Date.now()
     updateTaskInbox(projectId, taskId, inbox => inboxSnoozed(inbox, now, options))
@@ -75,6 +89,7 @@ export function useTaskInbox(core: AppStateCore): TaskInboxActions {
     markTaskEvent,
     markTaskVisited,
     markTaskUnread,
+    setTaskPreview,
     snoozeTask,
     unsnoozeTask
   }

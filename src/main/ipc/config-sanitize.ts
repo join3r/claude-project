@@ -70,6 +70,7 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   lastTaskId: nullableStr,
   defaultSidebarTab: v.literal('projects', 'inbox'),
   inboxLayout: v.literal('flat', 'grouped'),
+  layout: v.literal('classic', 'desk'),
   autoCollapseQuietStreams: bool,
   showProjectIcons: bool,
   promptBoxAgent: v.literal('claude-chat', 'claude', 'codex', 'pi'),

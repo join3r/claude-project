@@ -68,6 +68,9 @@ import {
   type SidebarTaskState
 } from './sidebar/streamTree'
 import { findStreamOfTask, findTaskInProject, projectTasks, taskTabs } from '../../shared/streams'
+import DeskColumn from './desk/DeskColumn'
+import { deskEvents } from './desk/deskEvents'
+import { useDeskDone } from './desk/useDeskDone'
 
 /** A pin resolved against the data: its project, and the stream or task it names. */
 type ResolvedPin = { item: PinnedItem; key: string; project: Project; stream?: Stream; task?: Task }
@@ -115,7 +118,10 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     [projects]
   )
 
-  const inboxActive = sidebarTab === 'inbox'
+  const deskMode = config?.layout === 'desk'
+  const deskModeRef = useRef(deskMode)
+  deskModeRef.current = deskMode
+  const inboxActive = sidebarTab === 'inbox' || deskMode
   const inboxGrouped = config?.inboxLayout === 'grouped'
 
   // Badge count is what makes the tab worth having: attention is visible without
@@ -311,24 +317,34 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     return () => window.removeEventListener('mousedown', dismiss)
   }, [closeContextMenu])
 
+  // The desk layout has no switcher or New task dialog: ⌘P opens the bar, New task focuses compose.
   useEffect(() => {
     return window.api.onMenuProjectSwitcher(() => {
-      setSwitcherActive(prev => !prev)
+      if (deskModeRef.current) paletteEvents.emit('palette-prefix-set', '')
+      else setSwitcherActive(prev => !prev)
     })
   }, [])
 
   useEffect(() => {
     return window.api.onMenuNewTask(() => {
-      setNewTaskOpen(true)
+      if (deskModeRef.current) deskEvents.focusCompose()
+      else setNewTaskOpen(true)
     })
   }, [])
 
   useEffect(() => {
-    return paletteEvents.on('open-new-task', () => setNewTaskOpen(true))
+    return paletteEvents.on('open-new-task', () => {
+      if (deskModeRef.current) deskEvents.focusCompose()
+      else setNewTaskOpen(true)
+    })
   }, [])
 
   useEffect(() => {
-    return paletteEvents.on('open-new-task-in', (where) => { setNewTaskWhere(where); setNewTaskOpen(true) })
+    return paletteEvents.on('open-new-task-in', (where) => {
+      if (deskModeRef.current) { deskEvents.focusCompose(where); return }
+      setNewTaskWhere(where)
+      setNewTaskOpen(true)
+    })
   }, [])
 
   useEffect(() => {
@@ -475,6 +491,8 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
 
   /** Hover ✕ on a task row, and the menu's Close task (see `useCloseTask`). */
   const handleCloseTask = closeTaskFlow.closeTask
+  /** The desk's ✓ Done: land without asking, conflicts to the agent (see `useDeskDone`). */
+  const handleDeskDone = useDeskDone(closeTaskFlow.closeTask)
 
   /** Hover ✕ on a stream row, and the menu's Close stream (see `useCloseStream`). */
   const handleCloseStream = closeStreamFlow.closeStream
@@ -968,6 +986,181 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
     )
   }
 
+  const overlays = (
+    <>
+        <SidebarContextMenu
+          contextMenu={contextMenu}
+          missingDirs={missingDirs}
+          snoozeSubmenu={snoozeSubmenu}
+          setSnoozeSubmenu={setSnoozeSubmenu}
+          closeContextMenu={closeContextMenu}
+          findTask={findTask}
+          handleCloseTask={handleCloseTask}
+          handleCloseStream={handleCloseStream}
+          beginEdit={beginEdit}
+          isPinned={isPinned}
+        />
+        <EntityMenuPopup menu={entityMenu} onClose={closeEntityMenu} />
+
+        <ServerNotices onOpenSettings={(tab) => { setSettingsTab(tab); setSettingsOpen(true) }} />
+
+        {settingsOpen && <Settings key={settingsTab ?? 'default'} initialTab={settingsTab ?? undefined} onClose={() => { setSettingsOpen(false); setSettingsTab(null) }} />}
+
+        {remoteModalOpen && (
+          <AddRemoteProject
+            allTags={tags}
+            onEnsureTag={addTag}
+            onAdd={(name, ssh, aiToolArgs, tagIds) => {
+              addRemoteProject(name, ssh, aiToolArgs, tagIds)
+              setRemoteModalOpen(false)
+            }}
+            onCancel={() => setRemoteModalOpen(false)}
+          />
+        )}
+
+        {serverProjectOpen && (
+          <AddServerProject
+            servers={pairedServers}
+            initialServerId={serverProjectStart?.serverId}
+            initialMode={serverProjectStart?.mode}
+            onAddServer={() => { setServerProjectOpen(false); setAddServerOpen(true) }}
+            existingDirectories={serverDirectories}
+            onAdd={(serverId, items) => {
+              const created = addServerProjects(serverId, items)
+              setServerProjectOpen(false)
+              revealAddedProjects(created)
+            }}
+            onClose={() => setServerProjectOpen(false)}
+          />
+        )}
+
+        {addServerOpen && (
+          <AddServerDialog
+            sshTargets={knownSshTargets(orderedProjects)}
+            existingDirectories={serverDirectories}
+            onAddProjects={(serverId, items) => {
+              revealAddedProjects(addServerProjects(serverId, items))
+            }}
+            onChooseFolder={(serverId) => {
+              setAddServerOpen(false)
+              setServerProjectStart({ serverId, mode: 'browse' })
+              setServerProjectOpen(true)
+            }}
+            onClose={() => setAddServerOpen(false)}
+          />
+        )}
+
+        {shellCommandModalOpen && (
+          <AddShellCommandProject
+            allTags={tags}
+            onEnsureTag={addTag}
+            onAdd={(name, command, tagIds) => {
+              addShellCommandProject(name, command, tagIds)
+              setShellCommandModalOpen(false)
+            }}
+            onCancel={() => setShellCommandModalOpen(false)}
+          />
+        )}
+
+        {newProjectOpen && (
+          <NewProjectModal
+            hosts={[
+              { id: 'local', label: 'This computer' },
+              ...pairedServers.filter(s => s.state === 'online').map(s => ({ id: s.id, label: serverName(s.id, serversState) }))
+            ]}
+            allTags={tags}
+            onEnsureTag={addTag}
+            onCreated={(host, name, directory, tagIds) => {
+              setNewProjectOpen(false)
+              let project: Project
+              if (host === 'local') {
+                project = addProject(name, directory, tagIds)
+              } else {
+                project = addServerProjects(host, [{ name, directory }])[0]
+                if (tagIds) setProjectTags(project.id, tagIds)
+              }
+              setProjectExpanded(project.id, true)
+              if (inboxActive) setPendingHome({ projectId: project.id })
+            }}
+            onCancel={() => setNewProjectOpen(false)}
+          />
+        )}
+
+        {newStreamProjectId && (() => {
+          const project = projects.find(p => p.id === newStreamProjectId)
+          if (!project) return null
+          return (
+            <NewStreamModal
+              project={project}
+              onCreate={(name, workspace, setupPending) => handleStreamCreated(project.id, name, workspace, setupPending)}
+              onClose={() => setNewStreamProjectId(null)}
+            />
+          )
+        })()}
+
+        {closeStreamFlow.dialog}
+        {closeTaskFlow.dialog}
+
+        {newTaskOpen && config && (
+          <NewTaskModal
+            projects={orderedProjects}
+            defaultProjectId={newTaskWhere?.projectId ?? selectedProjectId}
+            selectedTaskId={selectedTaskId}
+            defaultStreamId={newTaskWhere?.streamId ?? null}
+            pickProjectFirst={!newTaskWhere}
+            getProjectDir={getProjectDir}
+            config={config}
+            allTags={tags}
+            onEnsureTag={addTag}
+            onAddProject={addProject}
+            onCreate={handleComposedTask}
+            onClose={() => { setNewTaskOpen(false); setNewTaskWhere(null) }}
+          />
+        )}
+    </>
+  )
+
+  if (deskMode) {
+    return (
+      <>
+        <DeskColumn
+          projects={inboxProjects}
+          composeProjects={orderedProjects}
+          pinnedIds={pinnedProjectIds}
+          missingDirIds={missingDirs}
+          onSelectTask={(projectId, taskId) => {
+            const task = findTask(projectId, taskId)
+            if (task) handleSelectTask(projectId, task)
+          }}
+          onTaskContextMenu={handleTaskContextMenu}
+          onDone={(projectId, taskId) => void handleDeskDone(projectId, taskId)}
+          onCompose={handleComposedTask}
+          footer={[
+            { label: '+ New project…', onClick: () => setNewProjectOpen(true) },
+            { label: 'Open a folder as a project…', onClick: () => void handleAddProject() },
+            { label: 'Remote project (SSH)…', onClick: () => setRemoteModalOpen(true) },
+            { label: 'Server project…', onClick: () => { setServerProjectStart(null); setServerProjectOpen(true) } },
+            { label: 'Custom shell…', onClick: () => setShellCommandModalOpen(true) },
+            { label: 'Add server…', onClick: () => setAddServerOpen(true) },
+            { label: 'Settings', onClick: () => { setSettingsTab(null); setSettingsOpen(true) } }
+          ]}
+          rename={editingId && inboxTaskIds.has(editingId) ? {
+            taskId: editingId,
+            value: editValue,
+            onChange: setEditValue,
+            onSubmit: () => {
+              const projectId = inboxTaskIds.get(editingId)
+              if (projectId) handleRenameSubmit('task', projectId, editingId)
+              else setEditingId(null)
+            },
+            onCancel: () => setEditingId(null)
+          } : null}
+        />
+        {overlays}
+      </>
+    )
+  }
+
   return (
     <div
       className="sidebar relative flex flex-col bg-surface border-r-[0.5px] border-border select-none [--recency-rgb:199,146,87] [.theme-light_&]:[--recency-rgb:154,98,48]"
@@ -1128,140 +1321,11 @@ export default function Sidebar({ switcherRequested, onSwitcherConsumed }: { swi
       )}
       </>)}
 
-      <SidebarContextMenu
-        contextMenu={contextMenu}
-        missingDirs={missingDirs}
-        snoozeSubmenu={snoozeSubmenu}
-        setSnoozeSubmenu={setSnoozeSubmenu}
-        closeContextMenu={closeContextMenu}
-        findTask={findTask}
-        handleCloseTask={handleCloseTask}
-        handleCloseStream={handleCloseStream}
-        beginEdit={beginEdit}
-        isPinned={isPinned}
-      />
-      <EntityMenuPopup menu={entityMenu} onClose={closeEntityMenu} />
-
-      <ServerNotices onOpenSettings={(tab) => { setSettingsTab(tab); setSettingsOpen(true) }} />
-
       <div className="px-2 py-1 border-t border-hair [-webkit-app-region:no-drag]">
         <button className={headerIconCls} onClick={() => { setSettingsTab(null); setSettingsOpen(true) }} title="Settings"><SettingsIcon size={14} /></button>
       </div>
 
-      {settingsOpen && <Settings key={settingsTab ?? 'default'} initialTab={settingsTab ?? undefined} onClose={() => { setSettingsOpen(false); setSettingsTab(null) }} />}
-
-      {remoteModalOpen && (
-        <AddRemoteProject
-          allTags={tags}
-          onEnsureTag={addTag}
-          onAdd={(name, ssh, aiToolArgs, tagIds) => {
-            addRemoteProject(name, ssh, aiToolArgs, tagIds)
-            setRemoteModalOpen(false)
-          }}
-          onCancel={() => setRemoteModalOpen(false)}
-        />
-      )}
-
-      {serverProjectOpen && (
-        <AddServerProject
-          servers={pairedServers}
-          initialServerId={serverProjectStart?.serverId}
-          initialMode={serverProjectStart?.mode}
-          onAddServer={() => { setServerProjectOpen(false); setAddServerOpen(true) }}
-          existingDirectories={serverDirectories}
-          onAdd={(serverId, items) => {
-            const created = addServerProjects(serverId, items)
-            setServerProjectOpen(false)
-            revealAddedProjects(created)
-          }}
-          onClose={() => setServerProjectOpen(false)}
-        />
-      )}
-
-      {addServerOpen && (
-        <AddServerDialog
-          sshTargets={knownSshTargets(orderedProjects)}
-          existingDirectories={serverDirectories}
-          onAddProjects={(serverId, items) => {
-            revealAddedProjects(addServerProjects(serverId, items))
-          }}
-          onChooseFolder={(serverId) => {
-            setAddServerOpen(false)
-            setServerProjectStart({ serverId, mode: 'browse' })
-            setServerProjectOpen(true)
-          }}
-          onClose={() => setAddServerOpen(false)}
-        />
-      )}
-
-      {shellCommandModalOpen && (
-        <AddShellCommandProject
-          allTags={tags}
-          onEnsureTag={addTag}
-          onAdd={(name, command, tagIds) => {
-            addShellCommandProject(name, command, tagIds)
-            setShellCommandModalOpen(false)
-          }}
-          onCancel={() => setShellCommandModalOpen(false)}
-        />
-      )}
-
-      {newProjectOpen && (
-        <NewProjectModal
-          hosts={[
-            { id: 'local', label: 'This computer' },
-            ...pairedServers.filter(s => s.state === 'online').map(s => ({ id: s.id, label: serverName(s.id, serversState) }))
-          ]}
-          allTags={tags}
-          onEnsureTag={addTag}
-          onCreated={(host, name, directory, tagIds) => {
-            setNewProjectOpen(false)
-            let project: Project
-            if (host === 'local') {
-              project = addProject(name, directory, tagIds)
-            } else {
-              project = addServerProjects(host, [{ name, directory }])[0]
-              if (tagIds) setProjectTags(project.id, tagIds)
-            }
-            setProjectExpanded(project.id, true)
-            if (inboxActive) setPendingHome({ projectId: project.id })
-          }}
-          onCancel={() => setNewProjectOpen(false)}
-        />
-      )}
-
-      {newStreamProjectId && (() => {
-        const project = projects.find(p => p.id === newStreamProjectId)
-        if (!project) return null
-        return (
-          <NewStreamModal
-            project={project}
-            onCreate={(name, workspace, setupPending) => handleStreamCreated(project.id, name, workspace, setupPending)}
-            onClose={() => setNewStreamProjectId(null)}
-          />
-        )
-      })()}
-
-      {closeStreamFlow.dialog}
-      {closeTaskFlow.dialog}
-
-      {newTaskOpen && config && (
-        <NewTaskModal
-          projects={orderedProjects}
-          defaultProjectId={newTaskWhere?.projectId ?? selectedProjectId}
-          selectedTaskId={selectedTaskId}
-          defaultStreamId={newTaskWhere?.streamId ?? null}
-          pickProjectFirst={!newTaskWhere}
-          getProjectDir={getProjectDir}
-          config={config}
-          allTags={tags}
-          onEnsureTag={addTag}
-          onAddProject={addProject}
-          onCreate={handleComposedTask}
-          onClose={() => { setNewTaskOpen(false); setNewTaskWhere(null) }}
-        />
-      )}
-
+      {overlays}
       <div
         className="absolute right-0 top-0 bottom-0 w-[3px] cursor-col-resize hover:bg-accent active:bg-accent transition-colors duration-(--motion-fast) [-webkit-app-region:no-drag]"
         onMouseDown={resizeHandle.onMouseDown}

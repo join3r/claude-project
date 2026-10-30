@@ -1,6 +1,8 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { shouldSkipRendererCrashScreen } from './renderer-errors'
+import '@fontsource-variable/geist'
+import '@fontsource-variable/geist-mono'
 import './styles.css'
 import { startStatusPulse } from './statusPulse'
 

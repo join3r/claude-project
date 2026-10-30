@@ -541,6 +541,20 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
             </FormGroup>
 
             <FormGroup>
+              <SetBlock label="Window layout">
+                <SegCtl
+                  options={[
+                    { value: 'classic', label: 'Classic' },
+                    { value: 'desk', label: 'Desk (preview)' }
+                  ] as const}
+                  value={config.layout}
+                  onChange={(layout) => updateConfig({ layout })}
+                />
+                <HelperText>Desk is the redesign in progress: a mail-style inbox in place of the Projects tree, in a graphite palette. Classic is the sidebar you know.</HelperText>
+              </SetBlock>
+            </FormGroup>
+
+            <FormGroup>
               <SetBlock label="Inbox layout">
                 <SegCtl
                   options={[

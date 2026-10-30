@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { cloneWindowViewState } from '../../../shared/types'
-import type { FileBrowserTab, SidebarTab, WindowViewState } from '../../../shared/types'
+import type { DeskViewState, FileBrowserTab, SidebarTab, WindowViewState } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
 import {
   clampFileBrowserWidth,
@@ -36,7 +36,12 @@ export interface WindowLayoutActions {
   setSidebarWidth: (width: number) => void
   sidebarTab: SidebarTab
   setSidebarTab: (tab: SidebarTab) => void
+  /** The desk layout's column in this window: width, tab, scope. */
+  desk: DeskViewState
+  updateDesk: (patch: Partial<DeskViewState>) => void
 }
+
+const EMPTY_DESK: DeskViewState = {}
 
 /** Window chrome: sidebar expansion and widths, the file browser. */
 export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
@@ -91,6 +96,10 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
     updateWindowViewState(prev => ({ ...prev, sidebarTab: tab }))
   }, [updateWindowViewState])
 
+  const updateDesk = useCallback((patch: Partial<DeskViewState>) => {
+    updateWindowViewState(prev => ({ ...prev, desk: { ...prev.desk, ...patch } }))
+  }, [updateWindowViewState])
+
   const setFileBrowserOpen = useCallback((open: boolean) => {
     updateWindowViewState(prev => writeSidebarToCurrentTask(prev, { fileBrowserOpen: open }))
   }, [updateWindowViewState, writeSidebarToCurrentTask])
@@ -117,6 +126,8 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
     sidebarWidth: windowViewState.sidebarWidth,
     setSidebarWidth,
     sidebarTab: windowViewState.sidebarTab,
-    setSidebarTab
+    setSidebarTab,
+    desk: windowViewState.desk ?? EMPTY_DESK,
+    updateDesk
   }
 }
