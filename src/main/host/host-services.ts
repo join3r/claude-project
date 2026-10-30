@@ -39,7 +39,7 @@ import { SleepBlocker } from '../sleep-blocker'
 import type { ActivityUpdate } from '../../shared/agent-activity'
 import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from '../task-teardown'
 import { PaletteFrecencyStorage } from '../palette-frecency-storage'
-import { agentCommandOverride, resolveAgentCommand } from '../resolve-agent-command'
+import { agentCommandOverride, conptySpawnArgv, resolveAgentCommand } from '../resolve-agent-command'
 import { findGitBashExe, getShellEnv, resolveShellEnv, setPortableNodeDir } from '../shell-env'
 import { PI_EXTENSION_RESOURCE } from '../pi-extension-injector'
 import type { IpcRegistrar } from '../ipc/registrar'
@@ -78,6 +78,9 @@ import { registerTaskWorktreeHandlers } from '../ipc/task-worktrees'
 import { registerTaskLandingHandlers } from '../ipc/task-landing'
 import { registerPromptQueueHandlers } from '../ipc/prompt-queue'
 import { PromptQueueRunner } from '../prompt-queue-runner'
+import { AutopilotRunner } from '../autopilot'
+import { runCodexReview } from '../codex-review'
+import { findAgentCli } from '../agent-clis'
 import { featureUnavailableReason } from '../../shared/project-features'
 import { findTaskInProject, removeTaskFromProject, taskTabs } from '../../shared/streams'
 import { chatTabConfig } from '../../shared/chat-tab-config'
@@ -263,6 +266,8 @@ export class HostServices {
     () => this.mobileService?.hasPairedPhone() ?? false
   )
   private readonly promptQueue: PromptQueueRunner
+  /** Autopilot tasks, from their first turn to Done (desk redesign decision 7). */
+  private readonly autopilot: AutopilotRunner
   private readonly notesStore: RevisionStore<NotesRecord>
   private config: AppConfig
   private readonly env: HostEnv
@@ -354,6 +359,26 @@ export class HostServices {
         if (project && task) await this.archiveTaskFromMain(project, task, { task: closed, dir })
       },
       onState: (taskId, landing) => this.clients.broadcast('task-landing-state', taskId, landing),
+      onResumed: (projectId, taskId, intent, result) => this.autopilot.landingResumed(projectId, taskId, intent, result),
+      log: (message) => this.logDebug(message)
+    })
+    this.autopilot = new AutopilotRunner({
+      peek: () => this.projectsStore.peek(),
+      commit: (data) => { this.commitProjects(data) },
+      subscribeProjects: (listener) => this.projectsStore.subscribe(() => listener()),
+      statusOf: (tabId) => this.activityRegistry.getStatus(tabId),
+      activityOf: (tabId) => this.activityRegistry.getActivity(tabId),
+      subscribe: (listener) => this.activityRegistry.subscribe(listener),
+      runner: gitRunner,
+      review: (cwd, prompt) => runCodexReview(cwd, prompt, {
+        executable: () => findAgentCli(agentCommandOverride('codex', this.config).trim() || 'codex', getShellEnv()),
+        env: () => getShellEnv(),
+        wrap: (file, args) => conptySpawnArgv(file, args, { env: getShellEnv() }),
+        log: (message) => this.logDebug(message)
+      }),
+      sendToAgent: (project, task, tab, text) => this.sendToAgentTab(project, task, tab, text),
+      landing: this.taskLanding,
+      archiveTask: (project, task) => this.archiveTaskFromMain(project, task),
       log: (message) => this.logDebug(message)
     })
     this.promptQueue = new PromptQueueRunner({
@@ -486,6 +511,7 @@ export class HostServices {
     this.registerEventForwarders()
     void this.taskLanding.reconcile()
     this.promptQueue.start()
+    this.autopilot.start()
     this.missingFolders.start()
     this.taskDiffs.start()
     this.missingFoldersUnsub = this.projectsStore.subscribe(() => { void this.missingFolders.refresh() })
@@ -525,6 +551,7 @@ export class HostServices {
       },
       log,
       onPhoneSend: (phoneId, tabId) => push.phoneSent(phoneId, tabId),
+      onInterrupt: (tabId) => this.autopilot.interrupted(tabId),
       worktrees: { ensure: (projectId, taskId) => this.taskWorktrees.ensureTaskWorktree(projectId, taskId) },
       images: this.env.images,
       // The same folder check as the chat tab's /permissions IPC.
@@ -973,6 +1000,7 @@ export class HostServices {
     this.taskDiffs.stop()
     this.streamRunsUnsub?.()
     this.promptQueue.dispose()
+    this.autopilot.dispose()
     this.ptySessions.saveAllScrollback()
     this.ptySessions.killAll()
     this.notebookKernels.shutdownAll()
@@ -1008,6 +1036,32 @@ export class HostServices {
    * the phone's inbox and the sidebar's activity line read.
    */
   private handleHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
+    const event = typeof body.hook_event_name === 'string' ? body.hook_event_name : ''
+    const before = this.activityRegistry.getStatus(tabId)
+    const prior = this.activityRegistry.getActivity(tabId)
+    this.dispatchHook(endpoint, tabId, body)
+    this.logBackgroundFlip(tabId, event, before, (prior?.subagents ?? 0) + (prior?.background ?? 0) > 0)
+  }
+
+  /**
+   * Debug log for the "a sub-agent or background shell runs but the task shows as
+   * not working" reports: every subagent / background-level event, and any status
+   * flip while a subagent or background task is (or just was) live, with the counts
+   * behind it. Stop zeroes the subagent count, hence `hadLive`.
+   */
+  private logBackgroundFlip(tabId: string, event: string, before: TabStatusValue, hadLive: boolean): void {
+    const after = this.activityRegistry.getStatus(tabId)
+    const activity = this.activityRegistry.getActivity(tabId)
+    const subagents = activity?.subagents ?? 0
+    const background = activity?.background ?? 0
+    const lifecycle = event === 'SubagentStart' || event === 'SubagentStop' || event === 'DevtoolBackgroundTasks'
+    if (!lifecycle && (before === after || (!hadLive && subagents === 0 && background === 0))) return
+    const tasks = (activity?.backgroundTasks ?? []).map((task) => `${task.type}:${JSON.stringify(task.label)}`).join(',')
+    const turn = activity?.turnStartedAt !== undefined ? 'open' : 'ended'
+    this.logDebug(`agentBackground tab=${tabId} event=${event || 'unknown'} status=${before ?? 'idle'}->${after ?? 'idle'} turn=${turn} subagents=${subagents} background=${background}${tasks ? ` tasks=[${tasks}]` : ''}`)
+  }
+
+  private dispatchHook(endpoint: string, tabId: string, body: Record<string, unknown>): void {
     if (this.keyInterrupts.hook(tabId, body)) {
       this.activityRegistry.working(tabId)
       this.broadcastToAttachedClients(tabId, 'hook-working', tabId)
@@ -1167,6 +1221,7 @@ export class HostServices {
       hookInjector: () => this.hookInjector,
       codexSessionManager: this.codexSessionManager,
       chatManager: () => this.chatManager,
+      onChatInterrupt: (tabId) => this.autopilot.interrupted(tabId),
       ensureSshConnected: (projectId, sshConfig) => this.ensureSshConnected(projectId, sshConfig),
       cleanupRemoteHooks: (projectId, sshConfig, remoteDir, tabId) =>
         this.cleanupRemoteHooks(projectId, sshConfig, remoteDir, tabId),

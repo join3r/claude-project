@@ -1,8 +1,17 @@
 import { useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
 import { openEntityDialog } from '../../entityActions'
-import { closeArchivedView, getArchivedView } from '../archivedViewTarget'
-import type { DoneRowActions } from './DoneRows'
+import { closeArchivedView, getArchivedView, type ArchivedViewTarget } from '../archivedViewTarget'
+import type { ArchivedStream, ArchivedTask } from '../../../shared/archive'
+
+/** What an archived task or stream offers: open read-only, reopen, delete for good. */
+export interface DoneRowActions {
+  open: (target: ArchivedViewTarget) => void
+  reopenTask: (projectId: string, taskId: string) => void
+  reopenStream: (projectId: string, streamId: string) => void
+  deleteTask: (projectId: string, entry: ArchivedTask) => void
+  deleteStream: (projectId: string, entry: ArchivedStream) => void
+}
 
 type ReopenStream = ReturnType<typeof useApp>['reopenStream']
 
@@ -18,7 +27,7 @@ export async function reopenStreamWithSetup(reopenStream: ReopenStream, projectI
   else if (setup?.error) window.alert(`The worktree of the reopened stream is back, but its setup failed:\n\n${setup.error}`)
 }
 
-/** What archived rows do (the tree's Done rows, Project Home): open read-only, reopen, delete for good (after a confirm). */
+/** What archived rows do (a lane's Done list, the read-only view): open read-only, reopen, delete for good (after a confirm). */
 export function useDoneRowActions(): DoneRowActions {
   const { showArchived, reopenTask, reopenStream, deleteArchived } = useApp()
   return useMemo(() => ({

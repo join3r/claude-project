@@ -61,7 +61,8 @@ export interface ReopenedStreamSetup {
 
 export interface TasksActions {
   /** A task in stream `streamId` (`main` when absent), selected in this window. */
-  addTask: (projectId: string, name: string, initialTabs?: Tab[], streamId?: string | null) => Task
+  /** `extra`: what the task is born with besides its tabs (Autopilot). */
+  addTask: (projectId: string, name: string, initialTabs?: Tab[], streamId?: string | null, extra?: Pick<Task, 'autopilot'>) => Task
   addTaskInDirectory: (directory: string, name: string, initialTabs?: Tab[]) => Task
   /** A new stream at the end of the project's list: a worktree's, or the project folder's. */
   addStream: (projectId: string, name: string, workspace?: WorkspaceConfig) => Stream
@@ -149,8 +150,8 @@ export function useTasks(
   // `initialTabs` exists so a task can be born with its tabs: calling `addTab` right
   // after this would read a `projectsRef` that hasn't seen the task yet and clobber
   // the view state written below.
-  const addTask = useCallback((projectId: string, name: string, initialTabs: Tab[] = [], streamId?: string | null) => {
-    const task = makeTask(name, initialTabs)
+  const addTask = useCallback((projectId: string, name: string, initialTabs: Tab[] = [], streamId?: string | null, extra?: Pick<Task, 'autopilot'>) => {
+    const task: Task = { ...makeTask(name, initialTabs), ...(extra?.autopilot ? { autopilot: extra.autopilot } : {}) }
     mutateProjects(prev => appendTaskToProject(prev, projectId, task, streamId))
     updateWindowViewState(prev => selectNewTaskView(prev, projectId, task))
     return task

@@ -12,7 +12,7 @@ import type {
   GitStatusResult
 } from '../../shared/types'
 import { EMPTY_BRANCH_GRAPH, readBranchGraph } from '../git-branch-graph'
-import { parseNumstat } from '../git-diff-summary'
+import { countNulPaths, countNumstatFiles, parseNumstat } from '../git-diff-summary'
 import { nestedGitRepos, repoForPath, toProjectEntries, toRepoPath } from '../git-repos'
 import { GIT_STATUS_ARGS, parseGitStatusZ } from '../git-status-parse'
 import { findGitBashExe } from '../shell-env'
@@ -114,13 +114,26 @@ async function readUntrackedSummary(cwd: string, opts: string[]): Promise<GitDif
   }
 }
 
+/** How many untracked (not ignored) files there are. */
+async function countUntrackedFiles(cwd: string, opts: string[]): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync('git', [...opts, 'ls-files', '--others', '--exclude-standard', '-z'], { cwd, maxBuffer: 64 * 1024 * 1024 })
+    return countNulPaths(stdout)
+  } catch {
+    return 0
+  }
+}
+
 /**
  * Lines added and removed in the working tree, untracked files included, against
- * `against` (a commit; default HEAD).
+ * `against` (a commit; default HEAD). `withFiles` also counts the files changed.
  */
-async function readGitDiffSummary(cwd: string, nested: boolean, against = 'HEAD'): Promise<GitDiffSummary> {
+async function readGitDiffSummary(cwd: string, nested: boolean, against = 'HEAD', withFiles = false): Promise<GitDiffSummary> {
   const opts = nested ? NESTED_READ_OPTS : []
-  const untrackedSummary = await readUntrackedSummary(cwd, opts)
+  const [untrackedSummary, untrackedFiles] = await Promise.all([
+    readUntrackedSummary(cwd, opts),
+    withFiles ? countUntrackedFiles(cwd, opts) : Promise.resolve(0)
+  ])
 
   try {
     const diffArgs = await hasHeadCommit(cwd, opts)
@@ -134,15 +147,16 @@ async function readGitDiffSummary(cwd: string, nested: boolean, against = 'HEAD'
     const trackedSummary = parseNumstat(stdout)
     return {
       added: trackedSummary.added + untrackedSummary.added,
-      deleted: trackedSummary.deleted + untrackedSummary.deleted
+      deleted: trackedSummary.deleted + untrackedSummary.deleted,
+      ...(withFiles ? { files: countNumstatFiles(stdout) + untrackedFiles } : {})
     }
   } catch {
-    return untrackedSummary
+    return withFiles ? { ...untrackedSummary, files: untrackedFiles } : untrackedSummary
   }
 }
 
 /**
- * A task's lines added and removed, for the Inbox. With `baseBranch` (the task's
+ * A task's lines added and removed, and files changed, for the Inbox and the desk's task header. With `baseBranch` (the task's
  * own worktree) everything since it branched off: its commits plus what is not
  * committed yet. Without it, only what is not committed. Null outside a git repo.
  */
@@ -159,7 +173,7 @@ export async function readTaskDiffSummary(cwd: string, baseBranch?: string): Pro
       against = stdout.trim() || 'HEAD'
     } catch { /* the base branch is gone: count what is not committed */ }
   }
-  return readGitDiffSummary(cwd, false, against)
+  return readGitDiffSummary(cwd, false, against, true)
 }
 
 /** One repo's status and line summary, or null when `cwd` is not inside a git repo. */

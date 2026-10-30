@@ -20,6 +20,16 @@ export function parseNumstat(stdout: string): GitDiffSummary {
   return summary
 }
 
+/** Files in git numstat output: one line each, binary files and renames included. */
+export function countNumstatFiles(stdout: string): number {
+  return stdout.split('\n').filter(line => line.includes('\t')).length
+}
+
+/** Paths in NUL-separated output (`git ls-files -z`). */
+export function countNulPaths(stdout: string): number {
+  return stdout.split('\0').filter(Boolean).length
+}
+
 export function countTextLines(content: string): number {
   if (!content) return 0
 

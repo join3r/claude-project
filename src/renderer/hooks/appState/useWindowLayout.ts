@@ -1,28 +1,11 @@
 import { useCallback } from 'react'
 import { cloneWindowViewState } from '../../../shared/types'
-import type { FileBrowserTab, SidebarTab, WindowViewState } from '../../../shared/types'
+import type { DeskViewState, FileBrowserTab, WindowViewState } from '../../../shared/types'
 import type { AppStateCore } from './useAppStateCore'
-import {
-  clampFileBrowserWidth,
-  clampSidebarWidth,
-  setProjectExpandedView,
-  toggleId,
-  writeSidebarToTask,
-  type SidebarPatch
-} from './viewState'
+import { clampFileBrowserWidth, writeSidebarToTask, type SidebarPatch } from './viewState'
 import { findTaskInProject } from '../../../shared/streams'
 
-const EMPTY_EXPANSION: Record<string, boolean> = {}
-
 export interface WindowLayoutActions {
-  expandedProjectIds: string[]
-  toggleProjectExpansion: (projectId: string) => void
-  setProjectExpanded: (projectId: string, expanded: boolean) => void
-  /** Streams opened or closed by hand in this window; see `WindowViewState.streamExpansion`. */
-  streamExpansion: Record<string, boolean>
-  setStreamExpanded: (streamId: string, expanded: boolean) => void
-  /** Forget every hand-set stream, so all follow the auto-collapse setting again. */
-  clearStreamExpansion: () => void
   /** A detached copy of this window's view state, for handing to a new window. */
   exportWindowViewState: () => WindowViewState
   fileBrowserOpen: boolean
@@ -32,39 +15,16 @@ export interface WindowLayoutActions {
   setFileBrowserOpen: (open: boolean) => void
   setFileBrowserWidth: (width: number) => void
   setFileBrowserActiveTab: (tab: FileBrowserTab) => void
-  sidebarWidth: number
-  setSidebarWidth: (width: number) => void
-  sidebarTab: SidebarTab
-  setSidebarTab: (tab: SidebarTab) => void
+  /** The desk's column in this window: width, tab, scope. */
+  desk: DeskViewState
+  updateDesk: (patch: Partial<DeskViewState>) => void
 }
 
-/** Window chrome: sidebar expansion and widths, the file browser. */
+const EMPTY_DESK: DeskViewState = {}
+
+/** Window chrome: the inbox column's state, the file browser. */
 export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
   const { windowViewState, windowViewStateRef, projectsRef, updateWindowViewState } = core
-
-  const toggleProjectExpansion = useCallback((projectId: string) => {
-    updateWindowViewState(prev => ({ ...prev, expandedProjectIds: toggleId(prev.expandedProjectIds, projectId) }))
-  }, [updateWindowViewState])
-
-  const setProjectExpanded = useCallback((projectId: string, expanded: boolean) => {
-    updateWindowViewState(prev => setProjectExpandedView(prev, projectId, expanded))
-  }, [updateWindowViewState])
-
-  const setStreamExpanded = useCallback((streamId: string, expanded: boolean) => {
-    updateWindowViewState(prev => (
-      prev.streamExpansion?.[streamId] === expanded
-        ? prev
-        : { ...prev, streamExpansion: { ...prev.streamExpansion, [streamId]: expanded } }
-    ))
-  }, [updateWindowViewState])
-
-  const clearStreamExpansion = useCallback(() => {
-    updateWindowViewState(prev => {
-      if (!prev.streamExpansion) return prev
-      const { streamExpansion: _cleared, ...rest } = prev
-      return rest
-    })
-  }, [updateWindowViewState])
 
   const exportWindowViewState = useCallback(() => cloneWindowViewState(windowViewStateRef.current), [])
 
@@ -83,12 +43,8 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
     updateWindowViewState(prev => ({ ...prev, fileBrowserWidth: clampFileBrowserWidth(width) }))
   }, [updateWindowViewState])
 
-  const setSidebarWidth = useCallback((width: number) => {
-    updateWindowViewState(prev => ({ ...prev, sidebarWidth: clampSidebarWidth(width) }))
-  }, [updateWindowViewState])
-
-  const setSidebarTab = useCallback((tab: SidebarTab) => {
-    updateWindowViewState(prev => ({ ...prev, sidebarTab: tab }))
+  const updateDesk = useCallback((patch: Partial<DeskViewState>) => {
+    updateWindowViewState(prev => ({ ...prev, desk: { ...prev.desk, ...patch } }))
   }, [updateWindowViewState])
 
   const setFileBrowserOpen = useCallback((open: boolean) => {
@@ -100,12 +56,6 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
   }, [updateWindowViewState, writeSidebarToCurrentTask])
 
   return {
-    expandedProjectIds: windowViewState.expandedProjectIds,
-    toggleProjectExpansion,
-    setProjectExpanded,
-    streamExpansion: windowViewState.streamExpansion ?? EMPTY_EXPANSION,
-    setStreamExpanded,
-    clearStreamExpansion,
     exportWindowViewState,
     fileBrowserOpen: windowViewState.fileBrowserOpen,
     fileBrowserWidth: windowViewState.fileBrowserWidth,
@@ -114,9 +64,7 @@ export function useWindowLayout(core: AppStateCore): WindowLayoutActions {
     setFileBrowserOpen,
     setFileBrowserWidth,
     setFileBrowserActiveTab,
-    sidebarWidth: windowViewState.sidebarWidth,
-    setSidebarWidth,
-    sidebarTab: windowViewState.sidebarTab,
-    setSidebarTab
+    desk: windowViewState.desk ?? EMPTY_DESK,
+    updateDesk
   }
 }

@@ -21,6 +21,8 @@ export interface AgentActivity {
   lastPrompt?: string
   /** First line of Claude's final reply for the last finished turn. */
   lastMessage?: string
+  /** The start of that reply as one paragraph: the desk inbox's two-line preview. */
+  lastAnswer?: string
   /** The main-thread tool call in flight. Subagent tools are only counted. */
   tool?: { id?: string; name: string; label: string; startedAt: number }
   /** Why the agent is blocked on you, when it is. */
@@ -32,14 +34,26 @@ export interface AgentActivity {
   }
   subagents: number
   /**
-   * Live background agents and workflows — the chat tab's `background_tasks_changed`
-   * level. Outlives Stop: they keep running after the turn. Terminal tabs never set it.
+   * Live background tasks (agents, workflows, shells) — the chat tab's
+   * `background_tasks_changed` level. Outlives Stop: they keep running after the
+   * turn. Terminal tabs never set it.
    */
   background?: number
+  /** Those tasks, oldest first; `startedAt` is when this activity first saw each. */
+  backgroundTasks?: BackgroundTask[]
   compacting: boolean
   /** When the current turn started; undefined between turns. */
   turnStartedAt?: number
   updatedAt: number
+}
+
+export interface BackgroundTask {
+  id: string
+  /** The CLI's task_type: `local_bash`, `local_agent`, `local_workflow`, … */
+  type: string
+  /** One short line: the task's description, or what kind of task it is. */
+  label: string
+  startedAt: number
 }
 
 export interface ActivityUpdate {
@@ -57,6 +71,28 @@ function str(value: unknown): string | undefined {
 }
 
 /** First non-empty line, collapsed and truncated — sidebar rows are one line tall. */
+const ANSWER_LIMIT = 320
+
+/**
+ * The opening of a reply flattened to one paragraph: Markdown marks, headings and
+ * list bullets stripped, whitespace collapsed. Code fences are dropped whole.
+ */
+export function answerPreview(text: string | undefined, limit = ANSWER_LIMIT): string | undefined {
+  if (!text) return undefined
+  const prose = text
+    .replace(/```[\s\S]*?(```|$)/g, ' ')
+    .split('\n')
+    .map((l) => l.trim().replace(/^#+\s*/, '').replace(/^([-*+]|\d+\.)\s+/, '').replace(/^>\s?/, ''))
+    .filter((l) => l.length > 0 && !/^\|?[\s:|-]+\|?$/.test(l))
+    .join(' ')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!prose) return undefined
+  return prose.length > limit ? `${prose.slice(0, limit - 1)}…` : prose
+}
+
 export function firstLine(text: string | undefined, limit = TEXT_LIMIT): string | undefined {
   if (!text) return undefined
   const line = text.split('\n').map((l) => l.trim()).find((l) => l.length > 0)
@@ -156,6 +192,61 @@ const BLOCKING_TOOLS: Record<string, 'question' | 'plan'> = {
   ExitPlanMode: 'plan'
 }
 
+const BACKGROUND_KIND_LABELS: Record<string, string> = {
+  local_bash: 'shell',
+  local_agent: 'agent',
+  remote_agent: 'agent',
+  in_process_teammate: 'agent',
+  local_workflow: 'workflow'
+}
+
+/** The level's tasks with their first-seen time kept across levels. Bad entries are skipped. */
+function foldBackgroundTasks(prev: BackgroundTask[] | undefined, raw: unknown, now: number): BackgroundTask[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Map((prev ?? []).map((task) => [task.id, task]))
+  const out: BackgroundTask[] = []
+  for (const entry of raw) {
+    const e = entry as { id?: unknown; type?: unknown; description?: unknown } | null
+    const id = str(e?.id)
+    if (!id) continue
+    const type = str(e?.type) ?? 'unknown'
+    const label = firstLine(str(e?.description), 60) ?? BACKGROUND_KIND_LABELS[type] ?? 'task'
+    out.push({ id, type, label, startedAt: seen.get(id)?.startedAt ?? now })
+  }
+  return out.sort((a, b) => a.startedAt - b.startedAt)
+}
+
+function sameBackgroundTasks(a: BackgroundTask[] | undefined, b: BackgroundTask[]): boolean {
+  const left = a ?? []
+  return left.length === b.length && left.every((task, i) => task.id === b[i].id && task.label === b[i].label)
+}
+
+/**
+ * The Background state (redesign decision 6): the turn has ended but work it
+ * started still runs — a build, a test run, a subagent, a dev server that never
+ * ends. Not "working" in the sense of a turn in flight, and not idle either.
+ * Null when there is a turn in flight, a wait on you, or nothing in the background.
+ */
+export interface BackgroundWork {
+  tasks: BackgroundTask[]
+  /** "xcodebuild", or "xcodebuild +2" with more than one. */
+  label: string
+  /** When the oldest of them started. */
+  since: number
+}
+
+export function backgroundWork(activity: AgentActivity | undefined): BackgroundWork | null {
+  if (!activity || activity.turnStartedAt !== undefined || activity.waiting) return null
+  const count = activity.background ?? 0
+  if (count === 0) return null
+  const tasks = activity.backgroundTasks ?? []
+  const first = tasks[0]
+  const label = first
+    ? (count > 1 ? `${first.label} +${count - 1}` : first.label)
+    : (count === 1 ? '1 task' : `${count} tasks`)
+  return { tasks, label, since: first?.startedAt ?? activity.updatedAt }
+}
+
 export function emptyActivity(now: number): AgentActivity {
   return { subagents: 0, compacting: false, updatedAt: now }
 }
@@ -186,6 +277,7 @@ export function reduceAgentActivity(
       if (source === 'clear' || source === 'startup') {
         next.lastPrompt = undefined
         next.lastMessage = undefined
+        next.lastAnswer = undefined
       }
       next.tool = undefined
       next.waiting = undefined
@@ -198,6 +290,7 @@ export function reduceAgentActivity(
     case 'UserPromptSubmit':
       next.lastPrompt = promptLine(str(body.prompt)) ?? next.lastPrompt
       next.lastMessage = undefined
+      next.lastAnswer = undefined
       next.tool = undefined
       next.waiting = undefined
       next.subagents = 0
@@ -282,11 +375,13 @@ export function reduceAgentActivity(
     case 'DevtoolBackgroundTasks': {
       const count = typeof body.count === 'number' && body.count > 0 ? Math.floor(body.count) : 0
       const before = base.background ?? 0
-      if (count === before) return { activity: base, statusEvent: null, changed: false }
+      const tasks = foldBackgroundTasks(base.backgroundTasks, body.tasks, now)
+      if (count === before && sameBackgroundTasks(base.backgroundTasks, tasks)) return { activity: base, statusEvent: null, changed: false }
       next.background = count > 0 ? count : undefined
+      next.backgroundTasks = count > 0 && tasks.length > 0 ? tasks : undefined
       if (next.turnStartedAt === undefined) {
-        if (before === 0) statusEvent = 'background-started'
-        else if (count === 0) statusEvent = 'background-done'
+        if (before === 0 && count > 0) statusEvent = 'background-started'
+        else if (count === 0 && before > 0) statusEvent = 'background-done'
       }
       break
     }
@@ -309,6 +404,7 @@ export function reduceAgentActivity(
 
     case 'Stop':
       next.lastMessage = firstLine(str(body.last_assistant_message)) ?? next.lastMessage
+      next.lastAnswer = answerPreview(str(body.last_assistant_message)) ?? next.lastAnswer
       next.tool = undefined
       next.waiting = undefined
       next.subagents = 0
@@ -319,6 +415,7 @@ export function reduceAgentActivity(
     case 'StopFailure': {
       const error = str(body.error) ?? 'unknown'
       next.lastMessage = firstLine(str(body.last_assistant_message)) ?? next.lastMessage
+      next.lastAnswer = answerPreview(str(body.last_assistant_message)) ?? next.lastAnswer
       next.tool = undefined
       next.subagents = 0
       next.compacting = false
@@ -378,10 +475,8 @@ export function describeActivity(
     const parts: string[] = []
     if (activity.tool) parts.push(activity.tool.label)
     if (activity.subagents > 0) parts.push(activity.subagents === 1 ? '1 agent' : `${activity.subagents} agents`)
-    const background = activity.background ?? 0
-    if (background > 0 && activity.turnStartedAt === undefined) {
-      parts.push(background === 1 ? '1 background task' : `${background} background tasks`)
-    }
+    const background = backgroundWork(activity)
+    if (background) parts.push(`Background · ${background.label}`)
     if (parts.length > 0) return parts.join(' · ')
     return activity.lastPrompt ? `Thinking · ${activity.lastPrompt}` : 'Thinking'
   }

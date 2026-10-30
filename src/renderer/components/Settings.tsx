@@ -12,6 +12,7 @@ import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, S
 import ExternalIdesSettings from './ExternalIdesSettings'
 import MobileSettings from './settings/MobileSettings'
 import ServersSettings from './settings/ServersSettings'
+import HostsSettings from './settings/HostsSettings'
 import RelaySettings from './settings/RelaySettings'
 import UpdatesSettings from './settings/UpdatesSettings'
 
@@ -54,22 +55,23 @@ function parseNumberInput(value: string, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, parsed))
 }
 
-export type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'mobile' | 'servers' | 'relay' | 'updates'
+export type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'mobile' | 'hosts' | 'servers' | 'relay' | 'updates'
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'editor', label: 'Editor & Diff' },
   { id: 'ai', label: 'AI Tools' },
-  { id: 'sidebar', label: 'Sidebar' },
+  { id: 'sidebar', label: 'Inbox' },
   { id: 'mobile', label: 'Mobile' },
+  { id: 'hosts', label: 'Hosts' },
   { id: 'servers', label: 'Servers' },
   { id: 'relay', label: 'Relay' },
   { id: 'updates', label: 'Updates' }
 ]
 
 export default function Settings({ onClose, initialTab }: Props): React.ReactElement {
-  const { config, updateConfig, clearStreamExpansion } = useApp()
+  const { config, updateConfig } = useApp()
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => tabs.find(t => t.id === initialTab)?.id ?? 'appearance')
 
   if (!config) return <div />
@@ -490,6 +492,9 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
       case 'mobile':
         return <MobileSettings onOpenRelay={() => setActiveTab('relay')} />
 
+      case 'hosts':
+        return <HostsSettings onOpenServers={() => setActiveTab('servers')} />
+
       case 'servers':
         return <ServersSettings onOpenRelay={() => setActiveTab('relay')} />
 
@@ -502,18 +507,18 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
       case 'sidebar':
         return (
           <>
-            <GrpHead>Sidebar</GrpHead>
+            <GrpHead>Inbox</GrpHead>
             <FormGroup>
-              <SetBlock label="Sidebar opens on">
+              <SetBlock label="Group the list">
                 <SegCtl
                   options={[
-                    { value: 'projects', label: 'Projects' },
-                    { value: 'inbox', label: 'Inbox' }
+                    { value: 'flat', label: 'By status' },
+                    { value: 'grouped', label: 'By project' }
                   ] as const}
-                  value={config.defaultSidebarTab}
-                  onChange={(defaultSidebarTab) => updateConfig({ defaultSidebarTab })}
+                  value={config.inboxLayout}
+                  onChange={(inboxLayout) => updateConfig({ inboxLayout })}
                 />
-                <HelperText>Applies to new windows; each window remembers which one you last picked.</HelperText>
+                <HelperText>By project puts each tab's tasks under a header per project, pinned projects first. The button beside the tabs switches it too.</HelperText>
               </SetBlock>
             </FormGroup>
 
@@ -536,42 +541,14 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                     Browse
                   </LinkBtn>
                 </div>
-                <HelperText>+ → New project… makes a folder here and runs git init in it.</HelperText>
-              </SetBlock>
-            </FormGroup>
-
-            <FormGroup>
-              <SetBlock label="Inbox layout">
-                <SegCtl
-                  options={[
-                    { value: 'flat', label: 'By status' },
-                    { value: 'grouped', label: 'By project' }
-                  ] as const}
-                  value={config.inboxLayout}
-                  onChange={(inboxLayout) => updateConfig({ inboxLayout })}
-                />
-                <HelperText>By project puts open tasks under a header per project, pinned projects first, each row naming its stream; Snoozed stays folded at the bottom. The button in the Inbox header switches it too.</HelperText>
+                <HelperText>New project… makes a folder here and runs git init in it.</HelperText>
               </SetBlock>
             </FormGroup>
 
             <Group>
               <GroupRow
-                label="Collapse quiet streams"
-                sub="Streams where no task needs you, runs or has news fold up. A chevron click overrides it."
-                trailing={
-                  <Switch
-                    checked={config.autoCollapseQuietStreams}
-                    onChange={(autoCollapseQuietStreams) => {
-                      // A fresh rule: hand-opened and hand-closed streams follow it again.
-                      updateConfig({ autoCollapseQuietStreams })
-                      clearStreamExpansion()
-                    }}
-                  />
-                }
-              />
-              <GroupRow
                 label="Show project icons"
-                sub="Tiles and icons beside project names in the sidebar, Inbox and task header."
+                sub="A project's dashboard icon in place of its initials, in the task header."
                 trailing={
                   <Switch
                     checked={config.showProjectIcons}
@@ -579,80 +556,14 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                   />
                 }
               />
-              <GroupRow
-                label="Highlight recently focused tasks"
-                trailing={
-                  <Switch
-                    checked={config.taskRecencyHighlight.enabled}
-                    onChange={(enabled) => updateConfig({
-                      taskRecencyHighlight: { ...config.taskRecencyHighlight, enabled }
-                    })}
-                  />
-                }
-              />
             </Group>
-
-            <FormGroup>
-              <SetBlock label="Highlight mode">
-                <SegCtl
-                  options={[
-                    { value: 'rank', label: 'Rank' },
-                    { value: 'time', label: 'Time decay' }
-                  ] as const}
-                  value={config.taskRecencyHighlight.mode}
-                  disabled={!config.taskRecencyHighlight.enabled}
-                  onChange={(mode) => updateConfig({
-                    taskRecencyHighlight: { ...config.taskRecencyHighlight, mode }
-                  })}
-                />
-              </SetBlock>
-              <SetBlock
-                label={config.taskRecencyHighlight.mode === 'rank' ? 'Show top N tasks' : 'Fade after N minutes'}
-                divider
-              >
-                <Field
-                  type="number"
-                  className="w-24"
-                  disabled={!config.taskRecencyHighlight.enabled}
-                  min={config.taskRecencyHighlight.mode === 'rank' ? 1 : 5}
-                  max={config.taskRecencyHighlight.mode === 'rank' ? 20 : 10080}
-                  value={
-                    config.taskRecencyHighlight.mode === 'rank'
-                      ? config.taskRecencyHighlight.rankCount
-                      : config.taskRecencyHighlight.timeWindowMinutes
-                  }
-                  onChange={(e) => {
-                    if (config.taskRecencyHighlight.mode === 'rank') {
-                      updateConfig({
-                        taskRecencyHighlight: {
-                          ...config.taskRecencyHighlight,
-                          rankCount: parseNumberInput(e.target.value, 5, 1, 20)
-                        }
-                      })
-                    } else {
-                      updateConfig({
-                        taskRecencyHighlight: {
-                          ...config.taskRecencyHighlight,
-                          timeWindowMinutes: parseNumberInput(e.target.value, 1440, 5, 10080)
-                        }
-                      })
-                    }
-                  }}
-                />
-                <HelperText>
-                  {config.taskRecencyHighlight.mode === 'rank'
-                    ? 'The most recently focused tasks stay highlighted.'
-                    : 'Highlights fade as tasks go untouched.'}
-                </HelperText>
-              </SetBlock>
-            </FormGroup>
           </>
         )
     }
   }
 
   return (
-    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50">
+    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" data-modal>
       <div className="w-[680px] max-w-[90vw] h-[520px] max-h-[85vh] rounded-xl border border-border bg-surface shadow-pop flex flex-col overflow-hidden">
         {/* header */}
         <div className="flex items-center justify-between px-4 h-(--ctl-h-lg) mt-1 shrink-0">

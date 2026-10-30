@@ -6,11 +6,16 @@ import { createMainStream, type Project } from '../src/shared/types'
 
 void React
 
+/** The app state ProjectSettings reads; the host tests swap in saved hosts and projects. */
+const app: { config: { hosts?: unknown[] }; projects: Project[] } = { config: {}, projects: [] }
+
 vi.mock('../src/renderer/context/AppContext', () => ({
   useApp: () => ({
     effectiveTheme: 'dark' as const,
     tags: [],
-    addTag: () => ''
+    addTag: () => '',
+    config: app.config,
+    projects: app.projects
   })
 }))
 
@@ -52,6 +57,32 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  app.config = {}
+  app.projects = []
+})
+
+describe('ProjectSettings host field', () => {
+  it('lets a custom-shell project switch to another shell and saves its command', async () => {
+    const project = localProject({ directory: '', shellCommand: { command: 'bash -l' } })
+    app.config = { hosts: [{ kind: 'shell', name: 'Other', command: 'zsh -l' }] }
+    app.projects = [project]
+    const onSave = vi.fn()
+    render(<ProjectSettings project={project} onSave={onSave} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('combobox', { name: 'Host' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Other' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ shellCommand: { command: 'zsh -l' } }))
+  })
+
+  it('keeps a local project on this Mac', () => {
+    const project = localProject()
+    app.config = {}
+    app.projects = [project]
+    render(<ProjectSettings project={project} onSave={vi.fn()} onClose={vi.fn()} />)
+    const host = screen.getByRole('combobox', { name: 'Host' }) as HTMLButtonElement
+    expect(host.textContent).toContain('This Mac')
+    expect(host.disabled).toBe(true)
+  })
 })
 
 describe('ProjectSettings conda picker', () => {

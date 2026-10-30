@@ -152,7 +152,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       // the snapshot: the hook events that set it went by before it was listening.
       const snapshot = getChatState(tabId)
       if (snapshot.pending.length > 0) applyStatus('hook-needs-input')
-      else if (snapshot.busy || Object.values(snapshot.tasks).some((task) => task.background && task.status === 'running' && (task.kind === 'subagent' || task.kind === 'workflow'))) {
+      else if (snapshot.busy || Object.values(snapshot.tasks).some((task) => task.background && task.status === 'running')) {
         applyStatus('hook-working')
       }
       // Opened from an empty task's prompt box: apply its choices, then send.
@@ -314,6 +314,11 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
     if (!Object.values(all).some((task) => task.nested)) return all
     return Object.fromEntries(Object.entries(all).filter(([, task]) => !task.nested))
   }, [state.tasks])
+  // Desk layout: work the agent left running past its turn keeps that turn's card open.
+  const backgroundTasks = useMemo(
+    () => Object.values(tasks).filter((task) => task.background && task.status === 'running'),
+    [tasks]
+  )
   const taskTools = useMemo(() => {
     const ids = new Set<string>()
     for (const task of Object.values(tasks)) {
@@ -384,6 +389,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
                 onOpenLink={openLink}
                 taskTools={taskTools}
                 focus={focus}
+                folded
+                backgroundTasks={backgroundTasks}
+                onStopTask={stopTask}
               />
             )}
           </div>

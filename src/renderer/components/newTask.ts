@@ -32,6 +32,8 @@ export interface NewTaskSubmission {
   start?: { agent: PromptBoxAgent; prompt: PendingPrompt }
   /** A terminal task, with the command to type into it once it starts (if any). */
   terminal?: { command?: string }
+  /** Autopilot (desk only, a Claude chat start): main takes the task to Done by itself. */
+  autopilot?: { review: boolean }
 }
 
 export interface NewTaskDraft {

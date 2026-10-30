@@ -252,11 +252,12 @@ export class TaskLandingManager {
    * Lands the task into its stream. `keepWorktree` is the Land action: the
    * worktree stays, on the stream's new tip. Otherwise (closing) the task's
    * tabs stop, the worktree and branch go and the task is archived, also when
-   * there was nothing to land.
+   * there was nothing to land. `summary` (Autopilot's) opens the squashed
+   * commit's body, above the list of the commits it took in.
    */
-  landTask(projectId: string, taskId: string, options: { keepWorktree?: boolean } = {}): Promise<TaskLandingResult> {
+  landTask(projectId: string, taskId: string, options: { keepWorktree?: boolean; summary?: string } = {}): Promise<TaskLandingResult> {
     const intent: TaskLandingIntent = options.keepWorktree ? 'land' : 'close'
-    return this.enqueue(projectId, taskId, at => this.land(at, intent))
+    return this.enqueue(projectId, taskId, at => this.land(at, intent, options.summary?.trim() || undefined))
   }
 
   /** Rebases the task onto the stream's tip without landing (its commits stay as they are). */
@@ -417,7 +418,7 @@ export class TaskLandingManager {
 
   // ---- the steps -------------------------------------------------------------------
 
-  private async land(at: Located, intent: TaskLandingIntent): Promise<TaskLandingResult> {
+  private async land(at: Located, intent: TaskLandingIntent, summary?: string): Promise<TaskLandingResult> {
     if (this.agentWorking(at.task)) return { status: 'working' }
     this.stopWatching(at.task.id)
     const root = at.own.worktreePath
@@ -426,7 +427,7 @@ export class TaskLandingManager {
     this.setLanding(at.task.id, { state: 'landing', intent })
     await this.autoCommit(at)
     const base = (await this.git(root, ['merge-base', `refs/heads/${at.target.branchName}`, 'HEAD'])).trim()
-    if (!(await this.squash(at, base))) {
+    if (!(await this.squash(at, base, summary))) {
       this.deps.log?.(`task landing task=${at.task.id} nothing to land`)
       if (intent === 'close') await this.remove(at, { keepBranch: false, archive: true })
       else this.setLanding(at.task.id, null)
@@ -537,9 +538,9 @@ export class TaskLandingManager {
    * The task's commits since `base` as one: subject = the task's name, body =
    * the squashed commits' subjects. A commit already named after the task (an
    * auto-commit, an earlier squash) adds its own bullets instead. False when
-   * there is nothing to land.
+   * there is nothing to land. `summary` goes first in the body.
    */
-  private async squash(at: Located, base: string): Promise<boolean> {
+  private async squash(at: Located, base: string, summary?: string): Promise<boolean> {
     const root = at.own.worktreePath
     const log = await this.git(root, ['log', '--reverse', '--format=%s%x1f%b%x1e', `${base}..HEAD`])
     const commits = log.split('\x1e')
@@ -551,14 +552,15 @@ export class TaskLandingManager {
       })
     if (commits.length === 0) return false
     const subject = commitSubject(at.task)
-    if (commits.length === 1 && commits[0].subject === subject) return true
+    if (commits.length === 1 && commits[0].subject === subject && !summary) return true
     const bullets = commits.flatMap(commit => commit.subject === subject
       ? commit.body.split('\n').filter(line => line.startsWith('- '))
       : [`- ${commit.subject}`])
     await this.git(root, ['reset', '-q', '--soft', base])
     // The commits undid each other.
     if (!(await this.hasStaged(root))) return false
-    await this.commit(root, subject, bullets.join('\n'))
+    const body = [summary, bullets.join('\n')].filter(Boolean).join('\n\n')
+    await this.commit(root, subject, body || undefined)
     return true
   }
 

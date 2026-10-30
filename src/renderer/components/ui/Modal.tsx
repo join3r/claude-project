@@ -13,7 +13,7 @@ interface Props {
 /** Standard modal shell: dim backdrop on the modal z-rung, rounded card with pop shadow. */
 export default function Modal({ title, onClose, width = 'w-[440px]', footer, children }: Props): React.ReactElement {
   return (
-    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" onClick={onClose} data-modal>
       <div
         className={`${width} max-w-[90vw] max-h-[85vh] rounded-xl border border-border bg-surface shadow-pop flex flex-col overflow-hidden`}
         onClick={(e) => e.stopPropagation()}

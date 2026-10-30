@@ -13,6 +13,7 @@ import {
   reconcileWindowViewState,
   type PersistedWindowState,
   type Project,
+  type DeskViewState,
   type SidebarTab,
   type Tag,
   type TaskViewState,
@@ -438,7 +439,8 @@ export class Storage {
         sidebarWidth: isFiniteNumber(value.sidebarWidth) ? value.sidebarWidth : 240,
         sidebarTab: (value.sidebarTab === 'inbox' || value.sidebarTab === 'projects')
           ? value.sidebarTab
-          : defaultSidebarTab
+          : defaultSidebarTab,
+        ...(isRecord(value.desk) ? { desk: value.desk as DeskViewState } : {})
       },
       projects
     )

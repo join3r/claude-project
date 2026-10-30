@@ -91,6 +91,11 @@ export interface TaskInboxState {
   snoozeUntilAttention?: boolean
   /** Manual "mark unread"; cleared on the next visit. */
   forcedUnread?: boolean
+  /**
+   * The start of the agent's last answer (`AgentActivity.lastAnswer`), kept so the
+   * desk inbox can preview it after a restart, when live activity is gone.
+   */
+  preview?: string
 }
 
 /**
@@ -206,6 +211,32 @@ export interface Task {
    */
   sharesStreamWorktree?: true
   landing?: TaskLanding
+  /** Autopilot (desk redesign decision 7): main takes the task from its first turn to Done by itself. */
+  autopilot?: TaskAutopilot
+}
+
+/**
+ * Where an Autopilot task is (main's `AutopilotRunner` moves it on):
+ *  - `working`: Claude's first turn, in auto mode.
+ *  - `reviewing`: headless Codex reviews the task's diff (`review` only).
+ *  - `fixing`: Claude works on Codex's findings; another review follows.
+ *  - `landing`: landing like ✓ Done (a conflict goes to the agent first). The
+ *    archived task keeps this phase: that is the Done tab's "autopilot" mark.
+ *  - `stopped`: handed to you (`reason`); the task sits in Needs you until you
+ *    write to it. Autopilot doesn't pick it up again.
+ */
+export interface TaskAutopilot {
+  phase: 'working' | 'reviewing' | 'fixing' | 'landing' | 'stopped'
+  /** "+ Codex review": one review of the diff, its findings sent back to Claude once. */
+  review?: boolean
+  /** Codex reviews run so far. */
+  reviews?: number
+  /** A task with no worktree of its own: the commit its folder was on when Autopilot first saw it (what it diffs against). */
+  base?: string
+  /** `stopped`: one line on why ("No files changed", "Codex still has findings: …"). */
+  reason?: string
+  /** `stopped`: when. Writing to the task after it takes it out of Needs you. */
+  stoppedAt?: number
 }
 
 /**
@@ -707,29 +738,31 @@ export interface AppConfig {
   claudeDefaultView: ClaudeView
   lastProjectId: string | null
   lastTaskId: string | null
-  defaultSidebarTab: SidebarTab
-  /** Inbox rows as one list, or the open ones under a heading per project. */
+  /** The inbox column's rows by status (Needs you, Answered…), or under a heading per project. */
   inboxLayout: 'flat' | 'grouped'
-  /** Sidebar: fold streams where no task needs you, runs or has news. */
-  autoCollapseQuietStreams: boolean
-  /** Project tiles and icons beside project names in the sidebar, Inbox and task header. */
+  /** A project's dashboard icon beside its name in the task header. */
   showProjectIcons: boolean
   /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
   promptBoxMode: string
-  taskRecencyHighlight: {
-    enabled: boolean
-    mode: 'rank' | 'time'
-    rankCount: number
-    timeWindowMinutes: number
-  }
   /**
    * Settings → Mobile. Owned by main's `mobile-*` IPC: `save-config` ignores it so a
    * window's stale copy cannot flip it back.
    */
   mobile?: MobileConfig
+  /**
+   * Settings › Hosts: SSH boxes and custom shells added without a project yet
+   * (`src/renderer/hosts.ts`). Hosts a project already uses are listed from the
+   * projects themselves; this only keeps the ones that would otherwise vanish.
+   */
+  hosts?: SavedHost[]
 }
+
+/** A host kept in Settings › Hosts: an SSH box, or a shell command that opens one. */
+export type SavedHost =
+  | { kind: 'ssh'; host: string; port: number; username: string; keyFile?: string }
+  | { kind: 'shell'; name: string; command: string }
 
 /** One configured editor used to open the local project folder. */
 export interface ExternalEditor {
@@ -804,6 +837,8 @@ export function gitEntryPaths(entry: GitStatusEntry): string[] {
 export interface GitDiffSummary {
   added: number
   deleted: number
+  /** Files changed, untracked ones included; only a task's summary counts them (`readTaskDiffSummary`). */
+  files?: number
 }
 
 /** One repository inside a project: the root (`path: ''`) or a nested checkout. */
@@ -896,9 +931,55 @@ export interface WindowViewState {
   fileBrowserActiveTab: FileBrowserTab
   sidebarWidth: number
   sidebarTab: SidebarTab
+  /** The desk layout's column (absent until this window first used it). */
+  desk?: DeskViewState
 }
 
 export type SidebarTab = 'projects' | 'inbox'
+
+/** Which list the desk column shows. */
+export type DeskTab = 'inbox' | 'working' | 'snoozed' | 'done'
+
+/** What the desk column narrows to: everything, a project, or one of its streams. */
+export interface DeskScope {
+  projectId: string
+  streamId?: string
+}
+
+export interface DeskViewState {
+  width?: number
+  tab?: DeskTab
+  /** Null or absent: all projects. */
+  scope?: DeskScope | null
+}
+
+export function cloneDeskViewState(desk: DeskViewState): DeskViewState {
+  return {
+    ...(desk.width !== undefined ? { width: desk.width } : {}),
+    ...(desk.tab ? { tab: desk.tab } : {}),
+    ...(desk.scope ? { scope: { ...desk.scope } } : {})
+  }
+}
+
+const DESK_TABS: readonly DeskTab[] = ['inbox', 'working', 'snoozed', 'done']
+
+/** A stored desk state with anything malformed dropped, and a scope whose project or stream is gone cleared. */
+export function normalizeDeskViewState(value: unknown, projects: readonly Project[]): DeskViewState | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as { width?: unknown; tab?: unknown; scope?: unknown }
+  const desk: DeskViewState = {}
+  if (typeof raw.width === 'number' && Number.isFinite(raw.width)) desk.width = raw.width
+  if (typeof raw.tab === 'string' && (DESK_TABS as readonly string[]).includes(raw.tab)) desk.tab = raw.tab as DeskTab
+  const scope = raw.scope as { projectId?: unknown; streamId?: unknown } | null | undefined
+  if (scope && typeof scope.projectId === 'string') {
+    const project = projects.find(p => p.id === scope.projectId)
+    if (project) {
+      const streamId = typeof scope.streamId === 'string' && project.streams.some(s => s.id === scope.streamId) ? scope.streamId : undefined
+      desk.scope = { projectId: project.id, ...(streamId ? { streamId } : {}) }
+    }
+  }
+  return desk
+}
 
 export interface WindowGeometry {
   x: number
@@ -949,20 +1030,13 @@ export const DEFAULT_CONFIG: AppConfig = {
   claudeDefaultView: 'terminal',
   lastProjectId: null,
   lastTaskId: null,
-  defaultSidebarTab: 'inbox',
   inboxLayout: 'flat',
-  autoCollapseQuietStreams: true,
   showProjectIcons: false,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
-  taskRecencyHighlight: {
-    enabled: true,
-    mode: 'rank',
-    rankCount: 5,
-    timeWindowMinutes: 1440
-  },
   externalEditors: { editors: [], defaultId: null },
-  mobile: { ...DEFAULT_MOBILE_CONFIG }
+  mobile: { ...DEFAULT_MOBILE_CONFIG },
+  hosts: []
 }
 
 /** A task's default view: nothing remembered yet, so the window's own sidebar shows. */
@@ -1008,7 +1082,8 @@ export function cloneWindowViewState(state: WindowViewState): WindowViewState {
     fileBrowserWidth: state.fileBrowserWidth,
     fileBrowserActiveTab: state.fileBrowserActiveTab,
     sidebarWidth: state.sidebarWidth,
-    sidebarTab: state.sidebarTab
+    sidebarTab: state.sidebarTab,
+    ...(state.desk ? { desk: cloneDeskViewState(state.desk) } : {})
   }
 }
 
@@ -1101,7 +1176,8 @@ export function reconcileWindowViewState(
     fileBrowserActiveTab: state.fileBrowserActiveTab ?? 'files',
     sidebarWidth: state.sidebarWidth ?? 240,
     // only normalise unrecognised values — buildWindowViewState already applied the configured default
-    sidebarTab: state.sidebarTab === 'inbox' || state.sidebarTab === 'projects' ? state.sidebarTab : 'projects'
+    sidebarTab: state.sidebarTab === 'inbox' || state.sidebarTab === 'projects' ? state.sidebarTab : 'projects',
+    ...(state.desk ? { desk: normalizeDeskViewState(state.desk, projects) } : {})
   }
 }
 
@@ -1135,6 +1211,7 @@ export function buildWindowViewState(
     fileBrowserWidth: seed?.fileBrowserWidth ?? 250,
     fileBrowserActiveTab: seed?.fileBrowserActiveTab ?? 'files',
     sidebarWidth: seed?.sidebarWidth ?? 240,
-    sidebarTab: seed?.sidebarTab ?? config.defaultSidebarTab
+    sidebarTab: seed?.sidebarTab ?? 'inbox',
+    ...(seed?.desk ? { desk: cloneDeskViewState(seed.desk) } : {})
   }, projects)
 }

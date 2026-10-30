@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_TAB_TYPES, AI_TAB_META, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import { featureAvailable } from '../../shared/project-features'
 import { canMoveToServer } from '../../shared/project-move'
-import type { Project, AiTabType, RunCommand } from '../../shared/types'
+import type { Project, AiTabType, RunCommand, ShellCommandConfig } from '../../shared/types'
 import { projectRunCommands } from '../../shared/stream-run'
 import RunCommandsEditor, { cleanRunCommandDrafts, runCommandDraftsProblem } from './RunCommandsEditor'
 import {
@@ -14,6 +14,8 @@ import {
 } from '../../shared/conda'
 import { useApp } from '../context/AppContext'
 import { useHostPlatform } from '../hostPlatform'
+import { useServersState } from '../serversState'
+import { hostChoicesFor, listHosts, projectHostKey } from '../hosts'
 import ServerFolderList from './servers/ServerFolderList'
 import TagPicker from './TagPicker'
 import { Modal, SetBlock, Field, HelperText, LinkBtn, PrimaryButton, Switch } from './ui'
@@ -39,6 +41,8 @@ interface Props {
     /** Saved as the project's list; `runCommand` (older data) is cleared alongside. */
     runCommands?: RunCommand[]
     runCommand?: string
+    /** A custom-shell project switched to another shell host (the Host field). */
+    shellCommand?: ShellCommandConfig
   }) => void
   onClose: () => void
   /** An SSH project: Move to a DevTool server… */
@@ -46,7 +50,15 @@ interface Props {
 }
 
 export default function ProjectSettings({ project, onSave, onClose, onMoveToServer }: Props): React.ReactElement {
-  const { effectiveTheme, tags, addTag } = useApp()
+  const { effectiveTheme, tags, addTag, projects, config } = useApp()
+  const servers = useServersState()
+  // The host is one field, picked from Settings › Hosts' list (`hosts.ts`).
+  const hostChoices = useMemo(
+    () => hostChoicesFor(project, listHosts(projects, servers.servers, {}, config?.hosts), !!onMoveToServer && canMoveToServer(project)),
+    [project, projects, servers, config?.hosts, onMoveToServer]
+  )
+  const [hostKey, setHostKey] = useState(() => projectHostKey(project))
+  const pickedHost = hostChoices.find(host => host.key === hostKey)
   const [args, setArgs] = useState<Partial<Record<AiTabType, string>>>(
     project.aiToolArgs ?? {}
   )
@@ -149,6 +161,9 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
       updates.runCommand = undefined
     }
     if (canEditDirectory) updates.directory = cleanedDirectory
+    if (pickedHost?.kind === 'shell' && pickedHost.command && pickedHost.key !== projectHostKey(project)) {
+      updates.shellCommand = { command: pickedHost.command }
+    }
     if (canPickConda) {
       const selected = condaEnvFromSelection(condaValue, condaEnvs)
       updates.condaEnvName = selected.condaEnvName
@@ -179,8 +194,31 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
       onClose={onClose}
       footer={<PrimaryButton onClick={handleSave} disabled={(canEditDirectory && !directory.trim()) || !!runCommandsProblem}>Save</PrimaryButton>}
     >
+      <SetBlock label="Host">
+        <ThemedSelect
+          className="w-full"
+          aria-label="Host"
+          value={hostKey}
+          disabled={hostChoices.length < 2}
+          options={hostChoices.map(host => ({ value: host.key, label: host.kind === 'server' && host.key !== projectHostKey(project) ? `${host.label} · move there…` : host.label }))}
+          onChange={(key) => {
+            const host = hostChoices.find(h => h.key === key)
+            // Another server: the move dialog copies the project there; nothing changes here.
+            if (host?.kind === 'server' && key !== projectHostKey(project)) { onMoveToServer?.(); return }
+            setHostKey(key)
+          }}
+        />
+        <HelperText>
+          {project.ssh
+            ? <>On <span className="font-mono">{project.ssh.username}@{project.ssh.host}:{project.ssh.port}</span> in <span className="font-mono">{project.ssh.remoteDir || '~'}</span>.{hostChoices.length > 1 ? ' Pick a DevTool server to move it there.' : ''}</>
+            : isShellCommandProject(project)
+              ? hostKey !== projectHostKey(project) ? 'New terminals use the other shell once you save; open ones keep theirs.' : <>Terminals open with <span className="font-mono">{project.shellCommand?.command}</span>.</>
+              : 'Its tasks, worktrees and tabs live on this host. To run it somewhere else, add it there with New project.'}
+        </HelperText>
+      </SetBlock>
+
       {canEditDirectory && (
-        <SetBlock label="Directory">
+        <SetBlock label="Folder">
           <div className="flex gap-2">
             <Field
               className="flex-1"
@@ -216,7 +254,8 @@ export default function ProjectSettings({ project, onSave, onClose, onMoveToServ
         </SetBlock>
       )}
 
-      {onMoveToServer && canMoveToServer(project) && (
+      {/* No online server to pick in Host: the move dialog can still set one up on the SSH box. */}
+      {onMoveToServer && canMoveToServer(project) && !hostChoices.some(host => host.kind === 'server') && (
         <SetBlock label="DevTool server">
           <div className="flex items-center justify-between gap-3">
             <HelperText>Run this project on a DevTool server on {project.ssh!.host}. Its terminals and agents keep running while this computer sleeps.</HelperText>

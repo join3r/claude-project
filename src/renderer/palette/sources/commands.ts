@@ -47,8 +47,8 @@ commandRegistry.register({
 
 commandRegistry.register({
   id: 'cmd.openProjectHome',
-  title: 'Open Project Home',
-  aliases: ['home', 'project home'],
+  title: 'Open Project Map',
+  aliases: ['home', 'project home', 'map'],
   when: ctx => !!ctx.actions.selectedProjectId,
   run: ctx => {
     if (ctx.actions.selectedProjectId) ctx.actions.setSelectedTaskId(null)
@@ -123,6 +123,35 @@ for (const aiType of AI_TAB_TYPES) {
 }
 
 commandRegistry.register({
+  id: 'cmd.newTaskForm',
+  title: 'New Task with Options…',
+  aliases: ['new task', 'task form', 'model', 'terminal task', 'folder'],
+  run: ctx => {
+    const project = ctx.actions.projects.find(p => p.id === ctx.actions.selectedProjectId)
+    const streamId = project ? currentStreamId(project, ctx.actions.selectedTaskId) : undefined
+    paletteEvents.emit('open-new-task-form', project ? { projectId: project.id, ...(streamId ? { streamId } : {}) } : {})
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.newStream',
+  title: 'New Stream…',
+  aliases: ['stream', 'branch'],
+  shortcut: 'CmdOrCtrl+Alt+N',
+  when: ctx => !!ctx.actions.selectedProjectId,
+  run: ctx => {
+    if (ctx.actions.selectedProjectId) paletteEvents.emit('open-new-stream', ctx.actions.selectedProjectId)
+  }
+})
+
+commandRegistry.register({
+  id: 'cmd.newProject',
+  title: 'New Project…',
+  aliases: ['project', 'add project'],
+  run: () => paletteEvents.emit('open-new-project')
+})
+
+commandRegistry.register({
   id: 'cmd.newNote',
   title: 'New Note',
   aliases: ['note'],
@@ -170,8 +199,8 @@ commandRegistry.register({
 
 commandRegistry.register({
   id: 'cmd.toggleSidebar',
-  title: 'Toggle Sidebar',
-  aliases: ['sidebar'],
+  title: 'Toggle Inbox Column',
+  aliases: ['sidebar', 'inbox'],
   shortcut: 'CmdOrCtrl+B',
   run: () => paletteEvents.emit('toggle-sidebar')
 })

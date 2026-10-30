@@ -1,13 +1,13 @@
 import React from 'react'
 import { Play, RotateCw, Square } from 'lucide-react'
 import { canRunAppInTask, streamRunCommands, streamRunCrashed, type StreamRunAction, type StreamRunState } from '../../shared/stream-run'
-import type { Project, RunCommand, Stream, Task } from '../../shared/types'
+import type { Project, Stream, Task } from '../../shared/types'
 import {
-  badgeRun, controlStreamRun, openStreamRunCommands, openStreamRunLogs, openStreamRunPicker, useProjectStreamRun, useStreamRuns,
+  badgeRun, controlStreamRun, openStreamRunCommands, openStreamRunLogs, openStreamRunPicker, useStreamRuns,
   type StreamRunPickerTarget
 } from '../streamRuns'
 import { useApp } from '../context/AppContext'
-import { ContextMenu, RowAction, type ContextMenuItem } from './ui'
+import { ContextMenu, type ContextMenuItem } from './ui'
 
 /** What a run's state reads as: "Running", "Exited (1)", "Stopped". */
 export function streamRunLabel(run: StreamRunState | undefined): string | null {
@@ -47,10 +47,12 @@ interface ButtonsProps {
   onAction: (action: StreamRunAction) => void
   /** `md` buttons carry their names (the logs view, Project Home); `sm` are bare icons. */
   size?: 'sm' | 'md'
+  /** The command's name, for Run's tooltip before it ever ran. */
+  name?: string
 }
 
 /** Run when the app isn't running; Restart and Stop while it is. */
-export function StreamRunButtons({ run, canRun, onAction, size = 'sm' }: ButtonsProps): React.ReactElement {
+export function StreamRunButtons({ run, canRun, onAction, size = 'sm', name }: ButtonsProps): React.ReactElement {
   const running = run?.status === 'running'
   const button = (action: StreamRunAction, label: string, icon: React.ReactNode, title: string, disabled = false) => (
     <button
@@ -72,7 +74,7 @@ export function StreamRunButtons({ run, canRun, onAction, size = 'sm' }: Buttons
   )
   const iconSize = size === 'md' ? 12 : 13
   if (!running) {
-    return button('start', 'Run', <Play size={iconSize} />, canRun ? `Run ${run?.name ?? 'it'}` : 'This command is no longer set', !canRun)
+    return button('start', 'Run', <Play size={iconSize} />, canRun ? `Run ${run?.name ?? name ?? 'it'}` : 'This command is no longer set', !canRun)
   }
   return (
     <>
@@ -83,7 +85,7 @@ export function StreamRunButtons({ run, canRun, onAction, size = 'sm' }: Buttons
 }
 
 /**
- * The sidebar's sign of a stream's commands: lit while one runs, red after one
+ * The task header's sign of its stream's commands: lit while one runs, red after one
  * failed. Nothing once they were stopped or ended cleanly. A click opens its logs.
  */
 export function StreamRunBadge({ run, onClick }: { run: StreamRunState | undefined; onClick: () => void }): React.ReactElement | null {
@@ -108,37 +110,10 @@ interface StreamProps {
   streamId: string
 }
 
-/** The sidebar stream row's always-visible part: {@link StreamRunBadge} for this stream's runs. */
+/** {@link StreamRunBadge} for this stream's runs (the task header, beside the stream's name). */
 export function SidebarStreamRunBadge({ projectId, streamId }: StreamProps): React.ReactElement | null {
   const run = badgeRun(useStreamRuns(projectId, streamId))
   return <StreamRunBadge run={run} onClick={() => run && openStreamRunLogs({ projectId, streamId, commandId: run.commandId })} />
-}
-
-/** The sidebar stream row's hover action: Run, which opens the picker of the stream's commands. */
-export function SidebarStreamRunAction({ projectId, streamId, commands }: StreamProps & { commands: readonly RunCommand[] }): React.ReactElement | null {
-  const runs = useStreamRuns(projectId, streamId)
-  if (commands.length === 0 && runs.length === 0) return null
-  return (
-    <RowAction
-      title="Run a command…"
-      onClick={(e) => openStreamRunPicker({ projectId, streamId, ...pickerAnchor(e) })}
-    >
-      <Play size={13} />
-    </RowAction>
-  )
-}
-
-/** Where a picker opened from a button goes: under it. */
-export function pickerAnchor(e: React.MouseEvent): { x: number; y: number } {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  return { x: rect.left, y: rect.bottom + 4 }
-}
-
-/** A project's sign of its streams' commands: the badge of one running (else one that failed). */
-export function ProjectStreamRunBadge({ projectId, streamIds }: { projectId: string; streamIds: readonly string[] }): React.ReactElement | null {
-  const shown = useProjectStreamRun(projectId, streamIds)
-  if (!shown) return null
-  return <StreamRunBadge run={shown.run} onClick={() => openStreamRunLogs({ projectId, streamId: shown.streamId, commandId: shown.run.commandId })} />
 }
 
 /** One item of a run menu: the picker, a stream's menu, a task's menu. */

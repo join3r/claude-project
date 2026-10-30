@@ -31,7 +31,11 @@ function entryFor(projectId: string): Entry {
   return entry
 }
 
+/** Bumped on every notify, so a multi-project snapshot knows when to rebuild. */
+let version = 0
+
 function notify(): void {
+  version += 1
   for (const listener of listeners) listener()
 }
 
@@ -105,10 +109,44 @@ export function useProjectArchive(projectId: string | null, enabled: boolean): P
   return archive
 }
 
+const multiCache = new Map<string, { version: number; value: Map<string, ProjectArchive> }>()
+
+/**
+ * The archives of several projects while `enabled`, by project id; a project
+ * not read yet is missing from the map. The desk's Done tab lists every project's.
+ */
+export function useProjectArchives(projectIds: readonly string[], enabled: boolean): ReadonlyMap<string, ProjectArchive> {
+  const key = enabled ? projectIds.join(',') : ''
+  const archives = useSyncExternalStore(subscribe, () => {
+    const cached = multiCache.get(key)
+    if (cached && cached.version === version) return cached.value
+    const value = new Map<string, ProjectArchive>()
+    if (key) {
+      for (const id of key.split(',')) {
+        const archive = peekArchive(id)
+        if (archive) value.set(id, archive)
+      }
+    }
+    multiCache.set(key, { version, value })
+    return value
+  })
+  useEffect(() => {
+    if (!key) return
+    const ids = key.split(',')
+    for (const id of ids) {
+      entryFor(id).users += 1
+      void loadArchive(id).catch(() => {})
+    }
+    return () => { for (const id of ids) entryFor(id).users -= 1 }
+  }, [key])
+  return archives
+}
+
 /** Tests only. */
 export function resetArchiveStore(): void {
   entries.clear()
   listeners.clear()
+  multiCache.clear()
   listening = false
   onLoaded = null
 }

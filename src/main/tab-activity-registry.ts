@@ -158,6 +158,7 @@ export class TabActivityRegistry {
       waiting: undefined,
       subagents: 0,
       background: undefined,
+      backgroundTasks: undefined,
       compacting: false,
       turnStartedAt: undefined,
       updatedAt: this.now()

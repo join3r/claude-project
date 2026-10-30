@@ -26,6 +26,8 @@ interface Props {
    * the project (New task from a project or stream).
    */
   pickProjectFirst?: boolean
+  /** The prompt to start with (the compose box's text, when it opened this form). */
+  initialPrompt?: string
   getProjectDir: (project: Project) => string
   /** Which agents are switched on, and the last agent and mode a prompt went to. */
   config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi' | 'promptBoxAgent' | 'promptBoxMode'>
@@ -70,6 +72,7 @@ export default function NewTaskModal({
   selectedTaskId,
   defaultStreamId,
   pickProjectFirst = false,
+  initialPrompt = '',
   getProjectDir,
   config,
   allTags,
@@ -84,7 +87,7 @@ export default function NewTaskModal({
     }
     return projects[0] ? { kind: 'project', projectId: projects[0].id } : null
   })
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(initialPrompt)
   const [picked, setPicked] = useState<PromptBoxAgent | null>(null)
   const [mode, setMode] = useState(config.promptBoxMode ?? '')
   const [model, setModel] = useState('')
@@ -321,7 +324,7 @@ export default function NewTaskModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-(--z-modal) flex items-start justify-center pt-[14vh] bg-black/50" onClick={requestClose}>
+      <div data-modal className="fixed inset-0 z-(--z-modal) flex items-start justify-center pt-[14vh] bg-black/50" onClick={requestClose}>
         <div
           role="dialog"
           aria-label="New task"

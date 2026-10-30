@@ -104,10 +104,7 @@ export class AppRuntime {
       projects: { foreign: () => this.routing.foreignProjects() }
     })
     this.routing.attachHost(this.host)
-    this.startupWindowStates = this.host.storage.loadWindowSession(
-      this.allProjectsData(),
-      this.host.getConfig().defaultSidebarTab
-    ).windows
+    this.startupWindowStates = this.host.storage.loadWindowSession(this.allProjectsData(), 'inbox').windows
   }
 
   async start(): Promise<void> {

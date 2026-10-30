@@ -56,7 +56,8 @@ export default function TaskHeader({
   task,
   stream,
   title,
-  tools
+  tools,
+  trailing
 }: {
   project: Project
   task: Task | null
@@ -64,6 +65,8 @@ export default function TaskHeader({
   /** Full text for the hover, the same as the window title. */
   title: string
   tools: React.ReactNode
+  /** After the task menu: the desk's ✓ Done. */
+  trailing?: React.ReactNode
 }): React.ReactElement {
   const {
     config, effectiveTheme, renameTask, convertClaudeTab, pinnedItems, togglePinnedItem,
@@ -304,6 +307,7 @@ export default function TaskHeader({
               <MoreHorizontal size={15} />
             </button>
           )}
+          {trailing}
         </div>
       </div>
       <ContextMenu menu={menu} items={menuItems()} onClose={() => setMenu(null)} />

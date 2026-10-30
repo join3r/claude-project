@@ -103,12 +103,13 @@ export function reopensInOwnWorktree(project: Project, stream: Stream, task: Tas
 }
 
 /**
- * An archived task as it reopens: no landing (none survives its close), and
- * its recorded worktree only when it reopens into one of its own.
+ * An archived task as it reopens: no landing (none survives its close), no
+ * Autopilot (a reopened task is yours), and its recorded worktree only when it
+ * reopens into one of its own.
  */
 export function reopenedTask(task: Task, ownWorktree: boolean): Task {
-  if (!task.landing && (ownWorktree || !task.workspace)) return task
-  const { landing: _landing, workspace, ...rest } = task
+  if (!task.landing && !task.autopilot && (ownWorktree || !task.workspace)) return task
+  const { landing: _landing, autopilot: _autopilot, workspace, ...rest } = task
   return ownWorktree && workspace ? { ...rest, workspace } : rest
 }
 

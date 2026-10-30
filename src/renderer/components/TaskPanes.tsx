@@ -23,6 +23,23 @@ import { useTaskClosing } from '../taskLanding'
 import type { Tab, AiTabType, Project, Task, WorktreeSetupOfferAnswer } from '../../shared/types'
 import { paneIndexOfElement, setFocusedPane, useFocusedPane } from './paneFocus'
 import type { TabDragState, TabDropTarget } from './tabDrag'
+import { benchDividerShown, benchGridColumns, benchPanes, dragBenchDivider, type BenchView } from './desk/benchLayout'
+
+/**
+ * The desk's task view (`DeskTaskBody`): the conversation tab on top, full
+ * width, and the other tabs in the Bench drawer under the strip. Grid rows:
+ * conversation, strip, the Bench's tab bars, the Bench's bodies.
+ */
+export interface DeskPanesLayout {
+  /** The conversation (`conversationTabId`); none shows the Bench full size. */
+  chatTabId: string | null
+  open: boolean
+  height: number
+  view: BenchView
+  strip: React.ReactNode
+  /** Files, Changes or Notes, shown in place of the panes when `view` is one of them. */
+  panel: React.ReactNode
+}
 
 interface Props {
   project: Project
@@ -30,6 +47,7 @@ interface Props {
   /** The task is the one on screen. */
   visible: boolean
   projectDir: string
+  desk?: DeskPanesLayout
 }
 
 /**
@@ -60,7 +78,7 @@ function paneColumn(index: number): number {
  * tab to another pane therefore neither remounts its component nor moves its DOM
  * node, so terminals keep their session and browser webviews don't reload.
  */
-export default function TaskPanes({ project, task, visible, projectDir }: Props): React.ReactElement {
+export default function TaskPanes({ project, task, visible, projectDir, desk }: Props): React.ReactElement {
   const { effectiveTheme, setPaneWidths, convertClaudeTab } = useApp()
   const focusedPane = useFocusedPane(task.id)
   const gridRef = useRef<HTMLDivElement | null>(null)
@@ -70,12 +88,30 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
 
   const projectId = project.id
   const worktree = useTaskWorktreeGate(project, task, visible)
-  const showBars = showsTabBars(task)
-  const bodyRow = showBars ? 2 : 1
+  const chatTabId = desk?.chatTabId ?? null
+  const bench = desk ? benchPanes(task, chatTabId) : null
+  // Without a conversation the Bench is the whole task, always open.
+  const benchOpen = !!desk && (!chatTabId || desk.open)
+  const benchShowsPanes = benchOpen && desk?.view === 'panes'
+  const showBars = desk ? benchShowsPanes : showsTabBars(task)
+  const barRow = desk ? 3 : 1
+  const bodyRow = desk ? 4 : showBars ? 2 : 1
   const widths = dragWidths && dragWidths.length === task.panes.length ? dragWidths : task.panes.map(pane => pane.width)
-  const gridTemplateColumns = widths.length === 0
-    ? 'minmax(0, 1fr)'
-    : widths.map(width => `minmax(0, ${width}fr)`).join(' 3px ')
+  const gridTemplateColumns = bench
+    ? benchGridColumns(widths, bench)
+    : widths.length === 0
+      ? 'minmax(0, 1fr)'
+      : widths.map(width => `minmax(0, ${width}fr)`).join(' 3px ')
+  const gridTemplateRows = desk
+    ? [
+        chatTabId ? 'minmax(0, 1fr)' : '0px',
+        'auto',
+        'auto',
+        // The drawer's height covers its tab bars too, so switching to a panel doesn't move the strip.
+        !chatTabId ? 'minmax(0, 1fr)' : benchOpen ? `minmax(0, min(${desk.height}px - ${showBars ? 'var(--ctl-h-lg)' : '0px'}, 75%))` : '0px'
+      ].join(' ')
+    : showBars ? 'auto minmax(0, 1fr)' : 'minmax(0, 1fr)'
+  const benchEmpty = !!bench && bench.every(pane => pane.hidden)
 
   const handleDividerMouseDown = useCallback((divider: number) => (e: React.MouseEvent) => {
     e.preventDefault()
@@ -85,7 +121,8 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
     let latest = start
     const widthsAt = (clientX: number): number[] => {
       const rect = grid.getBoundingClientRect()
-      return dragDivider(start, divider, (clientX - rect.left) / rect.width)
+      const x = (clientX - rect.left) / rect.width
+      return bench ? dragBenchDivider(start, bench, divider, x) : dragDivider(start, divider, x)
     }
     const onMouseMove = (ev: MouseEvent): void => {
       latest = widthsAt(ev.clientX)
@@ -103,7 +140,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
     setDragWidths(start)
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [projectId, task.id, task.panes, setPaneWidths])
+  }, [projectId, task.id, task.panes, setPaneWidths, bench])
 
   const rememberFocus = useCallback((e: React.SyntheticEvent) => {
     const pane = paneIndexOfElement(e.target as Element)
@@ -156,7 +193,11 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
 
   // Fixed order, independent of the layout: see the component comment.
   const bodies = task.panes
-    .flatMap((pane, paneIndex) => pane.tabs.map(tab => ({ tab, paneIndex, active: tab.id === pane.activeTabId })))
+    .flatMap((pane, paneIndex) => pane.tabs.map(tab => ({
+      tab,
+      paneIndex,
+      active: bench ? tab.id === chatTabId || (benchShowsPanes && tab.id === bench[paneIndex].activeTabId) : tab.id === pane.activeTabId
+    })))
     .sort((a, b) => (a.tab.id < b.tab.id ? -1 : a.tab.id > b.tab.id ? 1 : 0))
 
   const dropOverlay = tabDragState && tabDropTarget?.inBody ? tabDropTarget : null
@@ -166,18 +207,18 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
     <div
       ref={gridRef}
       className="flex-1 min-h-0 min-w-0 grid relative overflow-hidden"
-      style={{ gridTemplateColumns, gridTemplateRows: showBars ? 'auto minmax(0, 1fr)' : 'minmax(0, 1fr)' }}
+      style={{ gridTemplateColumns, gridTemplateRows }}
       data-project-id={projectId}
       data-task-id={task.id}
       onMouseDownCapture={rememberFocus}
       onFocusCapture={rememberFocus}
     >
-      {showBars && task.panes.map((pane, paneIndex) => (
+      {showBars && task.panes.map((pane, paneIndex) => !bench?.[paneIndex].hidden && (
         <TabBar
           key={`bar-${paneIndex}`}
-          style={{ gridColumn: paneColumn(paneIndex), gridRow: 1 }}
-          tabs={pane.tabs}
-          activeTabId={pane.activeTabId}
+          style={{ gridColumn: paneColumn(paneIndex), gridRow: barRow }}
+          tabs={bench ? bench[paneIndex].tabs : pane.tabs}
+          activeTabId={bench ? bench[paneIndex].activeTabId ?? '' : pane.activeTabId}
           paneIndex={paneIndex}
           projectId={projectId}
           taskId={task.id}
@@ -189,16 +230,29 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           onTabDropTargetChange={setTabDropTarget}
         />
       ))}
-      {task.panes.slice(1).map((_, i) => (
+      {task.panes.slice(1).map((_, i) => (!bench || (benchShowsPanes && benchDividerShown(bench, i))) && (
         <div
           key={`divider-${i}`}
           className="bg-border cursor-col-resize hover:bg-accent active:bg-accent transition-colors duration-(--motion-fast)"
-          style={{ gridColumn: paneColumn(i) + 1, gridRow: '1 / -1' }}
+          style={{ gridColumn: paneColumn(i) + 1, gridRow: bench ? `${barRow} / -1` : '1 / -1' }}
           onMouseDown={handleDividerMouseDown(i)}
         />
       ))}
+      {desk && task.panes.length > 0 && (
+        <div className="min-w-0" style={{ gridColumn: '1 / -1', gridRow: 2 }}>{desk.strip}</div>
+      )}
+      {desk && benchOpen && desk.view !== 'panes' && (
+        <div className="min-w-0 min-h-0 flex flex-col overflow-hidden bg-surface" style={{ gridColumn: '1 / -1', gridRow: `${barRow} / -1` }}>
+          {desk.panel}
+        </div>
+      )}
+      {benchShowsPanes && benchEmpty && task.panes.length > 0 && (
+        <div className="min-w-0 min-h-0 flex items-center justify-center text-sm text-text-muted bg-surface" style={{ gridColumn: '1 / -1', gridRow: `${barRow} / -1` }}>
+          Nothing on the Bench yet. Open a terminal or a browser from the strip above.
+        </div>
+      )}
       {task.panes.length === 0 && (
-        <div className="relative min-w-0 min-h-0 overflow-hidden" style={{ gridColumn: 1, gridRow: 1 }} data-pane-index={0}>
+        <div className="relative min-w-0 min-h-0 overflow-hidden" style={{ gridColumn: 1, gridRow: desk ? '1 / -1' : 1 }} data-pane-index={0}>
           <TaskPromptBox
             project={project}
             taskId={task.id}
@@ -208,7 +262,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           />
         </div>
       )}
-      {task.panes.map((pane, paneIndex) => (
+      {task.panes.map((pane, paneIndex) => (!bench || (benchShowsPanes && !bench[paneIndex].hidden)) && (
         <div
           key={`slot-${paneIndex}`}
           className="pane-slot min-w-0 min-h-0"
@@ -221,7 +275,7 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
       ))}
       {worktree.waiting && (
         // Over every pane: the task's tabs start once its worktree is there.
-        <div className="relative min-w-0 min-h-0 overflow-hidden z-(--z-sticky)" style={{ gridColumn: '1 / -1', gridRow: bodyRow }}>
+        <div className="relative min-w-0 min-h-0 overflow-hidden z-(--z-sticky)" style={{ gridColumn: '1 / -1', gridRow: desk ? '1 / -1' : bodyRow }}>
           <TaskWorktreePanel
             state={worktree.state}
             closing={worktree.closing}
@@ -264,7 +318,9 @@ export default function TaskPanes({ project, task, visible, projectDir }: Props)
           // task moves to another worktree; see `useTasks.moveTask`.
           key={bodyKey(tab, projectDir, project.host)}
           className="relative min-w-0 min-h-0 overflow-hidden"
-          style={{ gridColumn: paneColumn(paneIndex), gridRow: bodyRow, display: active ? 'block' : 'none' }}
+          style={tab.id === chatTabId
+            ? { gridColumn: '1 / -1', gridRow: 1, display: 'block' }
+            : { gridColumn: paneColumn(paneIndex), gridRow: bodyRow, display: active ? 'block' : 'none' }}
           data-tab-body={tab.id}
           data-project-id={projectId}
           data-task-id={task.id}

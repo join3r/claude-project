@@ -7,7 +7,6 @@ import { useMenuPosition } from '../../hooks/useMenuPosition'
 import { isSnoozed, isUnread, snoozePresets } from '../inbox'
 import { menuCls, menuItemCls } from '../ui'
 import { revealInFolderLabel } from '../../utils/revealLabel'
-import type { SidebarContextMenuState } from './SidebarParts'
 import { findStreamOfTask, findTaskInProject } from '../../../shared/streams'
 import { useTabStatusStore } from '../../context/TabStatusContext'
 import { canLandTask, getLandingOp } from '../../taskLanding'
@@ -23,13 +22,18 @@ export {
   revealFolder, projectDeletePrompt, canTrashProjectFolder, projectDeleteWithFolderPrompt
 } from '../menus/projectMenuRules'
 
+/** Where the row menu opened, and on what. */
+export type SidebarContextMenuState = {
+  x: number; y: number; type: 'project' | 'stream' | 'task'; projectId: string; streamId?: string; taskId?: string
+}
+
 /** A task menu's other pages: its stream's menu, its project's, and the streams it can move to. */
 type TaskMenuPage = 'main' | 'stream' | 'project' | 'move'
 
 /**
- * The right-click menu for a project, stream or task row, and the snooze
- * presets that replace its body rather than fly out sideways — a nested flyout
- * would run off the edge of a 240px sidebar. A task's stream and project menus,
+ * The right-click (and ⋯) menu for an inbox row, and the snooze presets that
+ * replace its body rather than fly out sideways — a nested flyout would run off
+ * the edge of the column. A task's stream and project menus,
  * and the streams it can move to, are pages of the same menu for that reason.
  */
 export default function SidebarContextMenu({
@@ -59,7 +63,7 @@ export default function SidebarContextMenu({
   missingDirs?: ReadonlySet<string>
 }): React.ReactElement {
   const {
-    projects, togglePinnedItem, updateProject, setProjectExpanded,
+    projects, togglePinnedItem, updateProject,
     snoozeTask, unsnoozeTask, markTaskUnread, markTaskVisited
   } = useApp()
   // Keeps the popup inside the window — a right-click near the bottom of the
@@ -254,11 +258,10 @@ export default function SidebarContextMenu({
           closeContextMenu()
         }}>{isPinned(pinItem) ? 'Unpin task' : 'Pin task'}</button>
         {/* Promote the hidden project a "task in a directory" is filed under:
-            clearing the flag is all it takes for the tree to show it. */}
+            clearing the flag is all it takes for the scope menu and compose to offer it. */}
         {project && isEphemeralProject(project) && (
           <button className={menuItemCls} onClick={() => {
             updateProject(project.id, { ephemeral: undefined })
-            setProjectExpanded(project.id, true)
             closeContextMenu()
           }}>Save as project</button>
         )}

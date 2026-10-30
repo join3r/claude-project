@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  backgroundWork,
   describeActivity,
   firstLine,
   reduceAgentActivity,
@@ -235,11 +236,11 @@ describe('TabActivityRegistry', () => {
     }
     hook({ hook_event_name: 'UserPromptSubmit', prompt: 'Run the eval' })
     registry.working('tab')
-    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1 })
+    hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 1, tasks: [{ id: 'b1', type: 'local_bash', description: 'xcodebuild test' }] })
     hook({ hook_event_name: 'Stop' })
     registry.stopped('tab')
     expect(registry.getStatus('tab')).toBe('working')
-    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('1 background task')
+    expect(describeActivity(registry.getActivity('tab') ?? undefined, 'working')).toBe('Background · xcodebuild test')
 
     hook({ hook_event_name: 'DevtoolBackgroundTasks', count: 0 })
     expect(registry.getStatus('tab')).toBeNull()
@@ -256,14 +257,60 @@ describe('TabActivityRegistry', () => {
 
   it('forgets background tasks when the process goes away', () => {
     const registry = new TabActivityRegistry(() => 1)
-    registry.applyHook('tab', { hook_event_name: 'DevtoolBackgroundTasks', count: 2 })
+    registry.applyHook('tab', { hook_event_name: 'DevtoolBackgroundTasks', count: 2, tasks: [{ id: 'a', type: 'local_bash' }, { id: 'b', type: 'local_agent' }] })
     registry.reset('tab')
     expect(registry.backgroundTasks('tab')).toBe(0)
+    expect(registry.getActivity('tab')?.backgroundTasks).toBeUndefined()
   })
 
   it('returns null for bodies that change nothing', () => {
     const registry = new TabActivityRegistry(() => 1)
     expect(registry.applyHook('tab', {})).toBeNull()
     expect(registry.getActivity('tab')).toBeNull()
+  })
+})
+
+describe('background tasks', () => {
+  const level = (tasks: { id: string; type: string; description?: string }[]): Record<string, unknown> =>
+    ({ hook_event_name: 'DevtoolBackgroundTasks', count: tasks.length, tasks })
+
+  it('keeps when each task was first seen and lists the oldest first', () => {
+    let activity = reduceAgentActivity(undefined, level([{ id: 'b1', type: 'local_bash', description: 'npm run dev' }]), 1000).activity
+    activity = reduceAgentActivity(activity, level([
+      { id: 'a1', type: 'local_agent', description: 'Review the diff' },
+      { id: 'b1', type: 'local_bash', description: 'npm run dev' }
+    ]), 5000).activity
+    expect(activity.backgroundTasks).toEqual([
+      { id: 'b1', type: 'local_bash', label: 'npm run dev', startedAt: 1000 },
+      { id: 'a1', type: 'local_agent', label: 'Review the diff', startedAt: 5000 }
+    ])
+  })
+
+  it('updates when one task replaces another at the same count, without a status event', () => {
+    const first = reduceAgentActivity(undefined, level([{ id: 'b1', type: 'local_bash', description: 'build' }]), 1000)
+    expect(first.statusEvent).toBe('background-started')
+    const swapped = reduceAgentActivity(first.activity, level([{ id: 'b2', type: 'local_bash', description: 'test' }]), 2000)
+    expect(swapped.changed).toBe(true)
+    expect(swapped.statusEvent).toBeNull()
+    expect(swapped.activity.backgroundTasks?.map((t) => t.id)).toEqual(['b2'])
+    const same = reduceAgentActivity(swapped.activity, level([{ id: 'b2', type: 'local_bash', description: 'test' }]), 3000)
+    expect(same.changed).toBe(false)
+  })
+
+  it('labels a task without a description by its kind', () => {
+    const { activity } = reduceAgentActivity(undefined, level([{ id: 'b1', type: 'local_bash' }]), 1000)
+    expect(activity.backgroundTasks?.[0].label).toBe('shell')
+  })
+
+  it('is the Background state only between turns and when nothing waits on you', () => {
+    const { activity } = fold([
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Build it' },
+      level([{ id: 'b1', type: 'local_bash', description: 'xcodebuild' }, { id: 'a1', type: 'local_agent', description: 'Review' }])
+    ])
+    expect(backgroundWork(activity)).toBeNull()
+    const stopped = reduceAgentActivity(activity, { hook_event_name: 'Stop' }, 9000).activity
+    expect(backgroundWork(stopped)).toEqual({ tasks: stopped.backgroundTasks, label: 'xcodebuild +1', since: 1001 })
+    expect(backgroundWork({ ...stopped, waiting: { kind: 'error', label: 'x', since: 1 } })).toBeNull()
+    expect(backgroundWork(reduceAgentActivity(stopped, level([]), 9500).activity)).toBeNull()
   })
 })

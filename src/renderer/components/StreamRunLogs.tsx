@@ -17,9 +17,13 @@ import { StreamRunButtons, StreamRunStatusLabel } from './StreamRunControls'
  * One command's run log: the run's own PTY, shown like a terminal (typing
  * reaches the app, e.g. a dev server's shortcut keys). Closing it leaves the
  * command running. A restart starts the view over with the new run's output.
- * The stream's other commands are a click away in the header.
+ * The stream's other commands are a click away in the header. A modal by
+ * default; `embedded` (the desk's Bench) fills its parent instead, and closing
+ * or picking another command goes through its callbacks.
  */
-export default function StreamRunLogs({ projectId, streamId, commandId }: StreamRunLogsTarget): React.ReactElement | null {
+export default function StreamRunLogs({ projectId, streamId, commandId, embedded }: StreamRunLogsTarget & {
+  embedded?: { onClose: () => void; onPick: (commandId: string) => void }
+}): React.ReactElement | null {
   const { projects, config, effectiveTerminalTheme, terminalZoomDelta } = useApp()
   const project = projects.find(p => p.id === projectId)
   const stream = project?.streams.find(s => s.id === streamId)
@@ -29,7 +33,9 @@ export default function StreamRunLogs({ projectId, streamId, commandId }: Stream
   const termRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null)
   const [empty, setEmpty] = useState(false)
   const tabId = streamRunTabId(streamId, commandId)
-  const close = () => openStreamRunLogs(null)
+  const close = () => (embedded ? embedded.onClose() : openStreamRunLogs(null))
+  const pick = (other: string) => (embedded ? embedded.onPick(other) : openStreamRunLogs({ projectId, streamId, commandId: other }))
+  const isEmbedded = !!embedded
 
   // The stream went away (closed, deleted): nothing left to show.
   useEffect(() => {
@@ -37,12 +43,13 @@ export default function StreamRunLogs({ projectId, streamId, commandId }: Stream
   }, [stream])
 
   useEffect(() => {
+    if (isEmbedded) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !e.defaultPrevented) close()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [isEmbedded])
 
   // One xterm for the view's lifetime.
   useEffect(() => {
@@ -75,7 +82,7 @@ export default function StreamRunLogs({ projectId, streamId, commandId }: Stream
       if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit()
     })
     observer.observe(host)
-    term.focus()
+    if (!isEmbedded) term.focus()
     return () => {
       observer.disconnect()
       input.dispose()
@@ -84,7 +91,7 @@ export default function StreamRunLogs({ projectId, streamId, commandId }: Stream
       termRef.current = null
       term.dispose()
     }
-  }, [config, effectiveTerminalTheme, terminalZoomDelta, tabId])
+  }, [config, effectiveTerminalTheme, terminalZoomDelta, tabId, isEmbedded])
 
   // Attach to the run, again for each new run (Restart, or Run after it ended).
   const startedAt = run?.startedAt
@@ -132,69 +139,76 @@ export default function StreamRunLogs({ projectId, streamId, commandId }: Stream
   const runTask = streamRunTask(stream, run)
   const termBackground = config ? buildXtermTheme(effectiveTerminalTheme, config.terminalColorScheme).background : undefined
 
-  return (
-    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" onClick={close}>
-      <div
-        className="w-[min(1100px,92vw)] h-[78vh] rounded-xl border border-border bg-surface shadow-pop flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="stream-run-logs"
-      >
-        <header className="flex items-center gap-3 px-4 h-(--ctl-h-lg) mt-1 shrink-0">
-          <h2 className="text-md font-semibold text-text m-0 whitespace-nowrap">
-            {project.name}
-            {!stream.isMain && <span className="text-text-muted font-normal font-mono"> · {stream.name}</span>}
-          </h2>
-          <span className="text-sm text-text whitespace-nowrap" data-testid="stream-run-logs-name">{name}</span>
-          <StreamRunStatusLabel run={run} taskName={runTask?.name} />
-          <span className="ml-auto flex items-center gap-1">
-            <StreamRunButtons
-              run={run}
-              canRun={!!defined}
-              onAction={(action) => void controlStreamRun(projectId, streamId, commandId, action, action === 'stop' ? undefined : runTask?.id)}
-              size="md"
-            />
-          </span>
-          <button
-            onClick={close}
-            className="bg-transparent border-0 text-text-muted cursor-pointer text-lg leading-none px-1 rounded-sm hover:text-text"
-            title="Close (the app keeps running)"
-          >
-            &times;
-          </button>
-        </header>
-        {others.length > 1 && (
-          <div className="flex items-center gap-1 px-3 pb-1.5 shrink-0 overflow-x-auto" data-testid="stream-run-logs-commands">
-            {others.map(other => {
-              const otherRun = streamRuns.find(r => r.commandId === other.id)
-              return (
-                <button
-                  key={other.id}
-                  type="button"
-                  onClick={() => openStreamRunLogs({ projectId, streamId, commandId: other.id })}
-                  className={[
-                    'flex items-center gap-1.5 h-(--ctl-h-sm) px-2 rounded-md border-0 cursor-pointer text-xs whitespace-nowrap',
-                    other.id === commandId ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text hover:bg-sel'
-                  ].join(' ')}
-                >
-                  {otherRun?.status === 'running' && <span className="size-1.5 rounded-full bg-success" />}
-                  {other.name}
-                </button>
-              )
-            })}
+  const body = (
+    <div
+      className={isEmbedded
+        ? 'flex-1 min-h-0 bg-surface flex flex-col overflow-hidden'
+        : 'w-[min(1100px,92vw)] h-[78vh] rounded-xl border border-border bg-surface shadow-pop flex flex-col overflow-hidden'}
+      onClick={(e) => e.stopPropagation()}
+      data-testid="stream-run-logs"
+      data-embedded={isEmbedded || undefined}
+    >
+      <header className="flex items-center gap-3 px-4 h-(--ctl-h-lg) mt-1 shrink-0">
+        <h2 className="text-md font-semibold text-text m-0 whitespace-nowrap">
+          {project.name}
+          {!stream.isMain && <span className="text-text-muted font-normal font-mono"> · {stream.name}</span>}
+        </h2>
+        <span className="text-sm text-text whitespace-nowrap" data-testid="stream-run-logs-name">{name}</span>
+        <StreamRunStatusLabel run={run} taskName={runTask?.name} />
+        <span className="ml-auto flex items-center gap-1">
+          <StreamRunButtons
+            run={run}
+            canRun={!!defined}
+            onAction={(action) => void controlStreamRun(projectId, streamId, commandId, action, action === 'stop' ? undefined : runTask?.id)}
+            size="md"
+          />
+        </span>
+        <button
+          onClick={close}
+          className="bg-transparent border-0 text-text-muted cursor-pointer text-lg leading-none px-1 rounded-sm hover:text-text"
+          title={isEmbedded ? 'Close the log (the app keeps running)' : 'Close (the app keeps running)'}
+        >
+          &times;
+        </button>
+      </header>
+      {others.length > 1 && (
+        <div className="flex items-center gap-1 px-3 pb-1.5 shrink-0 overflow-x-auto" data-testid="stream-run-logs-commands">
+          {others.map(other => {
+            const otherRun = streamRuns.find(r => r.commandId === other.id)
+            return (
+              <button
+                key={other.id}
+                type="button"
+                onClick={() => pick(other.id)}
+                className={[
+                  'flex items-center gap-1.5 h-(--ctl-h-sm) px-2 rounded-md border-0 cursor-pointer text-xs whitespace-nowrap',
+                  other.id === commandId ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text hover:bg-sel'
+                ].join(' ')}
+              >
+                {otherRun?.status === 'running' && <span className="size-1.5 rounded-full bg-success" />}
+                {other.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <div className="px-4 pb-2 text-xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap shrink-0" title={command}>
+        {command ? `$ ${command}` : 'This command is no longer set: add it in Project settings, or in the stream\'s commands.'}
+      </div>
+      <div className="relative flex-1 min-h-0 mx-3 mb-3 rounded-md overflow-hidden" style={{ background: termBackground }}>
+        <div ref={hostRef} className="absolute inset-0 p-2" />
+        {empty && !run && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-text-muted pointer-events-none">
+            Not run yet.
           </div>
         )}
-        <div className="px-4 pb-2 text-xs font-mono text-text-subtle overflow-hidden text-ellipsis whitespace-nowrap shrink-0" title={command}>
-          {command ? `$ ${command}` : 'This command is no longer set: add it in Project settings, or in the stream\'s commands.'}
-        </div>
-        <div className="relative flex-1 min-h-0 mx-3 mb-3 rounded-md overflow-hidden" style={{ background: termBackground }}>
-          <div ref={hostRef} className="absolute inset-0 p-2" />
-          {empty && !run && (
-            <div className="absolute inset-0 flex items-center justify-center text-sm text-text-muted pointer-events-none">
-              Not run yet.
-            </div>
-          )}
-        </div>
       </div>
+    </div>
+  )
+  if (isEmbedded) return body
+  return (
+    <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" onClick={close} data-modal>
+      {body}
     </div>
   )
 }

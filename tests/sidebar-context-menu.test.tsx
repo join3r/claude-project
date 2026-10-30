@@ -1,23 +1,24 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import React from 'react'
+import React, { useState } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { DEFAULT_CONFIG, mainStreamId, type Project, type ProjectsData, type Tab, type Task } from '../src/shared/types'
 import { projectTasks } from '../src/shared/streams'
 import { fixtureProject } from './helpers/streams-fixtures'
-import { AppProvider } from '../src/renderer/context/AppContext'
+import { AppProvider, useApp } from '../src/renderer/context/AppContext'
 import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
 import Sidebar from '../src/renderer/components/Sidebar'
 import EntityActionsHost from '../src/renderer/components/EntityActionsHost'
 import { projectDeletePrompt, revealFolder } from '../src/renderer/components/sidebar/SidebarContextMenu'
+import { EntityMenuPopup, type EntityMenuTarget } from '../src/renderer/components/menus/EntityMenus'
 
 // React import is required by the JSX runtime under vitest's default transform.
 void React
 
 /**
- * Smoke test for the sidebar after its context menu, row parts and drag logic
- * moved out into `components/sidebar/`: the full tree renders against the real
- * app state, and the extracted menu still drives app actions.
+ * The inbox column against the real app state: a row's menu (and its stream,
+ * project and move pages) drives app actions, and the project and stream menus
+ * (the task header's and the Project map's) do too, opened here from a harness.
  */
 
 function buildProjects(): Project[] {
@@ -28,21 +29,17 @@ function buildProjects(): Project[] {
 let saved: ProjectsData[]
 let pinnedItems: ProjectsData['pinnedItems']
 let projectsFixture: () => Project[]
-// Quiet streams fold by default; most tests here want the rows on screen.
-let configOverrides: Partial<typeof DEFAULT_CONFIG>
 
 beforeEach(() => {
   saved = []
   pinnedItems = []
   projectsFixture = buildProjects
-  configOverrides = { autoCollapseQuietStreams: false }
   const known: Record<string, unknown> = {
     loadProjects: vi.fn().mockImplementation(async () => ({ local: {
       revision: 0,
       data: { projects: projectsFixture(), tags: [], projectOrder: projectsFixture().map(p => p.id), pinnedItems }
     } })),
-    loadConfig: vi.fn().mockImplementation(async () => ({ ...DEFAULT_CONFIG, ...configOverrides })),
-    loadWindowState: vi.fn().mockResolvedValue({ expandedProjectIds: ['p1'], sidebarTab: 'projects' }),
+    loadConfig: vi.fn().mockImplementation(async () => ({ ...DEFAULT_CONFIG })),
     notesLoad: vi.fn().mockResolvedValue({ revision: 0, data: {} }),
     saveProjects: vi.fn().mockImplementation((_source: string, payload: { data: ProjectsData }) => {
       saved.push(payload.data)
@@ -52,7 +49,7 @@ beforeEach(() => {
     sshStatus: vi.fn().mockResolvedValue('disconnected'),
     getAgentActivity: vi.fn().mockResolvedValue({})
   }
-  // Everything else the tree touches is a listener (returns a cleanup) or a
+  // Everything else the column touches is a listener (returns a cleanup) or a
   // fire-and-forget call.
   ;(window as any).api = new Proxy(known, {
     get(target, prop: string) {
@@ -72,25 +69,54 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** Buttons that open a project's or a stream's menu, as the task header and the Project map do. */
+function MenuHarness(): React.ReactElement {
+  const { projects } = useApp()
+  const [menu, setMenu] = useState<EntityMenuTarget | null>(null)
+  return (
+    <>
+      {projects.map(project => (
+        <React.Fragment key={project.id}>
+          <button data-testid={`open-project-${project.id}`} onClick={() => setMenu({ x: 0, y: 0, kind: 'project', projectId: project.id })}>{project.name}</button>
+          {project.streams.map(stream => (
+            <button key={stream.id} data-testid={`open-stream-${stream.id}`} onClick={() => setMenu({ x: 0, y: 0, kind: 'stream', projectId: project.id, streamId: stream.id })}>{stream.name}</button>
+          ))}
+        </React.Fragment>
+      ))}
+      <EntityMenuPopup menu={menu} onClose={() => setMenu(null)} />
+    </>
+  )
+}
+
 function renderSidebar() {
   return render(
     <TabStatusProvider>
       <AppProvider>
         <Sidebar />
+        <MenuHarness />
         <EntityActionsHost />
       </AppProvider>
     </TabStatusProvider>
   )
 }
 
-describe('Sidebar context menu', () => {
+/** A project's menu, from the harness (closing any menu open before). */
+async function openProjectMenu(projectId: string): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByTestId(`open-project-${projectId}`))
+  return screen.findByTestId('project-menu')
+}
+
+/** A desk row by its task's name. */
+async function row(name: string): Promise<HTMLElement> {
+  const title = await screen.findByText(name, { selector: '[data-testid="desk-row-title"]' })
+  return title.closest<HTMLElement>('[data-testid="desk-row"]')!
+}
+
+describe('Inbox row menu and project menu', () => {
   it('opens on a task row and snoozes the task until it needs you', async () => {
     renderSidebar()
-    const row = await screen.findByText('Fix the thing')
-
-    fireEvent.contextMenu(row)
-    fireEvent.click(await screen.findByRole('button', { name: /Snooze/ }))
-    // Done for now is gone: closing a task replaced it.
+    fireEvent.contextMenu(await row('Fix the thing'))
+    fireEvent.click((await screen.findAllByRole('button', { name: /Snooze/ })).at(-1)!)
     expect(screen.queryByText('Done for now', { selector: 'button' })).toBeNull()
     act(() => { fireEvent.click(screen.getByText('Until it needs me')) })
 
@@ -103,22 +129,21 @@ describe('Sidebar context menu', () => {
 
   it('pages to the snooze presets and back out on dismiss', async () => {
     renderSidebar()
-    fireEvent.contextMenu(await screen.findByText('Fix the thing'))
-    fireEvent.click(await screen.findByRole('button', { name: /Snooze/ }))
+    fireEvent.contextMenu(await row('Fix the thing'))
+    fireEvent.click((await screen.findAllByRole('button', { name: /Snooze/ })).at(-1)!)
 
     // The presets replace the menu body.
     expect(screen.queryByRole('button', { name: 'Rename' })).toBeNull()
     expect(screen.getAllByRole('button').length).toBeGreaterThan(0)
 
+    expect(screen.getByText('Until it needs me')).toBeTruthy()
     act(() => { window.dispatchEvent(new MouseEvent('mousedown')) })
-    expect(screen.queryByRole('button', { name: /Snooze/ })).toBeNull()
+    expect(screen.queryByText('Until it needs me')).toBeNull()
   })
 
   it('shows project details and pins a project', async () => {
     renderSidebar()
-    await screen.findByText('Alpha Project')
-    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
-
+    await openProjectMenu('p1')
     expect((await screen.findByTitle('/tmp/alpha')).textContent).toBe('Dir: /tmp/alpha')
     fireEvent.click(screen.getByRole('button', { name: 'Pin project' }))
 
@@ -136,16 +161,13 @@ describe('Sidebar context menu', () => {
       [server]: { revision: 1, data: { projects: [onServer], tags: [], projectOrder: [], pinnedItems: [] } }
     })
     renderSidebar()
-    await screen.findByText('Remote Repo')
-    await screen.findByText('Server Repo')
     const menuFor = async (projectId: string) => {
-      act(() => { window.dispatchEvent(new MouseEvent('mousedown')) })
-      fireEvent.contextMenu(document.querySelector(`[data-drag-type="project"][data-drag-id="${projectId}"]`)!)
+      await openProjectMenu(projectId)
       await screen.findByRole('button', { name: /^Rename/ })
       return screen.queryByRole('button', { name: 'Move to a DevTool server…' })
     }
     expect(await menuFor('p1')).toBeNull()
-    // A folder project renames through the dialog (folder too); an SSH one inline.
+    // A folder project renames through the dialog (folder too); an SSH one by name only.
     expect(screen.getByRole('button', { name: 'Rename…' })).toBeTruthy()
     expect(await menuFor('p-srv')).toBeNull()
     const move = await menuFor('p-ssh')
@@ -161,7 +183,7 @@ describe('Sidebar context menu', () => {
     const confirm = vi.fn(() => false)
     vi.stubGlobal('confirm', confirm)
     renderSidebar()
-    fireEvent.contextMenu(await screen.findByText('Fix the thing'))
+    fireEvent.contextMenu(await row('Fix the thing'))
     fireEvent.click(await screen.findByText('Close task', { selector: 'button' }))
     await waitFor(() => {
       expect(saved.length).toBeGreaterThan(0)
@@ -176,14 +198,12 @@ describe('Sidebar context menu', () => {
     const confirm = vi.fn((_message: string) => false)
     vi.stubGlobal('confirm', confirm)
     renderSidebar()
-    await screen.findByText('Alpha Project')
-    const row = document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!
-    fireEvent.contextMenu(row)
+    await openProjectMenu('p1')
     fireEvent.click(await screen.findByRole('button', { name: 'Delete…' }))
     expect(confirm.mock.calls[0][0]).toMatch(/^Delete project "Alpha Project"\?[\s\S]*Its task closes[\s\S]*not touched/)
-    expect(screen.getByText('Alpha Project')).toBeTruthy()
+    expect(screen.getByTestId('open-project-p1')).toBeTruthy()
 
-    fireEvent.contextMenu(row)
+    await openProjectMenu('p1')
     fireEvent.click(await screen.findByRole('button', { name: /Reveal in Finder|Show in/ }))
     expect(window.api.revealInFolder).toHaveBeenCalledWith('/tmp/alpha', undefined, 'p1')
   })
@@ -194,8 +214,7 @@ describe('Sidebar context menu', () => {
     ;(window.api as unknown as Record<string, unknown>).renameProjectCheck = check
     ;(window.api as unknown as Record<string, unknown>).renameProjectFolder = rename
     renderSidebar()
-    await screen.findByText('Alpha Project')
-    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    await openProjectMenu('p1')
     fireEvent.click(await screen.findByRole('button', { name: 'Rename…' }))
     expect(await screen.findByText('Rename Project')).toBeTruthy()
     // "Alpha Project" isn't the folder's name (alpha), so the folder stays unless switched on.
@@ -205,15 +224,14 @@ describe('Sidebar context menu', () => {
     expect(rename).not.toHaveBeenCalled()
   })
 
-  it('marks a project whose folder is gone, and opens its settings from the mark', async () => {
+  it('marks a project whose folder is gone in the scope menu, and offers no folder to trash', async () => {
     ;(window.api as unknown as Record<string, unknown>).missingProjectDirs = vi.fn().mockResolvedValue(['p1'])
     renderSidebar()
-    const badge = await screen.findByTestId('missing-dir-badge')
-    expect(badge.getAttribute('title')).toContain('/tmp/alpha')
-    fireEvent.click(badge)
-    expect(await screen.findByText('Project Settings')).toBeTruthy()
-    // No folder, nothing to trash.
-    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    await row('Fix the thing')
+    fireEvent.click(screen.getByTestId('desk-scope'))
+    const menu = await screen.findByTestId('desk-scope-menu')
+    await waitFor(() => expect(menu.querySelector('[title^="Folder not found"]')?.getAttribute('title')).toContain('/tmp/alpha'))
+    await openProjectMenu('p1')
     await screen.findByRole('button', { name: 'Delete…' })
     expect(screen.queryByRole('button', { name: 'Delete with folder…' })).toBeNull()
   })
@@ -224,8 +242,7 @@ describe('Sidebar context menu', () => {
     const trash = vi.fn().mockResolvedValue(undefined)
     ;(window.api as unknown as Record<string, unknown>).trashProjectDir = trash
     renderSidebar()
-    await screen.findByText('Alpha Project')
-    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    await openProjectMenu('p1')
     fireEvent.click(await screen.findByRole('button', { name: 'Delete with folder…' }))
     expect(confirm.mock.calls[0][0]).toMatch(/\/tmp\/alpha is moved to the Trash/)
     expect(confirm.mock.calls[0][0]).not.toMatch(/not touched/)
@@ -241,53 +258,16 @@ describe('Sidebar context menu', () => {
     const trash = vi.fn().mockRejectedValue(new Error('Refusing to trash /tmp/alpha: project "B" lives in it too.'))
     ;(window.api as unknown as Record<string, unknown>).trashProjectDir = trash
     renderSidebar()
-    await screen.findByText('Alpha Project')
-    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    await openProjectMenu('p1')
     fireEvent.click(await screen.findByRole('button', { name: 'Delete with folder…' }))
     await waitFor(() => expect(alert).toHaveBeenCalledWith(expect.stringMatching(/^Nothing was deleted\. Refusing/)))
     expect(trash).toHaveBeenCalledTimes(1)
-    expect(screen.getByText('Alpha Project')).toBeTruthy()
-  })
-})
-
-describe('Sidebar pins', () => {
-  const lastTasks = () => projectTasks(saved[saved.length - 1]?.projects[0])
-
-  it('adds a task and opens the new-stream dialog from a pinned project', async () => {
-    pinnedItems = [{ type: 'project', projectId: 'p1' }]
-    renderSidebar()
-    const pinned = (await screen.findByText('Pinned')).parentElement!
-    fireEvent.click(within(pinned).getByTitle('New task'))
-    await waitFor(() => expect(lastTasks()).toHaveLength(2))
-    expect(lastTasks()[1]).toMatchObject({ name: 'New Task' })
-    expect(lastTasks()[1]).not.toHaveProperty('workspaceDraft')
-
-    fireEvent.click(within(pinned).getByTitle('New stream'))
-    expect(await screen.findByText('New stream in Alpha Project')).toBeTruthy()
+    expect(screen.getByTestId('open-project-p1')).toBeTruthy()
   })
 
-  it('adds a sibling task from a pinned task, in its stream', async () => {
-    pinnedItems = [{ type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 't1' }]
+  it('creates a project-folder stream from a project\'s menu', async () => {
     renderSidebar()
-    const pinned = (await screen.findByText('Pinned')).parentElement!
-    fireEvent.click(within(pinned).getByTitle('New task in main'))
-    await waitFor(() => expect(lastTasks()).toHaveLength(2))
-  })
-
-  it('offers + Task and + Stream under an expanded pinned project', async () => {
-    pinnedItems = [{ type: 'project', projectId: 'p1' }]
-    renderSidebar()
-    const pinned = (await screen.findByText('Pinned')).parentElement!
-    expect(within(pinned).queryByText('Stream')).toBeNull()
-    fireEvent.click(pinned.querySelector('[data-pin-key] button')!)
-    fireEvent.click(within(pinned).getByText('Stream'))
-    expect(await screen.findByText('New stream in Alpha Project')).toBeTruthy()
-  })
-
-  it('creates a project-folder stream from a project\'s context menu', async () => {
-    renderSidebar()
-    await screen.findByText('Alpha Project')
-    fireEvent.contextMenu(document.querySelector('[data-drag-type="project"][data-drag-id="p1"]')!)
+    await openProjectMenu('p1')
     fireEvent.click(await screen.findByRole('button', { name: 'New stream…' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Project folder' }))
     fireEvent.change(screen.getByLabelText('Stream name'), { target: { value: 'bugfixes' } })
@@ -316,7 +296,7 @@ describe('revealFolder / projectDeletePrompt', () => {
   })
 })
 
-describe('Sidebar stream tree', () => {
+describe('Streams from the column and their menus', () => {
   const tab = (id: string, type: 'claude' | 'terminal' | 'browser'): Tab => ({ id, type, title: id } as Tab)
   const worktree = { worktreePath: '/wt/rel', branchName: 'release-0.5', baseBranch: 'main', relativeProjectPath: '' }
   function treeProjects(): Project[] {
@@ -335,45 +315,30 @@ describe('Sidebar stream tree', () => {
     }))
   }
   const lastProject = () => saved[saved.length - 1]?.projects[0]
-  const streamRow = (id: string) => document.querySelector<HTMLElement>(`[data-tree-row="stream"][data-stream-id="${id}"]`)!
+  const openStreamMenu = async (streamId: string): Promise<HTMLElement> => {
+    fireEvent.click(await screen.findByTestId(`open-stream-${streamId}`))
+    return screen.findByTestId('stream-menu')
+  }
 
   beforeEach(() => {
     projectsFixture = treeProjects
   })
 
-  it('lists streams with their branch and tasks with their extra tabs', async () => {
+  it('names a row\'s stream unless it is main', async () => {
     renderSidebar()
-    await screen.findByText('Busy task')
-    expect(streamRow(mainStreamId('p1')).textContent).toContain('main')
-    expect(streamRow('stream-busy').textContent).toContain('⎇ release-0.5')
-    expect(screen.getByText('+2')).toBeTruthy()
-    // Terminals and browsers are tabs inside the task, never rows.
-    expect(screen.queryByText('t1')).toBeNull()
-    expect(screen.queryByText('b1')).toBeNull()
+    expect((await row('Busy task')).textContent).toContain('0.5.0')
+    expect((await row('Quiet task')).textContent).not.toContain('main')
   })
 
-  it('folds quiet streams when auto-collapse is on, and a click opens one', async () => {
-    configOverrides = {}
-    renderSidebar()
-    await screen.findByText('Alpha Project')
-    await waitFor(() => expect(streamRow(mainStreamId('p1'))).toBeTruthy())
-    expect(screen.queryByText('Quiet task')).toBeNull()
-    // The collapsed row says how many tasks it holds.
-    expect(streamRow(mainStreamId('p1')).textContent).toContain('1')
-
-    fireEvent.click(streamRow(mainStreamId('p1')))
-    expect(await screen.findByText('Quiet task')).toBeTruthy()
-  })
-
-  it('never offers ✕ on main; a clean worktree stream closes without asking', async () => {
+  it('never offers Close on main; a clean worktree stream closes without asking', async () => {
     const confirm = vi.fn((_message: string) => true)
     vi.stubGlobal('confirm', confirm)
     ;(window.api as unknown as Record<string, unknown>).workspaceDelete = vi.fn().mockResolvedValue({ status: 'ok' })
     renderSidebar()
-    await screen.findByText('Busy task')
-    expect(within(streamRow(mainStreamId('p1'))).queryByTitle('Close stream')).toBeNull()
+    await row('Busy task')
+    expect(within(await openStreamMenu(mainStreamId('p1'))).queryByRole('button', { name: 'Close stream' })).toBeNull()
 
-    fireEvent.click(within(streamRow('stream-busy')).getByTitle('Close stream'))
+    fireEvent.click(within(await openStreamMenu('stream-busy')).getByRole('button', { name: 'Close stream' }))
     await waitFor(() => expect(lastProject()?.streams.map(s => s.id)).toEqual([mainStreamId('p1')]))
     expect(confirm).not.toHaveBeenCalled()
     // Only the pre-flight ran: clean and merged, it removed the worktree itself.
@@ -385,31 +350,31 @@ describe('Sidebar stream tree', () => {
     const workspaceDelete = vi.fn().mockResolvedValue({ status: 'unmerged', baseBranch: 'main' })
     ;(window.api as unknown as Record<string, unknown>).workspaceDelete = workspaceDelete
     renderSidebar()
-    await screen.findByText('Busy task')
+    await row('Busy task')
 
-    fireEvent.click(within(streamRow('stream-busy')).getByTitle('Close stream'))
+    fireEvent.click(within(await openStreamMenu('stream-busy')).getByRole('button', { name: 'Close stream' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Keep branch' })).toBeNull())
     expect(lastProject()?.streams.map(s => s.id) ?? ['unchanged']).not.toEqual([mainStreamId('p1')])
 
     workspaceDelete.mockResolvedValueOnce({ status: 'unmerged', baseBranch: 'main' }).mockResolvedValueOnce({ status: 'ok' })
-    fireEvent.click(within(streamRow('stream-busy')).getByTitle('Close stream'))
+    fireEvent.click(within(await openStreamMenu('stream-busy')).getByRole('button', { name: 'Close stream' }))
     expect(await screen.findByText(/not merged into "main"/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Keep branch' }))
     await waitFor(() => expect(lastProject()?.streams.map(s => s.id)).toEqual([mainStreamId('p1')]))
     await waitFor(() => expect(workspaceDelete).toHaveBeenLastCalledWith(expect.objectContaining({ force: true, keepBranch: true })))
   })
 
-  it('adds a task to a stream from its row', async () => {
+  it('adds a task to a stream from its menu', async () => {
     renderSidebar()
-    await screen.findByText('Busy task')
-    fireEvent.click(within(streamRow('stream-busy')).getByTitle('New task in 0.5.0'))
+    await row('Busy task')
+    fireEvent.click(within(await openStreamMenu('stream-busy')).getByRole('button', { name: 'New task in 0.5.0' }))
     await waitFor(() => expect(lastProject()?.streams.find(s => s.id === 'stream-busy')?.tasks).toHaveLength(2))
   })
 
   it('opens the task\'s stream menu as a page, and renames the stream in a dialog', async () => {
     renderSidebar()
-    fireEvent.contextMenu(await screen.findByText('Busy task'))
+    fireEvent.contextMenu(await row('Busy task'))
     fireEvent.click(await screen.findByTestId('task-menu-open-stream'))
     const page = await screen.findByTestId('task-menu-stream')
     expect(within(page).getByTestId('stream-menu-header').textContent).toContain('0.5.0')
@@ -425,7 +390,7 @@ describe('Sidebar stream tree', () => {
 
   it('offers no Close on main\'s page, and goes back to the task menu', async () => {
     renderSidebar()
-    fireEvent.contextMenu(await screen.findByText('Quiet task'))
+    fireEvent.contextMenu(await row('Quiet task'))
     fireEvent.click(await screen.findByTestId('task-menu-open-stream'))
     const page = await screen.findByTestId('task-menu-stream')
     expect(within(page).queryByRole('button', { name: 'Close stream' })).toBeNull()
@@ -435,7 +400,7 @@ describe('Sidebar stream tree', () => {
 
   it('opens Project Settings from the task\'s project page', async () => {
     renderSidebar()
-    fireEvent.contextMenu(await screen.findByText('Quiet task'))
+    fireEvent.contextMenu(await row('Quiet task'))
     fireEvent.click(await screen.findByTestId('task-menu-open-project'))
     const page = await screen.findByTestId('task-menu-project')
     expect(within(page).getByRole('button', { name: 'Rename…' })).toBeTruthy()
@@ -448,7 +413,7 @@ describe('Sidebar stream tree', () => {
     const confirm = vi.fn((_message: string) => true)
     vi.stubGlobal('confirm', confirm)
     renderSidebar()
-    fireEvent.contextMenu(await screen.findByText('Quiet task'))
+    fireEvent.contextMenu(await row('Quiet task'))
     fireEvent.click(await screen.findByTestId('task-menu-open-move'))
     const page = await screen.findByTestId('task-menu-move')
     expect(within(page).queryByTestId(`move-to-stream-${mainStreamId('p1')}`)).toBeNull()
@@ -457,16 +422,27 @@ describe('Sidebar stream tree', () => {
     await waitFor(() => expect(lastProject()?.streams.find(s => s.id === 'stream-busy')?.tasks.map(t => t.id)).toEqual(['busy', 'quiet']))
   })
 
-  it('pins a stream from its menu and lists its tasks under the pin', async () => {
+  it('pins a stream from its menu and offers it first in the scope menu', async () => {
     renderSidebar()
-    await screen.findByText('Busy task')
-    fireEvent.contextMenu(streamRow('stream-busy'))
-    fireEvent.click(await screen.findByRole('button', { name: 'Pin stream' }))
+    await row('Busy task')
+    fireEvent.click(within(await openStreamMenu('stream-busy')).getByRole('button', { name: 'Pin stream' }))
     await waitFor(() => {
       expect(saved[saved.length - 1]?.pinnedItems).toEqual([{ type: 'stream', projectId: 'p1', streamId: 'stream-busy' }])
     })
-    const pinned = (await screen.findByText('Pinned')).parentElement!
-    expect(within(pinned).getByText('Busy task')).toBeTruthy()
-    expect(within(pinned).queryByText('Quiet task')).toBeNull()
+    fireEvent.click(screen.getByTestId('desk-scope'))
+    const pinned = await screen.findByTestId('desk-scope-pinned-stream')
+    expect(pinned.textContent).toContain('0.5.0')
+    fireEvent.click(pinned)
+    await waitFor(() => expect(screen.queryByText('Quiet task', { selector: '[data-testid="desk-row-title"]' })).toBeNull())
+    expect(await row('Busy task')).toBeTruthy()
+  })
+
+  it('pins a task from its row menu: it goes first in its group, with a pin', async () => {
+    renderSidebar()
+    await row('Busy task')
+    fireEvent.contextMenu(await row('Quiet task'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pin task' }))
+    await waitFor(() => expect(saved[saved.length - 1]?.pinnedItems).toEqual([{ type: 'task', projectId: 'p1', streamId: mainStreamId('p1'), taskId: 'quiet' }]))
+    expect(await within(await row('Quiet task')).findByLabelText('pinned')).toBeTruthy()
   })
 })

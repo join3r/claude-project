@@ -1,37 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { projectHomeSummary, streamTone } from '../src/renderer/components/projectHomeState'
-import type { Stream, Tab, TabStatusValue } from '../src/shared/types'
-import { fixtureProject, fixtureTask } from './helpers/streams-fixtures'
+import { projectHomeSummary } from '../src/renderer/components/projectHomeState'
+import type { Tab } from '../src/shared/types'
+import { fixtureProject } from './helpers/streams-fixtures'
 
 const NOW = new Date('2026-10-07T12:00:00').getTime()
 
 const tab = (id: string, type: Tab['type']): Tab => ({ id, type, title: id })
-
-function stream(id: string, tasks: Stream['tasks']): Stream {
-  return { id, name: id, tasks }
-}
-
-describe('streamTone', () => {
-  const tasks = [
-    fixtureTask({ id: 'a', tabs: { left: [tab('a1', 'claude')] } }),
-    fixtureTask({ id: 'b', tabs: { left: [tab('b1', 'codex')] } }),
-    fixtureTask({ id: 'c', tabs: { left: [tab('c1', 'claude-chat')] }, inbox: { eventAt: NOW - 1000 }, lastInteractedAt: NOW - 5000 })
-  ]
-
-  it('takes the strongest task: needs you over working over your turn', () => {
-    const statuses: Record<string, TabStatusValue> = { a1: 'working', b1: 'attention' }
-    expect(streamTone(stream('s', tasks), statuses, {}, NOW)).toBe('attention')
-    expect(streamTone(stream('s', tasks), { a1: 'working' }, {}, NOW)).toBe('working')
-    expect(streamTone(stream('s', tasks), {}, {}, NOW)).toBe('turn')
-  })
-
-  it('is quiet for an empty stream or one whose finished tasks are put away', () => {
-    expect(streamTone(stream('s', []), {}, {}, NOW)).toBe('quiet')
-    const snoozed = fixtureTask({ id: 'z', tabs: { left: [tab('z1', 'claude')] }, inbox: { eventAt: NOW - 1000, snoozedUntil: NOW + 60_000 } })
-    const untilAttention = fixtureTask({ id: 'y', tabs: { left: [tab('y1', 'claude')] }, inbox: { eventAt: NOW - 5000, snoozedAt: NOW - 1000, snoozeUntilAttention: true } })
-    expect(streamTone(stream('s', [snoozed, untilAttention]), {}, {}, NOW)).toBe('quiet')
-  })
-})
 
 describe('projectHomeSummary', () => {
   it('counts open tasks, how many need you or work, and tasks by agent in a fixed order', () => {
