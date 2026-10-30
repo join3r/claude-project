@@ -45,7 +45,8 @@ if [ "$OS" = "Darwin" ]; then
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
     -kill -r -domain local -domain system -domain user 2>/dev/null || true
 
-  echo "Done. Launch ${APP_NAME} from /Applications."
+  echo "Done. Starting ${APP_NAME}..."
+  open "$INSTALL_PATH"
 
 elif [ "$OS" = "Linux" ]; then
   ARCH="$(uname -m)"
@@ -77,7 +78,12 @@ elif [ "$OS" = "Linux" ]; then
   sudo sh -c "printf '[Desktop Entry]\nName=${APP_NAME}\nExec=${INSTALL_PATH}/${BIN_NAME}\nTerminal=false\nType=Application\nCategories=Development;\n' > /usr/share/applications/devtool.desktop"
   sudo update-desktop-database /usr/share/applications 2>/dev/null || true
 
-  echo "Done. Launch ${APP_NAME} from your app menu or run 'devtool'."
+  if [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ]; then
+    echo "Done. Starting ${APP_NAME}..."
+    nohup "${INSTALL_PATH}/${BIN_NAME}" > /dev/null 2>&1 &
+  else
+    echo "Done. No display found; launch ${APP_NAME} from your app menu or run 'devtool'."
+  fi
 
 else
   echo "Unsupported OS: $OS"
