@@ -451,7 +451,7 @@ export default function NewTaskModal({
             </button>
           </header>
 
-          {project && <SameFolderWarning project={project} stream={stream} busy={busy} offerStream={false} />}
+          {project && prompt.trim() !== '' && <SameFolderWarning project={project} stream={stream} busy={busy} offerStream={false} />}
 
           <div
             className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)"

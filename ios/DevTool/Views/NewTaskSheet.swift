@@ -374,7 +374,7 @@ struct NewTaskSheet: View {
     /// (the desktop's same-folder warning), with New stream… when the desktop takes `stream.new`.
     @ViewBuilder
     private var sameFolderWarning: some View {
-        if let project = selectedProject, let selection, targetStreamId == selectedStream?.id {
+        if !trimmed.isEmpty, let project = selectedProject, let selection, targetStreamId == selectedStream?.id {
             let busy = project.busyInSameFolder(selectedStream)
             if !busy.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {

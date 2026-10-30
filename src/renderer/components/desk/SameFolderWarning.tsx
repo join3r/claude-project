@@ -5,8 +5,8 @@ import { paletteEvents } from '../../palette/paletteEvents'
 import { sameFolderWarning } from './deskStart'
 
 /**
- * Under a new task's prompt when another agent is already working in the
- * folder it would start in (see `busyInSameFolder`). In the compose box,
+ * Under a new task's prompt, once something is typed, when another agent is
+ * already working in the folder it would start in (see `busyInSameFolder`). In the compose box,
  * New stream… makes a worktree, then aims the box at it; the full form has
  * its own stream picker instead.
  */

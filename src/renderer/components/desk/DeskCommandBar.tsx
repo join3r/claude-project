@@ -141,8 +141,8 @@ export default function DeskCommandBar(): React.ReactElement | null {
   const { agents, agent } = config && bar.target ? deskAgents(config, bar.target.project, agentOverride) : { agents: [], agent: null }
   const statuses = useAllTabStatuses()
   const busy = useMemo(
-    () => (open && agent && bar.target ? busyInSameFolder(bar.target.project, bar.target.stream, (tabId) => statuses[tabId]) : []),
-    [open, agent, bar.target, statuses]
+    () => (open && agent && bar.target && input.trim() ? busyInSameFolder(bar.target.project, bar.target.stream, (tabId) => statuses[tabId]) : []),
+    [open, agent, bar.target, input, statuses]
   )
 
   // The input grows with the prompt; the mirror behind it (token colours) follows its scroll.

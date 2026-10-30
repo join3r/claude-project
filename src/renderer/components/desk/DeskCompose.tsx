@@ -190,7 +190,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
           ↵ fire{canAutopilot && ' · ⌘↵ autopilot'}
         </span>
       </div>
-      {target && <SameFolderWarning project={target.project} stream={target.stream} busy={busy} />}
+      {target && text.trim() !== '' && <SameFolderWarning project={target.project} stream={target.stream} busy={busy} />}
       <WhereMenu
         anchor={anchor}
         options={options}
