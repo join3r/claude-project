@@ -6,7 +6,7 @@ import { render, cleanup, act } from '@testing-library/react'
 // React import is required by the JSX runtime under vitest's default transform.
 void React
 
-import { useMenuPosition, type MenuAnchor } from '../src/renderer/hooks/useMenuPosition'
+import { useMenuPosition, menuTopInset, type MenuAnchor } from '../src/renderer/hooks/useMenuPosition'
 
 const MENU_W = 180
 const MENU_H = 200
@@ -85,22 +85,44 @@ describe('useMenuPosition', () => {
     expect(s.left + MENU_W).toBeLessThanOrEqual(1000)
   })
 
-  it('clamps to the margin when flipping still overflows', () => {
-    // Anchored 20px from the top: flipping up would put it at -180.
-    menuHeight = 200
+  it('keeps to the roomier side and scrolls when it fits on neither', () => {
+    // Anchored 20px from the bottom of a short window: 200px fits neither side.
     window.innerHeight = 210
-    const { getByTestId } = render(<Harness anchor={{ x: 50, y: 20 }} />)
+    const { getByTestId } = render(<Harness anchor={{ x: 50, y: 190 }} />)
     const s = styleOf(getByTestId('menu'))
-    expect(s.top).toBeGreaterThanOrEqual(8)
+    const room = 190 - menuTopInset()
+    expect(s.maxHeight).toBe(`${room}px`)
+    expect(s.overflowY).toBe('auto')
+    expect(s.top).toBe(menuTopInset())
+  })
+
+  it('stays under its anchor instead of sliding over it', () => {
+    // A dropdown under a box near the top, taller than the room below it:
+    // it used to flip up and cover the box (and the macOS traffic lights).
+    menuHeight = 900
+    window.innerHeight = 1000
+    const { getByTestId } = render(<Harness anchor={{ x: 50, y: 180 }} />)
+    const s = styleOf(getByTestId('menu'))
+    expect(s.top).toBe(180)
+    expect(s.maxHeight).toBe('812px') // 1000 - 8 - 180
+  })
+
+  it('never climbs into the title bar when flipping up', () => {
+    // Fits only above an anchor near the bottom: the top is the title bar's edge, not 8px.
+    menuHeight = 500
+    const { getByTestId } = render(<Harness anchor={{ x: 50, y: 580 }} />)
+    const s = styleOf(getByTestId('menu'))
+    expect(s.top).toBeGreaterThanOrEqual(menuTopInset())
+    expect(s.top + Math.min(500, parseFloat(s.maxHeight) || 500)).toBeLessThanOrEqual(580)
   })
 
   it('makes a menu taller than the window scrollable', () => {
     menuHeight = 900
     const { getByTestId } = render(<Harness anchor={{ x: 50, y: 300 }} />)
     const s = styleOf(getByTestId('menu'))
-    expect(s.maxHeight).toBe('584px') // 600 - 2 * 8 margin
+    expect(s.maxHeight).toBe('292px') // the 300px below the anchor, less the 8px margin
     expect(s.overflowY).toBe('auto')
-    expect(s.top).toBe(8)
+    expect(s.top).toBe(300)
   })
 
   it('repositions when the window is resized', () => {
