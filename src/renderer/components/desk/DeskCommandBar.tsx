@@ -40,7 +40,7 @@ const MAX_INPUT_HEIGHT = 160
 export default function DeskCommandBar(): React.ReactElement | null {
   const actions = useApp()
   const {
-    projects, projectOrder, notes, config, desk, updateDesk, selectedProjectId, selectedTaskId, effectiveTheme,
+    projects, projectOrder, notes, config, desk, selectedProjectId, selectedTaskId, effectiveTheme,
     switchToTask, selectProjectHome, updatePromptQueue, openOrFocusNoteTab, openOrFocusEditorTab, taskForTab
   } = actions
   const [open, setOpen] = useState(false)
@@ -187,14 +187,9 @@ export default function DeskCommandBar(): React.ReactElement | null {
     record(item.id)
     switch (item.kind) {
       case 'task': switchToTask(item.project.id, item.task.id); break
+      // A project or stream opens its Project map; the column's scope filter stays as it was.
       case 'project':
-        updateDesk({ scope: { projectId: item.project.id } })
-        selectProjectHome(item.project.id)
-        break
       case 'stream':
-        updateDesk({ scope: { projectId: item.project.id, streamId: item.stream.id } })
-        selectProjectHome(item.project.id)
-        break
       case 'queued': selectProjectHome(item.project.id); break
       case 'app': openRunLog(item.app, { selectedProjectId, selectedTaskId, switchToTask }); break
       case 'command': runPaletteCommand(item.id, actions); break
