@@ -11,6 +11,8 @@ import type { NewTaskKind, NewTaskSubmission, NewTaskTarget } from './newTask'
 import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickPromptAgent } from './promptBox'
 import { currentStreamId } from '../../shared/streams'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
+import AutopilotChips from './desk/AutopilotChips'
+import { AUTOPILOT_OFF, autopilotAvailable, type DeskAutopilot } from './desk/deskStart'
 
 interface Props {
   projects: Project[]
@@ -93,6 +95,7 @@ export default function NewTaskModal({
   const [model, setModel] = useState('')
   const [effort, setEffort] = useState('')
   const [kind, setKind] = useState<NewTaskKind>('agent')
+  const [autopilot, setAutopilot] = useState<DeskAutopilot>(AUTOPILOT_OFF)
   // Null: the target project's current stream.
   const [pickedStreamId, setPickedStreamId] = useState<string | null>(defaultStreamId ?? null)
   // With one project there is no filter to type into, so the prompt keeps focus.
@@ -156,6 +159,7 @@ export default function NewTaskModal({
   )
   const agent = terminal ? undefined : pickPromptAgent(picked ?? config.promptBoxAgent, agents)
   const takesMode = !!agent && agentTakesMode(agent)
+  const canAutopilot = autopilotAvailable(project ?? undefined, agent ?? null)
   // Without an agent to hand it to, there is no prompt — the task opens blank.
   const promptText = agent || takesCommand ? prompt.trim() : ''
   // Only the chat view takes images; switching away hides them rather than dropping them.
@@ -237,8 +241,10 @@ export default function NewTaskModal({
   const draft = { target, prompt: promptText }
   const valid = isNewTaskDraftValid(draft) && !imagesNeedPrompt
 
-  const handleCreate = (): void => {
+  /** `withAutopilot`: ⌘↵, which turns Autopilot on for this one start (⇧⌘↵ with a Codex review). */
+  const handleCreate = (withAutopilot: DeskAutopilot | null = null): void => {
     if (!valid || !target) return
+    const run = canAutopilot && promptText ? (withAutopilot ?? (autopilot.on ? autopilot : null)) : null
     const where = target.kind === 'project' && streamId ? { streamId } : {}
     if (terminal) {
       onCreate({ target, ...where, terminal: takesCommand && promptText ? { command: promptText } : {} })
@@ -249,18 +255,22 @@ export default function NewTaskModal({
           agent,
           prompt: {
             text: promptText,
-            ...(takesMode && mode ? { mode } : {}),
+            // Autopilot runs in auto mode unless you picked a mode yourself.
+            ...(takesMode && (mode || run) ? { mode: mode || 'auto' } : {}),
             ...(agent === 'claude-chat' && model ? { model } : {}),
             ...(agent === 'claude-chat' && effort ? { effort } : {}),
             ...(images.length > 0 ? { images: toChatImages(images) } : {})
           }
         }
       : undefined
-    onCreate({ target, ...where, start })
+    onCreate({ target, ...where, start, ...(run && start ? { autopilot: { review: run.review } } : {}) })
   }
 
   const onPromptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      handleCreate(canAutopilot ? { on: true, review: e.shiftKey } : null)
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleCreate()
     } else if (e.key === 'Tab' && e.shiftKey && takesMode) {
@@ -462,10 +472,15 @@ export default function NewTaskModal({
                 {agent === 'claude-chat' && (
                   <ChipMenu label={`Effort: ${effort || 'Default'}`} title="Thinking effort" placement="down" options={EFFORT_OPTIONS} value={effort} onChange={(v) => { setEffort(v); focusPrompt() }} />
                 )}
+                {canAutopilot && (
+                  <span className="ml-1 flex items-center gap-1">
+                    <AutopilotChips value={autopilot} onChange={(next) => { setAutopilot(next); focusPrompt() }} />
+                  </span>
+                )}
               </div>
               <button
                 type="button"
-                title={terminal ? 'Open the terminal (Enter)' : promptText ? 'Start (Enter)' : 'Create an empty task (Enter)'}
+                title={terminal ? 'Open the terminal (Enter)' : promptText ? (canAutopilot ? 'Start (Enter) · on Autopilot (⌘Enter)' : 'Start (Enter)') : 'Create an empty task (Enter)'}
                 aria-label="Create task"
                 disabled={!valid}
                 onClick={() => handleCreate()}
@@ -485,7 +500,7 @@ export default function NewTaskModal({
               {terminal
                 ? `A terminal task in ${streamLabel}. It is named after the start-up command, or "Terminal"; rename it from the sidebar.`
                 : agent
-                ? `The first prompt names the task.${takesImages ? ' Paste or drop images to send them with it.' : ''} Send it empty to open the task without starting an agent.`
+                ? `The first prompt names the task.${takesImages ? ' Paste or drop images to send them with it.' : ''}${canAutopilot ? ' ⌘↵ starts it on Autopilot.' : ''} Send it empty to open the task without starting an agent.`
                 : 'The task opens empty; add a terminal or browser tab from there.'}
             </HelperText>
           )}

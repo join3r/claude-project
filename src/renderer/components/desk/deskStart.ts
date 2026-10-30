@@ -2,6 +2,7 @@ import type { AppConfig, Project, PromptBoxAgent, Stream } from '../../../shared
 import { availablePromptAgents, pickPromptAgent } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
 import { autopilotSupported } from '../../../shared/autopilot'
+import { fuzzyMatch } from '../../palette/fuzzy'
 
 /** The Autopilot chip: off by default every time (decision 7), "+ Codex review" inside it. */
 export interface DeskAutopilot {
@@ -63,4 +64,29 @@ export function deskSubmission(
       ? { start: { agent, prompt: { text: prompt, ...(agent === 'claude-chat' || agent === 'claude' ? { mode: 'auto' as const } : {}) } } }
       : { terminal: { command: prompt } })
   }
+}
+
+/** A row of the compose box's where picker: a project, or one of its non-main streams. */
+export interface WhereOption {
+  key: string
+  project: Project
+  stream?: Stream
+}
+
+/**
+ * The where picker's rows, each project followed by its non-main streams.
+ * Typed text narrows them (a stream matches on "project stream"), best first.
+ */
+export function whereOptions(projects: readonly Project[], filter: string): WhereOption[] {
+  const all: WhereOption[] = projects.flatMap(project => [
+    { key: project.id, project },
+    ...project.streams.filter(stream => !stream.isMain).map(stream => ({ key: `${project.id}:${stream.id}`, project, stream }))
+  ])
+  const query = filter.trim()
+  if (!query) return all
+  return all
+    .map(option => ({ option, score: fuzzyMatch(query, option.stream ? `${option.project.name} ${option.stream.name}` : option.project.name)?.score ?? -1 }))
+    .filter(scored => scored.score >= 0)
+    .sort((a, b) => b.score - a.score)
+    .map(scored => scored.option)
 }

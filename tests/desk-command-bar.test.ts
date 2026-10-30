@@ -15,7 +15,7 @@ import {
 import { createMainStream } from '../src/shared/types'
 import type { Project, Stream, Task } from '../src/shared/types'
 import { singlePane } from '../src/shared/streams'
-import { AUTOPILOT_OFF, autopilotAvailable, deskSubmission } from '../src/renderer/components/desk/deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, deskSubmission, whereOptions } from '../src/renderer/components/desk/deskStart'
 
 const NOW = new Date('2026-10-30T12:00:00').getTime()
 
@@ -197,5 +197,17 @@ describe('Autopilot on a start', () => {
     expect(deskSubmission(server, beta, 'claude-chat', 'fix it', on).autopilot).toBeUndefined()
     expect(autopilotAvailable(devtool, 'claude-chat')).toBe(true)
     expect(autopilotAvailable(server, 'claude-chat')).toBe(false)
+  })
+})
+
+describe('whereOptions (the compose box where picker)', () => {
+  it('lists each project followed by its non-main streams', () => {
+    expect(whereOptions(projects, '').map(option => option.key)).toEqual(['dt', 'dt:beta', 'st', 'st:st-next'])
+  })
+
+  it('narrows on project names, and on "project stream" for streams', () => {
+    expect(whereOptions(projects, 'stem').map(option => option.key)).toContain('st')
+    expect(whereOptions(projects, 'stem').map(option => option.key)).not.toContain('dt')
+    expect(whereOptions(projects, 'dev 0.7').map(option => option.key)).toEqual(['dt:beta'])
   })
 })
