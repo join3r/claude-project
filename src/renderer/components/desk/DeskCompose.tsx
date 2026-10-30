@@ -7,8 +7,10 @@ import { useMenuPosition, type MenuAnchor } from '../../hooks/useMenuPosition'
 import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import { composeTarget } from './deskInbox'
 import { deskEvents } from './deskEvents'
-import { autopilotAvailable, deskAgents, deskSubmission, mentionAt, readLastProject, whereOptions, writeLastProject, type WhereOption } from './deskStart'
+import { autopilotAvailable, busyInSameFolder, deskAgents, deskSubmission, mentionAt, readLastProject, whereOptions, writeLastProject, type WhereOption } from './deskStart'
 import { paletteEvents } from '../../palette/paletteEvents'
+import { useAllTabStatuses } from '../../context/TabStatusContext'
+import SameFolderWarning from './SameFolderWarning'
 
 const chipCls = 'flex items-center gap-1.5 bg-surface-3 border border-border rounded-full px-2.5 py-[3px] text-sm text-body cursor-pointer hover:border-border-strong min-w-0'
 
@@ -55,6 +57,11 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   )
   const { agent, isDefault } = deskAgents(config, target?.project, null)
   const canAutopilot = autopilotAvailable(target?.project, agent)
+  const statuses = useAllTabStatuses()
+  const busy = useMemo(
+    () => (target && agent ? busyInSameFolder(target.project, target.stream, (tabId) => statuses[tabId]) : []),
+    [target, agent, statuses]
+  )
 
   const found = mentionAt(text, caret)
   const mention = found && found.start !== dismissedAt ? found : null
@@ -183,6 +190,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
           ↵ fire{canAutopilot && ' · ⌘↵ autopilot'}
         </span>
       </div>
+      {target && <SameFolderWarning project={target.project} stream={target.stream} busy={busy} />}
       <WhereMenu
         anchor={anchor}
         options={options}

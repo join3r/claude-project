@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { v4 as uuid } from 'uuid'
-import type { Project, PromptBoxAgent } from '../../../shared/types'
+import type { Project, PromptBoxAgent, Task } from '../../../shared/types'
 import { isEphemeralProject } from '../../../shared/types'
-import { findTaskInProject, streamDirectory, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
+import { findTaskInProject, streamDirectory, taskDirectory } from '../../../shared/streams'
 import { useApp } from '../../context/AppContext'
 import { paletteEvents, setPaletteReturnFocus } from '../../palette/paletteEvents'
 import { usePaletteHotkey } from '../../palette/usePaletteHotkey'
 import { useFrecency } from '../../palette/useFrecency'
 import { paletteCommandEntities, runPaletteCommand } from '../../palette/paletteCommands'
 import { useAllStreamRuns, useDismissedStreamRunCrashes } from '../../streamRuns'
+import { useAllTabStatuses } from '../../context/TabStatusContext'
 import { useFileNewTask } from '../../hooks/useFileNewTask'
 import { resolveLandingTaskId } from '../../hooks/taskNavigation'
 import { showToast } from '../../toasts'
@@ -21,7 +22,7 @@ import { createTab } from '../newTaskTabs'
 import { inboxApps } from '../inbox'
 import { openBench } from './benchState'
 import { openRunLog } from './DeskStatusBar'
-import { AUTOPILOT_OFF, autopilotAvailable, deskAgents, deskSubmission, readLastProject, writeLastProject, type DeskAutopilot } from './deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, deskAgents, startsInOwnWorktree, deskSubmission, readLastProject, writeLastProject, type DeskAutopilot } from './deskStart'
 import AutopilotChips from './AutopilotChips'
 import {
   barSections, canQueue, completeToken, queuedPromptFor, resolveBar, targetLabel, targetStreamName,
@@ -138,6 +139,11 @@ export default function DeskCommandBar(): React.ReactElement | null {
   }, [selected])
 
   const { agents, agent } = config && bar.target ? deskAgents(config, bar.target.project, agentOverride) : { agents: [], agent: null }
+  const statuses = useAllTabStatuses()
+  const busy = useMemo(
+    () => (open && agent && bar.target ? busyInSameFolder(bar.target.project, bar.target.stream, (tabId) => statuses[tabId]) : []),
+    [open, agent, bar.target, statuses]
+  )
 
   // The input grows with the prompt; the mirror behind it (token colours) follows its scroll.
   useLayoutEffect(() => {
@@ -310,6 +316,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
                     index={at}
                     selected={at === selected}
                     agent={agent}
+                    busy={busy}
                     theme={effectiveTheme}
                     onHover={() => setSelected(at)}
                     onClick={() => commit(item)}
@@ -397,11 +404,13 @@ function BarMirror({ input, bar }: { input: string; bar: ResolvedBar }): React.R
 
 const ROW = 'flex items-center gap-3 mx-1.5 px-2.5 rounded-lg text-base cursor-pointer'
 
-function BarRow({ item, index, selected, agent, theme, onHover, onClick }: {
+function BarRow({ item, index, selected, agent, busy, theme, onHover, onClick }: {
   item: BarItem
   index: number
   selected: boolean
   agent: PromptBoxAgent | null
+  /** Agents already working where a started task would go (see `busyInSameFolder`). */
+  busy: readonly Task[]
   theme: 'dark' | 'light'
   onHover: () => void
   onClick: () => void
@@ -414,7 +423,7 @@ function BarRow({ item, index, selected, agent, theme, onHover, onClick }: {
   switch (item.kind) {
     case 'start': {
       const { project, stream } = item.target
-      const ownWorktree = !!stream?.workspace && !!stream.taskWorktrees && taskWorktreesSupported(project)
+      const ownWorktree = startsInOwnWorktree(project, stream)
       const who = agent === 'claude-chat' || agent === 'claude' ? 'Claude' : agent ? PROMPT_BOX_AGENT_LABEL[agent] : 'A terminal'
       return (
         <div {...common} className={`${ROW} py-3 ${bg}`}>
@@ -423,6 +432,11 @@ function BarRow({ item, index, selected, agent, theme, onHover, onClick }: {
             <strong className="text-md text-text font-semibold truncate">Start task in {targetLabel(item.target)}</strong>
             <span className="text-sm text-text-muted truncate">
               {who} starts {ownWorktree ? 'in its own worktree' : stream?.workspace ? `in the ${stream.name} worktree` : 'in the project folder'}
+              {busy.length > 0 && (
+                <span className="text-warn" data-testid="command-bar-same-folder">
+                  {' · '}{busy.length === 1 ? `"${busy[0].name}" is` : `${busy.length} agents are`} already working there
+                </span>
+              )}
             </span>
           </div>
           {kbd('↵')}

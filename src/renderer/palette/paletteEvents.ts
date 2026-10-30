@@ -14,6 +14,8 @@ type EventMap = {
   'open-new-task-form': NewTaskFormRequest
   /** The New stream dialog for a project (Project Home's button). */
   'open-new-stream': string
+  /** The same, from a new task's same-folder warning: once made, the compose box aims at the new stream. */
+  'open-new-stream-for-task': string
   /** The New project dialog (the palette's New Project…). */
   'open-new-project': void
   'toggle-sidebar': void

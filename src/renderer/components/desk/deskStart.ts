@@ -1,4 +1,6 @@
-import type { AppConfig, Project, PromptBoxAgent, Stream } from '../../../shared/types'
+import type { AppConfig, Project, PromptBoxAgent, Stream, Task } from '../../../shared/types'
+import { findMainStream, streamDirectory, taskDirectory, taskWorktreesSupported } from '../../../shared/streams'
+import { isTaskWorking, type StatusOf } from '../sidebar/closeRules'
 import { availablePromptAgents, pickPromptAgent } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
 import { autopilotSupported } from '../../../shared/autopilot'
@@ -69,6 +71,33 @@ export function deskSubmission(
       ? { start: { agent, prompt: { text: prompt, ...(agent === 'claude-chat' || agent === 'claude' ? { mode: 'auto' as const } : {}) } } }
       : { terminal: { command: prompt } })
   }
+}
+
+/** Whether a new task in `stream` gets a worktree of its own (a task-worktree stream in a project that has them). */
+export function startsInOwnWorktree(project: Project, stream: Stream | undefined): boolean {
+  return !!stream?.workspace && !!stream.taskWorktrees && taskWorktreesSupported(project)
+}
+
+/**
+ * The tasks whose agent is working in the folder a new task in `stream` (none:
+ * `main`) would start in: the project folder, or a stream worktree its tasks
+ * share. Empty when the new task gets a worktree of its own. Two agents in one
+ * folder edit the same files, so starting there warns.
+ */
+export function busyInSameFolder(project: Project, stream: Stream | undefined, statusOf: StatusOf): Task[] {
+  const target = stream ?? findMainStream(project)
+  if (startsInOwnWorktree(project, target)) return []
+  const dir = streamDirectory(project, target)
+  return project.streams.flatMap(candidate => candidate.tasks)
+    .filter(task => isTaskWorking(task, statusOf) && taskDirectory(project, task) === dir)
+}
+
+/** The warning's one line: who works where, and what to do about it. */
+export function sameFolderWarning(project: Project, stream: Stream | undefined, busy: readonly Task[]): string {
+  const target = stream ?? findMainStream(project)
+  const where = target?.workspace ? `the ${target.name} worktree` : 'the project folder'
+  const who = busy.length === 1 ? `"${busy[0].name}" is` : `${busy.length} agents are`
+  return `${who} already working in ${where}. Two agents there edit the same files; a new stream gives this one its own worktree.`
 }
 
 /** When you last worked in a stream: its most recently touched task. */

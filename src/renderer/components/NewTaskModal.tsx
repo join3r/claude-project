@@ -12,7 +12,9 @@ import { PROMPT_BOX_AGENT_LABEL, agentTakesMode, availablePromptAgents, pickProm
 import { currentStreamId } from '../../shared/streams'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
 import AutopilotChips from './desk/AutopilotChips'
-import { AUTOPILOT_OFF, autopilotAvailable, type DeskAutopilot } from './desk/deskStart'
+import { AUTOPILOT_OFF, autopilotAvailable, busyInSameFolder, type DeskAutopilot } from './desk/deskStart'
+import SameFolderWarning from './desk/SameFolderWarning'
+import { useAllTabStatuses } from '../context/TabStatusContext'
 
 interface Props {
   projects: Project[]
@@ -152,6 +154,12 @@ export default function NewTaskModal({
   const streamOptions = project?.streams.map(stream => ({ value: stream.id, label: stream.name })) ?? []
   const streamLabel = project?.streams.find(stream => stream.id === streamId)?.name ?? 'main'
   const terminal = kind === 'terminal'
+  const statuses = useAllTabStatuses()
+  const stream = project?.streams.find(candidate => candidate.id === streamId)
+  const busy = useMemo(
+    () => (project && !terminal ? busyInSameFolder(project, stream, (tabId) => statuses[tabId]) : []),
+    [project, stream, terminal, statuses]
+  )
   // Shell-command projects run their own command in every terminal.
   const takesCommand = terminal && !project?.shellCommand
   const agents = useMemo(
@@ -442,6 +450,8 @@ export default function NewTaskModal({
               &times;
             </button>
           </header>
+
+          {project && <SameFolderWarning project={project} stream={stream} busy={busy} offerStream={false} />}
 
           <div
             className="relative rounded-xl border-[0.5px] bg-field shadow-[0_1px_3px_rgba(0,0,0,0.12)] border-border-strong focus-within:border-border-focus transition-colors duration-(--motion-fast)"

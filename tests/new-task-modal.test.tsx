@@ -7,6 +7,7 @@ import { render, fireEvent, screen, act, cleanup, waitFor } from '@testing-libra
 void React
 
 import NewTaskModal from '../src/renderer/components/NewTaskModal'
+import { TabStatusProvider } from '../src/renderer/context/TabStatusContext'
 import type { NewTaskSubmission, NewTaskTarget } from '../src/renderer/components/newTask'
 import { createMainStream, type AppConfig, type Project } from '../src/shared/types'
 
@@ -71,18 +72,20 @@ afterEach(() => {
 
 function modal(defaultProjectId: string | null, projects: Project[], config: ComposerConfig = CONFIG, pickProjectFirst = false): React.ReactElement {
   return (
-    <NewTaskModal
-      projects={projects}
-      defaultProjectId={defaultProjectId}
-      pickProjectFirst={pickProjectFirst}
-      getProjectDir={(p) => p.directory}
-      config={config}
-      allTags={[]}
-      onEnsureTag={() => 't1'}
-      onAddProject={onAddProject}
-      onCreate={onCreate}
-      onClose={onClose}
-    />
+    <TabStatusProvider>
+      <NewTaskModal
+        projects={projects}
+        defaultProjectId={defaultProjectId}
+        pickProjectFirst={pickProjectFirst}
+        getProjectDir={(p) => p.directory}
+        config={config}
+        allTags={[]}
+        onEnsureTag={() => 't1'}
+        onAddProject={onAddProject}
+        onCreate={onCreate}
+        onClose={onClose}
+      />
+    </TabStatusProvider>
   )
 }
 
@@ -291,7 +294,7 @@ describe('NewTaskModal', () => {
         onCreate={onCreate}
         onClose={onClose}
       />
-    )
+    , { wrapper: TabStatusProvider })
     // The selected task's stream is the default.
     expect(screen.getByTitle('Stream').textContent).toContain('0.5.0')
     await act(async () => { fireEvent.click(screen.getByTitle('Stream')) })

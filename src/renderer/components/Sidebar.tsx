@@ -85,6 +85,7 @@ export default function Sidebar(): React.ReactElement {
   const [newTaskForm, setNewTaskForm] = useState<NewTaskFormRequest | null>(null)
   // The project the New stream dialog is open for.
   const [newStreamProjectId, setNewStreamProjectId] = useState<string | null>(null)
+  const composeIntoNewStream = useRef(false)
   const closeTaskFlow = useCloseTask()
   const closeStreamFlow = useCloseStream()
   useStreamAheadPolling(projects, selectedProjectId, selectedTaskId)
@@ -157,7 +158,8 @@ export default function Sidebar(): React.ReactElement {
   useEffect(() => paletteEvents.on('open-new-task', () => deskEvents.focusCompose()), [])
   useEffect(() => paletteEvents.on('open-new-task-in', (where) => deskEvents.focusCompose(where)), [])
   useEffect(() => paletteEvents.on('open-new-task-form', (request) => setNewTaskForm(request)), [])
-  useEffect(() => paletteEvents.on('open-new-stream', (projectId) => setNewStreamProjectId(projectId)), [])
+  useEffect(() => paletteEvents.on('open-new-stream', (projectId) => { composeIntoNewStream.current = false; setNewStreamProjectId(projectId) }), [])
+  useEffect(() => paletteEvents.on('open-new-stream-for-task', (projectId) => { composeIntoNewStream.current = true; setNewStreamProjectId(projectId) }), [])
   useEffect(() => paletteEvents.on('open-new-project', () => setNewProjectOpen(true)), [])
   useEffect(() => {
     return window.api.onMenuNewStream(() => {
@@ -209,7 +211,9 @@ export default function Sidebar(): React.ReactElement {
     const stream = addStream(projectId, name, workspace)
     setNewStreamProjectId(null)
     if (workspace && setupPending) openEntityDialog({ kind: 'stream-setup', projectId, streamId: stream.id, branch: workspace.branchName, pending: setupPending })
-    setPendingHome({ projectId, streamId: stream.id })
+    // From the same-folder warning: back to the prompt you were writing, now aimed at the new stream.
+    if (composeIntoNewStream.current) deskEvents.focusCompose({ projectId, streamId: stream.id })
+    else setPendingHome({ projectId, streamId: stream.id })
   }
 
   /** File what the compose box, the bar or the full form asked for (see `useFileNewTask`). */
