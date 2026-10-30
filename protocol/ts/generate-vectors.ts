@@ -13,7 +13,7 @@ import type { PairingPayload } from './pairing-uri.ts'
 import { encodeJson, negotiateVersion, parseAppMessage, parseDesktopHello, parsePhoneHello } from './app-messages.ts'
 import type { DesktopHello, PhoneHello } from './app-messages.ts'
 import { FRAGMENT_CHUNK, Reassembler, fragmentMessage } from './fragments.ts'
-import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
+import { parseBranchesListParams, parseBranchesListResult, parseStreamNewParams, parseStreamNewResult, parseProjectNewParams, parseProjectNewResult, parseStreamRunParams, parseStreamLogsParams, parseStreamLogsResult, parseStreamCommandsParams, parseStreamCommandsResult, parseStreamCommandsSetParams, parseStreamCommandsSuggestResult, parseChatParams, parseChatResult, parseChatSettingsParams, parseChatImageParams, parseChatImageResult, parseChatCommandsParams, parseChatCommandsResult, parseChatBtwParams, parseChatBtwResult, parseChatBashParams, parseChatTaskStopParams, parseChatPermissionsParams, parseChatPermissionsResult, parseChatPermissionsUpdateParams, parseTaskNewParams, parseTaskNewResult, parseTaskCloseParams, parseTaskCloseResult, parseTaskLandParams, parseTaskLandResult, parseTabCloseParams, parsePinSetParams, parseTaskTriageParams, parseQueueUpdateParams, parseQueueUpdateResult, parseQueueRunParams, parseQueueRunResult } from './chat-messages.ts'
 import { openPushCap, openPushPayload, parsePushParams, pushRegisterMessage, sealPushCap, sealPushPayload, signPushRegister } from './push.ts'
 import type { PushPayload } from './push.ts'
 import { PROJECT_TILE_PALETTE, fnv1a32, projectTile, taskPlace } from './project-tile.ts'
@@ -901,6 +901,54 @@ function chatMessages(): unknown {
       invalid: {
         params: [text({ projectId: 'p1' }), text({ streamId: 's-main' }), text({ projectId: 'p1', streamId: 's-main', commandId: '' }), 'null'],
         results: [text({}), text({ text: 7 }), '[]']
+      }
+    },
+    // §8.21: `stream.commands.get`, `.set` and `.suggest` read, save and suggest a project's or a stream's commands.
+    streamCommands: {
+      params: [
+        text({ projectId: 'p1' }),
+        text({ projectId: 'p1', streamId: 's-050' }),
+        text({ projectId: 'p1', streamId: null, extra: 1 })
+      ].map((json) => ({ json, expected: parseStreamCommandsParams(JSON.parse(json)) })),
+      results: [
+        text({ commands: [] }),
+        text({ commands: [{ id: 'c-run', name: 'run', command: 'npm run dev' }, { id: 'c-install', name: 'install', command: 'npm ci', extra: 1 }] }),
+        text({
+          commands: [{ id: 'c-run', name: 'run', command: 'npm run dev -- --port 3001' }],
+          inherited: [{ id: 'c-run', name: 'run', command: 'npm run dev' }, { id: 'c-install', name: 'install', command: 'npm ci' }]
+        }),
+        text({ commands: [], inherited: [] }),
+        text({ commands: [], inherited: null })
+      ].map((json) => ({ json, expected: parseStreamCommandsResult(JSON.parse(json)) })),
+      setParams: [
+        text({ projectId: 'p1', commands: [] }),
+        text({ projectId: 'p1', streamId: 's-050', commands: [{ id: 'c-run', name: ' run ', command: '  npm run dev -- --port 3001 ' }, { name: 'test', command: 'npm test', id: null }] }),
+        text({ projectId: 'p1', commands: [{ name: 'run', command: 'npm run dev', extra: 1 }, { name: 'Run (staging)', command: 'npm run dev -- --mode staging' }] }),
+        text({ projectId: 'p1', commands: [{ name: 'x'.repeat(60), command: 'y'.repeat(2000) }] })
+      ].map((json) => ({ json, expected: parseStreamCommandsSetParams(JSON.parse(json)) })),
+      setResults: [text({})],
+      suggestResults: [
+        text({ commands: [] }),
+        text({ commands: [{ name: 'install', command: 'pnpm install' }, { name: 'run', command: 'pnpm dev', id: 'ignored' }] })
+      ].map((json) => ({ json, expected: parseStreamCommandsSuggestResult(JSON.parse(json)) })),
+      invalid: {
+        params: [text({}), text({ projectId: 7 }), text({ projectId: 'p1', streamId: '' }), text({ projectId: 'p1', streamId: 7 }), 'null'],
+        results: [text({}), text({ commands: [{ id: 'c1', name: 'run' }] }), text({ commands: [], inherited: [{ name: 'run', command: 'x' }] }), text({ commands: 'npm ci' }), '[]'],
+        setParams: [
+          text({ projectId: 'p1' }),
+          text({ commands: [] }),
+          text({ projectId: 'p1', streamId: '', commands: [] }),
+          text({ projectId: 'p1', commands: [{ name: '  ', command: 'npm ci' }] }),
+          text({ projectId: 'p1', commands: [{ name: 'install', command: '' }] }),
+          text({ projectId: 'p1', commands: [{ name: 'install' }] }),
+          text({ projectId: 'p1', commands: [{ id: '', name: 'install', command: 'npm ci' }] }),
+          text({ projectId: 'p1', commands: [{ name: 'run', command: 'a' }, { name: 'RUN ', command: 'b' }] }),
+          text({ projectId: 'p1', commands: [{ name: 'x'.repeat(61), command: 'y' }] }),
+          text({ projectId: 'p1', commands: [{ name: 'x', command: 'y'.repeat(2001) }] }),
+          text({ projectId: 'p1', commands: Array.from({ length: 21 }, (_, i) => ({ name: `c${i}`, command: 'true' })) }),
+          'null'
+        ],
+        suggestResults: [text({}), text({ commands: [{ name: 'run' }] }), '[]']
       }
     },
     // §8.16: `queue.update` edits Project Home's queue; `queue.run` starts a queued prompt now.

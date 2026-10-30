@@ -19,7 +19,7 @@ function doc(file: string): Schema {
 
 const KNOWN = new Set([
   '$schema', '$id', '$defs', '$ref', 'title', 'description', 'type', 'required', 'properties',
-  'items', 'enum', 'const', 'pattern', 'minimum', 'maxLength', 'oneOf', 'if', 'then'
+  'items', 'maxItems', 'enum', 'const', 'pattern', 'minimum', 'maxLength', 'oneOf', 'if', 'then'
 ])
 
 function resolve(ref: string, file: string): [Schema, string] {
@@ -65,6 +65,7 @@ function validate(schema: Schema, value: unknown, file: string, path = '$'): str
       if (key in (value as Schema)) errors.push(...validate(sub, (value as Schema)[key], file, `${path}.${key}`))
     }
   }
+  if (typeof schema.maxItems === 'number' && Array.isArray(value) && value.length > schema.maxItems) errors.push(`${path}: maxItems`)
   if (Array.isArray(value) && schema.items) value.forEach((item, i) => errors.push(...validate(schema.items as Schema, item, file, `${path}[${i}]`)))
   if (schema.oneOf) {
     const passing = (schema.oneOf as Schema[]).filter((s) => validate(s, value, file, path).length === 0).length
@@ -160,6 +161,23 @@ describe('JSON Schema', () => {
     for (const text of chat.streamRun.invalid.params) expect(check('streamRunParams', JSON.parse(text)), text).not.toEqual([])
     for (const text of chat.streamLogs.invalid.params) expect(check('streamLogsParams', JSON.parse(text)), text).not.toEqual([])
     for (const text of chat.streamLogs.invalid.results) expect(check('streamLogsResult', JSON.parse(text)), text).not.toEqual([])
+  })
+
+  it('accepts the stream.commands samples and rejects the invalid ones (§8.21)', () => {
+    const check = (def: string, value: unknown) => validate({ $ref: `app-message.schema.json#/$defs/${def}` }, value, 'app-message.schema.json')
+    const file = chat.streamCommands
+    for (const s of file.params) expect(check('streamCommandsParams', s.expected), s.json).toEqual([])
+    for (const s of file.results) expect(check('streamCommandsResult', s.expected), s.json).toEqual([])
+    for (const s of file.setParams) expect(check('streamCommandsSetParams', s.expected), s.json).toEqual([])
+    for (const json of file.setResults) expect(check('streamCommandsSetResult', JSON.parse(json)), json).toEqual([])
+    for (const s of file.suggestResults) expect(check('streamCommandsSuggestResult', s.expected), s.json).toEqual([])
+    for (const text of file.invalid.params) expect(check('streamCommandsParams', JSON.parse(text)), text).not.toEqual([])
+    for (const text of file.invalid.results) expect(check('streamCommandsResult', JSON.parse(text)), text).not.toEqual([])
+    for (const text of file.invalid.suggestResults) expect(check('streamCommandsSuggestResult', JSON.parse(text)), text).not.toEqual([])
+    // Two names equal ignoring case is beyond the schema; every other invalid list fails it.
+    for (const text of file.invalid.setParams.filter((t: string) => !t.includes('RUN '))) {
+      expect(check('streamCommandsSetParams', JSON.parse(text)), text).not.toEqual([])
+    }
   })
 
   it('accepts the queue.update and queue.run samples and rejects the invalid ones (§8.16)', () => {

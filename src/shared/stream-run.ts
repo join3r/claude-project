@@ -110,6 +110,18 @@ export function streamRunCommands(project: Project, stream: Stream | undefined):
   return out
 }
 
+/** The project with `commands` as its own list (none: cleared); older data's single `runCommand` goes with it. */
+export function withProjectRunCommands(project: Project, commands: RunCommand[]): Project {
+  const { runCommand: _old, runCommands: _list, ...rest } = project
+  return commands.length > 0 ? { ...rest, runCommands: commands } : rest
+}
+
+/** The stream with `commands` as its own list (none: cleared); older data's single `runCommand` goes with it. */
+export function withStreamRunCommands(stream: Stream, commands: RunCommand[]): Stream {
+  const { runCommand: _old, runCommands: _list, ...rest } = stream
+  return commands.length > 0 ? { ...rest, runCommands: commands } : rest
+}
+
 /** One of the stream's commands by id. */
 export function findStreamRunCommand(project: Project, stream: Stream | undefined, commandId: string): RunCommand | undefined {
   return streamRunCommands(project, stream).find(c => c.id === commandId)

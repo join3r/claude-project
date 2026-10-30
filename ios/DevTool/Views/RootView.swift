@@ -118,7 +118,7 @@ struct RootView: View {
                 }
                 .navigationDestination(for: ProjectRef.self) { ref in
                     ProjectView(ref: ref, selection: $taskSelection,
-                                demoSheet: demoRoute == .newStream || demoRoute == .newTask || demoRoute == .streamLogs ? demoRoute : nil)
+                                demoSheet: demoRoute == .newStream || demoRoute == .newTask || demoRoute == .streamLogs || demoRoute == .commands ? demoRoute : nil)
                 }
             }
         } detail: {
@@ -231,7 +231,7 @@ struct RootView: View {
         case .projects, .desktop, .compose:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first { sidebar = .desktop(first.id) }
-        case .project, .newStream, .newTask, .streamLogs:
+        case .project, .newStream, .newTask, .streamLogs, .commands:
             try? await Task.sleep(for: .milliseconds(400))
             if let first = model.desktops.first {
                 sidebar = .desktop(first.id)

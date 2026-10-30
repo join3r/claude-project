@@ -24,6 +24,12 @@ import {
   parseStreamNewParams,
   parseStreamRunParams,
   parseStreamLogsParams,
+  parseStreamCommandsParams,
+  parseStreamCommandsSetParams,
+  type StreamCommandsParams,
+  type StreamCommandsResult,
+  type StreamCommandsSetParams,
+  type StreamCommandsSuggestResult,
   parseProjectNewParams,
   parseBranchesListParams,
   type StreamNewParams,
@@ -256,6 +262,12 @@ export interface MobileServiceDeps {
     subscribe(listener: () => void): () => void
     control(params: StreamRunParams): Promise<{ ok: true } | { ok: false; code: string; message: string }>
     logs(params: StreamLogsParams): { ok: true; result: StreamLogsResult } | { ok: false; code: string; message: string }
+  }
+  /** `stream.commands.get`, `.set` and `.suggest` (SPEC.md §8.21). Without it the three answer `unsupported`. */
+  streamCommands?: {
+    get(params: StreamCommandsParams): { ok: true; result: StreamCommandsResult } | { ok: false; code: string; message: string }
+    set(params: StreamCommandsSetParams): { ok: true } | { ok: false; code: string; message: string }
+    suggest(params: StreamCommandsParams): Promise<{ ok: true; result: StreamCommandsSuggestResult } | { ok: false; code: string; message: string }>
   }
   /** `branches.list` (SPEC.md §8.13). Without it the op answers `unsupported`. */
   listBranches?(projectId: string): Promise<({ ok: true } & BranchesListResult) | { ok: false; code: string; message: string }>
@@ -986,6 +998,30 @@ export class MobileService {
       this.answerLater(session, id, message.op, () => parseStreamLogsParams(message.params), async (params) => {
         const outcome = runs.logs(params)
         return outcome.ok ? { ok: true, result: outcome.result, log: `stream=${params.streamId} chars=${outcome.result.text.length}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.StreamCommandsGet && this.deps.streamCommands) {
+      const commands = this.deps.streamCommands
+      this.answerLater(session, id, message.op, () => parseStreamCommandsParams(message.params), async (params) => {
+        const outcome = commands.get(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `project=${params.projectId} stream=${params.streamId ?? '-'} commands=${outcome.result.commands.length}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.StreamCommandsSet && this.deps.streamCommands) {
+      const commands = this.deps.streamCommands
+      this.answerLater(session, id, message.op, () => parseStreamCommandsSetParams(message.params), async (params) => {
+        const outcome = commands.set(params)
+        return outcome.ok ? { ok: true, result: {}, log: `project=${params.projectId} stream=${params.streamId ?? '-'} commands=${params.commands.length}` } : outcome
+      })
+      return
+    }
+    if (message.op === AppOp.StreamCommandsSuggest && this.deps.streamCommands) {
+      const commands = this.deps.streamCommands
+      this.answerLater(session, id, message.op, () => parseStreamCommandsParams(message.params), async (params) => {
+        const outcome = await commands.suggest(params)
+        return outcome.ok ? { ok: true, result: outcome.result, log: `project=${params.projectId} stream=${params.streamId ?? '-'} suggested=${outcome.result.commands.length}` } : outcome
       })
       return
     }

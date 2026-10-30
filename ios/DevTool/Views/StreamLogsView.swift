@@ -167,13 +167,16 @@ struct StreamRunRow: View {
 }
 
 /// Run's picker: the stream's commands that aren't running (in `taskId`'s
-/// worktree when it names one, which also moves a run from elsewhere).
+/// worktree when it names one, which also moves a run from elsewhere), and
+/// Commands… to edit them.
 struct RunCommandMenu<Label: View>: View {
     @Environment(AppModel.self) private var model
     let desktopId: String
     let projectId: String
     let stream: InboxStream
     var taskId: String? = nil
+    /// Commands… at the end (a desktop that lists `stream.commands`): edits the commands.
+    var onCommands: (() -> Void)? = nil
     @ViewBuilder let label: () -> Label
 
     var body: some View {
@@ -191,6 +194,10 @@ struct RunCommandMenu<Label: View>: View {
                     Text(run?.isRunning == true ? (here ? "Running" : "Running elsewhere: moves it") : command.command)
                 }
                 .disabled(here || model.pendingRun(streamId: stream.id, commandId: command.id, desktopId: desktopId) != nil)
+            }
+            if let onCommands, model.supports(DesktopFeature.streamCommands, on: desktopId) {
+                Divider()
+                Button("Commands…", systemImage: "terminal", action: onCommands)
             }
         } label: {
             label()

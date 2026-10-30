@@ -18,6 +18,7 @@ import {
   singlePane,
   taskTabIds
 } from '../../../shared/streams'
+import { withStreamRunCommands } from '../../../shared/stream-run'
 import { addTabToPane, patchTabInTask } from '../../../shared/panes'
 import { dirBasename } from '../../../shared/paths'
 import { incrementLifetimeStat } from '../lifetimeStats'
@@ -245,11 +246,7 @@ export function renameStreamInData(data: ProjectsData, projectId: string, stream
 export function setStreamRunCommandsInData(data: ProjectsData, projectId: string, streamId: string, commands: RunCommand[]): ProjectsData {
   return mapProject(data, projectId, project => ({
     ...project,
-    streams: project.streams.map(stream => {
-      if (stream.id !== streamId) return stream
-      const { runCommand: _old, runCommands: _list, ...rest } = stream
-      return commands.length > 0 ? { ...rest, runCommands: commands } : rest
-    })
+    streams: project.streams.map(stream => (stream.id === streamId ? withStreamRunCommands(stream, commands) : stream))
   }))
 }
 

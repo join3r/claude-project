@@ -104,6 +104,7 @@ import { closeTask, findClosableTab, landTask, removeTabFromData } from '../mobi
 import { setPinInData } from '../mobile/pin'
 import { triageTaskInData } from '../mobile/triage'
 import { queuedPromptForRun, updateQueueInData } from '../mobile/queue'
+import { savedRunCommands, setStreamCommandsInData, streamCommandsInData, streamCommandsPlace } from '../mobile/stream-commands'
 import {
   AppErrorCode,
   BRANCHES_LIST_FEATURE,
@@ -118,6 +119,7 @@ import {
   STREAM_RUN_FEATURE,
   STREAM_RUN_TASK_FEATURE,
   STREAM_RUN_COMMANDS_FEATURE,
+  STREAM_COMMANDS_FEATURE,
   ChatLimits,
   PROJECT_NEW_FEATURE,
   TAB_CLOSE_FEATURE,
@@ -581,7 +583,7 @@ export class HostServices {
         // A phone shows a server as one (SPEC.md §4.3).
         app: `${this.isServer ? SERVER_APP_NAME : 'devtool'}/${this.env.appVersion}`,
         desktopName,
-        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, CHAT_TASKS_FEATURE],
+        features: () => [TASK_NEW_FEATURE, CHAT_SETTINGS_FEATURE, TASK_CLOSE_FEATURE, TASK_CLOSE_CHOICE_FEATURE, TAB_CLOSE_FEATURE, CHAT_IMAGE_FEATURE, PIN_FEATURE, TASK_TRIAGE_FEATURE, STREAM_NEW_FEATURE, PROJECT_NEW_FEATURE, BRANCHES_LIST_FEATURE, CHAT_COMMANDS_FEATURE, TASK_LAND_FEATURE, SEND_IMAGES_FEATURE, QUEUE_FEATURE, CHAT_BASH_FEATURE, STREAM_RUN_FEATURE, STREAM_RUN_TASK_FEATURE, STREAM_RUN_COMMANDS_FEATURE, STREAM_COMMANDS_FEATURE, CHAT_TASKS_FEATURE],
         log
       }),
       createInvite: (options) => createInvite(identity.get(), options),
@@ -688,6 +690,30 @@ export class HostServices {
         ...this.streamGit(),
         peek: () => this.projectsStore.peek()
       }, projectId),
+      streamCommands: {
+        get: (params) => streamCommandsInData(this.projectsStore.peek(), params),
+        set: (params) => {
+          const outcome = setStreamCommandsInData(this.projectsStore.peek(), params)
+          if (!outcome.ok) return outcome
+          if (outcome.changed) this.commitProjects(outcome.data)
+          return { ok: true }
+        },
+        suggest: async ({ projectId, streamId }) => {
+          const place = streamCommandsPlace(this.projectsStore.peek(), projectId, streamId)
+          if (!place.ok) return place
+          if (!this.isServer && !this.config.enableClaude) {
+            return { ok: false, code: AppErrorCode.Unsupported, message: 'Claude is turned off on this desktop' }
+          }
+          if (isRemoteProject(place.project)) {
+            return { ok: false, code: AppErrorCode.Unsupported, message: 'Suggest with Claude isn\'t available for SSH projects yet.' }
+          }
+          const current = savedRunCommands(place.project, place.stream).map(({ name, command }) => ({ name, command }))
+          const outcome = await this.suggestRunCommands(projectId, streamId, current)
+          return outcome.ok
+            ? { ok: true, result: { commands: outcome.commands } }
+            : { ok: false, code: AppErrorCode.Internal, message: outcome.error }
+        }
+      },
       streamRuns: {
         states: (streamId) => this.streamRuns.statesOfStream(streamId),
         subscribe: (listener) => this.streamRuns.subscribe(listener),

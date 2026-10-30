@@ -20,7 +20,7 @@
         "t": { "const": "req" },
         "id": { "$ref": "#/$defs/id" },
         "op": { "type": "string", "description": "inbox.get, a chat.* op (SPEC.md §6.3), or a §7.4/§8 op such as task.new or stream.new" },
-        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams, stream.run #/$defs/streamRunParams, stream.logs #/$defs/streamLogsParams." }
+        "params": { "description": "Op-specific (SPEC.md §6.3, §8); the chat ops take an object with tabId, stream.new #/$defs/streamNewParams, project.new #/$defs/projectNewParams, branches.list #/$defs/branchesListParams, task.land #/$defs/taskLandParams, queue.update #/$defs/queueUpdateParams, queue.run #/$defs/queueRunParams, stream.run #/$defs/streamRunParams, stream.logs #/$defs/streamLogsParams, stream.commands.get and stream.commands.suggest #/$defs/streamCommandsParams, stream.commands.set #/$defs/streamCommandsSetParams." }
       }
     },
     "resOk": {
@@ -30,7 +30,7 @@
         "t": { "const": "res" },
         "id": { "$ref": "#/$defs/id" },
         "ok": { "const": true },
-        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run, #/$defs/streamRunResult and #/$defs/streamLogsResult for stream.run and stream.logs." }
+        "result": { "description": "Op-specific; an Inbox for inbox.get, chat.schema.json for the chat ops, #/$defs/streamNewResult and #/$defs/branchesListResult for stream.new and branches.list, #/$defs/projectNewResult for project.new, #/$defs/taskCloseResult and #/$defs/taskLandResult for task.close and task.land, #/$defs/queueUpdateResult and #/$defs/queueRunResult for queue.update and queue.run, #/$defs/streamRunResult and #/$defs/streamLogsResult for stream.run and stream.logs, #/$defs/streamCommandsResult, #/$defs/streamCommandsSetResult and #/$defs/streamCommandsSuggestResult for stream.commands.get, .set and .suggest." }
       }
     },
     "resErr": {
@@ -123,6 +123,75 @@
       "properties": {
         "text": { "type": "string", "maxLength": 200000 },
         "truncated": { "const": true }
+      }
+    },
+    "streamCommandsParams": {
+      "description": "stream.commands.get and stream.commands.suggest params (SPEC.md §8.21): no streamId means the project's own commands.",
+      "type": "object",
+      "required": ["projectId"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "streamId": { "type": "string", "pattern": "." }
+      }
+    },
+    "streamCommand": {
+      "description": "A saved command (SPEC.md §8.19, §8.21).",
+      "type": "object",
+      "required": ["id", "name", "command"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "command": { "type": "string" }
+      }
+    },
+    "streamCommandsResult": {
+      "description": "stream.commands.get result (SPEC.md §8.21): that list's commands, and with streamId the project's (inherited, absent when none).",
+      "type": "object",
+      "required": ["commands"],
+      "properties": {
+        "commands": { "type": "array", "items": { "$ref": "#/$defs/streamCommand" } },
+        "inherited": { "type": "array", "items": { "$ref": "#/$defs/streamCommand" } }
+      }
+    },
+    "streamCommandsSetParams": {
+      "description": "stream.commands.set params (SPEC.md §8.21): the whole list, at most 20, names unique ignoring case (not expressible here).",
+      "type": "object",
+      "required": ["projectId", "commands"],
+      "properties": {
+        "projectId": { "type": "string" },
+        "streamId": { "type": "string", "pattern": "." },
+        "commands": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": {
+              "id": { "type": "string", "pattern": ".", "description": "Keeps the command of that id in the list; absent: a fresh id." },
+              "name": { "type": "string", "pattern": "\\S", "maxLength": 60 },
+              "command": { "type": "string", "pattern": "\\S", "maxLength": 2000 }
+            }
+          }
+        }
+      }
+    },
+    "streamCommandsSetResult": {
+      "description": "stream.commands.set result (SPEC.md §8.21): empty; the merged commands arrive in the next inbox.",
+      "type": "object"
+    },
+    "streamCommandsSuggestResult": {
+      "description": "stream.commands.suggest result (SPEC.md §8.21): what Claude suggests; nothing is saved.",
+      "type": "object",
+      "required": ["commands"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": { "name": { "type": "string" }, "command": { "type": "string" } }
+          }
+        }
       }
     },
     "branchesListParams": {

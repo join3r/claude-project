@@ -237,6 +237,8 @@ struct TaskInfoSheet: View {
     var onLanding: () -> Void = {}
     @State private var closing: CloseTaskRequest?
     @State private var logs: StreamLogsTarget?
+    /// The Commands sheet from Run here…'s Commands… (§8.21).
+    @State private var commands: CommandsTarget?
 
     var body: some View {
         NavigationStack {
@@ -308,6 +310,7 @@ struct TaskInfoSheet: View {
             actions(project: project, task: task, streamName: streamName, offline: offline)
         }
         .sheet(item: $logs) { StreamLogsView(target: $0) }
+        .sheet(item: $commands) { CommandsSheet(target: $0) }
         .listStyle(.insetGrouped)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -327,7 +330,9 @@ struct TaskInfoSheet: View {
                     let target = StreamLogsTarget(desktopId: ref.desktopId, projectId: project.id, streamId: stream.id, commandId: commandRun.commandId)
                     StreamRunRow(target: target, stream: stream, now: Date()) { logs = target }
                 }
-                RunCommandMenu(desktopId: ref.desktopId, projectId: project.id, stream: stream, taskId: task.id) {
+                RunCommandMenu(desktopId: ref.desktopId, projectId: project.id, stream: stream, taskId: task.id, onCommands: {
+                    commands = CommandsTarget.of(stream, desktopId: ref.desktopId, projectId: project.id)
+                }) {
                     Label("Run here…", systemImage: "play")
                 }
             } header: {
