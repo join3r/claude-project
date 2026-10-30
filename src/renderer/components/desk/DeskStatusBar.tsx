@@ -76,10 +76,10 @@ export default function DeskStatusBar(): React.ReactElement {
             {host.detail && <span className="text-text-subtle">· {host.detail}</span>}
           </>
         )
-        // A server's page has its pairing, build and updates; This Mac and SSH boxes open the hosts list.
+        // Settings › Hosts; a server's dot scrolls to the servers, with their pairing, builds and updates.
         const page = host.kind === 'server' ? 'servers' : 'hosts'
         return (
-          <button key={host.key} type="button" className={BUTTON} title={`${host.title} · open Settings › ${host.kind === 'server' ? 'Servers' : 'Hosts'}`} onClick={() => paletteEvents.emit('open-settings-tab', page)} data-testid="desk-status-host">
+          <button key={host.key} type="button" className={BUTTON} title={`${host.title} · open Settings › Hosts`} onClick={() => paletteEvents.emit('open-settings-tab', page)} data-testid="desk-status-host">
             {content}
           </button>
         )

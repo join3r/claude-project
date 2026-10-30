@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { describeUpdateStatus, type UpdateStatus } from '../../../shared/updates'
 import { useApp } from '../../context/AppContext'
-import { Group, GroupRow, GrpHead, HelperText, LinkBtn, Switch } from '../ui'
+import { Group, GroupRow, HelperText, LinkBtn, Switch } from '../ui'
 
 const MODE_HELP: Record<Exclude<UpdateStatus['mode'], 'none'>, string> = {
   auto: 'This install updates itself: a new version downloads in the background and installs when you quit or restart.',
@@ -30,7 +30,6 @@ export default function UpdatesSettings(): React.ReactElement {
 
   return (
     <>
-      <GrpHead>Updates</GrpHead>
       <Group>
         <GroupRow
           label={`DevTool ${status.appVersion}`}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { FileDiff, Inbox, Palette, RadioTower, RefreshCw, Server, Smartphone, Sparkles, SquareTerminal, X, type LucideIcon } from 'lucide-react'
 import type { EditorLineNumbers, EditorRenderWhitespace, EditorWordWrap, PromptBoxAgent, TerminalColorScheme } from '../../shared/types'
 import { PROMPT_BOX_AGENTS } from '../../shared/types'
 import { PROMPT_BOX_AGENT_LABEL } from './promptBox'
@@ -13,7 +14,6 @@ import {
 import { GrpHead, FormGroup, SetBlock, Group, GroupRow, SegCtl, Switch, Field, Select, HelperText, LinkBtn } from './ui'
 import ExternalIdesSettings from './ExternalIdesSettings'
 import MobileSettings from './settings/MobileSettings'
-import ServersSettings from './settings/ServersSettings'
 import HostsSettings from './settings/HostsSettings'
 import RelaySettings from './settings/RelaySettings'
 import UpdatesSettings from './settings/UpdatesSettings'
@@ -57,24 +57,57 @@ function parseNumberInput(value: string, fallback: number, min: number, max: num
   return Math.min(max, Math.max(min, parsed))
 }
 
-export type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'mobile' | 'hosts' | 'servers' | 'relay' | 'updates'
+export type SettingsTab = 'appearance' | 'terminal' | 'editor' | 'ai' | 'sidebar' | 'mobile' | 'hosts' | 'relay' | 'updates'
 
-const tabs: Array<{ id: SettingsTab; label: string }> = [
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'terminal', label: 'Terminal' },
-  { id: 'editor', label: 'Editor & Diff' },
-  { id: 'ai', label: 'AI Tools' },
-  { id: 'sidebar', label: 'Inbox' },
-  { id: 'mobile', label: 'Mobile' },
-  { id: 'hosts', label: 'Hosts' },
-  { id: 'servers', label: 'Servers' },
-  { id: 'relay', label: 'Relay' },
-  { id: 'updates', label: 'Updates' }
+interface TabInfo {
+  id: SettingsTab
+  label: string
+  icon: LucideIcon
+  /** Under the page title: what the page is for. */
+  blurb: string
+}
+
+/** The rail, in groups: how DevTool looks and works here, then where code runs and who reaches it. */
+const tabGroups: Array<{ label: string; tabs: TabInfo[] }> = [
+  {
+    label: 'App',
+    tabs: [
+      { id: 'appearance', label: 'Appearance', icon: Palette, blurb: 'How DevTool looks.' },
+      { id: 'terminal', label: 'Terminal', icon: SquareTerminal, blurb: 'Type, colors and behavior of terminal tabs.' },
+      { id: 'editor', label: 'Editor & Diff', icon: FileDiff, blurb: 'The file editor, notebook cells and diff tabs.' },
+      { id: 'ai', label: 'AI Tools', icon: Sparkles, blurb: 'Which agents a task can start, and how they run.' },
+      { id: 'sidebar', label: 'Inbox', icon: Inbox, blurb: 'The task list in the sidebar, and where new projects go.' }
+    ]
+  },
+  {
+    label: 'Remote',
+    tabs: [
+      { id: 'hosts', label: 'Hosts', icon: Server, blurb: 'Where your projects run. Each project picks one host when you make it; the status bar shows which.' },
+      { id: 'mobile', label: 'Mobile', icon: Smartphone, blurb: 'Your phone sees this desktop\'s projects and tasks, and can start and answer them.' },
+      { id: 'relay', label: 'Relay', icon: RadioTower, blurb: 'How phones and DevTool servers reach this computer.' }
+    ]
+  },
+  {
+    label: 'About',
+    tabs: [
+      { id: 'updates', label: 'Updates', icon: RefreshCw, blurb: 'This DevTool\'s version and new releases.' }
+    ]
+  }
 ]
+
+const tabs = tabGroups.flatMap(group => group.tabs)
+
+/** Old page ids still sent by links: Servers is a section of Hosts now. */
+function resolveTab(id: string | undefined): { tab: SettingsTab; focus?: 'servers' } {
+  if (id === 'servers') return { tab: 'hosts', focus: 'servers' }
+  return { tab: tabs.find(t => t.id === id)?.id ?? 'appearance' }
+}
 
 export default function Settings({ onClose, initialTab }: Props): React.ReactElement {
   const { config, updateConfig } = useApp()
-  const [activeTab, setActiveTab] = useState<SettingsTab>(() => tabs.find(t => t.id === initialTab)?.id ?? 'appearance')
+  const [initial] = useState(() => resolveTab(initialTab))
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initial.tab)
+  const page = tabs.find(t => t.id === activeTab) ?? tabs[0]
 
   if (!config) return <div />
 
@@ -83,7 +116,6 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
       case 'appearance':
         return (
           <>
-            <GrpHead>Appearance</GrpHead>
             <FormGroup>
               <SetBlock label="Application theme">
                 <SegCtl
@@ -224,10 +256,8 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
       case 'editor':
         return (
           <>
-            <GrpHead>Editor & Diff</GrpHead>
             <FormGroup>
-              <HelperText>Applies to Monaco-backed file editor, notebook cells, and diff tabs.</HelperText>
-              <SetBlock label="Font family" divider>
+              <SetBlock label="Font family">
                 <Field
                   value={config.editorFontFamily}
                   onChange={(e) => updateConfig({ editorFontFamily: e.target.value })}
@@ -526,10 +556,7 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
         return <MobileSettings onOpenRelay={() => setActiveTab('relay')} />
 
       case 'hosts':
-        return <HostsSettings onOpenServers={() => setActiveTab('servers')} />
-
-      case 'servers':
-        return <ServersSettings onOpenRelay={() => setActiveTab('relay')} />
+        return <HostsSettings onOpenRelay={() => setActiveTab('relay')} focus={initial.tab === 'hosts' ? initial.focus : undefined} />
 
       case 'relay':
         return <RelaySettings />
@@ -540,7 +567,6 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
       case 'sidebar':
         return (
           <>
-            <GrpHead>Inbox</GrpHead>
             <FormGroup>
               <SetBlock label="Group the list">
                 <SegCtl
@@ -597,41 +623,57 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
 
   return (
     <div className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/50" data-modal>
-      <div className="w-[680px] max-w-[90vw] h-[520px] max-h-[85vh] rounded-xl border border-border bg-surface shadow-pop flex flex-col overflow-hidden">
-        {/* header */}
-        <div className="flex items-center justify-between px-4 h-(--ctl-h-lg) mt-1 shrink-0">
-          <h2 className="text-md font-semibold text-text m-0">Settings</h2>
-          <button
-            onClick={onClose}
-            className="bg-transparent border-0 text-text-muted cursor-pointer text-lg leading-none px-1 rounded-sm hover:text-text"
-            title="Close"
-          >
-            &times;
-          </button>
-        </div>
+      <div className="w-[860px] max-w-[92vw] h-[640px] max-h-[88vh] rounded-xl border border-border bg-surface shadow-pop flex overflow-hidden">
+        {/* left rail */}
+        <nav className="w-48 shrink-0 bg-surface-2 border-r border-hair flex flex-col px-2 pb-3 overflow-y-auto" aria-label="Settings pages">
+          <h2 className="m-0 px-2.5 pt-4 pb-3 text-md font-semibold text-text">Settings</h2>
+          {tabGroups.map(group => (
+            <div key={group.label} className="flex flex-col gap-px mb-3">
+              <div className="px-2.5 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-text-subtle">{group.label}</div>
+              {group.tabs.map(tab => {
+                const Icon = tab.icon
+                const active = activeTab === tab.id
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={[
+                      'flex items-center gap-2.5 text-left rounded-md px-2.5 py-[5px] text-base cursor-pointer border-0',
+                      'transition-colors duration-(--motion-fast)',
+                      active ? 'bg-sel text-text' : 'bg-transparent text-text-muted hover:text-text hover:bg-surface-3'
+                    ].join(' ')}
+                    data-testid={`settings-tab-${tab.id}`}
+                  >
+                    <Icon size={15} strokeWidth={1.75} className={`shrink-0 ${active ? 'text-accent' : ''}`} />
+                    {tab.label}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </nav>
 
-        {/* split: tabs + panel */}
-        <div className="flex flex-1 min-h-0">
-          {/* left rail */}
-          <div className="w-40 border-r border-hair py-2 px-2 flex flex-col gap-0.5 shrink-0">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={[
-                  'text-left rounded-md px-2.5 py-1 text-base cursor-pointer bg-transparent border-0',
-                  'transition-colors duration-(--motion-fast)',
-                  activeTab === tab.id ? 'bg-sel text-text' : 'text-text-muted hover:text-text'
-                ].join(' ')}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* right panel */}
+        {/* page */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          <header className="flex items-start gap-3 px-6 pt-5 pb-4 border-b border-hair shrink-0">
+            <div className="flex-1 min-w-0 flex flex-col gap-1">
+              <h3 className="m-0 text-lg font-semibold text-text">{page.label}</h3>
+              <p className="m-0 text-sm text-text-muted leading-snug">{page.blurb}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="shrink-0 -mr-2 -mt-1 w-7 h-7 flex items-center justify-center bg-transparent border-0 text-text-muted cursor-pointer rounded-md hover:text-text hover:bg-surface-3"
+              title="Close"
+              aria-label="Close settings"
+            >
+              <X size={15} />
+            </button>
+          </header>
           {/* Cards must keep their intrinsic height — the panel scrolls instead of squashing them. */}
-          <div className="flex-1 overflow-y-auto px-4 pb-4 flex flex-col gap-2 [&>*]:shrink-0">
+          <div className="flex-1 overflow-y-auto px-6 pt-4 pb-6 flex flex-col gap-2.5 [&>*]:shrink-0" data-testid="settings-page">
             {renderTabContent()}
           </div>
         </div>

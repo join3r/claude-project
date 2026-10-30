@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Container, Laptop, Server, SquareTerminal, type LucideIcon } from 'lucide-react'
 import type { SavedHost } from '../../../shared/types'
 import { useApp } from '../../context/AppContext'
 import { useServersState } from '../../serversState'
@@ -6,19 +7,13 @@ import { useSshStatuses } from '../../sshStatuses'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { addSavedHost, listHosts, removeSavedHost, shellHostKey, type HostEntry, type HostTone, type SshBox } from '../../hosts'
 import { parseSshTarget } from '../servers/sshTargets'
-import { Field, Group, GrpHead, HelperText, LinkBtn, PrimaryButton } from '../ui'
+import { Field, Group, HelperText, LinkBtn, PrimaryButton } from '../ui'
+import ServersSettings from './ServersSettings'
 
 const DOT: Record<HostTone, string> = {
   ok: 'bg-success',
   idle: 'bg-status-exited',
   bad: 'bg-danger'
-}
-
-const KIND: Record<HostEntry['kind'], string> = {
-  mac: 'This computer',
-  server: 'DevTool server',
-  ssh: 'SSH',
-  shell: 'Custom shell'
 }
 
 function errorText(err: unknown): string {
@@ -33,14 +28,39 @@ async function testSshBox(box: SshBox): Promise<void> {
   await window.api.sshDisconnect('__test__', config).catch(() => {})
 }
 
+/** What each kind of host is, and how it differs from the others: the page's whole explanation. */
+const SECTIONS: Record<HostEntry['kind'], { icon: LucideIcon; title: string; text: string }> = {
+  mac: {
+    icon: Laptop,
+    title: 'This Mac',
+    text: 'Projects in a folder on this computer. Their agents stop when it sleeps or DevTool quits.'
+  },
+  server: {
+    icon: Server,
+    title: 'DevTool servers',
+    text: 'A Linux or macOS machine of yours running the DevTool server. Its agents keep working while this Mac sleeps, and your phone reaches it too. Servers connect through the relay, so there are no ports to open.'
+  },
+  ssh: {
+    icon: SquareTerminal,
+    title: 'SSH boxes',
+    text: 'Any machine you can ssh into, with nothing to install. This Mac opens every terminal over SSH, so the agents need this Mac awake. Tasks share one folder there: no worktree per task.'
+  },
+  shell: {
+    icon: Container,
+    title: 'Custom shells',
+    text: 'A command this Mac runs to open each terminal, such as docker exec into a container or a VM\'s shell.'
+  }
+}
+
 /**
- * Settings › Hosts (change 6 of the redesign): every place code runs, listed
- * once with its health and its projects. This Mac, the paired DevTool servers
- * (managed on Settings › Servers), the SSH boxes and the custom shells. A
- * project picks one of these when it's made (New project); boxes and shells
- * added here before any project uses them are kept in `config.hosts`.
+ * Settings › Hosts: every place code runs, grouped by kind, each kind with a
+ * line on what it is. This Mac, the paired DevTool servers (their pairing,
+ * builds and phones inline, see `ServersSettings`), the SSH boxes and the
+ * custom shells. A project picks one of these when it's made (New project);
+ * boxes and shells added here before any project uses them are kept in
+ * `config.hosts`. `focus` scrolls to a section (the status bar's server dot).
  */
-export default function HostsSettings({ onOpenServers }: { onOpenServers: () => void }): React.ReactElement {
+export default function HostsSettings({ onOpenRelay, focus }: { onOpenRelay: () => void; focus?: 'servers' }): React.ReactElement {
   const { projects, config, updateConfig, updateProject } = useApp()
   const servers = useServersState()
   const sshProjectIds = useMemo(() => projects.filter(project => project.ssh).map(project => project.id), [projects])
@@ -48,6 +68,11 @@ export default function HostsSettings({ onOpenServers }: { onOpenServers: () => 
   const saved = useMemo(() => config?.hosts ?? [], [config?.hosts])
   const hosts = useMemo(() => listHosts(projects, servers.servers, ssh, saved), [projects, servers, ssh, saved])
   const [adding, setAdding] = useState<'ssh' | 'shell' | null>(null)
+  const serversRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (focus === 'servers') serversRef.current?.scrollIntoView({ block: 'start' })
+  }, [focus])
 
   const save = (next: SavedHost[]): void => updateConfig({ hosts: next })
 
@@ -60,44 +85,87 @@ export default function HostsSettings({ onOpenServers }: { onOpenServers: () => 
     save(host.saved || name.trim() ? addSavedHost(keep, { kind: 'shell', name: name.trim(), command }) : keep)
   }
 
+  const ofKind = (kind: HostEntry['kind']): HostEntry[] => hosts.filter(host => host.kind === kind)
+  // Paired servers render as server rows; a server only projects still name ("not paired") as a plain row.
+  const strayServers = ofKind('server').filter(host => !host.server)
+  const projectsOf = (serverId: string): string[] =>
+    hosts.find(host => host.server?.id === serverId)?.projects.map(project => project.name) ?? []
+  const rows = (list: HostEntry[]): React.ReactNode => list.map(host => (
+    <HostRow
+      key={host.key}
+      host={host}
+      onRemove={() => save(removeSavedHost(saved, host.key))}
+      onEditShell={(name, command) => editShell(host, name, command)}
+    />
+  ))
+
   return (
     <>
-      <GrpHead actions={
-        <>
-          <LinkBtn onClick={() => setAdding(adding === 'ssh' ? null : 'ssh')}>Add SSH box</LinkBtn>
-          <LinkBtn onClick={() => setAdding(adding === 'shell' ? null : 'shell')}>Add shell</LinkBtn>
-          <LinkBtn onClick={() => paletteEvents.emit('open-add-server')}>Add server</LinkBtn>
-        </>
-      }>Hosts</GrpHead>
-      {adding === 'ssh' && <AddSshBox onDone={(box) => { if (box) save(addSavedHost(saved, { kind: 'ssh', ...box })); setAdding(null) }} />}
-      {adding === 'shell' && (
-        <ShellForm
-          submitLabel="Add"
-          onCancel={() => setAdding(null)}
-          onSubmit={(name, command) => { save(addSavedHost(saved, { kind: 'shell', name, command })); setAdding(null) }}
-        />
-      )}
-      <Group>
-        {hosts.map(host => (
-          <HostRow
-            key={host.key}
-            host={host}
-            onOpenServers={onOpenServers}
-            onRemove={() => save(removeSavedHost(saved, host.key))}
-            onEditShell={(name, command) => editShell(host, name, command)}
+      <HostSection kind="mac">
+        <Group>{rows(ofKind('mac'))}</Group>
+      </HostSection>
+
+      <HostSection kind="server" sectionRef={serversRef} action={<LinkBtn onClick={() => paletteEvents.emit('open-add-server')}>Add server</LinkBtn>}>
+        <ServersSettings onOpenRelay={onOpenRelay} projectsOf={projectsOf} />
+        {strayServers.length > 0 && <Group>{rows(strayServers)}</Group>}
+      </HostSection>
+
+      <HostSection kind="ssh" action={<LinkBtn onClick={() => setAdding(adding === 'ssh' ? null : 'ssh')}>Add SSH box</LinkBtn>}>
+        {adding === 'ssh' && <AddSshBox onDone={(box) => { if (box) save(addSavedHost(saved, { kind: 'ssh', ...box })); setAdding(null) }} />}
+        {ofKind('ssh').length > 0 ? <Group>{rows(ofKind('ssh'))}</Group> : adding !== 'ssh' && <EmptyLine>No SSH boxes.</EmptyLine>}
+      </HostSection>
+
+      <HostSection kind="shell" action={<LinkBtn onClick={() => setAdding(adding === 'shell' ? null : 'shell')}>Add shell</LinkBtn>}>
+        {adding === 'shell' && (
+          <ShellForm
+            submitLabel="Add"
+            onCancel={() => setAdding(null)}
+            onSubmit={(name, command) => { save(addSavedHost(saved, { kind: 'shell', name, command })); setAdding(null) }}
           />
-        ))}
-      </Group>
+        )}
+        {ofKind('shell').length > 0 ? <Group>{rows(ofKind('shell'))}</Group> : adding !== 'shell' && <EmptyLine>No custom shells.</EmptyLine>}
+      </HostSection>
+
       <HelperText>
-        A project runs on one of these. Pick it in New project; it shows in the project&apos;s settings and in the status bar. SSH boxes and shells with no project left go away unless you added them here.
+        SSH boxes and shells with no project left go away unless you added them here.
       </HelperText>
     </>
   )
 }
 
-function HostRow({ host, onOpenServers, onRemove, onEditShell }: {
+/** A kind of host: an icon, its name, what it is, and its rows. */
+function HostSection({ kind, action, sectionRef, children }: {
+  kind: HostEntry['kind']
+  action?: React.ReactNode
+  sectionRef?: React.Ref<HTMLElement>
+  children: React.ReactNode
+}): React.ReactElement {
+  const { icon: Icon, title, text } = SECTIONS[kind]
+  return (
+    <section ref={sectionRef} className="flex flex-col gap-2 pt-1 scroll-mt-4" data-testid={`hosts-section-${kind}`}>
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 w-7 h-7 rounded-md bg-surface-3 border border-border flex items-center justify-center shrink-0 text-text-muted">
+          <Icon size={15} strokeWidth={1.75} />
+        </span>
+        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+          <div className="flex items-center gap-3">
+            <h3 className="m-0 text-base font-semibold text-text">{title}</h3>
+            {action && <span className="ml-auto shrink-0">{action}</span>}
+          </div>
+          <p className="m-0 text-sm text-text-muted leading-snug">{text}</p>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 pl-10">{children}</div>
+    </section>
+  )
+}
+
+function EmptyLine({ children }: { children: React.ReactNode }): React.ReactElement {
+  return <div className="text-sm text-text-subtle">{children}</div>
+}
+
+function HostRow({ host, onRemove, onEditShell }: {
   host: HostEntry
-  onOpenServers: () => void
   onRemove: () => void
   onEditShell: (name: string, command: string) => void
 }): React.ReactElement {
@@ -122,9 +190,8 @@ function HostRow({ host, onOpenServers, onRemove, onEditShell }: {
       <div className="flex items-center gap-2 min-w-0">
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[host.tone]}`} />
         <span className="truncate text-base text-text font-medium">{host.label}</span>
-        <span className="text-sm text-text-muted shrink-0">{KIND[host.kind]}{host.detail ? ` · ${host.detail}` : ''}</span>
+        {host.detail && <span className="text-sm text-text-muted shrink-0">{host.detail}</span>}
         <span className="ml-auto flex items-center gap-3 shrink-0">
-          {host.kind === 'server' && <LinkBtn onClick={onOpenServers}>Manage</LinkBtn>}
           {host.kind === 'ssh' && <LinkBtn onClick={test} disabled={testing}>{testing ? 'Testing…' : 'Test'}</LinkBtn>}
           {host.kind === 'shell' && <LinkBtn onClick={() => setEditing(open => !open)}>Edit</LinkBtn>}
           {host.saved && count === 0 && <LinkBtn danger onClick={onRemove}>Remove</LinkBtn>}

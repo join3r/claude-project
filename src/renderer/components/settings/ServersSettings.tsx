@@ -5,7 +5,7 @@ import { useServersState } from '../../serversState'
 import { formatCountdown, formatLastSeen, useNow } from '../../hooks/useMobileState'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { showToast } from '../../toasts'
-import { Field, Group, GrpHead, HelperText, LinkBtn, PrimaryButton } from '../ui'
+import { Field, Group, LinkBtn, PrimaryButton } from '../ui'
 import ServerFolderList from '../servers/ServerFolderList'
 import { describePlatform } from '../servers/addServerFlow'
 import RemoveServerDialog, { OFFLINE_UNINSTALL_COMMAND } from '../servers/RemoveServerDialog'
@@ -69,36 +69,37 @@ const UPDATE_RESULT: Record<ServerUpdateResult['reason'], string> = {
 }
 
 /**
- * Settings › Servers: the relay line, then every paired server with its state,
- * build and machine, and what can be done with it.
+ * The DevTool servers on Settings › Hosts: the relay line they connect
+ * through, then every paired server with its state, build, machine, its
+ * projects (`projectsOf`) and what can be done with it.
  */
-export default function ServersSettings({ onOpenRelay }: { onOpenRelay: () => void }): React.ReactElement {
+export default function ServersSettings({ onOpenRelay, projectsOf }: {
+  onOpenRelay: () => void
+  /** The names of the projects on a server, for its row. */
+  projectsOf?: (serverId: string) => readonly string[]
+}): React.ReactElement {
   const state = useServersState()
   const now = useNow(true)
   const [removing, setRemoving] = useState<ServerStatus | null>(null)
 
   return (
     <>
-      <GrpHead actions={<LinkBtn onClick={() => paletteEvents.emit('open-add-server')}>Add server</LinkBtn>}>Servers</GrpHead>
       <RelayLine onOpenRelay={onOpenRelay} />
       <Group>
         {state.servers.length === 0 ? (
           <div className="px-3 py-3 flex flex-col gap-1" data-testid="servers-empty">
             <div className="text-base text-text">No servers yet</div>
             <div className="text-sm text-text-muted">
-              A DevTool server is a Linux or macOS machine that runs your terminals and agents, even while this computer sleeps. Add one with a single command.
+              Install the DevTool server on a Linux or macOS machine with one command, and its agents keep working while this computer sleeps.
             </div>
             <div className="pt-1"><LinkBtn onClick={() => paletteEvents.emit('open-add-server')}>Add server…</LinkBtn></div>
           </div>
         ) : (
           state.servers.map(server => (
-            <ServerRow key={server.id} server={server} now={now} onRemove={() => setRemoving(server)} />
+            <ServerRow key={server.id} server={server} now={now} projects={projectsOf?.(server.id)} onRemove={() => setRemoving(server)} />
           ))
         )}
       </Group>
-      {state.servers.length > 0 && (
-        <HelperText>Servers keep their terminals and agents running while this computer sleeps. Their projects show in the sidebar with the server's name.</HelperText>
-      )}
       {removing && (
         <RemoveServerDialog
           server={state.servers.find(s => s.id === removing.id) ?? removing}
@@ -116,7 +117,7 @@ export default function ServersSettings({ onOpenRelay }: { onOpenRelay: () => vo
   )
 }
 
-function ServerRow({ server, now, onRemove }: { server: ServerStatus; now: number; onRemove: () => void }): React.ReactElement {
+function ServerRow({ server, now, projects, onRemove }: { server: ServerStatus; now: number; projects?: readonly string[]; onRemove: () => void }): React.ReactElement {
   const [renaming, setRenaming] = useState(false)
   const [code, setCode] = useState<ServerDeviceCode | null>(null)
   const [message, setMessage] = useState<{ text: string; bad?: boolean } | null>(null)
@@ -161,6 +162,11 @@ function ServerRow({ server, now, onRemove }: { server: ServerStatus; now: numbe
           {host ? `, ${host.hostname}, ${describePlatform(host)}` : ''}
         </div>
         <div>{online ? `Paired ${new Date(server.pairedAt).toLocaleDateString()}` : formatLastSeen(server.lastSeen, now)}</div>
+        {projects && (
+          <div className="truncate" title={projects.join(', ')} data-testid="server-projects">
+            {projects.length === 0 ? 'No projects' : `${projects.length} project${projects.length === 1 ? '' : 's'} · ${projects.join(', ')}`}
+          </div>
+        )}
         {status.note && <div className={status.tone === 'bad' ? 'text-danger' : ''}>{status.note}</div>}
       </div>
       {server.updateReady && (

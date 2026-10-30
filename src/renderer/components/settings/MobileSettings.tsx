@@ -96,7 +96,6 @@ export default function MobileSettings({ onOpenRelay }: { onOpenRelay: () => voi
 
   return (
     <>
-      <GrpHead>Mobile</GrpHead>
       <Group>
         <GroupRow
           label="Connect phones to this desktop"

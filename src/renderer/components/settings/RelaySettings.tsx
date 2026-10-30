@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { DEFAULT_MOBILE_RELAY_URL, isUnencryptedRemoteRelay, isValidRelayUrl, normalizeRelayUrl, UNENCRYPTED_RELAY_WARNING } from '../../../shared/mobile'
 import { useServersState } from '../../serversState'
 import { useMobileState } from '../../hooks/useMobileState'
-import { Field, FormGroup, GrpHead, HelperText, LinkBtn, SetBlock } from '../ui'
+import { Field, FormGroup, HelperText, LinkBtn, SetBlock } from '../ui'
 import { RELAY_DOT, pairedOnRelay, relayStatus } from './relay'
 
 function errorMessage(err: unknown): string {
@@ -47,7 +47,6 @@ export default function RelaySettings(): React.ReactElement {
 
   return (
     <>
-      <GrpHead>Relay</GrpHead>
       <FormGroup>
         <SetBlock label="Relay address">
           <Field
