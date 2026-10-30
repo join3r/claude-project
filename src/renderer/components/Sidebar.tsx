@@ -257,8 +257,8 @@ export default function Sidebar(): React.ReactElement {
           if (task) handleSelectTask(projectId, task)
         }}
         onTaskContextMenu={handleTaskContextMenu}
-        onDone={(projectId, taskId) => void handleDeskDone(projectId, taskId)}
-        onRemove={(projectId, taskId) => void closeTaskFlow.removeTask(projectId, taskId)}
+        onDone={(projectId, taskId) => handleDeskDone(projectId, taskId)}
+        onRemove={(projectId, taskId, confirmed) => closeTaskFlow.removeTask(projectId, taskId, confirmed)}
         onCompose={handleComposedTask}
         footer={[
           { label: '+ New project…', onClick: () => setNewProjectOpen(true) },

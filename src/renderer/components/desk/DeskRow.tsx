@@ -1,5 +1,5 @@
 import React from 'react'
-import { MoreHorizontal, Pin } from 'lucide-react'
+import { Check, MoreHorizontal, Pin } from 'lucide-react'
 import type { GitDiffSummary, Project } from '../../../shared/types'
 import { formatLineCount } from '../../hooks/useTaskDiffSummaries'
 import type { AgentActivity } from '../../../shared/agent-activity'
@@ -75,7 +75,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
 const actionCls = 'px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong whitespace-nowrap'
 
 export default function DeskRow({
-  entry, kind, agent, activity, background = null, diff, selected, pinned = false, offline = false, now, theme, onSelect, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
+  entry, kind, agent, activity, background = null, diff, selected, checked = false, checking = false, pinned = false, offline = false, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
 }: {
   entry: InboxEntry
   kind: DeskRowKind
@@ -86,13 +86,20 @@ export default function DeskRow({
   /** Lines the task added and removed, shown before its age. */
   diff?: GitDiffSummary
   selected: boolean
+  /** Ticked for a bulk action. */
+  checked?: boolean
+  /** Some row is ticked: the tile gives way to a checkbox. */
+  checking?: boolean
   /** A pinned task: a pin beside its title. */
   pinned?: boolean
   /** Its project's DevTool server isn't online: the row is greyed. */
   offline?: boolean
   now: number
   theme: 'dark' | 'light'
-  onSelect: () => void
+  /** A click on the row; ⌘ and ⇧ held tick rows instead of opening (the column decides). */
+  onSelect: (e: React.MouseEvent) => void
+  /** The checkbox that stands in for the tile while some row is ticked. */
+  onCheck: () => void
   /** The tile: narrow the column to this project. */
   onScopeProject: (project: Project) => void
   onContextMenu: (e: React.MouseEvent) => void
@@ -115,7 +122,7 @@ export default function DeskRow({
       className={[
         'group relative flex gap-3 mx-2 px-3 py-2.5 rounded-[9px] items-start cursor-pointer',
         'transition-colors duration-(--motion-fast)',
-        selected ? 'bg-row-sel' : 'hover:bg-row-hover',
+        checked ? 'bg-sel' : selected ? 'bg-row-sel' : 'hover:bg-row-hover',
         offline ? 'opacity-55' : ''
       ].join(' ')}
       onClick={rename ? undefined : onSelect}
@@ -126,22 +133,40 @@ export default function DeskRow({
       data-testid="desk-row"
       data-task-id={task.id}
       data-kind={kind}
+      data-checked={checked || undefined}
     >
-      <button
-        type="button"
-        className="shrink-0 p-0 border-0 bg-transparent cursor-pointer rounded-md"
-        title={`Show only ${project.name}`}
-        onClick={(e) => { e.stopPropagation(); onScopeProject(project) }}
-      >
-        <ProjectTileBadge project={project} theme={theme} size={24} />
-      </button>
+      {checking ? (
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={checked}
+          aria-label={`Select ${task.name}`}
+          className={[
+            'shrink-0 w-6 h-6 flex items-center justify-center p-0 rounded-md cursor-pointer border',
+            checked ? 'bg-accent border-accent text-accent-ink' : 'bg-transparent border-border-strong text-transparent hover:border-text-muted'
+          ].join(' ')}
+          onClick={(e) => { e.stopPropagation(); onCheck() }}
+          data-testid="desk-row-check"
+        >
+          <Check size={14} strokeWidth={3} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="shrink-0 p-0 border-0 bg-transparent cursor-pointer rounded-md"
+          title={`Show only ${project.name}`}
+          onClick={(e) => { e.stopPropagation(); onScopeProject(project) }}
+        >
+          <ProjectTileBadge project={project} theme={theme} size={24} />
+        </button>
+      )}
       <div className="flex-1 min-w-0 flex flex-col gap-[3px]">
         <div className="flex justify-between gap-2 text-xs text-text-muted">
           <span className="overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
             <strong className="font-semibold text-body">{project.name}</strong>
             {!stream.isMain && <> › <span className="font-mono">{stream.name}</span></>}
           </span>
-          <span className="shrink-0 tabular-nums flex items-center gap-1.5 group-hover:invisible">
+          <span className={`shrink-0 tabular-nums flex items-center gap-1.5 ${checking ? '' : 'group-hover:invisible'}`}>
             {/* Background work: a steady dot, since the agent itself is idle. */}
             {kind === 'working' && (inBackground
               ? <span className="w-[7px] h-[7px] rounded-full bg-status-working" aria-label="background" data-testid="desk-row-background" />
@@ -204,7 +229,7 @@ export default function DeskRow({
         )}
       </div>
       <div
-        className="absolute right-2.5 top-2 hidden group-hover:flex gap-1 pl-2 bg-row-sel"
+        className={`absolute right-2.5 top-2 hidden ${checking ? '' : 'group-hover:flex'} gap-1 pl-2 bg-row-sel`}
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >

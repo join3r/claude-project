@@ -26,11 +26,12 @@ import { useTaskCloseChoice, type TaskCloseChoice } from './TaskCloseDialog'
  * `removeTask` is the Inbox row's ✕: a task with a worktree of its own asks
  * once, then its worktree and branch go without landing (uncommitted work with
  * them) and it is archived. Any other task has nothing of its own to throw
- * away, so it just closes.
+ * away, so it just closes. `confirmed` skips that question: a bulk remove has
+ * already asked once for all of its tasks.
  */
 export function useCloseTask(): {
   closeTask: (projectId: string, taskId: string) => Promise<void>
-  removeTask: (projectId: string, taskId: string) => Promise<void>
+  removeTask: (projectId: string, taskId: string, confirmed?: boolean) => Promise<void>
   dialog: React.ReactElement | null
 } {
   const { projects, archiveTask, confirmDiscardDirty, switchToTask } = useApp()
@@ -84,13 +85,13 @@ export function useCloseTask(): {
     }
   }, [askClose, confirmDiscardDirty, switchToTask, tabStatusStore])
 
-  const closeOrRemove = useCallback(async (projectId: string, taskId: string, remove: boolean) => {
+  const closeOrRemove = useCallback(async (projectId: string, taskId: string, remove: boolean, confirmed = false) => {
     const project = projects.find(p => p.id === projectId)
     const task = findTaskInProject(project, taskId)
     if (!project || !task) return
     const lands = canLandTask(project, task)
     if (lands && remove) {
-      if (!window.confirm(taskRemoveQuestion(task))) return
+      if (!confirmed && !window.confirm(taskRemoveQuestion(task))) return
     } else if (!lands) {
       const question = taskCloseQuestion(task, (tabId) => tabStatusStore.getStatus(tabId))
       if (question && !window.confirm(question)) return
@@ -117,7 +118,7 @@ export function useCloseTask(): {
   }, [projects, archiveTask, tabStatusStore, ask, landAndArchive])
 
   const closeTask = useCallback((projectId: string, taskId: string) => closeOrRemove(projectId, taskId, false), [closeOrRemove])
-  const removeTask = useCallback((projectId: string, taskId: string) => closeOrRemove(projectId, taskId, true), [closeOrRemove])
+  const removeTask = useCallback((projectId: string, taskId: string, confirmed?: boolean) => closeOrRemove(projectId, taskId, true, confirmed), [closeOrRemove])
 
   return {
     closeTask,

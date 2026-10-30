@@ -217,3 +217,35 @@ export function nextNeedsYou(needsYou: readonly InboxEntry[], selectedTaskId: st
   const index = selectedTaskId ? needsYou.findIndex(entry => entry.task.id === selectedTaskId) : -1
   return needsYou[(index + 1) % needsYou.length]
 }
+
+/**
+ * A click on a row with the list's multi-select keys: ⌘-click toggles the row,
+ * ⇧-click checks every row from `anchor` to it (in drawn order) on top of what
+ * is checked. `anchor` falls back to the selected task, so ⇧-click right after
+ * opening a task takes it along.
+ */
+export function checkRows(
+  rows: readonly InboxEntry[],
+  checked: ReadonlySet<string>,
+  taskId: string,
+  how: 'toggle' | 'range',
+  anchor: string | null
+): Set<string> {
+  const next = new Set(checked)
+  if (how === 'range' && anchor) {
+    const from = rows.findIndex(entry => entry.task.id === anchor)
+    const to = rows.findIndex(entry => entry.task.id === taskId)
+    if (from >= 0 && to >= 0) {
+      for (let i = Math.min(from, to); i <= Math.max(from, to); i++) next.add(rows[i].task.id)
+      return next
+    }
+  }
+  if (next.has(taskId)) next.delete(taskId)
+  else next.add(taskId)
+  return next
+}
+
+/** The checked rows still listed, in drawn order: a row that moved tab or went away drops out. */
+export function checkedRows(rows: readonly InboxEntry[], checked: ReadonlySet<string>): InboxEntry[] {
+  return checked.size === 0 ? [] : rows.filter(entry => checked.has(entry.task.id))
+}

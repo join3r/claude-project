@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { inboxSources, partitionInbox } from '../src/renderer/components/inbox'
 import {
+  checkRows,
+  checkedRows,
   composeTarget,
   deskLists,
   deskTabCounts,
@@ -135,6 +137,32 @@ describe('keyTarget', () => {
     expect(keyTarget(rows, 'y', 'x')?.task.id).toBe('y')
     expect(keyTarget(rows, null, 'x')?.task.id).toBe('x')
     expect(keyTarget(rows, 'elsewhere', null)).toBeNull()
+  })
+})
+
+describe('checkRows', () => {
+  const rows = inboxSources([project('p', [task('a'), task('b'), task('c'), task('d')])]).map(s => ({ ...s, status: null, since: null, unread: false, yourTurn: false }))
+  const ids = (set: ReadonlySet<string>): string[] => [...set].sort()
+
+  it('toggles one row', () => {
+    const one = checkRows(rows, new Set(), 'b', 'toggle', null)
+    expect(ids(one)).toEqual(['b'])
+    expect(ids(checkRows(rows, one, 'b', 'toggle', null))).toEqual([])
+  })
+
+  it('adds the range from the anchor, either way round, on top of what is ticked', () => {
+    expect(ids(checkRows(rows, new Set(['a']), 'd', 'range', 'c'))).toEqual(['a', 'c', 'd'])
+    expect(ids(checkRows(rows, new Set(), 'a', 'range', 'c'))).toEqual(['a', 'b', 'c'])
+  })
+
+  it('toggles when the anchor is not listed', () => {
+    expect(ids(checkRows(rows, new Set(), 'b', 'range', null))).toEqual(['b'])
+    expect(ids(checkRows(rows, new Set(), 'b', 'range', 'gone'))).toEqual(['b'])
+  })
+
+  it('keeps only ticked rows still listed, in drawn order', () => {
+    expect(checkedRows(rows, new Set(['d', 'gone', 'a'])).map(e => e.task.id)).toEqual(['a', 'd'])
+    expect(checkedRows(rows, new Set())).toEqual([])
   })
 })
 
