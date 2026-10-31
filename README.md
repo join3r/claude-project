@@ -207,6 +207,10 @@ The token in the one-liner works once and expires after 15 minutes. It travels i
 
 Terminals, Claude Code, Codex and Pi tabs, Claude chat, the file browser, editor and diff tabs, the Git panel, notebooks, conda envs, streams with task worktrees and landing, and browser tabs. A browser tab resolves and connects from the server, so `localhost:3000` is the server's port 3000. Agent CLIs run on the server with the server's own logins. A missing one gets **Install**, which runs the official installer in a terminal tab, and `/login` in a chat asks for the pasted code. **Open in IDE** opens VS Code or Cursor over Remote-SSH, tunnelled through the relay to the server's own sshd (install `openssh-server` there). The first time, DevTool asks before it adds an `Include` line to `~/.ssh/config` and authorizes its key on the server. Reveal in Finder stays local only, and Windows desktops don't offer Open in IDE yet.
 
+### Direct connection
+
+Every connection to a server starts through the relay, so it works anywhere the relay does. Right after that, DevTool and the server try to open a direct path between them: a WebRTC data channel that punches through NAT from both sides, with the relay's STUN service telling each one its public address. No SSH, no open ports. When it works, Settings › Hosts says **Online, direct**, the traffic skips the relay, and the session keeps running even if the relay goes down. When it can't (both machines behind strict NATs, UDP blocked), everything stays on the relay, and DevTool tries again later. If the direct path drops, DevTool reconnects through the relay at once and tries direct again. A server downloads the small native library for this from npm on its first start; set `DEVTOOL_NO_DIRECT=1` to keep a machine on the relay.
+
 When a server goes offline its projects stay in the sidebar, greyed out, from the last snapshot. Open terminal and agent tabs say "<server> is offline, reconnecting…" and reattach when it's back.
 
 Add more projects with **+** › **Server project…**: pick a folder on the server, clone a repo there, or choose from the repos it found.

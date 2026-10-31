@@ -88,6 +88,7 @@ node protocol/tools/fake-desktop.ts ws://localhost:8787
 | `HOST` | `0.0.0.0` | Listen address. Use `127.0.0.1` behind a reverse proxy on the same host |
 | `RELAY_DATA` | `./data` | Directory for `relay.db` (created if missing) |
 | `RELAY_TRUST_PROXY` | unset | `1` makes the per-IP limit use the **last** `X-Forwarded-For` entry, which is what your own proxy appended. Only set it behind a proxy you control, or clients can pick their own IP |
+| `RELAY_STUN_PORT` | `3478` | UDP port of the STUN responder that desktops and DevTool servers use to find their public address for a direct path (protocol/SERVER.md §13). `off` turns it off; they then stay on the relay unless they share a network |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 | `RELAY_PUSH_UPSTREAM` | `https://relay.devtool.awantech.sk` | Gateway that a non-gateway relay forwards `push` to. Set it to an empty string to turn push off (desktops get `unavailable`). A gateway ignores it |
 | `RELAY_PUSH_SEAL_KEY` | unset | Setting it makes this relay the push gateway. 32 random bytes, base64url without padding. Every cap is sealed with it, so changing it invalidates every phone's registration until the phone registers again |
@@ -169,11 +170,11 @@ The image is `node:24-alpine` running as the unprivileged `node` user. It declar
 
 ## Deploy on a small VPS with Caddy
 
-1. Install Docker and Caddy, and point a DNS `A`/`AAAA` record (for example `relay.devtool.awantech.sk`) at the machine. Open ports 80 and 443.
-2. Build or pull the image, then run it on loopback only, trusting Caddy's `X-Forwarded-For`:
+1. Install Docker and Caddy, and point a DNS `A`/`AAAA` record (for example `relay.devtool.awantech.sk`) at the machine. Open ports 80 and 443, and UDP 3478 for STUN.
+2. Build or pull the image, then run it on loopback only, trusting Caddy's `X-Forwarded-For`. STUN is plain UDP and goes past Caddy, straight to the container:
    ```bash
    docker run -d --name devtool-relay --restart unless-stopped \
-     -p 127.0.0.1:8787:8787 -e RELAY_TRUST_PROXY=1 \
+     -p 127.0.0.1:8787:8787 -p 3478:3478/udp -e RELAY_TRUST_PROXY=1 \
      -v devtool-relay-data:/data devtool-relay
    ```
 3. Copy `deploy/Caddyfile.example` to `/etc/caddy/Caddyfile` (change the host name if needed) and `systemctl reload caddy`. Caddy obtains the TLS certificate itself and proxies the WebSocket upgrade.

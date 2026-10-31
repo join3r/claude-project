@@ -13,7 +13,9 @@ export const LinkChannel = {
   /** `[{ deleteData?: boolean }]` → `{ ok: true }`: stop and remove the service, then the files. */
   Uninstall: 'server-uninstall',
   /** Bootstrap only: `[{ uploaded: boolean }]` → `{ ok: true }`: the desktop is done; install the service. */
-  BootstrapDone: 'server-bootstrap-done'
+  BootstrapDone: 'server-bootstrap-done',
+  /** `[DirectSignal]` → `DirectSignal`: the desktop's offer for a direct path, the server's answer (§13). */
+  DirectOffer: 'server-direct-offer'
 } as const
 
 /** Link-level events, pushed to `*`. */

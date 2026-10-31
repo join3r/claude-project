@@ -10,6 +10,8 @@ import { createPushGateway } from './push/gateway.ts'
 import type { PushGateway } from './push/gateway.ts'
 import { startRelayServer } from './server.ts'
 import { SqliteStore } from './store.ts'
+import { startStunServer } from './stun.ts'
+import type { StunServer } from './stun.ts'
 
 /**
  * Entry point: `node src/main.ts` (Node >= 24 strips the types itself; no build step).
@@ -77,6 +79,16 @@ const server = await startRelayServer({
 })
 log.info('listening', { host: config.host, port: server.port, db: dbPath, trustProxy: config.trustProxy, ...config.limits })
 
+let stun: StunServer | undefined
+if (config.stunPort !== null) {
+  try {
+    stun = await startStunServer({ port: config.stunPort, logger: log })
+  } catch (err) {
+    // Direct paths need it, the relay itself doesn't: keep relaying.
+    log.warn('stun-unavailable', { port: config.stunPort, error: (err as Error).message })
+  }
+}
+
 let stopping = false
 async function stop(signal: string): Promise<void> {
   if (stopping) return
@@ -89,6 +101,7 @@ async function stop(signal: string): Promise<void> {
   hard.unref()
   try {
     await server.close()
+    await stun?.close()
   } finally {
     gateway?.close()
     store.close()

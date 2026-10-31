@@ -1,8 +1,12 @@
+import path from 'node:path'
 import { HostServices } from '../main/host/host-services'
 import { ClientRegistry } from './client-registry'
 import { loadServerConfig, serverDisplayName } from './server-config'
 import { ServerLink, type ServerLinkOptions } from './server-link'
 import { LinkChannel } from '../main/host/link/link-channels'
+import { loadDirect, stunServersFor } from '../main/host/link/direct'
+import { errorMessage } from '../main/host/link/errors'
+import { DATACHANNEL_MANIFEST, prepareDatachannel } from './datachannel-binary'
 import { ProcessPowerSave } from './power-save'
 import { createServerHostEnv, ensureServerDirs, serverHostInfo, type ServerHostEnv, type ServerManifest, type ServerPaths } from './server-env'
 import type { PowerSaveApi } from '../main/sleep-blocker'
@@ -101,6 +105,18 @@ export function createServerLink(server: ServerHost, overrides: Partial<ServerLi
     host: serverHostInfo,
     log: server.env.log,
     linkCall: (call) => (call.ch === LinkChannel.PairCode ? pairCodeForDesktop(link) : undefined),
+    direct: {
+      load: async () => {
+        try {
+          await prepareDatachannel({ bundleDir: path.dirname(server.env.resourcePath(DATACHANNEL_MANIFEST)), home: server.env.paths.home, log: server.env.log })
+        } catch (err) {
+          server.env.log(`direct path unavailable: ${errorMessage(err)}`)
+          return null
+        }
+        return loadDirect(server.env.log)
+      },
+      iceServers: () => stunServersFor(loadServerConfig(dataDir).relayUrl)
+    },
     ...overrides
   })
   return link

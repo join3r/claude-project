@@ -41,6 +41,7 @@ import {
   type ServersRelayKind,
   type ServersState
 } from '../../shared/servers'
+import { loadDirect, stunServersFor } from '../host/link/direct'
 import { ServerConnection, type ConnectionTimers } from './server-connection'
 import { PeerStore, type PeerRecord } from '../host/link/peer-store'
 import { atomicWriteFileSync } from '../atomic-write'
@@ -71,6 +72,8 @@ export interface ServerHubDeps {
   timers?: ConnectionTimers
   /** Tests: speak another protocol version range. */
   version?: VersionInfo
+  /** False keeps every server on the relay (protocol/SERVER.md §13). */
+  direct?: boolean
 }
 
 /** The Node version an install token names when the desktop carries no server bundle. */
@@ -761,6 +764,12 @@ export class ServerHub {
       timers: this.timers,
       log: (message) => this.deps.log(`servers ${message}`),
       onChange: () => this.emitState(),
+      ...(this.deps.direct === false ? {} : {
+        direct: {
+          load: () => loadDirect((message) => this.deps.log(`servers ${message}`)),
+          iceServers: () => stunServersFor(this.deps.relayUrl())
+        }
+      }),
       onEstablished: (reply) => {
         this.store.setBuild(record.id, reply.build)
         if (reply.host) this.store.setHost(record.id, reply.host)

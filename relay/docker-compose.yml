@@ -8,6 +8,8 @@ services:
     image: devtool-relay
     ports:
       - "8787:8787"
+      # STUN for direct desktop↔server paths (RELAY_STUN_PORT, "off" to disable).
+      - "3478:3478/udp"
     environment:
       LOG_LEVEL: debug
       # Push (see README "Push gateway"). By default pushes are forwarded to the hosted

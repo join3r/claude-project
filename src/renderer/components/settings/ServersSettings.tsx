@@ -47,7 +47,7 @@ export function serverStateText(server: ServerStatus): { tone: Tone; label: stri
     case 'online':
       if (server.upload) return { tone: 'busy', label: `Updating ${Math.round((server.upload.sent / Math.max(1, server.upload.total)) * 100)}%` }
       if (server.installing) return { tone: 'busy', label: 'Installing' }
-      return { tone: 'online', label: 'Online' }
+      return { tone: 'online', label: server.path === 'direct' ? 'Online, direct' : 'Online' }
   }
 }
 

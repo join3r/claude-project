@@ -179,9 +179,13 @@ describe('config', () => {
     expect(loadConfig({}).dataDir).toMatch(/\/data$/)
     expect(loadConfig({ PORT: '9000', HOST: '127.0.0.1', RELAY_DATA: '/data', RELAY_TRUST_PROXY: '1', LOG_LEVEL: 'debug' })).toEqual({
       port: 9000, host: '127.0.0.1', dataDir: '/data', trustProxy: true, logLevel: 'debug',
-      push: { role: 'forward', upstream: 'https://relay.devtool.awantech.sk' }
+      push: { role: 'forward', upstream: 'https://relay.devtool.awantech.sk' },
+      stunPort: 3478
     })
     expect(() => loadConfig({ PORT: 'x' })).toThrow()
+    expect(loadConfig({ RELAY_STUN_PORT: 'off' }).stunPort).toBeNull()
+    expect(loadConfig({ RELAY_STUN_PORT: '3479' }).stunPort).toBe(3479)
+    expect(() => loadConfig({ RELAY_STUN_PORT: '70000' })).toThrow(/RELAY_STUN_PORT/)
   })
 
   it('reads limits from the environment, with K/M/G sizes', () => {

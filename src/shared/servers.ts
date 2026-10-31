@@ -49,6 +49,8 @@ export interface ServerStatus {
   problem?: 'unknown-device' | 'revoked' | 'relay-too-old'
   /** With `incompatible`: the side that has to update. */
   update?: 'desktop' | 'server'
+  /** With `online`: whether the link runs through the relay or moved to a direct path (protocol/SERVER.md §13). */
+  path?: 'relay' | 'direct'
   /** The server staged an update and swaps once no tab is working ("Server update ready · Restart now"). */
   updateReady?: ServerPendingUpdate
   /** While the desktop uploads its bundle: bytes sent so far and the total. */

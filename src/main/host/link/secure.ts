@@ -10,6 +10,7 @@ import {
 } from '../../../../protocol/ts/index.ts'
 import type { HandshakeState, KeyPair, VersionInfo } from '../../../../protocol/ts/index.ts'
 import {
+  HOST_LINK_DIRECT_PROLOGUE,
   HOST_LINK_PROLOGUE,
   encodeHandshakePayload,
   parseHandshakeVersion,
@@ -29,6 +30,14 @@ import { HOST_LINK_MIN_VERSION, HOST_LINK_PROTOCOL_VERSION } from './version'
  */
 
 const PROLOGUE = utf8Encode(HOST_LINK_PROLOGUE)
+const DIRECT_PROLOGUE = utf8Encode(HOST_LINK_DIRECT_PROLOGUE)
+
+/** Which session a handshake opens: the relay's or a direct pipe's (protocol/SERVER.md §13.4). */
+export type LinkPathKind = 'relay' | 'direct'
+
+function prologueFor(path: LinkPathKind): Uint8Array {
+  return path === 'direct' ? DIRECT_PROLOGUE : PROLOGUE
+}
 const LOCAL_VERSION: VersionInfo = { v: HOST_LINK_PROTOCOL_VERSION, min: HOST_LINK_MIN_VERSION }
 
 /** One side's sealed session: link messages in, envelopes out, and back. */
@@ -61,8 +70,8 @@ function sealed(handshake: HandshakeState, log: (message: string) => void): Seal
 export class LinkInitiator {
   private readonly handshake: HandshakeState
 
-  constructor(staticKey: KeyPair, serverStatic: Uint8Array, private readonly log: (message: string) => void) {
-    this.handshake = createInitiator({ prologue: PROLOGUE, s: staticKey, rs: serverStatic })
+  constructor(staticKey: KeyPair, serverStatic: Uint8Array, private readonly log: (message: string) => void, path: LinkPathKind = 'relay') {
+    this.handshake = createInitiator({ prologue: prologueFor(path), s: staticKey, rs: serverStatic })
   }
 
   /** Envelope `0x01`: message 1 carrying the desktop's hello. */
@@ -129,9 +138,10 @@ export function answerHandshake(
   reply: (result: HostLinkResult) => Omit<HostLinkReply, 'result'>,
   decide: (decision: ResponderDecision) => 'ok' | 'unknown-device',
   log: (message: string) => void,
-  local: VersionInfo = LOCAL_VERSION
+  local: VersionInfo = LOCAL_VERSION,
+  path: LinkPathKind = 'relay'
 ): ResponderOutcome {
-  const handshake = createResponder({ prologue: PROLOGUE, s: staticKey })
+  const handshake = createResponder({ prologue: prologueFor(path), s: staticKey })
   const payload = handshake.readMessage(body)
   const remoteStatic = handshake.remoteStatic!
   const negotiation = negotiateVersion(local, parseHandshakeVersion(payload))

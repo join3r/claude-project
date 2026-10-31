@@ -30,6 +30,9 @@ import type { HostLinkPort, RelayMux } from '../main/host/link/relay-mux'
 import { relayLinkTransport } from '../main/host/link/relay-transport'
 import { answerHandshake, isLinkHandshake, type SealedChannel } from '../main/host/link/secure'
 import { LinkSession, type IncomingCall, type LinkTimers } from '../main/host/link/session'
+import { DIRECT_FEATURE, parseSignal, type DirectAnswer, type DirectApi, type DirectPipe, type DirectSignal } from '../main/host/link/direct'
+import { LinkChannel } from '../main/host/link/link-channels'
+import { LinkPaths, pipeLinkTransport, readPipe } from '../main/host/link/paths'
 import type { StreamKinds } from '../main/host/link/stream'
 import { HOST_LINK_MIN_VERSION, HOST_LINK_PROTOCOL_VERSION } from '../main/host/link/version'
 import type { ServerHostInfo } from '../shared/servers'
@@ -89,10 +92,25 @@ export interface ServerLinkOptions {
   onPaired?: (desktop: PeerRecord) => void
   /** A desktop's session came up or went away. */
   onSessionsChanged?: () => void
+  /** Direct paths (protocol/SERVER.md §13). Without it, or when the API doesn't load, desktops stay on the relay. */
+  direct?: {
+    load(): Promise<DirectApi | null>
+    iceServers(): string[]
+  }
   /** Tests: speak another protocol version range. */
   version?: VersionInfo
   timers?: LinkTimers
   now?: () => number
+}
+
+/** What a {@link DesktopLink} needs for a direct path. */
+interface DirectContext {
+  api: DirectApi
+  iceServers(): string[]
+  /** Answers the pipe's message 1 for this desktop: the envelope, and the channel when it is the paired desktop. */
+  handshake(body: Uint8Array): { envelope: Uint8Array; channel: SealedChannel | null }
+  /** The session moved to the pipe and the pipe broke: the session is over. */
+  lost(why: string): void
 }
 
 /** Counters for tests and the live check. */
@@ -141,6 +159,7 @@ export class ServerLink {
   private codeTimer: ReturnType<typeof setTimeout> | null = null
   private tokenPairing: PendingTokenPairing | null = null
   private started = false
+  private directApi: DirectApi | null = null
 
   constructor(private readonly options: ServerLinkOptions) {
     this.desktops = new PeerStore(options.dataDir, 'desktops.json', options.log)
@@ -171,6 +190,10 @@ export class ServerLink {
   start(): void {
     if (this.started) return
     this.started = true
+    void this.options.direct?.load().then((api) => {
+      this.directApi = api
+      if (api) this.options.log('link direct paths available')
+    })
     this.port.connect(this.options.relayUrl())
   }
 
@@ -192,6 +215,11 @@ export class ServerLink {
   /** Desktops with a session right now. */
   connectedDesktops(): string[] {
     return [...this.links.keys()]
+  }
+
+  /** Desktops whose session moved to a direct path. */
+  directDesktops(): string[] {
+    return [...this.links.values()].filter((link) => link.onDirect).map((link) => link.desktopId)
   }
 
   /** Bytes queued on the relay socket that the OS hasn't taken (tests, diagnostics). */
@@ -370,7 +398,8 @@ export class ServerLink {
 
   private onRelayState(state: RelayTransportState): void {
     if (state.kind !== 'online') {
-      for (const desktopId of [...this.links.keys()]) this.dropLink(desktopId, 'the relay connection dropped')
+      // A session on a direct path doesn't need the relay any more.
+      for (const [desktopId, link] of [...this.links]) if (!link.onDirect) this.dropLink(desktopId, 'the relay connection dropped')
       return
     }
     // An offer lives with the socket that made it.
@@ -391,6 +420,7 @@ export class ServerLink {
       // The desktop removed this server: forget it too.
       if (this.desktops.remove(message.id)) this.options.log(`link desktop=${message.id} revoked the pairing`)
     }
+    if (message.state !== 'revoked' && this.links.get(message.id)?.onDirect) return
     this.dropLink(message.id, message.state === 'revoked' ? 'the desktop revoked the pairing' : 'the desktop went offline')
   }
 
@@ -403,7 +433,7 @@ export class ServerLink {
       return
     }
     if (message.to && message.code === 'offline') {
-      this.dropLink(message.to, 'the desktop went offline')
+      if (!this.links.get(message.to)?.onDirect) this.dropLink(message.to, 'the desktop went offline')
       return
     }
     this.options.log(`link relayError code=${message.code}${message.to ? ` to=${message.to}` : ''}${message.message ? ` message=${message.message}` : ''}`)
@@ -508,7 +538,7 @@ export class ServerLink {
       outcome = answerHandshake(
         identity.x25519,
         body,
-        () => ({ ...buildHello('devtool-server', this.options.build(), this.options.name(), this.options.features ?? [], this.options.host()), v: this.version.v, min: this.version.min }),
+        () => this.replyHello(),
         ({ remoteStatic }) => {
           const desktop = this.desktops.get(from)
           return desktop && desktop.x25519Pub === b64uEncode(remoteStatic) ? 'ok' : 'unknown-device'
@@ -527,8 +557,40 @@ export class ServerLink {
     if (outcome.result !== 'ok' || !outcome.channel || !hello) return
     this.desktops.touchLastSeen(from, this.now())
     this.desktops.setBuild(from, hello.build)
-    this.links.set(from, new DesktopLink(from, outcome.channel, hello, this.port, this.options, this.streams, this.stats))
+    const link: DesktopLink = new DesktopLink(from, outcome.channel, hello, this.port, this.options, this.streams, this.stats, this.directContext(from, () => link))
+    this.links.set(from, link)
     this.options.onSessionsChanged?.()
+  }
+
+  private replyHello(): HostLinkHello {
+    const features = [...(this.options.features ?? []), ...(this.directApi ? [DIRECT_FEATURE] : [])]
+    return { ...buildHello('devtool-server', this.options.build(), this.options.name(), features, this.options.host()), v: this.version.v, min: this.version.min }
+  }
+
+  private directContext(desktopId: string, link: () => DesktopLink): DirectContext | null {
+    const api = this.directApi
+    const direct = this.options.direct
+    if (!api || !direct) return null
+    return {
+      api,
+      iceServers: () => direct.iceServers(),
+      handshake: (body) => {
+        const outcome = answerHandshake(
+          this.options.identity.get().x25519,
+          body,
+          () => this.replyHello(),
+          // Only the desktop whose relay session asked for this pipe.
+          ({ remoteStatic }) => this.desktops.get(desktopId)?.x25519Pub === b64uEncode(remoteStatic) ? 'ok' : 'unknown-device',
+          (line) => this.options.log(`link desktop=${desktopId} direct ${line}`),
+          this.version,
+          'direct'
+        )
+        return { envelope: outcome.envelope, channel: outcome.channel }
+      },
+      lost: (why) => {
+        if (this.links.get(desktopId) === link()) this.dropLink(desktopId, why)
+      }
+    }
   }
 
   private dropLink(desktopId: string, why: string): void {
@@ -561,6 +623,10 @@ class DesktopLink {
   private readonly focus = new Map<string, boolean>()
   private waitingForDrain = false
   private closed = false
+  private readonly paths: LinkPaths
+  /** The offer being answered, until its pipe opens or fails. */
+  private answering: DirectAnswer | null = null
+  private pipe: DirectPipe | null = null
 
   constructor(
     readonly desktopId: string,
@@ -569,12 +635,17 @@ class DesktopLink {
     private readonly port: HostLinkPort,
     private readonly options: ServerLinkOptions,
     streams: StreamKinds,
-    private readonly stats: ServerLinkStats
+    private readonly stats: ServerLinkStats,
+    private readonly direct: DirectContext | null
   ) {
     this.group = `link:${desktopId}`
-    const transport = relayLinkTransport(port, desktopId, channel)
+    this.paths = new LinkPaths(
+      relayLinkTransport(port, desktopId, channel),
+      (plaintext) => this.session.receive(plaintext),
+      (why) => this.direct?.lost(why)
+    )
     this.session = new LinkSession({
-      transport,
+      transport: this.paths,
       side: 'server',
       peer: desktopId,
       onCall: (call) => this.call(call),
@@ -595,8 +666,13 @@ class DesktopLink {
     } catch {
       return false
     }
-    if (plaintext) this.session.receive(plaintext)
+    if (plaintext) this.paths.fromRelay(plaintext)
     return true
+  }
+
+  /** The session moved (either way) to a direct pipe. */
+  get onDirect(): boolean {
+    return this.paths.onDirect
   }
 
   sendEvent(client: string, ch: string, args: unknown[]): void {
@@ -607,6 +683,10 @@ class DesktopLink {
     if (this.closed) return
     this.closed = true
     this.session.close(new LinkError(LinkErrorCode.ServerOffline, `The link closed: ${why}`))
+    this.answering?.close()
+    this.answering = null
+    this.pipe?.close(`the link closed: ${why}`)
+    this.pipe = null
     this.options.registry?.unregisterGroup(this.group)
     this.releaseTerminals()
   }
@@ -618,6 +698,7 @@ class DesktopLink {
   private async call({ client, ch, args, focused }: IncomingCall): Promise<unknown> {
     if (!CLIENT_ID.test(client)) throw new LinkError(LinkErrorCode.Protocol, 'Bad client id')
     if (LOCAL_ONLY_CHANNELS.has(ch)) throw new LinkError(LinkErrorCode.Unsupported, `${ch} is for local windows only`)
+    if (ch === LinkChannel.DirectOffer) return this.answerDirect(args[0])
     const linkLevel = this.options.linkCall?.({ desktopId: this.desktopId, ch, args })
     if (linkLevel !== undefined) {
       try {
@@ -641,6 +722,88 @@ class DesktopLink {
     } catch (err) {
       throw new LinkError(LinkErrorCode.Remote, errorMessage(err))
     }
+  }
+
+  // ---- direct path (protocol/SERVER.md §13) --------------------------------------------
+
+  /** `server-direct-offer`: answers at once; the pipe opens, handshakes and takes over in the background. */
+  private async answerDirect(raw: unknown): Promise<DirectSignal> {
+    const direct = this.direct
+    if (!direct) throw new LinkError(LinkErrorCode.Unsupported, 'This server has no direct paths')
+    let offer: DirectSignal
+    try {
+      offer = parseSignal(raw)
+    } catch (err) {
+      throw new LinkError(LinkErrorCode.Protocol, errorMessage(err))
+    }
+    if (this.paths.sendingDirect) throw new LinkError(LinkErrorCode.Refused, 'Already on a direct path')
+    this.answering?.close()
+    const log = (line: string) => this.options.log(`link desktop=${this.desktopId} ${line}`)
+    const answer = await direct.api.answer(offer, { iceServers: direct.iceServers(), log })
+    if (this.closed) {
+      answer.close()
+      throw new LinkError(LinkErrorCode.ServerOffline, 'The link closed')
+    }
+    this.answering = answer
+    answer.pipe.then(
+      (pipe) => {
+        if (this.answering === answer) this.answering = null
+        if (this.closed || this.paths.sendingDirect) {
+          pipe.close('not needed')
+          return
+        }
+        this.acceptPipe(pipe, direct)
+      },
+      (err: unknown) => {
+        if (this.answering === answer) this.answering = null
+        log(`direct path failed: ${errorMessage(err)}`)
+      }
+    )
+    return answer.signal
+  }
+
+  /** The desktop's message 1 on the pipe, then the move. */
+  private acceptPipe(pipe: DirectPipe, direct: DirectContext): void {
+    let channel: SealedChannel | null = null
+    const timer = setTimeout(() => {
+      if (!channel) pipe.close('no direct handshake')
+    }, 10_000)
+    timer.unref?.()
+    pipe.onClose((why) => {
+      clearTimeout(timer)
+      if (this.pipe !== pipe) return
+      this.pipe = null
+      if (this.paths.onDirect) direct.lost(`the direct path broke (${why})`)
+    })
+    pipe.onMessage((bytes) => {
+      if (channel) return
+      clearTimeout(timer)
+      let outcome: { envelope: Uint8Array; channel: SealedChannel | null }
+      try {
+        const envelope = decodeEnvelope(bytes)
+        if (envelope.kind !== FrameKind.Handshake1) throw new Error(`unexpected frame ${envelope.kind}`)
+        outcome = direct.handshake(envelope.body)
+      } catch (err) {
+        pipe.close(`bad direct handshake: ${errorMessage(err)}`)
+        return
+      }
+      pipe.send(outcome.envelope)
+      if (!outcome.channel || this.closed) {
+        pipe.close('the direct handshake was refused')
+        return
+      }
+      const opened = outcome.channel
+      channel = opened
+      readPipe(pipe, opened, (plaintext) => this.paths.fromDirect(plaintext), (why) => pipe.close(why))
+      this.pipe = pipe
+      if (!this.paths.useDirect(pipeLinkTransport(pipe, opened))) {
+        this.pipe = null
+        pipe.close('the relay went away before the move')
+        return
+      }
+      this.options.log(`link desktop=${this.desktopId} direct path up (${pipe.describe()})`)
+      this.options.onSessionsChanged?.()
+    })
   }
 
   private push(client: string, ch: string, args: unknown[]): void {

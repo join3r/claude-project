@@ -7,6 +7,9 @@ import { LinkSession, type IncomingEvent, type LinkTimers } from '../host/link/s
 import type { LinkStream } from '../host/link/stream'
 import type { HostLinkPort } from '../host/link/relay-mux'
 import { relayLinkTransport } from '../host/link/relay-transport'
+import { DIRECT_FEATURE, parseSignal, type DirectApi, type DirectPipe } from '../host/link/direct'
+import { LinkChannel } from '../host/link/link-channels'
+import { LinkPaths, pipeLinkTransport, readPipe } from '../host/link/paths'
 import type { ServerConnectionKind, ServerStatus } from '../../shared/servers'
 
 /** Message 2 has this long to arrive before the attempt counts as failed. */
@@ -14,6 +17,20 @@ export const HANDSHAKE_TIMEOUT_MS = 10_000
 /** Reconnect backoff (plan: 1 s → 30 s), reset by a session that comes up. */
 export const MIN_RETRY_MS = 1000
 export const MAX_RETRY_MS = 30_000
+/** A failed direct attempt is tried again after this, doubling up to {@link MAX_DIRECT_RETRY_MS}, while the relay session lasts. */
+export const MIN_DIRECT_RETRY_MS = 30_000
+export const MAX_DIRECT_RETRY_MS = 10 * 60_000
+/** The direct pipe's own handshake has this long. */
+const DIRECT_HANDSHAKE_MS = 10_000
+/** The link-level client that makes the desktop's own calls (protocol/SERVER.md §5.1). */
+const HUB_CLIENT = 'hub'
+
+/** How a connection moves to a direct path (protocol/SERVER.md §13). */
+export interface ServerDirectDeps {
+  /** The API, or null when this desktop has none (node-datachannel didn't load). */
+  load(): Promise<DirectApi | null>
+  iceServers(): string[]
+}
 
 export interface ConnectionTimers extends LinkTimers {
   now(): number
@@ -37,6 +54,8 @@ export interface ServerConnectionDeps {
   /** A handshake answered `ok`. */
   onEstablished: (reply: HostLinkReply) => void
   onEvent: (event: IncomingEvent) => void
+  /** Without it the link stays on the relay. */
+  direct?: ServerDirectDeps
 }
 
 type Problem = NonNullable<ServerStatus['problem']>
@@ -57,6 +76,14 @@ export class ServerConnection {
   private initiator: LinkInitiator | null = null
   private channel: SealedChannel | null = null
   private session: LinkSession | null = null
+  private paths: LinkPaths | null = null
+  /** The pipe the session moved to (or is moving to). */
+  private pipe: DirectPipe | null = null
+  /** The server said it takes direct offers. */
+  private serverDirect = false
+  private directTimer: unknown = null
+  private directBackoff = MIN_DIRECT_RETRY_MS
+  private directRunning = false
   private handshakeTimer: unknown = null
   private retryTimer: unknown = null
   private backoff = MIN_RETRY_MS
@@ -72,9 +99,15 @@ export class ServerConnection {
     return this.kind
   }
 
-  status(): Pick<ServerStatus, 'state' | 'error' | 'problem' | 'update'> {
+  /** `direct` once this desktop sends over a direct pipe. */
+  get path(): 'relay' | 'direct' {
+    return this.paths?.sendingDirect ? 'direct' : 'relay'
+  }
+
+  status(): Pick<ServerStatus, 'state' | 'error' | 'problem' | 'update' | 'path'> {
     return {
       state: this.kind,
+      ...(this.kind === 'online' ? { path: this.path } : {}),
       ...(this.error ? { error: this.error } : {}),
       ...(this.problem ? { problem: this.problem } : {}),
       ...(this.update ? { update: this.update } : {})
@@ -93,10 +126,18 @@ export class ServerConnection {
     this.connect()
   }
 
-  /** The server went offline, or the relay socket did. */
+  /**
+   * The server went offline, or the relay socket did. Without a `reason` that is
+   * only the relay's view: a session on a direct path lives on, and ends when the
+   * pipe does.
+   */
   serverOffline(reason?: { error?: string; problem?: Problem }): void {
     this.present = false
     this.cancelRetry()
+    if (!reason && !this.stopped && this.session && this.paths?.onDirect) {
+      this.deps.log(`server=${this.deps.id} relay lost; staying on the direct path`)
+      return
+    }
     this.endSession(new LinkError(LinkErrorCode.ServerOffline, 'The server went offline'))
     this.set('offline', reason?.error, reason?.problem)
   }
@@ -207,18 +248,29 @@ export class ServerConnection {
       return
     }
     this.channel = channel
-    this.session = new LinkSession({
-      transport: relayLinkTransport(this.deps.port, this.deps.id, channel),
+    let session: LinkSession | null = null
+    const paths = new LinkPaths(
+      relayLinkTransport(this.deps.port, this.deps.id, channel),
+      (plaintext) => this.deliver(session!, plaintext),
+      (why) => this.directBroke(paths, why)
+    )
+    session = new LinkSession({
+      transport: paths,
       side: 'desktop',
       peer: this.deps.id,
       onEvent: (event) => this.deps.onEvent(event),
       log: this.deps.log,
       timers: this.deps.timers
     })
+    this.session = session
+    this.paths = paths
+    this.serverDirect = reply.features.includes(DIRECT_FEATURE)
+    this.directBackoff = MIN_DIRECT_RETRY_MS
     this.backoff = MIN_RETRY_MS
     this.deps.log(`server=${this.deps.id} online version=${reply.build.version} commit=${reply.build.commit.slice(0, 12)}`)
     this.set('online')
     this.deps.onEstablished(reply)
+    this.scheduleDirect(0)
   }
 
   private transportMessage(body: Uint8Array): void {
@@ -241,11 +293,144 @@ export class ServerConnection {
       return
     }
     if (!plaintext) return
+    this.paths?.fromRelay(plaintext)
+  }
+
+  private deliver(session: LinkSession, plaintext: Uint8Array): void {
     try {
       session.receive(plaintext)
     } catch (err) {
       if (!(err instanceof ProtocolError)) throw err
       this.deps.log(`server=${this.deps.id} bad message: ${err.message}`)
+    }
+  }
+
+  // ---- direct path (protocol/SERVER.md §13) --------------------------------------------
+
+  private scheduleDirect(delay: number): void {
+    const direct = this.deps.direct
+    if (!direct || !this.serverDirect || this.stopped || !this.session || this.paths?.sendingDirect) return
+    this.cancelDirectRetry()
+    this.directTimer = this.deps.timers.setTimeout(() => {
+      this.directTimer = null
+      void this.tryDirect(direct)
+    }, delay)
+  }
+
+  private async tryDirect(direct: ServerDirectDeps): Promise<void> {
+    const session = this.session
+    const paths = this.paths
+    if (!session || !paths || this.directRunning) return
+    this.directRunning = true
+    let pipe: DirectPipe | null = null
+    try {
+      const api = await direct.load()
+      if (!api || this.session !== session) return
+      const log = (line: string) => this.deps.log(`server=${this.deps.id} ${line}`)
+      const offer = await api.offer({ iceServers: direct.iceServers(), log })
+      let answer
+      try {
+        answer = parseSignal(await session.call(HUB_CLIENT, LinkChannel.DirectOffer, [offer.signal]))
+      } catch (err) {
+        offer.close()
+        throw err
+      }
+      if (this.session !== session) {
+        offer.close()
+        return
+      }
+      pipe = await offer.connect(answer)
+      if (this.session !== session) return
+      const channel = await this.directHandshake(pipe)
+      if (this.session !== session || pipe.closed) return
+      const opened = pipe
+      readPipe(opened, channel, (plaintext) => paths.fromDirect(plaintext), (why) => opened.close(why))
+      opened.onClose((why) => {
+        if (this.pipe === opened) this.directBroke(paths, why)
+      })
+      this.pipe = opened
+      if (!paths.useDirect(pipeLinkTransport(opened, channel))) {
+        this.pipe = null
+        opened.close('the relay went away before the move')
+        return
+      }
+      pipe = null
+      this.deps.log(`server=${this.deps.id} direct path up (${opened.describe()})`)
+      this.directBackoff = MIN_DIRECT_RETRY_MS
+      this.deps.onChange()
+    } catch (err) {
+      if (this.session !== session) return
+      const code = err instanceof LinkError ? err.code : null
+      if (code === LinkErrorCode.Unsupported) {
+        this.deps.log(`server=${this.deps.id} direct path: the server takes no offers`)
+        this.serverDirect = false
+        return
+      }
+      const delay = this.directBackoff
+      this.directBackoff = Math.min(MAX_DIRECT_RETRY_MS, this.directBackoff * 2)
+      this.deps.log(`server=${this.deps.id} direct path failed: ${errorMessage(err)}; next try in ${Math.round(delay / 1000)} s`)
+      this.scheduleDirect(delay)
+    } finally {
+      this.directRunning = false
+      pipe?.close('not used')
+    }
+  }
+
+  /** Noise IK over the pipe with the direct prologue: the server proves the same static key again. */
+  private directHandshake(pipe: DirectPipe): Promise<SealedChannel> {
+    const initiator = new LinkInitiator(this.deps.staticKey(), this.deps.serverStatic(), (line) => this.deps.log(`server=${this.deps.id} ${line}`), 'direct')
+    return new Promise((resolve, reject) => {
+      let done = false
+      const finish = (error: Error | null, channel?: SealedChannel) => {
+        if (done) return
+        done = true
+        this.deps.timers.clearTimeout(timer)
+        if (error) reject(error)
+        else resolve(channel!)
+      }
+      const timer = this.deps.timers.setTimeout(() => finish(new Error('the direct handshake timed out')), DIRECT_HANDSHAKE_MS)
+      pipe.onClose((why) => finish(new Error(why)))
+      pipe.onMessage((bytes) => {
+        if (done) return
+        try {
+          const envelope = decodeEnvelope(bytes)
+          if (envelope.kind !== FrameKind.Handshake2) throw new ProtocolError(`unexpected frame ${envelope.kind}`)
+          const { reply, channel } = initiator.finish(envelope.body)
+          if (!channel) throw new ProtocolError(`the server answered ${reply.result}`)
+          finish(null, channel)
+        } catch (err) {
+          finish(err instanceof Error ? err : new Error(String(err)))
+        }
+      })
+      if (!pipe.send(initiator.start(this.deps.hello()))) finish(new Error('the direct pipe closed'))
+    })
+  }
+
+  /** The pipe broke. Before the move nothing is lost; after it the session ends and starts again on the relay. */
+  private directBroke(paths: LinkPaths, why: string): void {
+    if (this.paths !== paths) return
+    const pipe = this.pipe
+    this.pipe = null
+    pipe?.close(why)
+    if (!paths.onDirect) {
+      this.scheduleDirect(this.directBackoff)
+      return
+    }
+    this.deps.log(`server=${this.deps.id} direct path lost (${why}); reconnecting`)
+    this.endSession(new LinkError(LinkErrorCode.ServerOffline, 'The direct path to the server broke'))
+    if (this.present) {
+      this.set('connecting')
+      this.backoff = MIN_RETRY_MS
+      this.connect()
+    } else {
+      this.set('offline')
+    }
+  }
+
+  private cancelDirectRetry(): void {
+    if (this.directTimer !== null) {
+      this.deps.timers.clearTimeout(this.directTimer)
+      this.directTimer = null
     }
   }
 
@@ -269,6 +454,12 @@ export class ServerConnection {
     this.clearHandshakeTimer()
     this.initiator = null
     this.channel = null
+    this.cancelDirectRetry()
+    this.paths = null
+    this.serverDirect = false
+    const pipe = this.pipe
+    this.pipe = null
+    pipe?.close('the session ended')
     const session = this.session
     this.session = null
     session?.close(error)

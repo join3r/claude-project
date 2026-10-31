@@ -24,6 +24,8 @@ export interface RelayConfig {
   trustProxy: boolean
   logLevel: LogLevel
   push: PushConfig
+  /** UDP port of the STUN responder (protocol/SERVER.md §13), or null when it is off. */
+  stunPort: number | null
   /** Limits set in the environment (see LIMIT_ENV); absent when none are. */
   limits?: Partial<RelayLimits>
 }
@@ -127,6 +129,13 @@ export function loadConfig(env: Env = process.env): RelayConfig {
   const port = env.PORT === undefined || env.PORT === '' ? 8787 : Number(env.PORT)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`PORT must be a port number, got ${env.PORT}`)
   const limits = parseLimits(env)
+  const stunRaw = env.RELAY_STUN_PORT
+  let stunPort: number | null = 3478
+  if (stunRaw === 'off' || stunRaw === '0') stunPort = null
+  else if (stunRaw !== undefined && stunRaw !== '') {
+    stunPort = Number(stunRaw)
+    if (!Number.isInteger(stunPort) || stunPort < 1 || stunPort > 65535) throw new Error(`RELAY_STUN_PORT must be a port number or "off", got ${stunRaw}`)
+  }
   return {
     port,
     host: env.HOST || '0.0.0.0',
@@ -134,6 +143,7 @@ export function loadConfig(env: Env = process.env): RelayConfig {
     trustProxy: env.RELAY_TRUST_PROXY === '1' || env.RELAY_TRUST_PROXY === 'true',
     logLevel: parseLogLevel(env.LOG_LEVEL),
     push: parsePushConfig(env),
+    stunPort,
     ...(Object.keys(limits).length > 0 ? { limits } : {})
   }
 }

@@ -5,6 +5,8 @@ import type { ServerHostInfo } from '../../../shared/servers'
 
 /** Noise prologue of the desktop↔server link (protocol/SERVER.md §2); never the phones' `devtool-mobile-v1`. */
 export const HOST_LINK_PROLOGUE = 'devtool-server-v1'
+/** The direct path's own Noise session (§13.4), so a relay handshake can't be replayed onto a pipe or back. */
+export const HOST_LINK_DIRECT_PROLOGUE = 'devtool-server-direct-v1'
 
 export type HostLinkApp = 'devtool-desktop' | 'devtool-server'
 

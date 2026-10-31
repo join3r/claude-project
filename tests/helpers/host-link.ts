@@ -54,7 +54,7 @@ export interface TestDesktop {
   close(): void
 }
 
-export function startTestDesktop(relayUrl: string, options: { version?: VersionInfo; bundle?: () => LocalBundle | null; desktopName?: string } = {}): TestDesktop {
+export function startTestDesktop(relayUrl: string, options: { version?: VersionInfo; bundle?: () => LocalBundle | null; desktopName?: string; direct?: boolean } = {}): TestDesktop {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-link-desktop-'))
   const log: string[] = []
   const identity = new IdentityStore(path.join(dir, 'mobile'), plaintext)
@@ -75,6 +75,8 @@ export function startTestDesktop(relayUrl: string, options: { version?: VersionI
     relayUrl: () => relayUrl,
     build,
     desktopName: () => options.desktopName ?? 'test-mac',
+    // Off unless a test asks: the rest measure the relay path.
+    direct: options.direct ?? false,
     log: (line) => log.push(line),
     ...(options.version ? { version: options.version } : {}),
     ...(options.bundle ? { bundle: options.bundle } : {})

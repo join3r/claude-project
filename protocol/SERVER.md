@@ -6,7 +6,7 @@ It builds on the mobile protocol in [SPEC.md](SPEC.md). The relay rules are §3 
 
 ## 1. Overview
 
-- The desktop and the server talk through the relay only, over the same socket and identity each of them uses for phones.
+- The desktop and the server start every session on the relay, over the same socket and identity each of them uses for phones. Once it is up they try to move it to a direct WebRTC data channel punched through NAT (§13), and fall back to the relay when that fails or breaks.
 - The relay sees opaque envelopes. Everything above it is end-to-end encrypted with Noise IK, with the desktop as the initiator.
 - Inside the session, binary app messages carry RPC calls into the server's host channels (the same channels and argument schemas a local window uses), events back to the desktop's windows, and multiplexed byte streams with credit-based flow control.
 
@@ -36,7 +36,7 @@ The desktop's `build` is the server bundle it carries (§10): its commit, build 
 
 Rules:
 - The server accepts a desktop only when its pairings (`<data>/desktops.json`) have a record for the relay-authenticated sender ID and that record's `x25519Pub` equals the static key message 1 revealed. The sender ID is the hash of the Ed25519 key the relay checked, so this binds both keys.
-- Unknown fields are ignored. A desktop sends no `features` in version 1. A server being installed says `features: ["bootstrap"]` (§11).
+- Unknown fields are ignored. A desktop sends no `features` in version 1. A server being installed says `features: ["bootstrap"]` (§11). A server that can answer direct offers says `"direct"` (§13).
 
 ### 2.3 Versions
 
@@ -231,8 +231,11 @@ The relay keeps one live offer per host (SPEC §3.2), shared by a desktop's phon
 | `src/server/updater.ts`, `node-install.ts`, `restart.ts` | §10: staging, Node, switching, restarting |
 | `src/server/bootstrap.ts` | §11 (`site/server/bootstrap.mjs`); `site/install` comes from `scripts/server-install.sh` |
 | `src/server/service.ts`, `control.ts`, `cli.ts` | the service, the CLI's control socket, `devtool-server` |
+| `src/main/host/link/direct.ts`, `paths.ts` | §13: the data channel (node-datachannel), the move between paths |
+| `src/server/datachannel-binary.ts` | §13.6: a bundled server's node-datachannel binary |
+| `relay/src/stun.ts` | §13.2: the relay's STUN responder |
 
-Tests: `tests/host-link-wire.test.ts`, `tests/host-link-session.test.ts` and `tests/host-link-tcp.test.ts` (loopback), `tests/server-tcp-e2e.test.ts` (`tcp` through a relay), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay) and `tests/server-updates.test.ts` (archive, policy, uploads through a relay).
+Tests: `tests/host-link-wire.test.ts`, `tests/host-link-session.test.ts` and `tests/host-link-tcp.test.ts` (loopback), `tests/server-tcp-e2e.test.ts` (`tcp` through a relay), `tests/relay-mux.test.ts`, `tests/server-link-e2e.test.ts` (desktop, relay and server in one process), `tests/server-pairing.test.ts` (tickets, offers, the pairing handshake, both flows through a relay) and `tests/server-updates.test.ts` (archive, policy, uploads through a relay). Direct paths: `tests/host-link-paths.test.ts` (ordering across the move), `tests/relay-stun.test.ts` and `tests/server-direct-e2e.test.ts` (the move, the relay going away, falling back) and `tests/server-datachannel-binary.test.ts`.
 
 ## 10. Updates
 
@@ -288,3 +291,45 @@ A phone pairs with a server exactly as with a desktop (SPEC §2, §3.8, §4), an
 - Pushes go out through the server's relay socket like a desktop's (SPEC §7.2).
 - A desktop drives a server's phones through host channels routed by their first argument (the server id, `{host: 0}`): `server-mobile-get-state`, `server-mobile-start-pairing` (answers `{uri, exp}`), `server-mobile-cancel-pairing`, `server-mobile-accept`, `server-mobile-reject` and `server-mobile-revoke` (the last three take the phone id). Each answers the server's `MobileState`. The server pushes that state to its desktops as `server-mobile-state-changed`, never `mobile-state-changed` (a desktop's own Settings › Mobile). The desktop forwards it to its windows as `(serverId, state)`, the id being the server it came from (`SERVER_EVENTS` scope `server-self`).
 - On the server, `devtool-server pair --phone [--no-wait]` prints the pairing link and a terminal QR code, then asks Accept or Reject in the terminal (without a terminal it waits for Accept in DevTool). `devtool-server status` lists the phones, `unpair` takes a phone's name or id too, and `uninstall --delete-data` revokes the phones with the desktops.
+
+## 13. Direct path
+
+A session starts on the relay and stays there until a direct path works. There is no SSH and no port to open: both ends punch through NAT from the inside with ICE, and the relay's STUN responder tells each its public address. Code: `src/main/host/link/direct.ts` and `paths.ts`, used by `ServerConnection` and `DesktopLink`.
+
+### 13.1 Transport
+
+- A WebRTC data channel (`node-datachannel`, libdatachannel's Node binding): ICE over UDP, DTLS, SCTP. One channel, label `link`, ordered and reliable. No TURN: when no candidate pair works, the session simply stays on the relay.
+- Each pipe message is one SPEC §4.1 envelope (`0x01` message 1, `0x02` message 2, `0x03` transport, `0x04` reset) or a one-byte `0x00` heartbeat. Both sides send a heartbeat every 10 s and close the pipe after 35 s with nothing received. A pipe whose ICE state stays `disconnected` for 10 s, or turns `failed` or `closed`, is closed too.
+- A host where `node-datachannel` doesn't load (or with `DEVTOOL_NO_DIRECT` set) has no direct path. The rest works as before.
+
+### 13.2 STUN
+
+- The relay answers RFC 5389 Binding Requests on UDP 3478 (`RELAY_STUN_PORT`, `off` to disable) with `XOR-MAPPED-ADDRESS` and `FINGERPRINT`, nothing else, at most 20 requests per second per address. A reply is never more than 32 bytes bigger than its request.
+- Both ends use `stun:<relay host>:3478`, the host of the relay URL they already use. `DEVTOOL_STUN` overrides it: comma-separated `stun:` URLs, or empty for none (host candidates only).
+
+### 13.3 Signalling
+
+- After a session comes up and the server's reply lists `direct`, the desktop gathers its candidates (at most 5 s), then calls `server-direct-offer` as the `hub` client with `{sdp, candidates: [{candidate, mid}]}`. The server gathers its own and answers with the same shape. The offer and answer travel inside the Noise session, so the relay never sees them, and the DTLS fingerprints in them are end-to-end authenticated.
+- The server answers `unsupported` when it has no direct path (the desktop stops trying for that session) and `refused` when the session already moved.
+- ICE, DTLS and SCTP then get 15 s to open the channel. A failed attempt is tried again after 30 s, doubling to 10 min, for as long as the relay session lasts.
+
+### 13.4 Handshake on the pipe
+
+- Once the channel opens, the desktop sends a Noise IK message 1 on it with the prologue `utf8("devtool-server-direct-v1")` and its usual hello (§2.2). The server answers it with message 2 only when the desktop's static key is the one paired for the desktop whose relay session made this offer, as in §2.2. The pipe gets its own transport keys, counters and fragmentation (SPEC §6.1). The handshake has 10 s.
+- The different prologue keeps a relay handshake from being replayed onto a pipe and back.
+
+### 13.5 Moving the session
+
+- Calls, results, events, detaches and streams (§4–§6) are the same session's, whichever path carries them. Pending calls and open streams survive the move.
+- Each direction moves on its own. A side that has its pipe's channel sends `path` (type `0x14`, header `{"to":"direct"}`, no payload) as its last message on the relay, then sends everything over the pipe. The desktop moves after message 2, the server after sending it.
+- A receiver holds what the pipe brings until `path` has come through the relay, then hands those messages on in order. So the session sees every message once and in the order it was sent. One that holds more than 16 MiB before `path` arrives ends the session.
+- Flow control (§6.2) and the terminal holds (§8) use the path a side sends on: the pipe's `bufferedAmount` with the same 512 KiB / 128 KiB marks.
+- After the move, losing the relay (socket down, `peer offline`, `error offline`) no longer ends the session. `peer revoked` still does.
+- Losing the pipe before the move costs nothing: the session stays on the relay and the desktop tries again later. Losing it after the move ends the session, since messages in flight on the pipe are gone. Pending calls fail with `server-offline`, streams abort, and the desktop handshakes again on the relay (when the relay still reports the server online), then tries a direct path again. Terminals reattach with their scrollback as after any reconnect.
+- The desktop reports `path: "relay" | "direct"` with `online` in `ServerStatus`. Settings › Hosts shows "Online, direct".
+
+### 13.6 The binary on a server
+
+- A packaged desktop carries `node-datachannel` with its own platform's prebuild (unpacked from the asar).
+- The server bundle carries node-datachannel's JS, bundled into `server.js` with its loader replaced by one that returns `globalThis.__devtoolNodeDatachannel`, and `datachannel.json`: the npm tarball URL and `sha512` integrity of each prebuild (`darwin-arm64`, `darwin-x64`, `linux-{x64,arm64}-{gnu,musl}`), taken from `package-lock.json`. The prebuilds are about 9 MB each, three times the rest of the bundle.
+- On its first start, a bundled server downloads its own platform's tarball from the npm registry, checks the hash, keeps `node_datachannel.node` in `<home>/native/node-datachannel-<version>-<platform>/` and loads it. If any of that fails it logs why and stays relay-only. A server run from a source checkout loads the npm package as installed.

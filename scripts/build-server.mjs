@@ -10,6 +10,10 @@
  *   pi-status-extension.mjs, notebook-kernel.py   resources for external processes
  *   node_modules/node-pty/   upstream node-pty (the `node-pty-server` alias):
  *                    package.json, LICENSE, lib/ and the four unix prebuilds
+ *   datachannel.json node-datachannel's prebuilds (npm URL + sha512 per platform,
+ *                    from package-lock.json). Its JS is in server.js; a server
+ *                    fetches its own ~9 MB binary on first use
+ *                    (src/server/datachannel-binary.ts), so the bundle stays small.
  *
  * The build fails if anything in the server's graph imports electron or
  * electron-updater.
@@ -22,6 +26,10 @@ import { fileURLToPath } from 'node:url'
 import { MANIFEST_FILE, SERVER_NODE_VERSION, bundleSha256, electronGuardPlugin } from './server-bundle.mjs'
 /** node-pty's prebuilt platforms the server supports; Windows is the desktop's alone. */
 const PTY_PREBUILDS = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64']
+/** node-datachannel's prebuilds a server may fetch (src/server/datachannel-binary.ts `prebuildName`). */
+const DATACHANNEL_PREBUILDS = ['darwin-arm64', 'darwin-x64', 'linux-arm64-gnu', 'linux-x64-gnu', 'linux-arm64-musl', 'linux-x64-musl']
+/** The global the stub loader reads (BINDING_GLOBAL in src/server/datachannel-binary.ts). */
+const DATACHANNEL_GLOBAL = '__devtoolNodeDatachannel'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -65,6 +73,40 @@ function copyNodePty(dest) {
   return pkg.version
 }
 
+/** `datachannel.json`: each prebuild's tarball and sha512, as package-lock.json pins them. */
+function datachannelManifest() {
+  const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8')).packages
+  const main = lock['node_modules/node-datachannel']
+  if (!main) throw new Error('node-datachannel is not in package-lock.json; run npm install')
+  const prebuilds = {}
+  for (const name of DATACHANNEL_PREBUILDS) {
+    const entry = lock[`node_modules/@node-datachannel/${name}`]
+    if (!entry?.resolved || !entry.integrity?.startsWith('sha512-')) throw new Error(`package-lock.json has no @node-datachannel/${name}`)
+    if (entry.version !== main.version) throw new Error(`@node-datachannel/${name} ${entry.version} does not match node-datachannel ${main.version}`)
+    prebuilds[name] = { url: entry.resolved, integrity: entry.integrity }
+  }
+  return { version: main.version, prebuilds }
+}
+
+/**
+ * node-datachannel's loader looks for its binary next to the package or in an
+ * optional dependency; in the bundle it is neither, so the loader is replaced by
+ * one that returns what datachannel-binary.ts loaded.
+ */
+function datachannelLoaderPlugin() {
+  return {
+    name: 'devtool-datachannel-loader',
+    setup(build) {
+      build.onLoad({ filter: /node-datachannel[\\/]dist[\\/](esm|cjs)[\\/]lib[\\/]node-datachannel\.(mjs|cjs)$/ }, () => ({
+        contents: `const binding = globalThis.${DATACHANNEL_GLOBAL};\n` +
+          `if (!binding) throw new Error('node-datachannel binary not loaded');\n` +
+          'export default binding;\n',
+        loader: 'js'
+      }))
+    }
+  }
+}
+
 async function main() {
   const started = Date.now()
   fs.rmSync(outDir, { recursive: true, force: true })
@@ -87,7 +129,7 @@ async function main() {
     banner: {
       js: "import { createRequire as __devtoolCreateRequire } from 'node:module'; const require = __devtoolCreateRequire(import.meta.url);"
     },
-    plugins: [electronGuardPlugin(root)],
+    plugins: [electronGuardPlugin(root), datachannelLoaderPlugin()],
     legalComments: 'none',
     logLevel: 'warning',
     metafile: true
@@ -102,6 +144,8 @@ async function main() {
     fs.copyFileSync(path.join(root, 'resources', name), path.join(outDir, name))
   }
   const ptyVersion = copyNodePty(path.join(outDir, 'node_modules/node-pty'))
+  const datachannel = datachannelManifest()
+  fs.writeFileSync(path.join(outDir, 'datachannel.json'), JSON.stringify(datachannel, null, 2) + '\n')
 
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version
   const manifest = {
@@ -127,7 +171,7 @@ async function main() {
   const kb = (n) => `${(n / 1024).toFixed(0)} KiB`
   const inputs = Object.keys(result.metafile.inputs).length
   console.log(`build:server ${version} (${manifest.commit.slice(0, 12)}) → ${path.relative(root, outDir)}/ in ${Date.now() - started} ms`)
-  console.log(`  main.js ${kb(bytes('main.js'))}, server.js ${kb(bytes('server.js'))} (${inputs} inputs), node-pty ${ptyVersion}, total ${kb(total)}`)
+  console.log(`  main.js ${kb(bytes('main.js'))}, server.js ${kb(bytes('server.js'))} (${inputs} inputs), node-pty ${ptyVersion}, node-datachannel ${datachannel.version} (fetched by servers), total ${kb(total)}`)
   console.log(`  sha256 ${manifest.sha256}`)
 }
 

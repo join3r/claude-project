@@ -91,6 +91,7 @@ afterEach(() => {
 describe('Settings › Servers', () => {
   it('describes every state in plain words', () => {
     expect(serverStateText(server())).toEqual({ tone: 'online', label: 'Online' })
+    expect(serverStateText(server({ path: 'direct' }))).toEqual({ tone: 'online', label: 'Online, direct' })
     expect(serverStateText(server({ state: 'connecting' }))).toMatchObject({ label: 'Connecting' })
     expect(serverStateText(server({ state: 'offline', error: 'The server went offline' }))).toMatchObject({ tone: 'offline', label: 'Offline', note: 'The server went offline' })
     expect(serverStateText(server({ state: 'updating' }))).toMatchObject({ tone: 'busy', label: 'Restarting into an update' })

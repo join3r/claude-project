@@ -26,7 +26,7 @@ RUN rm -f protocol/ts/*.test.ts protocol/ts/generate-vectors.ts \
 USER node
 WORKDIR /app/relay
 VOLUME /data
-EXPOSE 8787
+EXPOSE 8787 3478/udp
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
   CMD wget -qO- "http://127.0.0.1:${PORT}/healthz" >/dev/null || exit 1
