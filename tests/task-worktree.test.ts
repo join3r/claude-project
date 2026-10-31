@@ -7,7 +7,7 @@ import { TaskWorktreeManager } from '../src/main/task-worktree'
 import { TaskLandingManager } from '../src/main/task-landing'
 import { LocalGitRunner } from '../src/main/git-runner'
 import { canonicalFilePath, WorkspaceManager } from '../src/main/workspace-manager'
-import { MemorySetupApprovals } from '../src/main/worktree-setup-approvals'
+import { AutoSetupApprovals, MemorySetupApprovals } from '../src/main/worktree-setup-approvals'
 import { WORKTREE_CONFIG_FILE } from '../src/main/worktree-setup'
 import { findTaskInProject } from '../src/shared/streams'
 import type { Project, ProjectsData, Stream, Task, TaskWorktreeState, WorkspaceConfig } from '../src/shared/types'
@@ -58,6 +58,8 @@ describe('TaskWorktreeManager', () => {
   let store: ReturnType<typeof memoryStore>
   let states: Map<string, TaskWorktreeState>
   let manager: TaskWorktreeManager
+  /** Settings → Set up worktrees without asking. */
+  let autoSetup: boolean
 
   function worktreeStream(tasks: Task[], extra: Partial<Stream> = {}): Stream {
     return { id: 'stream-s', name: 'Release', workspace: streamWorkspace, taskWorktrees: true, tasks, ...extra }
@@ -72,7 +74,8 @@ describe('TaskWorktreeManager', () => {
         if (state) states.set(taskId, state)
         else states.delete(taskId)
       },
-      waitMs: 300
+      waitMs: 300,
+      autoSetup: () => autoSetup
     })
   }
 
@@ -98,7 +101,8 @@ describe('TaskWorktreeManager', () => {
     git(streamPath, 'commit', '-q', '--allow-empty', '-m', 'stream work')
     streamWorkspace = { worktreePath: canonicalFilePath(streamPath), branchName: 'release', baseBranch: 'master', relativeProjectPath: '' }
     approvals = new MemorySetupApprovals()
-    git_ = new WorkspaceManager({ approvals })
+    autoSetup = false
+    git_ = new WorkspaceManager({ approvals: new AutoSetupApprovals(approvals, () => autoSetup) })
     states = new Map()
   })
 
@@ -228,6 +232,18 @@ describe('TaskWorktreeManager', () => {
     expect(states.has('t1')).toBe(false)
   })
 
+  it('runs setup commands without asking when setup is automatic', async () => {
+    autoSetup = true
+    writeConfig(streamWorkspace.worktreePath, { setup: ['touch ran.txt'] })
+    setProjects([project([fixtureTask({ id: 't1', name: 'Auto', tabs: { left: [tab('a')] } })])])
+
+    const result = await manager.ensureTaskWorktree('p1', 't1')
+
+    expect(result.status).toBe('ready')
+    expect(fs.existsSync(path.join(taskOf('t1')!.workspace!.worktreePath, 'ran.txt'))).toBe(true)
+    expect(states.has('t1')).toBe(false)
+  })
+
   it('skips held commands this once', async () => {
     writeConfig(streamWorkspace.worktreePath, { setup: ['touch ran.txt'] })
     setProjects([project([fixtureTask({ id: 't1', name: 'Skip', tabs: { left: [tab('a')] } })])])
@@ -313,6 +329,18 @@ describe('TaskWorktreeManager', () => {
       expect((await manager.ensureTaskWorktree('p1', 't3')).status).toBe('ready')
       expect(states.size).toBe(0)
       expect(fs.lstatSync(path.join(taskOf('t3')!.workspace!.worktreePath, 'node_modules')).isSymbolicLink()).toBe(true)
+    })
+
+    it('adds it on its own when setup is automatic', async () => {
+      autoSetup = true
+      setProjects([project([fixtureTask({ id: 't1', name: 'First', tabs: { left: [tab('a')] } })])])
+
+      expect((await manager.ensureTaskWorktree('p1', 't1')).status).toBe('ready')
+      // The task is ready at once; the config and links follow in the background.
+      await expect.poll(() => states.size, { timeout: 10_000 }).toBe(0)
+
+      expect(JSON.parse(git(repo, 'show', `release:${WORKTREE_CONFIG_FILE}`))).toEqual({ symlink: ['node_modules'], setup: offer })
+      expect(fs.lstatSync(path.join(taskOf('t1')!.workspace!.worktreePath, 'node_modules')).isSymbolicLink()).toBe(true)
     })
 
     it('stays away from the repo once declined', async () => {

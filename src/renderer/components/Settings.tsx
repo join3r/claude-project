@@ -631,6 +631,16 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                   />
                 }
               />
+              <GroupRow
+                label="Set up worktrees without asking"
+                sub="A new worktree runs its repo's .devtool/worktree.json setup commands right away, and a repo without one gets DevTool's suggested setup committed. Off asks before each new or changed setup runs."
+                trailing={
+                  <Switch
+                    checked={config.autoWorktreeSetup}
+                    onChange={(autoWorktreeSetup) => updateConfig({ autoWorktreeSetup })}
+                  />
+                }
+              />
             </Group>
 
             <Group>

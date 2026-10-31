@@ -68,6 +68,11 @@ export interface TaskWorktreeDeps {
    * meanwhile is not one to restore.
    */
   isLanding?(taskId: string): boolean
+  /**
+   * Settings → Set up worktrees without asking: a repo with no config gets
+   * DevTool's suggested one added as if the user had said Add setup.
+   */
+  autoSetup?(): boolean
 }
 
 interface Located {
@@ -150,9 +155,10 @@ export class TaskWorktreeManager {
    * worktree of the stream that is there. `decline` stops the offer for the repo.
    */
   async answerSetupOffer(taskId: string, answer: WorktreeSetupOfferAnswer): Promise<void> {
-    const state = this.states.get(taskId)
     const found = this.locate(taskId)
     const base = found ? await this.baseOf(found.project, found.stream).catch(() => null) : null
+    // Read after the wait: another task's answer for the same stream may have started meanwhile.
+    const state = this.states.get(taskId)
     if (state?.phase !== 'setup-offer' || state.adding) return
     if (!found || !base) {
       this.setState(taskId, null)
@@ -448,6 +454,12 @@ export class TaskWorktreeManager {
     }
     const offer = await this.setupOffer(roots.sourceRoot)
     this.setState(taskId, offer ? { phase: 'setup-offer', branch: workspace.branchName, commands: offer } : null)
+    // The task starts now; the install and links follow in the background.
+    if (offer && this.deps.autoSetup?.()) {
+      void this.answerSetupOffer(taskId, 'add').catch((err: unknown) => {
+        this.deps.log?.(`task worktree auto setup task=${taskId} error=${errorMessage(err)}`)
+      })
+    }
     return { status: 'ready', workspace }
   }
 

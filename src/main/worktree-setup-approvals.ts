@@ -107,3 +107,27 @@ export class MemorySetupApprovals implements SetupApprovals {
     this.declined.add(repoKey)
   }
 }
+
+/**
+ * `inner`, except that every config counts as approved while `auto()` says so
+ * (Settings → Set up worktrees without asking). Offers declined stay declined.
+ */
+export class AutoSetupApprovals implements SetupApprovals {
+  constructor(private readonly inner: SetupApprovals, private readonly auto: () => boolean) {}
+
+  isApproved(repoKey: string, hash: string): boolean {
+    return this.auto() || this.inner.isApproved(repoKey, hash)
+  }
+
+  approve(repoKey: string, hash: string): void {
+    this.inner.approve(repoKey, hash)
+  }
+
+  isOfferDeclined(repoKey: string): boolean {
+    return this.inner.isOfferDeclined(repoKey)
+  }
+
+  declineOffer(repoKey: string): void {
+    this.inner.declineOffer(repoKey)
+  }
+}

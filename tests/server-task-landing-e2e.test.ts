@@ -136,7 +136,8 @@ describe.skipIf(process.platform === 'win32')('streams, task worktrees and landi
     write(repo, 'node_modules/dep/index.js', 'module.exports = 1\n')
 
     ;({ relay } = await startTestRelay())
-    server = await startTestServer(relay.url)
+    // Asks before setup runs: the approval round trip is what this covers.
+    server = await startTestServer(relay.url, {}, { autoWorktreeSetup: false })
     desktop = startTestDesktop(relay.url)
     await pairByCode(desktop, server)
 

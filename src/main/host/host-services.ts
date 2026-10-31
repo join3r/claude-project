@@ -19,7 +19,7 @@ import { SshConnectionManager } from '../ssh-connection-manager'
 import { CodexSessionManager } from '../codex-session-manager'
 import { RemoteWorkspaceManager } from '../remote-workspace-manager'
 import { WorkspaceManager } from '../workspace-manager'
-import { FileSetupApprovals } from '../worktree-setup-approvals'
+import { AutoSetupApprovals, FileSetupApprovals } from '../worktree-setup-approvals'
 import { TaskWorktreeManager } from '../task-worktree'
 import { recordSetupArtifacts, TaskLandingManager } from '../task-landing'
 import { mergeStream } from '../stream-merge'
@@ -320,7 +320,9 @@ export class HostServices {
     this.paletteFrecencyStorage = new PaletteFrecencyStorage(configDir)
     this.tokenUsage = new TokenUsageIndex(path.join(configDir, 'token-usage.json'), undefined, (message) => this.logDebug(message))
     this.notebookKernels = new NotebookKernelManager({ helperPath: env.resourcePath(NOTEBOOK_KERNEL_HELPER_RESOURCE) })
-    this.workspaceManager = new WorkspaceManager({ approvals: new FileSetupApprovals(configDir) })
+    this.workspaceManager = new WorkspaceManager({
+      approvals: new AutoSetupApprovals(new FileSetupApprovals(configDir), () => this.autoWorktreeSetup())
+    })
 
     this.storage.backupProjectsOnStartup()
     this.projectsStore = new RevisionStore<ProjectsData>({
@@ -350,7 +352,8 @@ export class HostServices {
       log: (message) => this.logDebug(message),
       recordSetupArtifacts: (worktreeRoot) => recordSetupArtifacts(gitRunner, worktreeRoot),
       // Made just below; only asked once something calls ensure.
-      isLanding: (taskId) => this.taskLanding.isBusy(taskId)
+      isLanding: (taskId) => this.taskLanding.isBusy(taskId),
+      autoSetup: () => this.autoWorktreeSetup()
     })
     this.taskLanding = new TaskLandingManager({
       projects: {
@@ -1471,6 +1474,11 @@ export class HostServices {
    */
   private projectsDir(): string {
     return this.config.projectsDir || (this.isServer ? path.join(os.homedir(), 'code') : '')
+  }
+
+  /** Settings → Set up worktrees without asking; read before the config loads, so it defaults to on. */
+  private autoWorktreeSetup(): boolean {
+    return this.config?.autoWorktreeSetup !== false
   }
 
   private applyConfig(patch: Partial<AppConfig>): void {

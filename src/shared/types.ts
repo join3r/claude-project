@@ -753,6 +753,12 @@ export interface AppConfig {
    * Settings can change one afterwards.
    */
   mainTaskWorktrees: boolean
+  /**
+   * Settings → Inbox: a new worktree runs its repo's `.devtool/worktree.json`
+   * setup commands without asking, and a repo without one gets DevTool's
+   * suggested config added on its own. Off asks first, per config content.
+   */
+  autoWorktreeSetup: boolean
   /** The agent an empty task's prompt box preselects: the last one a prompt was sent to. */
   promptBoxAgent: PromptBoxAgent
   /** The permission mode the prompt box last started Claude with; '' leaves Claude's own default. */
@@ -1050,6 +1056,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   inboxLayout: 'flat',
   showProjectIcons: false,
   mainTaskWorktrees: false,
+  autoWorktreeSetup: true,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',
   deskAgent: 'claude-chat',

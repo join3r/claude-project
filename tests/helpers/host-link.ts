@@ -13,6 +13,7 @@ import type { ServerHost } from '../../src/server/server-host'
 import type { ServerLink, ServerLinkOptions } from '../../src/server/server-link'
 import type { PowerSaveApi } from '../../src/main/sleep-blocker'
 import type { ServerStatus } from '../../src/shared/servers'
+import type { AppConfig } from '../../src/shared/types'
 import type { LocalBundle } from '../../src/main/host/link/bundle-archive'
 import { waitFor } from './relay-phone'
 
@@ -105,8 +106,17 @@ export interface TestServer {
   close(): Promise<void>
 }
 
-export async function startTestServer(relayUrl: string, overrides: Partial<ServerLinkOptions> = {}): Promise<TestServer> {
+export async function startTestServer(
+  relayUrl: string,
+  overrides: Partial<ServerLinkOptions> = {},
+  /** The host's `config.json` before it starts (AppConfig fields over the defaults). */
+  config?: Partial<AppConfig>
+): Promise<TestServer> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'devtool-link-server-'))
+  if (config) {
+    fs.mkdirSync(path.join(home, 'data'), { recursive: true, mode: 0o700 })
+    fs.writeFileSync(path.join(home, 'data', 'config.json'), JSON.stringify(config))
+  }
   // Imported here: the host loads node-pty.
   const { startServerHost, createServerLink } = await import('../../src/server/server-host')
   const { loadServerManifest, serverPaths } = await import('../../src/server/server-env')
