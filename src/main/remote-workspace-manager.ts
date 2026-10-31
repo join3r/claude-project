@@ -138,6 +138,18 @@ try:
         raise RuntimeError(f'Invalid branch name: "{payload["name"]}"')
 
     worktree_path = os.path.join(repo_root, '.worktrees', payload['name'])
+
+    # A repo fresh from git init has an unborn branch: give it an empty first commit.
+    def git_ok(args):
+        return subprocess.run(['git'] + args, cwd=repo_root, capture_output=True, text=True, timeout=5).returncode == 0
+    base = payload['baseBranch']
+    if not git_ok(['rev-parse', '--verify', '--quiet', base + '^{commit}']) and not git_ok(['rev-parse', '--verify', '--quiet', 'HEAD']):
+        head = subprocess.run(['git', 'symbolic-ref', '--short', '-q', 'HEAD'], cwd=repo_root, capture_output=True, text=True, timeout=5)
+        if head.returncode == 0 and head.stdout.strip() == base:
+            commit = ['commit', '--allow-empty', '--no-verify', '-m', 'Initial commit']
+            if not git_ok(commit):
+                git_ok(['-c', 'user.name=DevTool', '-c', 'user.email=devtool@localhost', '-c', 'commit.gpgsign=false'] + commit)
+
     try:
         subprocess.run(
             ['git', 'worktree', 'add', worktree_path, '-b', payload['name'], payload['baseBranch']],

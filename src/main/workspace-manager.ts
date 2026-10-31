@@ -111,6 +111,8 @@ export class WorkspaceManager {
 
     const worktreePath = path.join(repoRoot, '.worktrees', name)
 
+    await this.ensureFirstCommit(repoRoot, baseBranch)
+
     // Create worktree with new branch
     const added = await this.runner.run(['worktree', 'add', worktreePath, '-b', name, baseBranch], { cwd: repoRoot, timeoutMs: 10000 })
     if (added.code !== 0) {
@@ -138,6 +140,25 @@ export class WorkspaceManager {
       relativeProjectPath: rel.split(path.sep).join('/'),
       setup
     }
+  }
+
+  /**
+   * A repo fresh from `git init` (New project makes one) has its branch but no
+   * commit, so `worktree add -b <name> <base>` has nothing to start from. When
+   * `baseBranch` is that unborn branch, give it an empty first commit. Without
+   * a git identity, the commit is made as DevTool.
+   */
+  private async ensureFirstCommit(repoRoot: string, baseBranch: string): Promise<void> {
+    const opts = { cwd: repoRoot, timeoutMs: 5000 }
+    const based = await this.runner.run(['rev-parse', '--verify', '--quiet', `${baseBranch}^{commit}`], opts)
+    if (based.code === 0) return
+    const head = await this.runner.run(['symbolic-ref', '--short', '-q', 'HEAD'], opts)
+    if (head.code !== 0 || head.stdout.trim() !== baseBranch) return
+    const born = await this.runner.run(['rev-parse', '--verify', '--quiet', 'HEAD'], opts)
+    if (born.code === 0) return
+    const commit = ['commit', '--allow-empty', '--no-verify', '-m', 'Initial commit']
+    if ((await this.runner.run(commit, opts)).code === 0) return
+    await this.git(repoRoot, ['-c', 'user.name=DevTool', '-c', 'user.email=devtool@localhost', '-c', 'commit.gpgsign=false', ...commit])
   }
 
   /**

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { WorkspaceManager, canonicalFilePath } from '../src/main/workspace-manager'
+import { LocalGitRunner, type GitRunner } from '../src/main/git-runner'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -85,6 +86,24 @@ describe('WorkspaceManager', () => {
       expect(canonicalFilePath(result.worktreePath)).toBe(
         canonicalFilePath(path.join(repoDir, '.worktrees', 'sub-ws'))
       )
+    })
+
+    it('gives a repo with no commits yet its first commit, as New project leaves it', async () => {
+      const fresh = canonicalFilePath(fs.mkdtempSync(path.join(os.tmpdir(), 'ws-fresh-')))
+      try {
+        execFileSync('git', ['init', '-b', 'master', fresh])
+        // No identity on purpose: the commit must still be made.
+        const env = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', EMAIL: '', GIT_AUTHOR_EMAIL: '', GIT_COMMITTER_EMAIL: '' }
+        const local = new LocalGitRunner()
+        const runner: GitRunner = { kind: 'local', run: (args, options) => local.run(args, { ...options, env: { ...options.env, ...env } }) }
+        const isolated = new WorkspaceManager({ runner })
+        const result = await isolated.create(fresh, 'first-task', 'master')
+        expect(fs.existsSync(result.worktreePath)).toBe(true)
+        const count = execFileSync('git', ['-C', fresh, 'rev-list', '--count', 'master']).toString().trim()
+        expect(count).toBe('1')
+      } finally {
+        fs.rmSync(fresh, { recursive: true, force: true })
+      }
     })
 
     it('rejects invalid branch names', async () => {
