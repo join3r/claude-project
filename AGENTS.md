@@ -45,5 +45,6 @@ agent-browser click @e5
 Notes:
 - The CDP switch is opt-in; `npm run dev` and production builds do **not** open the port.
 - Multiple DevTool windows (Cmd+Shift+N) are separate CDP targets — switch via `agent-browser tab <index>`. One `agent-browser` instance handles all of them.
+- Stop the instance you started (dev server and Electron) before you finish. DevTool kills what an agent leaves behind only when its tab or task closes (`src/main/tab-processes.ts`), so a leftover stays open until then.
 - Terminal panes are xterm.js inside the same renderer, so they appear in the same snapshot — no separate `agent-browser` needed. xterm renders rows to DOM but the a11y tree is sparse; for *typing into* a terminal use `agent-browser keyboard type "..."` after focusing the pane, and for *reading* terminal output prefer reading the underlying buffer/log files rather than scraping xterm DOM.
 - An `agent-browser` running *inside* a DevTool terminal (e.g. Pi or Codex driving some other browser) is unrelated to the one driving DevTool itself — they're independent processes.

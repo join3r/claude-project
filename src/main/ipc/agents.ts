@@ -63,6 +63,8 @@ export interface AgentDeps {
   cleanupRemoteHooks: (projectId: string, sshConfig: SshConfig, remoteDir: string | undefined, tabId: string) => Promise<void>
   /** Drop a tab's agent activity and tell every window. */
   forgetActivity: (tabId: string) => void
+  /** End what the tab's agent left running in the background (tab-processes.ts). */
+  reapTab: (tabId: string) => void
   /** Throws unless `dir` is a known local project/workspace directory. */
   assertAllowedDirectory: (dir: string) => Promise<string>
 }
@@ -230,6 +232,7 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
   ipc.on('chat-close', [safeId], (_event, tabId) => {
     deps.chatManager().close(tabId)
     deps.forgetActivity(tabId)
+    deps.reapTab(tabId)
   })
   ipc.handle('chat-list-files', [str, optSafeId, optSshConfig], (_event, cwd, projectId, config) =>
     listChatFiles(deps, cwd, projectId, config))

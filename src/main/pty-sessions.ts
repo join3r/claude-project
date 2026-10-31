@@ -5,6 +5,7 @@ import type { ScrollbackStorage } from './scrollback-storage'
 import type { SshConnectionManager } from './ssh-connection-manager'
 import type { HookInjector } from './hook-injector'
 import type { TabActivityRegistry } from './tab-activity-registry'
+import { TAB_OWNER_ENV } from './tab-processes'
 import { agentCommandOverride, conptySpawnArgv, isAiAgentCommand, resolveAgentCommand } from './resolve-agent-command'
 import { isLocalInteractiveTerminal, resolveLocalTerminalSpawn } from './resolve-local-terminal'
 import { wrapInteractiveShellWithCondaActivate } from './conda-env'
@@ -485,6 +486,7 @@ export class PtySessions {
         spawnArgs = wrapped.args
         deps.log(`ptySpawn resolve id=${id} shell=${shell} file=${spawnFile} args=${spawnArgs.join(' ')}`)
       }
+      if (isAiAgentCommand(shell)) localEnv = { ...localEnv, [TAB_OWNER_ENV]: id }
       deps.ptyManager.spawn(id, spawnFile, cwd, cols, rows, spawnArgs, localEnv, callbacks, condaEnv)
     }
   }

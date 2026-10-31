@@ -38,6 +38,7 @@ import { KeyInterrupts } from '../key-interrupts'
 import { TerminalStatusTracker } from '../terminal-status-tracker'
 import { SleepBlocker } from '../sleep-blocker'
 import type { ActivityUpdate } from '../../shared/agent-activity'
+import { reapTabProcesses } from '../tab-processes'
 import { tearDownTabs, tearDownTaskTabs, type TaskTeardownTargets } from '../task-teardown'
 import { PaletteFrecencyStorage } from '../palette-frecency-storage'
 import { agentCommandOverride, conptySpawnArgv, resolveAgentCommand } from '../resolve-agent-command'
@@ -922,6 +923,7 @@ export class HostServices {
       killPty: (tabId) => {
         this.ptySessions.discard(tabId)
         this.chatManager.close(tabId)
+        void reapTabProcesses(tabId, (message) => this.logDebug(message))
       },
       deleteScrollback: (tabId) => this.scrollbackStorage.delete(tabId),
       forgetActivity: (tabId) => {
@@ -1323,6 +1325,7 @@ export class HostServices {
         this.activityRegistry.remove(tabId)
         this.broadcastAgentActivity(tabId)
       },
+      reapTab: (tabId) => { void reapTabProcesses(tabId, log) },
       assertAllowedDirectory: resolveRoot
     })
 

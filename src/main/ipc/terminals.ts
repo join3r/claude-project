@@ -1,4 +1,5 @@
 import type { PtyAttachResult, PtySessions } from '../pty-sessions'
+import { reapTabProcesses } from '../tab-processes'
 import type { IpcRegistrar } from './registrar'
 import { dimension, envRecord, optSafeId, optSshConfig, safeId, str, stringList } from './schemas'
 import { v } from './validate'
@@ -57,5 +58,6 @@ export function registerTerminalHandlers(ipc: IpcRegistrar, deps: TerminalDeps):
 
   ipc.on('pty-kill', [safeId], (_event, id) => {
     ptySessions.kill(id)
+    void reapTabProcesses(id, log)
   })
 }

@@ -19,6 +19,7 @@ import { ChatSession } from './chat-session'
 import { runBash, type BashSpawn } from './bash-mode'
 import { accountFromStatus, loginArgs, loginUrlFrom, outputTail, startLogin, type LoginRun } from './auth'
 import { createRemoteSpawner, type RemoteCommand } from './remote-spawn'
+import { TAB_OWNER_ENV } from '../tab-processes'
 import { readLocalTranscript, readRemoteTranscript, SESSION_ID_RE } from './transcript'
 
 /** What a window tells main about the chat tab it mounts. */
@@ -504,7 +505,7 @@ export class ClaudeChatManager {
         }
       )
     } else {
-      env = this.deps.localEnv()
+      env = { ...this.deps.localEnv(), [TAB_OWNER_ENV]: tabId }
       executable = this.deps.resolveLocalClaude()
     }
 
