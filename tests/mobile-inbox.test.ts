@@ -48,6 +48,22 @@ describe('buildInbox diff', () => {
   })
 })
 
+describe('buildInbox limits', () => {
+  it("sends each login's windows in whole percents and Unix ms, and nothing when none is known", () => {
+    const accounts = [{
+      email: 'me@example.com', plan: 'max', readAt: NOW, hosts: ['This Mac'],
+      fiveHour: { utilization: 41.6, resetsAt: '2026-10-03T14:30:00Z' }, sevenDay: { utilization: 7 }
+    }]
+    const inbox = buildInbox(data([]), lookup(), DESKTOP, NOW, new Set(), () => [], () => undefined, accounts)
+    expect(inbox.limits).toEqual([{
+      account: 'me@example.com', plan: 'max',
+      fiveHour: { used: 42, resetsAt: Date.parse('2026-10-03T14:30:00Z') }, sevenDay: { used: 7 }
+    }])
+    expect(buildInbox(data([]), lookup(), DESKTOP, NOW)).not.toHaveProperty('limits')
+    expect(inboxContentKey(inbox)).not.toBe(inboxContentKey(buildInbox(data([]), lookup(), DESKTOP, NOW)))
+  })
+})
+
 describe('buildInbox', () => {
   it('stamps the desktop and generation time', () => {
     const inbox = buildInbox(data([]), lookup(), DESKTOP, NOW)

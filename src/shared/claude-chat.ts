@@ -192,6 +192,15 @@ export interface ChatSessionInfo {
   applied?: { model?: string; effort?: string | null }
   cwd?: string
   claudeVersion?: string
+  /** The claude.ai login the plan windows belong to; absent for API-key and cloud-provider sessions. */
+  account?: ChatAccount
+}
+
+/** A claude.ai login, as the CLI's `accountInfo` names it. */
+export interface ChatAccount {
+  email: string
+  /** `max`, `pro`, `team`… as the CLI reports it. */
+  plan?: string
 }
 
 /** One plan rate-limit window: percent used (0–100) and when it resets. */

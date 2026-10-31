@@ -353,8 +353,18 @@ extension Inbox {
             desktop: InboxDesktop(id: try desktop.str("id"), name: try desktop.str("name")),
             generatedAt: try o.int("generatedAt"),
             projects: try o.array("projects").map { (v) throws(ProtocolError) in try parseProject(v) },
-            pinned: o.isUnset("pinned") ? [] : try o.array("pinned").map { (v) throws(ProtocolError) in try parsePin(v) }
+            pinned: o.isUnset("pinned") ? [] : try o.array("pinned").map { (v) throws(ProtocolError) in try parsePin(v) },
+            // A malformed account is dropped, not the inbox.
+            limits: o.isUnset("limits") ? nil : (try? o.array("limits"))?.compactMap { try? parsePlanLimit($0) }
         )
+    }
+
+    private static func parsePlanLimit(_ value: JSONValue) throws(ProtocolError) -> InboxPlanLimit {
+        let o = try Fields(value, "limit")
+        guard let account = try o.optNonEmpty("account") else { throw ProtocolError("account must be a string") }
+        return InboxPlanLimit(account: account, plan: try optStr(o, "plan"),
+                              fiveHour: o.isUnset("fiveHour") ? nil : try ChatLimitWindow.parse(o["fiveHour"]),
+                              sevenDay: o.isUnset("sevenDay") ? nil : try ChatLimitWindow.parse(o["sevenDay"]))
     }
 
     private static func parsePin(_ value: JSONValue) throws(ProtocolError) -> InboxPin {
@@ -427,8 +437,15 @@ extension Inbox {
             snoozeUntilAttention: o["snoozeUntilAttention"] == .bool(true),
             branch: try optStr(o, "branch"),
             landing: o.isUnset("landing") ? nil : try TaskLanding.parse(o["landing"]),
+            // Malformed counts drop the counts, not the task.
+            diff: o.isUnset("diff") ? nil : try? parseDiff(o["diff"]),
             tabs: tabs
         )
+    }
+
+    private static func parseDiff(_ value: JSONValue?) throws(ProtocolError) -> InboxTaskDiff {
+        let o = try Fields(value, "diff")
+        return InboxTaskDiff(added: Int(try o.int("added")), deleted: Int(try o.int("deleted")))
     }
 
     private static func parseTab(_ value: JSONValue) throws(ProtocolError) -> InboxTab {
@@ -452,6 +469,17 @@ extension Inbox {
             "projects": .array(projects.map(\.json)),
         ]
         if !pinned.isEmpty { o["pinned"] = .array(pinned.map(\.json)) }
+        if let limits, !limits.isEmpty { o["limits"] = .array(limits.map(\.json)) }
+        return .object(o)
+    }
+}
+
+extension InboxPlanLimit {
+    var json: JSONValue {
+        var o: JSONObject = ["account": .string(account)]
+        if let plan { o["plan"] = .string(plan) }
+        if let fiveHour { o["fiveHour"] = fiveHour.json }
+        if let sevenDay { o["sevenDay"] = sevenDay.json }
         return .object(o)
     }
 }
@@ -515,6 +543,7 @@ extension InboxTask {
         if snoozeUntilAttention { o["snoozeUntilAttention"] = .bool(true) }
         if let branch { o["branch"] = .string(branch) }
         if let landing { o["landing"] = landing.json }
+        if let diff { o["diff"] = .object(["added": .int(Int64(diff.added)), "deleted": .int(Int64(diff.deleted))]) }
         o["tabs"] = .array(tabs.map(\.json))
         return .object(o)
     }

@@ -21,6 +21,7 @@ import {
   type ChatPrompt,
   type ChatPromptResponse,
   type ChatSideAnswer,
+  type ChatAccount,
   type ChatColdCache,
   type ChatUsage
 } from '../../shared/claude-chat'
@@ -474,7 +475,11 @@ export class ChatSession {
         usage.contextTokens = context.totalTokens
         usage.contextMax = context.maxTokens
       }
+      let account: ChatAccount | undefined
       if (limits) {
+        // Read with the windows, so they always arrive named; a `/login` can switch it.
+        const info = await query.accountInfo().catch(() => null)
+        if (info?.email) account = { email: info.email, ...(info.subscriptionType ? { plan: info.subscriptionType } : {}) }
         const plan = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }).catch(() => null)
         if (plan) {
           // An experimental answer: one without `session` (an older or newer CLI) is no cost.
@@ -484,7 +489,9 @@ export class ChatSession {
           usage.sevenDay = limitWindow(plan.rate_limits?.seven_day)
         }
       }
-      if (!this.ended && Object.keys(usage).length > 0) this.options.onEvent({ t: 'meta', usage })
+      if (!this.ended && (Object.keys(usage).length > 0 || account)) {
+        this.options.onEvent({ t: 'meta', ...(Object.keys(usage).length > 0 ? { usage } : {}), ...(account ? { info: { account } } : {}) })
+      }
     })().finally(() => {
       this.usageBusy = false
       const again = this.usageAgain

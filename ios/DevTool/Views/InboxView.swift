@@ -4,7 +4,8 @@ import SwiftUI
 /// Every task of every paired desktop in the desktop inbox's groups (§8.3):
 /// Needs you and Ready open; Working and Snoozed folded
 /// into one-line summaries. The toolbar switches to cards by project.
-/// Above them, Apps: stream app runs that are running or crashed (§8.19).
+/// Above them, Apps: stream app runs that are running or crashed (§8.19);
+/// above everything, a tile per Claude account's plan limits (§4.4 `limits`).
 struct InboxView: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: TaskRef?
@@ -94,6 +95,7 @@ struct InboxView: View {
         let apps = model.inboxApps()
         return List(selection: $selection) {
             DesktopBanners(desktops: model.desktops)
+            limitsSection(now: now)
             if partition.isEmpty && apps.isEmpty {
                 emptyState
             }
@@ -152,6 +154,20 @@ struct InboxView: View {
                         .foregroundStyle(Color(.secondaryLabel))
                         .textCase(nil)
                 }
+            }
+        }
+    }
+
+    /// Claude plan limits, one tile per account (§4.4 `limits`); nothing
+    /// when no desktop sends them.
+    @ViewBuilder
+    private func limitsSection(now: Date) -> some View {
+        let limits = model.planLimits()
+        if !limits.isEmpty {
+            Section {
+                PlanLimitTiles(limits: limits, now: now)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
             }
         }
     }

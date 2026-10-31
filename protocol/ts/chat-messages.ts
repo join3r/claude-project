@@ -867,7 +867,7 @@ function parseSettings(value: unknown): ChatViewSettings {
   }
 }
 
-function parseLimitWindow(value: unknown): ChatViewLimitWindow {
+export function parseLimitWindow(value: unknown): ChatViewLimitWindow {
   const o = obj(value, 'limit')
   const window: ChatViewLimitWindow = { used: int(o, 'used') }
   const resetsAt = optInt(o, 'resetsAt')

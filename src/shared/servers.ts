@@ -176,6 +176,12 @@ export const RELAY_TOO_OLD_FOR_SERVERS = 'This relay is too old for servers'
  */
 export const SERVER_MOBILE_STATE_CHANNEL = 'server-mobile-state-changed'
 
+/**
+ * A server's plan windows per claude.ai login: it pushes its own on this channel,
+ * and its desktop folds them into the list its windows and phones get.
+ */
+export const SERVER_PLAN_LIMITS_CHANNEL = 'server-plan-limits-changed'
+
 /** Where the install script and the bootstrap are served from; `DEVTOOL_INSTALL_URL` overrides it. */
 export const DEFAULT_INSTALL_URL = 'https://devtool.awantech.sk'
 

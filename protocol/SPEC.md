@@ -234,7 +234,10 @@ Desktop rules (a server follows them too):
       }]
     }]
   }],
-  "pinned": [{ "projectId": "…" }, { "projectId": "…", "streamId": "…" }, { "projectId": "…", "streamId": "…", "taskId": "…" }]
+  "pinned": [{ "projectId": "…" }, { "projectId": "…", "streamId": "…" }, { "projectId": "…", "streamId": "…", "taskId": "…" }],
+  "limits": [{ "account": "me@example.com", "plan": "max",
+               "fiveHour": { "used": 42, "resetsAt": 1793412000000 },
+               "sevenDay": { "used": 61, "resetsAt": 1793700000000 } }]
 }
 ```
 - `streams` lists the project's open streams in sidebar order, `main` first (`main: true`, exactly one, the project folder), empty ones included. `branch` is present only on a worktree stream: the branch its worktree is on. `taskWorktrees: true` is present only on `main`, when the project gives main's new tasks worktrees of their own (branched off whatever the project folder is on, landing back into it); a receiver that doesn't know it treats main as the shared project folder. `lastStreamId` is the stream the project was last used in, present only while that stream is open.
@@ -256,6 +259,7 @@ Desktop rules (a server follows them too):
 - `diff` is the task's lines added and removed, as the desktop Inbox shows them: for a task with a worktree of its own, everything since it branched off its stream (its commits, uncommitted changes and untracked files); for any other task, what is not committed in its directory, so tasks sharing a folder carry the same numbers. The desktop recounts about every 15 seconds while a phone is connected. It is absent when nothing changed, before the first count, and for SSH, server and shell-command projects. A phone shows it as a green `+added` and a red `−deleted`.
 - Archived streams and tasks are never sent, nor is anything inside an archived stream. Ephemeral-but-spent projects (no open task left) and projects with `hideFromMobile: true` are excluded. Filtering happens before encryption.
 - `projects` follows the desktop's `projectOrder`.
+- `limits` is the Claude plan windows of every claude.ai login the desktop's Claude chats run on (this machine, its SSH boxes and its DevTool servers), one entry per login, sorted by `account` (the login's email). `plan` is the subscription as Claude Code names it (`max`, `pro`, `team`…). `fiveHour` and `sevenDay` have the chat meter's shape (§6.2): `used` in percent, `resetsAt` in Unix ms; each is absent until a chat on that login has read it. A desktop reads them from its running chats, so they are as of the last read; a window whose `resetsAt` has passed has reset, and a phone shows it as unused. The field is absent when no login is known (API-key and cloud-provider sessions have none). A chat's own `usage` (§6.2) keeps its windows too.
 - `pinned` is the desktop sidebar's Pinned list in its order: a project, a stream when `streamId` is set, or a task when `taskId` is set (its `streamId` is then the stream holding the task now). A pin whose project, stream or task isn't in `projects` (hidden, spent, archived, gone) is left out, and the field is absent when nothing is left. A phone ignores a pin it can't resolve. A pinned stream shows its tasks under it; its tasks are not pinned by themselves.
 
 ## 5. Test vectors (`protocol/vectors/`)

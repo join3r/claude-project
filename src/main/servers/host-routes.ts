@@ -211,6 +211,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'task-worktree-close': project0,
   // token usage per project (ipc/token-usage.ts): the host it lives on read its agents' sessions
   'token-usage-project': project0,
+  // This desktop's tracker already holds its servers' logins.
+  'plan-limits-get': 'local',
   // a task's title from its first prompt (ipc/task-names.ts): this desktop's claude names it
   'task-name-suggest': 'local',
 
@@ -303,6 +305,8 @@ export const SERVER_PRIVATE_EVENTS: readonly string[] = [
   'config-updated',
   'notes-updated',
   'mobile-state-changed',
+  // DesktopRouting folds it into this desktop's own list.
+  'server-plan-limits-changed',
   'ssh-status-changed',
   'ssh-tunnel-status-changed'
 ]

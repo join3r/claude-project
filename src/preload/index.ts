@@ -53,6 +53,7 @@ import type { AgentClisReport } from '../shared/agent-clis'
 import type { AiStatusEvent } from '../shared/ai-status'
 import type { PromptQueueRunResult } from '../shared/prompt-queue'
 import type { TokenUsageReport } from '../shared/token-usage'
+import type { PlanAccount } from '../shared/plan-limits'
 import type { ChatEvent, ChatImage, ChatLoginMethod, ChatPromptResponse, ChatSideAnswer, ChatSnapshot } from '../shared/claude-chat'
 import type { PermissionBehavior, PermissionSettingsSource, PermissionSourceKind } from '../shared/chat-permissions'
 import type { ServerIdeConsent, ServerIdeState } from '../shared/server-ide'
@@ -674,6 +675,13 @@ const api = {
   serverMobileAccept: (serverId: string, phoneId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-accept', serverId, phoneId),
   serverMobileReject: (serverId: string, phoneId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-reject', serverId, phoneId),
   serverMobileRevoke: (serverId: string, phoneId: string): Promise<MobileState> => ipcRenderer.invoke('server-mobile-revoke', serverId, phoneId),
+  /** Plan windows per claude.ai login, this desktop's and its servers'. */
+  planLimitsGet: (): Promise<PlanAccount[]> => ipcRenderer.invoke('plan-limits-get'),
+  onPlanLimitsChanged: (callback: (accounts: PlanAccount[]) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, accounts: PlanAccount[]) => callback(accounts)
+    ipcRenderer.on('plan-limits-changed', handler)
+    return () => ipcRenderer.removeListener('plan-limits-changed', handler)
+  },
   /** A server's phone state as it changes; `serverId` is the server it came from. */
   onServerMobileStateChanged: (callback: (serverId: string, state: MobileState) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, serverId: string, state: MobileState) => callback(serverId, state)

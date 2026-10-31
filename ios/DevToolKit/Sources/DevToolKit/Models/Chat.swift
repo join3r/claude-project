@@ -303,7 +303,7 @@ public struct ChatSettings: Sendable, Equatable {
 }
 
 /// One plan rate-limit window.
-public struct ChatLimitWindow: Sendable, Equatable {
+public struct ChatLimitWindow: Codable, Sendable, Equatable {
     /// Percent used, 0–100.
     public var used: Int
     /// Unix ms.
@@ -312,6 +312,16 @@ public struct ChatLimitWindow: Sendable, Equatable {
     public init(used: Int, resetsAt: Int64? = nil) {
         self.used = used
         self.resetsAt = resetsAt
+    }
+
+    /// Whether `resetsAt` has passed: the window has reset since the desktop read it.
+    public func hasReset(now: Date) -> Bool {
+        resetsAt.map { $0 <= now.unixMilliseconds } ?? false
+    }
+
+    /// The window as it stands now: empty, with no reset, once it has reset.
+    public func current(now: Date) -> ChatLimitWindow {
+        hasReset(now: now) ? ChatLimitWindow(used: 0) : self
     }
 }
 

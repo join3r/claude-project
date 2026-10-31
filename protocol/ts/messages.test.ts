@@ -173,6 +173,15 @@ describe('app messages', () => {
     })
   })
 
+  it("reads the inbox's plan limits (§4.4 `limits`)", () => {
+    const inbox = { desktop: { id: ID, name: 'd' }, generatedAt: 1, projects: [] }
+    const limits = [{ account: 'me@example.com', plan: 'max', fiveHour: { used: 42, resetsAt: 5 }, sevenDay: { used: 7 } }]
+    expect(parseInbox({ ...inbox, limits }).limits).toEqual(limits)
+    expect(parseInbox({ ...inbox, limits: [] })).not.toHaveProperty('limits')
+    expect(() => parseInbox({ ...inbox, limits: [{ account: '' }] })).toThrow(ProtocolError)
+    expect(() => parseInbox({ ...inbox, limits: [{ account: 'a', fiveHour: { used: 'x' } }] })).toThrow(ProtocolError)
+  })
+
   it('validates inbox structure', () => {
     const inbox = { desktop: { id: ID, name: 'd' }, generatedAt: 1, projects: [] }
     expect(parseInbox(inbox)).toEqual(inbox)

@@ -1354,6 +1354,7 @@ public enum MockInbox {
     public static func sample(desktopId: String, desktopName: String, now: Date = Date()) -> Inbox {
         let t = now.unixMilliseconds
         func ago(_ minutes: Double) -> Int64 { t - Int64(minutes * 60_000) }
+        func ahead(_ minutes: Double) -> Int64 { t + Int64(minutes * 60_000) }
 
         // Command runs (§8.19): api-server has install, run and run (staging); main's
         // dev server runs and install finished, 0.5.0's run (its own port) exited with
@@ -1462,6 +1463,16 @@ public enum MockInbox {
                 InboxPin(projectId: "p-web", streamId: webMain.id, taskId: "t-charts"),
                 InboxPin(projectId: "p-api", streamId: api050.id),
                 InboxPin(projectId: "p-infra"),
+            ],
+            // Plan limits per Claude account (§4.4 `limits`): the work account is
+            // close to its 5-hour limit.
+            limits: [
+                InboxPlanLimit(account: "me@personal.dev", plan: "max",
+                               fiveHour: ChatLimitWindow(used: 42, resetsAt: ahead(130)),
+                               sevenDay: ChatLimitWindow(used: 61, resetsAt: ahead(2 * 1440 + 300))),
+                InboxPlanLimit(account: "ops@company.dev", plan: "team",
+                               fiveHour: ChatLimitWindow(used: 88, resetsAt: ahead(47)),
+                               sevenDay: ChatLimitWindow(used: 34, resetsAt: ahead(4 * 1440 + 600))),
             ]
         )
     }

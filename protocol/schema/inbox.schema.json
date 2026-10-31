@@ -16,9 +16,28 @@
     },
     "generatedAt": { "$ref": "#/$defs/unixMs" },
     "projects": { "type": "array", "items": { "$ref": "#/$defs/project" } },
-    "pinned": { "type": "array", "items": { "$ref": "#/$defs/pin" }, "description": "The desktop sidebar's Pinned list, in its order (SPEC.md §4.4). Absent when nothing is pinned." }
+    "pinned": { "type": "array", "items": { "$ref": "#/$defs/pin" }, "description": "The desktop sidebar's Pinned list, in its order (SPEC.md §4.4). Absent when nothing is pinned." },
+    "limits": { "type": "array", "items": { "$ref": "#/$defs/planLimit" }, "description": "Claude plan windows per claude.ai login, sorted by account (SPEC.md §4.4). Absent when none is known." }
   },
   "$defs": {
+    "limitWindow": {
+      "type": "object",
+      "required": ["used"],
+      "properties": {
+        "used": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Percent used." },
+        "resetsAt": { "$ref": "#/$defs/unixMs" }
+      }
+    },
+    "planLimit": {
+      "type": "object",
+      "required": ["account"],
+      "properties": {
+        "account": { "type": "string", "minLength": 1, "description": "The login's email." },
+        "plan": { "type": "string", "description": "max, pro, team… as Claude Code reports it." },
+        "fiveHour": { "$ref": "#/$defs/limitWindow" },
+        "sevenDay": { "$ref": "#/$defs/limitWindow" }
+      }
+    },
     "deviceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
     "unixMs": { "type": "integer", "minimum": 0 },
     "pin": {

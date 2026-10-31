@@ -126,6 +126,11 @@ final class AppModel {
         })
     }
 
+    /// Claude plan limits per account, across the desktops (§4.4 `limits`).
+    func planLimits() -> [InboxPlanLimit] {
+        InboxPlanLimit.merged(desktops.compactMap { inboxes[$0.id] })
+    }
+
         func attentionCount(for desktopId: String) -> Int {
         inboxes[desktopId]?.projects.reduce(0) { sum, project in
             sum + project.tasks.filter { $0.status == .attention }.count

@@ -14,11 +14,14 @@ import {
 } from '../../shared/types'
 import { findStreamOfTask, taskTabs } from '../../shared/streams'
 import { promptQueue, promptQueueWatchedTask, queuedPromptStream } from '../../shared/prompt-queue'
+import type { PlanAccount } from '../../shared/plan-limits'
+import { limitWindow as wireLimitWindow } from './chat-view'
 import { INBOX_TAB_TYPES, TaskLandingLimits } from '../../../protocol/ts/index.ts'
 import type {
   TaskLanding as WireLanding,
   Inbox as MobileInbox,
   InboxPin as MobileInboxPin,
+  InboxPlanLimit as MobileInboxPlanLimit,
   InboxQueuedPrompt as MobileQueuedPrompt,
   InboxProject as MobileInboxProject,
   InboxStream as MobileInboxStream,
@@ -289,7 +292,9 @@ export function buildInbox(
   /** Streams' app runs (§8.19). */
   runs: StreamRunLookup = () => [],
   /** Tasks' lines added and removed (§4.4 `diff`). */
-  diffs: TaskDiffLookup = () => undefined
+  diffs: TaskDiffLookup = () => undefined,
+  /** Plan windows per claude.ai login (§4.4 `limits`). */
+  planAccounts: readonly PlanAccount[] = []
 ): MobileInbox {
   const visible = orderedProjects(data).filter(isVisibleOnMobile)
   const inbox: MobileInbox = {
@@ -299,10 +304,23 @@ export function buildInbox(
   }
   const pinned = buildPinned(data, visible)
   if (pinned.length > 0) inbox.pinned = pinned
+  const limits = planAccounts.map(wirePlanLimit)
+  if (limits.length > 0) inbox.limits = limits
   return inbox
+}
+
+/** A login's windows as the inbox carries them (§4.4 `limits`): whole percents, Unix ms. */
+export function wirePlanLimit(account: PlanAccount): MobileInboxPlanLimit {
+  const out: MobileInboxPlanLimit = { account: account.email }
+  if (account.plan) out.plan = account.plan
+  const fiveHour = wireLimitWindow(account.fiveHour)
+  if (fiveHour) out.fiveHour = fiveHour
+  const sevenDay = wireLimitWindow(account.sevenDay)
+  if (sevenDay) out.sevenDay = sevenDay
+  return out
 }
 
 /** Everything but `generatedAt`: equal keys mean the phone would see nothing new. */
 export function inboxContentKey(inbox: MobileInbox): string {
-  return JSON.stringify({ desktop: inbox.desktop, projects: inbox.projects, pinned: inbox.pinned })
+  return JSON.stringify({ desktop: inbox.desktop, projects: inbox.projects, pinned: inbox.pinned, limits: inbox.limits })
 }

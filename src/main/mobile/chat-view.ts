@@ -246,7 +246,8 @@ export function viewSettings(info: ChatSessionInfo, models: ChatModelOption[]): 
   }
 }
 
-function limitWindow(window: ChatLimitWindow | undefined): ChatViewLimitWindow | undefined {
+/** A plan window on the wire: whole percents, Unix ms (§6.2; the inbox's `limits` too). */
+export function limitWindow(window: ChatLimitWindow | undefined): ChatViewLimitWindow | undefined {
   if (!window || !Number.isFinite(window.utilization)) return undefined
   const out: ChatViewLimitWindow = { used: Math.round(Math.min(100, Math.max(0, window.utilization))) }
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : NaN

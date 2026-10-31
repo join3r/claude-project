@@ -214,8 +214,8 @@ private struct UsageMeter: View {
                 }
                 if usage.fiveHour != nil || usage.sevenDay != nil {
                     VStack(spacing: 3) {
-                        Bar(window: usage.fiveHour)
-                        Bar(window: usage.sevenDay)
+                        LimitBar(window: usage.fiveHour)
+                        LimitBar(window: usage.sevenDay)
                     }
                     .frame(width: 34)
                     if let five = usage.fiveHour {
@@ -259,7 +259,7 @@ private struct ContextRing: View {
 }
 
 /// One thin bar of a plan window; an empty track when unknown.
-private struct Bar: View {
+struct LimitBar: View {
     let window: ChatLimitWindow?
 
     var body: some View {
@@ -285,10 +285,10 @@ private struct UsageDetails: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 12) {
                 if let five = usage.fiveHour {
-                    limitRow("5-hour limit", five, now: context.date)
+                    LimitRow(title: "5-hour limit", window: five, now: context.date)
                 }
                 if let week = usage.sevenDay {
-                    limitRow("Weekly limit", week, now: context.date)
+                    LimitRow(title: "Weekly limit", window: week, now: context.date)
                 }
                 if let tokens = usage.contextTokens {
                     row("Context") {
@@ -316,26 +316,35 @@ private struct UsageDetails: View {
         }
     }
 
-    private func limitRow(_ title: String, _ window: ChatLimitWindow, now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            row(title) {
-                Text("\(window.used)% used")
-                    .foregroundStyle(UsageTone.limit(window.used))
-            }
-            Bar(window: window)
-            if let resetsAt = window.resetsAt {
-                Text("Resets \(UsageFormat.reset(resetsAt, now: now))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
     private func row(_ title: String, @ViewBuilder value: () -> some View) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
             Spacer(minLength: 16)
             value()
+        }
+    }
+}
+
+/// A plan window in a details popover: percent used, its bar, when it resets.
+struct LimitRow: View {
+    let title: String
+    let window: ChatLimitWindow
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                Spacer(minLength: 16)
+                Text("\(window.used)% used")
+                    .foregroundStyle(UsageTone.limit(window.used))
+            }
+            LimitBar(window: window)
+            if let resetsAt = window.resetsAt {
+                Text("Resets \(UsageFormat.reset(resetsAt, now: now))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

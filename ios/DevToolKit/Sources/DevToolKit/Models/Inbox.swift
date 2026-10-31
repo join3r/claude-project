@@ -12,12 +12,17 @@ public struct Inbox: Codable, Sendable, Equatable {
     public var projects: [InboxProject]
     /// The desktop sidebar's Pinned list, in its order (§4.4).
     public var pinned: [InboxPin]
+    /// Claude plan limits per account, in the desktop's order (§4.4 `limits`);
+    /// nil when the desktop knows no account or doesn't send them.
+    public var limits: [InboxPlanLimit]?
 
-    public init(desktop: InboxDesktop, generatedAt: Int64, projects: [InboxProject], pinned: [InboxPin] = []) {
+    public init(desktop: InboxDesktop, generatedAt: Int64, projects: [InboxProject], pinned: [InboxPin] = [],
+                limits: [InboxPlanLimit]? = nil) {
         self.desktop = desktop
         self.generatedAt = generatedAt
         self.projects = projects
         self.pinned = pinned
+        self.limits = limits
     }
 
     public init(from decoder: any Decoder) throws {
@@ -26,6 +31,8 @@ public struct Inbox: Codable, Sendable, Equatable {
         generatedAt = try c.decodeIfPresent(Int64.self, forKey: .generatedAt) ?? 0
         projects = try c.decodeIfPresent([InboxProject].self, forKey: .projects) ?? []
         pinned = try c.decodeIfPresent([InboxPin].self, forKey: .pinned) ?? []
+        // A malformed account drops only itself.
+        limits = (try? c.decodeIfPresent([LossyPlanLimit].self, forKey: .limits))?.compactMap(\.value)
     }
 
     public var generatedDate: Date { Date(unixMilliseconds: generatedAt) }
@@ -53,6 +60,80 @@ public struct Inbox: Codable, Sendable, Equatable {
             return .project(project)
         }
     }
+}
+
+/// One Claude account's plan limits (§4.4 `limits`).
+public struct InboxPlanLimit: Codable, Sendable, Equatable {
+    /// The Claude login email.
+    public var account: String
+    /// Subscription type: "max", "pro", "team"…
+    public var plan: String?
+    public var fiveHour: ChatLimitWindow?
+    public var sevenDay: ChatLimitWindow?
+
+    public init(account: String, plan: String? = nil, fiveHour: ChatLimitWindow? = nil, sevenDay: ChatLimitWindow? = nil) {
+        self.account = account
+        self.plan = plan
+        self.fiveHour = fiveHour
+        self.sevenDay = sevenDay
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        account = try c.decode(String.self, forKey: .account)
+        guard !account.isEmpty else {
+            throw DecodingError.dataCorruptedError(forKey: .account, in: c, debugDescription: "account is empty")
+        }
+        plan = try c.decodeIfPresent(String.self, forKey: .plan)
+        fiveHour = try c.decodeIfPresent(ChatLimitWindow.self, forKey: .fiveHour)
+        sevenDay = try c.decodeIfPresent(ChatLimitWindow.self, forKey: .sevenDay)
+    }
+
+    /// The part of the email before "@", or the whole email when another
+    /// account in `all` shares that part.
+    public func shortName(among all: [InboxPlanLimit]) -> String {
+        let short = Self.short(account)
+        let clash = all.contains { $0.account != account && Self.short($0.account) == short }
+        return clash ? account : short
+    }
+
+    private static func short(_ email: String) -> String {
+        guard let at = email.firstIndex(of: "@"), at > email.startIndex else { return email }
+        return String(email[..<at])
+    }
+
+    /// The reset the tile counts down to: the 5-hour window's, or the weekly
+    /// one's when there is no 5-hour window; nil once it has passed.
+    public func nextReset(now: Date) -> Int64? {
+        guard let resetsAt = (fiveHour ?? sevenDay)?.resetsAt, resetsAt > now.unixMilliseconds else { return nil }
+        return resetsAt
+    }
+}
+
+extension InboxPlanLimit {
+    /// Every desktop's accounts in one list: first seen first, an account two
+    /// desktops send taken from the newer inbox.
+    public static func merged(_ inboxes: [Inbox]) -> [InboxPlanLimit] {
+        var order: [String] = []
+        var newest: [String: (at: Int64, limit: InboxPlanLimit)] = [:]
+        for inbox in inboxes {
+            for limit in inbox.limits ?? [] {
+                if let held = newest[limit.account] {
+                    if inbox.generatedAt > held.at { newest[limit.account] = (inbox.generatedAt, limit) }
+                } else {
+                    order.append(limit.account)
+                    newest[limit.account] = (inbox.generatedAt, limit)
+                }
+            }
+        }
+        return order.compactMap { newest[$0]?.limit }
+    }
+}
+
+/// Decodes an account this build can't read as nil, so one bad entry drops only itself.
+struct LossyPlanLimit: Decodable {
+    let value: InboxPlanLimit?
+    init(from decoder: any Decoder) throws { value = try? InboxPlanLimit(from: decoder) }
 }
 
 /// One entry of the desktop's Pinned list: a project, one of its streams

@@ -1,7 +1,7 @@
 import { b64uDecode, utf8Decode, utf8Encode } from './encoding.ts'
 import { ProtocolError } from './errors.ts'
-import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, CHAT_TASK_STOP_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_COMMANDS_GET_OP, STREAM_COMMANDS_SET_OP, STREAM_COMMANDS_SUGGEST_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, TOKENS_USAGE_OP, parseChatViewEvent, parseTaskLanding } from './chat-messages.ts'
-import type { ChatViewEvent, TaskLanding } from './chat-messages.ts'
+import { BRANCHES_LIST_OP, CHAT_BASH_OP, CHAT_BTW_OP, CHAT_COMMANDS_OP, CHAT_IMAGE_OP, CHAT_PERMISSIONS_OP, CHAT_PERMISSIONS_UPDATE_OP, CHAT_SETTINGS_OP, CHAT_TASK_STOP_OP, ChatOp, PIN_SET_OP, QUEUE_RUN_OP, QUEUE_UPDATE_OP, PROJECT_NEW_OP, STREAM_COMMANDS_GET_OP, STREAM_COMMANDS_SET_OP, STREAM_COMMANDS_SUGGEST_OP, STREAM_LOGS_OP, STREAM_NEW_OP, STREAM_RUN_OP, TAB_CLOSE_OP, TASK_CLOSE_OP, TASK_LAND_OP, TASK_NEW_OP, TASK_TRIAGE_OP, TOKENS_USAGE_OP, parseChatViewEvent, parseLimitWindow, parseTaskLanding } from './chat-messages.ts'
+import type { ChatViewEvent, ChatViewLimitWindow, TaskLanding } from './chat-messages.ts'
 import { PushOp } from './push.ts'
 
 /**
@@ -199,6 +199,18 @@ export interface Inbox {
   projects: InboxProject[]
   /** The desktop sidebar's Pinned list, in its order; absent when nothing is pinned (§4.4). */
   pinned?: InboxPin[]
+  /** Claude plan windows per claude.ai login, sorted by `account`; absent when none is known (§4.4). */
+  limits?: InboxPlanLimit[]
+}
+
+/** One claude.ai login's plan windows, as the desktop's hosts last read them (§4.4 `limits`). */
+export interface InboxPlanLimit {
+  /** The login's email. */
+  account: string
+  /** `max`, `pro`, `team`… as Claude Code reports it. */
+  plan?: string
+  fiveHour?: ChatViewLimitWindow
+  sevenDay?: ChatViewLimitWindow
 }
 
 export interface ReqMessage {
@@ -557,6 +569,18 @@ function parsePin(value: unknown): InboxPin {
   return pin
 }
 
+function parsePlanLimit(value: unknown): InboxPlanLimit {
+  const o = obj(value, 'limit')
+  const account = str(o, 'account')
+  if (account === '') fail('limit.account is empty')
+  const limit: InboxPlanLimit = { account }
+  const plan = optStr(o, 'plan')
+  if (plan !== undefined) limit.plan = plan
+  if (o.fiveHour !== undefined && o.fiveHour !== null) limit.fiveHour = parseLimitWindow(o.fiveHour)
+  if (o.sevenDay !== undefined && o.sevenDay !== null) limit.sevenDay = parseLimitWindow(o.sevenDay)
+  return limit
+}
+
 /** Validates an `Inbox` value (already-parsed JSON, e.g. `res.result` or `evt.inbox`). */
 export function parseInbox(value: unknown): Inbox {
   const o = obj(value, 'inbox')
@@ -569,6 +593,10 @@ export function parseInbox(value: unknown): Inbox {
   if (o.pinned !== undefined && o.pinned !== null) {
     const pinned = arr(o, 'pinned').map(parsePin)
     if (pinned.length > 0) inbox.pinned = pinned
+  }
+  if (o.limits !== undefined && o.limits !== null) {
+    const limits = arr(o, 'limits').map(parsePlanLimit)
+    if (limits.length > 0) inbox.limits = limits
   }
   return inbox
 }

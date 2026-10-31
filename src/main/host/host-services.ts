@@ -58,6 +58,8 @@ import { readPermissionSettings, updatePermissionRule } from '../claude-chat/per
 import { registerFileBrowserHandlers } from '../ipc/file-browser'
 import { registerGitHandlers } from '../ipc/git'
 import { TaskDiffWatch } from '../task-diff-watch'
+import { PlanLimits } from '../plan-limits'
+import { registerPlanLimitsHandlers } from '../ipc/plan-limits'
 import { registerNotebookHandlers } from '../ipc/notebooks'
 import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
@@ -139,7 +141,7 @@ import {
   SERVER_APP_NAME
 } from '../../../protocol/ts/index.ts'
 import { normalizeMobileConfig, normalizeRelayUrl, type MobileConfig } from '../../shared/mobile'
-import { SERVER_MOBILE_STATE_CHANNEL } from '../../shared/servers'
+import { SERVER_MOBILE_STATE_CHANNEL, SERVER_PLAN_LIMITS_CHANNEL } from '../../shared/servers'
 import { LOCAL_SOURCE } from '../../shared/projects-sources'
 import type {
   AppConfig,
@@ -289,6 +291,8 @@ export class HostServices {
   /** A DevTool server's host (relay role `server`), not a desktop's own. */
   private readonly isServer: boolean
   private readonly phones: HostServicesOptions['phones']
+  /** Plan windows per claude.ai login, for the status bar and the phone's inbox; a desktop adds its servers'. */
+  readonly planLimits: PlanLimits
 
   constructor({ env, clients, onTaskArchived, relayRole, projects, terminalStatus, remoteClients, phones }: HostServicesOptions) {
     this.env = env
@@ -296,6 +300,11 @@ export class HostServices {
     this.remoteClients = remoteClients === true
     this.isServer = relayRole === 'server'
     this.phones = phones
+    this.planLimits = new PlanLimits({
+      // A server's own chats are named by its desktop, which knows what it calls it.
+      selfLabel: this.isServer ? '' : 'This Mac',
+      hostOfTab: (tabId) => this.sshHostOfTab(tabId)
+    })
     this.onTaskArchived = onTaskArchived ?? (() => {})
     const configDir = env.configDir
     const identity = new IdentityStore(path.join(configDir, 'mobile'), env.secrets, (message) => this.logDebug(message))
@@ -503,6 +512,10 @@ export class HostServices {
       this.clients.broadcast('notebook-kernel-event', tabId, event)
     })
     this.chatManager = this.createChatManager()
+    this.chatManager.watch((tabId, event, state) => this.planLimits.observe(tabId, event, state))
+    this.planLimits.subscribe(() => {
+      this.clients.broadcast(this.isServer ? SERVER_PLAN_LIMITS_CHANNEL : 'plan-limits-changed', this.isServer ? this.planLimits.own() : this.planLimits.accounts())
+    })
     this.mobileService = this.createMobileService()
     this.registerEventForwarders()
     void this.taskLanding.reconcile()
@@ -660,6 +673,7 @@ export class HostServices {
       },
       missingFolders: this.missingFolders,
       taskDiffs: this.taskDiffs,
+      planLimits: { peek: () => this.planLimits.accounts(), subscribe: (listener) => this.planLimits.subscribe(listener) },
       newProject: async ({ name }) => {
         let directory: string
         try {
@@ -1063,6 +1077,19 @@ export class HostServices {
     this.relayClient.close()
   }
 
+  /** The status-bar label of the SSH box a chat tab runs on; null when it runs on this host. */
+  private sshHostOfTab(tabId: string): string | null {
+    for (const project of this.projectsStore.peek().projects) {
+      if (!project.ssh) continue
+      for (const stream of project.streams) {
+        for (const task of stream.tasks) {
+          if (taskTabs(task).some(tab => tab.id === tabId)) return `${project.ssh.host} (ssh)`
+        }
+      }
+    }
+    return null
+  }
+
   private registerEventForwarders(): void {
     for (const endpoint of ['session-start', 'working', 'stopped', 'notification', 'activity']) {
       this.hookServer.on(endpoint, (tabId: string, body: Record<string, unknown>) => this.handleHook(endpoint, tabId, body))
@@ -1394,6 +1421,8 @@ export class HostServices {
     registerPromptQueueHandlers(ipc, { promptQueue: this.promptQueue })
     registerTaskNameHandlers(ipc, { suggest: (prompt) => this.suggestTaskName(prompt) })
     registerTokenUsageHandlers(ipc, { projectUsage: (projectId) => this.projectTokenUsage(projectId) })
+    // A server answers its own logins (its desktop merges them); a desktop every one it knows.
+    registerPlanLimitsHandlers(ipc, { accounts: () => this.isServer ? this.planLimits.own() : this.planLimits.accounts() })
     registerHostFsHandlers(ipc, {
       send: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       env: () => getShellEnv()

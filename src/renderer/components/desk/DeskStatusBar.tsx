@@ -9,6 +9,7 @@ import { useMobileState } from '../../hooks/useMobileState'
 import { paletteEvents } from '../../palette/paletteEvents'
 import { inboxApps, type InboxApp } from '../inbox'
 import { openBenchRun } from './benchState'
+import PlanLimitChips from './PlanLimitChips'
 import { runLogTaskId, statusHosts, statusPhone, statusRunLabel, type StatusTone } from './statusBar'
 
 const DOT: Record<StatusTone, string> = {
@@ -42,8 +43,8 @@ export function openRunLog(app: InboxApp, here: {
 
 /**
  * The desk's status bar, along the bottom of the window (change 7 of the
- * redesign): host health on the left; the stream commands that run or crashed
- * and the phone on the right. A run opens its log in the Bench of its task (or
+ * redesign): host health on the left; the stream commands that run or crashed,
+ * the plan limits of each Claude login and the phone on the right. A run opens its log in the Bench of its task (or
  * of the task this window shows, in the same project), else as the logs
  * window. A host or the phone opens its Settings page.
  */
@@ -108,6 +109,7 @@ export default function DeskStatusBar(): React.ReactElement {
           )}
         </span>
       ))}
+      <PlanLimitChips />
       {phone && (
         <button
           type="button"

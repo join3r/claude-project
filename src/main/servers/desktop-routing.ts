@@ -10,6 +10,8 @@ import type { ImageCodec } from '../mobile/chat-image'
 import { fitChatImagesForLink } from './link-chat-images'
 import { streamGivesTaskWorktrees } from '../../shared/streams'
 import { LinkError, LinkErrorCode } from '../host/link/errors'
+import { SERVER_PLAN_LIMITS_CHANNEL } from '../../shared/servers'
+import type { PlanAccount } from '../../shared/plan-limits'
 
 /** The part of ServerHub the desktop's routing uses. */
 export interface RoutingHub {
@@ -23,6 +25,8 @@ export interface RoutingHub {
 export interface RoutedHost {
   getProjectsData(): ProjectsData
   onProjectsChanged(listener: (data: ProjectsData) => void): () => void
+  /** The plan windows per login, which hold each server's too. */
+  planLimits?: { setForeign(serverId: string, label: string, accounts: PlanAccount[] | null): void }
 }
 
 export interface DesktopRoutingDeps {
@@ -51,6 +55,9 @@ export class DesktopRouting {
   private hub: RoutingHub | null = null
   private host: RoutedHost | null = null
   private online = new Set<string>()
+  private serverNames = new Map<string, string>()
+  /** Servers whose logins the plan limits hold. */
+  private readonly planLimitServers = new Set<string>()
 
   constructor(private readonly deps: DesktopRoutingDeps) {
     this.projects = new ServerProjects({
@@ -119,7 +126,10 @@ export class DesktopRouting {
 
   attachHub(hub: RoutingHub): void {
     this.hub = hub
-    hub.onEvent((event) => this.router.deliver(event))
+    hub.onEvent((event) => {
+      if (event.ch === SERVER_PLAN_LIMITS_CHANNEL) this.setServerPlanLimits(event.serverId, event.args[0])
+      this.router.deliver(event)
+    })
     // ServerProjects first: a server that comes online is asked for its projects
     // before anything below, and one link answers in order, so the refreshes
     // know its tasks and tabs by the time their answers arrive.
@@ -147,9 +157,38 @@ export class DesktopRouting {
     const now = new Set(state.servers.filter(s => s.state === 'online').map(s => s.id))
     const came = [...now].filter(id => !this.online.has(id))
     this.online = now
+    this.serverNames = new Map(state.servers.map(s => [s.id, s.name || `server ${s.id.slice(0, 6)}`]))
     for (const serverId of came) {
       void this.refreshActivity(serverId)
       void this.refreshWorktreeStates(serverId)
+      void this.refreshPlanLimits(serverId)
+    }
+    // An offline server's logins stay as last read; an unpaired one's go.
+    for (const serverId of [...this.planLimitServers]) {
+      if (this.serverNames.has(serverId)) continue
+      this.planLimitServers.delete(serverId)
+      this.host?.planLimits?.setForeign(serverId, '', null)
+    }
+  }
+
+  /** A server's own logins (its push or its answer), named for the status bar as the server is. */
+  private setServerPlanLimits(serverId: string, value: unknown): void {
+    if (!Array.isArray(value)) return
+    const accounts = value.filter((a): a is PlanAccount =>
+      typeof a === 'object' && a !== null && typeof a.email === 'string' && a.email !== '' && Array.isArray(a.hosts))
+    this.planLimitServers.add(serverId)
+    this.host?.planLimits?.setForeign(serverId, this.serverNames.get(serverId) ?? `server ${serverId.slice(0, 6)}`, accounts)
+  }
+
+  /** A server came (back) online: its logins' windows may have moved on meanwhile. */
+  private async refreshPlanLimits(serverId: string): Promise<void> {
+    const hub = this.hub
+    if (!hub) return
+    try {
+      this.setServerPlanLimits(serverId, await hub.call(serverId, MAIN_CLIENT_ID, 'plan-limits-get'))
+    } catch (err) {
+      // An older server has no such channel: it shows no logins.
+      this.deps.log(`servers planLimitsRefresh server=${serverId} error=${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

@@ -7,6 +7,86 @@ import Testing
         try JSONDecoder().decode(Inbox.self, from: Data(json.utf8))
     }
 
+    static let limitsJSON = """
+    {
+      "desktop": { "id": "d1", "name": "mbp" }, "generatedAt": 1, "projects": [],
+      "limits": [
+        { "account": "me@personal.dev", "plan": "max",
+          "fiveHour": { "used": 42, "resetsAt": 1793412000000 }, "sevenDay": { "used": 61, "resetsAt": 1793700000000 } },
+        { "account": "ops@company.dev", "sevenDay": { "used": 34 } },
+        { "account": "", "plan": "pro" },
+        { "plan": "pro" },
+        { "account": "bad@x.dev", "fiveHour": { "used": "lots" } },
+        "junk"
+      ]
+    }
+    """
+
+    /// §4.4 `limits`: order kept, a malformed account dropped, both decoders alike.
+    @Test func decodesPlanLimits() throws {
+        let expected = [
+            InboxPlanLimit(account: "me@personal.dev", plan: "max",
+                           fiveHour: ChatLimitWindow(used: 42, resetsAt: 1_793_412_000_000),
+                           sevenDay: ChatLimitWindow(used: 61, resetsAt: 1_793_700_000_000)),
+            InboxPlanLimit(account: "ops@company.dev", sevenDay: ChatLimitWindow(used: 34)),
+        ]
+        #expect(try decode(Self.limitsJSON).limits == expected)
+        let wire = try Inbox.parse(try JSONValue.parse(Self.limitsJSON))
+        #expect(wire.limits == expected)
+        #expect(try Inbox.parse(wire.json).limits == expected)
+
+        let none = #"{ "desktop": { "id": "d", "name": "n" }, "generatedAt": 1, "projects": [] }"#
+        #expect(try decode(none).limits == nil)
+        #expect(try Inbox.parse(try JSONValue.parse(none)).limits == nil)
+        let notArray = #"{ "desktop": { "id": "d", "name": "n" }, "generatedAt": 1, "projects": [], "limits": 5 }"#
+        #expect(try decode(notArray).limits == nil)
+        #expect(try Inbox.parse(try JSONValue.parse(notArray)).limits == nil)
+    }
+
+    @Test func planLimitNamesAndResets() {
+        let a = InboxPlanLimit(account: "me@personal.dev"), b = InboxPlanLimit(account: "ops@company.dev")
+        let c = InboxPlanLimit(account: "me@company.dev")
+        #expect(a.shortName(among: [a, b]) == "me")
+        #expect(a.shortName(among: [a, b, c]) == "me@personal.dev")
+        #expect(b.shortName(among: [a, b, c]) == "ops")
+
+        let now = Date(unixMilliseconds: 1_000_000)
+        let past = ChatLimitWindow(used: 80, resetsAt: 999_000), future = ChatLimitWindow(used: 80, resetsAt: 2_000_000)
+        #expect(past.current(now: now) == ChatLimitWindow(used: 0) && past.hasReset(now: now))
+        #expect(future.current(now: now) == future && !future.hasReset(now: now))
+        #expect(ChatLimitWindow(used: 5).current(now: now) == ChatLimitWindow(used: 5))
+        #expect(InboxPlanLimit(account: "x", fiveHour: future, sevenDay: ChatLimitWindow(used: 1, resetsAt: 3_000_000)).nextReset(now: now) == 2_000_000)
+        #expect(InboxPlanLimit(account: "x", sevenDay: future).nextReset(now: now) == 2_000_000)
+        #expect(InboxPlanLimit(account: "x", fiveHour: past, sevenDay: future).nextReset(now: now) == nil)
+    }
+
+    @Test func mergesAccountsAcrossDesktops() {
+        func inbox(_ at: Int64, _ limits: [InboxPlanLimit]?) -> Inbox {
+            Inbox(desktop: InboxDesktop(id: "d\(at)", name: "n"), generatedAt: at, projects: [], limits: limits)
+        }
+        let a = InboxPlanLimit(account: "a@x", fiveHour: ChatLimitWindow(used: 10))
+        let b = InboxPlanLimit(account: "b@x"), c = InboxPlanLimit(account: "c@x")
+        let newerA = InboxPlanLimit(account: "a@x", fiveHour: ChatLimitWindow(used: 20))
+        #expect(InboxPlanLimit.merged([inbox(1, [a, b]), inbox(2, nil), inbox(3, [c, newerA])]) == [newerA, b, c])
+        #expect(InboxPlanLimit.merged([inbox(3, [newerA]), inbox(1, [a])]) == [newerA])
+        #expect(InboxPlanLimit.merged([inbox(1, nil)]).isEmpty)
+    }
+
+    /// The wire parser reads each task's `diff` too; malformed counts drop only the counts.
+    @Test func wireTaskDiff() throws {
+        let inbox = try Inbox.parse(try JSONValue.parse(#"""
+        { "desktop": { "id": "d", "name": "n" }, "generatedAt": 1, "projects": [{ "id": "p", "name": "p", "remote": false,
+          "streams": [{ "id": "s1", "name": "main", "main": true }], "tasks": [
+            { "id": "t1", "name": "a", "streamId": "s1", "streamName": "main", "status": "idle", "diff": { "added": 1240, "deleted": 14 }, "tabs": [] },
+            { "id": "t2", "name": "b", "streamId": "s1", "streamName": "main", "status": "idle", "diff": "junk", "tabs": [] }
+        ] }] }
+        """#))
+        let tasks = inbox.projects[0].tasks
+        #expect(tasks[0].diff == InboxTaskDiff(added: 1240, deleted: 14))
+        #expect(tasks[1].diff == nil)
+        #expect(try Inbox.parse(inbox.json).projects[0].tasks[0].diff == tasks[0].diff)
+    }
+
     @Test func decodesTaskDiff() throws {
         let inbox = try decode("""
         {
