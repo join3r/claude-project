@@ -94,6 +94,15 @@ export function loadDirect(log: (message: string) => void): Promise<DirectApi | 
     (mod) => {
       const ndc = ((mod as unknown as { default?: Ndc }).default ?? mod) as Ndc
       if (typeof ndc.PeerConnection !== 'function') throw new Error('no PeerConnection export')
+      // Closes every channel while the JS environment is still alive. Left to the
+      // environment's teardown, a DataChannel finalizer deadlocks on a
+      // threadsafe-function mutex: the process never exits and, holding the
+      // instance lock, makes every later launch hand over to it and quit.
+      process.once('exit', () => {
+        try {
+          ndc.cleanup()
+        } catch { /* exiting anyway */ }
+      })
       return directApi(ndc)
     },
     (err: unknown) => {
