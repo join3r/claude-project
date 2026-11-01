@@ -737,6 +737,11 @@ export interface AppConfig {
   lazyLoadClaude: boolean
   /** Hold off system sleep while any agent tab is working (the display may still sleep). */
   keepAwakeWhileWorking: boolean
+  /**
+   * Settings → Inbox: closed tasks and streams older than this many days are
+   * deleted for good from the Done lists (`pruneArchive`). 0 keeps them all.
+   */
+  doneRetentionDays: number
   /** Settings → Updates: look for a newer release at launch and every few hours (packaged builds). */
   autoCheckUpdates: boolean
   /** New Claude tabs (task auto-open, the tab bar's ✦) open as a terminal or a chat. */
@@ -1049,6 +1054,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   piCommand: '',
   lazyLoadClaude: true,
   keepAwakeWhileWorking: true,
+  doneRetentionDays: 30,
   autoCheckUpdates: true,
   claudeDefaultView: 'terminal',
   lastProjectId: null,

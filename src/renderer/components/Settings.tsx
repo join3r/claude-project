@@ -45,6 +45,15 @@ const editorWhitespaceOptions: Array<{ value: EditorRenderWhitespace; label: str
   { value: 'none', label: 'None' }
 ]
 
+/** Settings → Inbox → Keep done tasks; 0 keeps them all. */
+const DONE_RETENTION_OPTIONS: Array<{ days: number; label: string }> = [
+  { days: 7, label: '1 week' },
+  { days: 30, label: '30 days' },
+  { days: 90, label: '90 days' },
+  { days: 365, label: '1 year' },
+  { days: 0, label: 'Forever' }
+]
+
 const themeOptions = [
   { value: 'system', label: 'System' },
   { value: 'dark', label: 'Dark' },
@@ -593,6 +602,23 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                 }
               />
             </Group>
+
+            <FormGroup>
+              <SetBlock label="Keep done tasks">
+                <Select
+                  value={String(config.doneRetentionDays)}
+                  onChange={(e) => updateConfig({ doneRetentionDays: Number(e.target.value) })}
+                >
+                  {!DONE_RETENTION_OPTIONS.some(option => option.days === config.doneRetentionDays) && (
+                    <option value={config.doneRetentionDays}>{config.doneRetentionDays} days</option>
+                  )}
+                  {DONE_RETENTION_OPTIONS.map(option => (
+                    <option key={option.days} value={option.days}>{option.label}</option>
+                  ))}
+                </Select>
+                <HelperText>Closed tasks and streams older than this are deleted for good from the Done lists, with their terminal scrollback. The agents&apos; own session files stay.</HelperText>
+              </SetBlock>
+            </FormGroup>
 
             <FormGroup>
               <SetBlock label="Projects folder">

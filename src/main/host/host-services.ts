@@ -66,7 +66,10 @@ import { registerHostAgentHandlers } from '../ipc/host-agents'
 import { registerHostSshHandlers } from '../ipc/host-ssh'
 import { detectAgentClis } from '../agent-clis'
 import { isRemoteProject, isShellCommandProject } from '../../shared/types'
-import { archiveTasksInData, archivedTabIds, archivedTaskEntry, vanishedProjectIds, withArchivedTasks, type ProjectArchive } from '../../shared/archive'
+import {
+  archiveTasksInData, archivedTabIds, archivedTaskEntry, doneRetentionCutoff, pruneArchive, syncArchiveCounts, vanishedProjectIds, withArchivedTasks,
+  type ProjectArchive
+} from '../../shared/archive'
 import {
   NOTEBOOK_ERROR_REMOTE,
   NOTEBOOK_ERROR_SHELL_PROJECT,
@@ -161,6 +164,10 @@ import type { ClientHub } from './client-hub'
 import type { HostEnv } from './host-env'
 
 const execFileAsync = promisify(execFile)
+
+/** Settings → Keep done tasks: first sweep a minute after launch, then every six hours. */
+const DONE_PRUNE_FIRST_MS = 60_000
+const DONE_PRUNE_EVERY_MS = 6 * 60 * 60_000
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -274,6 +281,8 @@ export class HostServices {
   /** Local projects whose folder is gone, for the phone's inbox (SPEC.md §4.4). */
   private readonly missingFolders = new MissingFolderWatch(() => this.projectsStore.peek().projects)
   private missingFoldersUnsub: (() => void) | null = null
+  /** Settings → Keep done tasks: the sweep that runs a while after launch and then every few hours. */
+  private donePruneTimer: ReturnType<typeof setTimeout> | null = null
   /** Tasks' lines added and removed, for the phone's inbox (SPEC.md §4.4 `diff`), counted while a phone is connected. */
   private readonly taskDiffs = new TaskDiffWatch(
     () => this.projectsStore.peek().projects,
@@ -423,6 +432,7 @@ export class HostServices {
     })
     this.forgetArchivesOfVanishedProjects()
     this.config = this.storage.loadConfig()
+    this.scheduleDonePrune(DONE_PRUNE_FIRST_MS)
     setPortableNodeDir(this.config.portableNodeDir)
     this.sleepBlocker = new SleepBlocker(
       env.powerSave,
@@ -882,6 +892,45 @@ export class HostServices {
     })
   }
 
+  private scheduleDonePrune(delay: number): void {
+    if (this.donePruneTimer) clearTimeout(this.donePruneTimer)
+    this.donePruneTimer = setTimeout(() => {
+      this.pruneDoneTasks()
+      this.scheduleDonePrune(DONE_PRUNE_EVERY_MS)
+    }, delay)
+    this.donePruneTimer.unref?.()
+  }
+
+  /**
+   * Settings → Keep done tasks: delete for good the archived tasks and streams
+   * closed longer ago than that, with their scrollback, and bring the `Done (N)`
+   * counts in line. The agents' own session files are not touched.
+   */
+  private pruneDoneTasks(): void {
+    const cutoff = doneRetentionCutoff(this.config.doneRetentionDays, Date.now())
+    if (cutoff === null) return
+    const pruned: { projectId: string; archive: ProjectArchive }[] = []
+    for (const project of this.projectsStore.peek().projects) {
+      try {
+        const before = this.archiveStorage.load(project.id)
+        const after = pruneArchive(before, cutoff)
+        if (after === before) continue
+        this.archiveStorage.update(project.id, archive => pruneArchive(archive, cutoff))
+        const kept = new Set(archivedTabIds(after))
+        for (const tabId of archivedTabIds(before)) if (!kept.has(tabId)) this.scrollbackStorage.delete(tabId)
+        pruned.push({ projectId: project.id, archive: after })
+        this.clients.broadcast('archive-changed', project.id)
+      } catch (err) {
+        this.logDebug(`donePrune projectId=${project.id} error=${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    if (pruned.length === 0) return
+    const data = this.projectsStore.peek()
+    const next = pruned.reduce((acc, { projectId, archive }) => syncArchiveCounts(acc, projectId, archive), data)
+    if (next !== data) this.commitProjects(next)
+    this.logDebug(`donePrune projects=${pruned.length} olderThanDays=${this.config.doneRetentionDays}`)
+  }
+
   /**
    * End a task's processes before its worktree is removed (a landing's close):
    * the teardown archiving does, keeping the scrollback. Windows can't delete a
@@ -1059,6 +1108,7 @@ export class HostServices {
   }
 
   async shutdown(): Promise<void> {
+    if (this.donePruneTimer) clearTimeout(this.donePruneTimer)
     this.mobileService?.stop()
     this.missingFoldersUnsub?.()
     this.missingFolders.stop()
@@ -1514,7 +1564,9 @@ export class HostServices {
   }
 
   private applyConfig(patch: Partial<AppConfig>): void {
+    const retention = this.config.doneRetentionDays
     this.config = { ...this.config, ...patch }
+    if (this.config.doneRetentionDays !== retention) this.scheduleDonePrune(0)
     this.storage.saveConfig(this.config)
     setPortableNodeDir(this.config.portableNodeDir)
     this.sleepBlocker.update()

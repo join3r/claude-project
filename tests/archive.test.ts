@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { isSpentEphemeralProject, mainStreamId, type ProjectsData, type WorkspaceConfig } from '../src/shared/types'
+import { isSpentEphemeralProject, mainStreamId, type ProjectsData, type Stream, type Task, type WorkspaceConfig } from '../src/shared/types'
 import {
   archiveStreamInData,
   archiveTasksInData,
@@ -10,8 +10,10 @@ import {
   archivedTabIds,
   archivedTaskEntry,
   archivedTasksOf,
+  doneRetentionCutoff,
   emptyArchive,
   normalizeArchive,
+  pruneArchive,
   reopenStreamInData,
   reopenTaskInData,
   syncArchiveCounts,
@@ -209,6 +211,41 @@ describe('Done counts', () => {
     const synced = syncArchiveCounts(drifted, 'p', archive)
     expect(synced.projects[0].archivedStreamCount).toBeUndefined()
     expect(synced.projects[0].streams[0].archivedTaskCount).toBe(1)
+  })
+})
+
+describe('pruning old Done entries', () => {
+  const DAY = 24 * 60 * 60_000
+  const now = 100 * DAY
+  const task = (id: string, archivedAt: number, streamId = mainStreamId('p')) => ({
+    task: { id, name: id, panes: [{ id: `pane-${id}`, tabs: [term(`tab-${id}`)], activeTabId: `tab-${id}` }] } as unknown as Task,
+    streamId,
+    streamName: 'main',
+    dir: '/tmp/p',
+    archivedAt
+  })
+
+  it('has no cutoff for 0, negative or missing days', () => {
+    expect(doneRetentionCutoff(0, now)).toBeNull()
+    expect(doneRetentionCutoff(-5, now)).toBeNull()
+    expect(doneRetentionCutoff(undefined, now)).toBeNull()
+    expect(doneRetentionCutoff(30, now)).toBe(70 * DAY)
+  })
+
+  it('drops tasks and streams closed before the cutoff, and a closed stream\'s older Done tasks; undated entries stay', () => {
+    const recentStream = { stream: { id: 's1', name: 's1', tasks: [] } as unknown as Stream, doneTasks: [task('d-old', 10 * DAY, 's1'), task('d-new', 90 * DAY, 's1')], dir: '/tmp/p', archivedAt: 95 * DAY }
+    const oldStream = { stream: { id: 's2', name: 's2', tasks: [] } as unknown as Stream, doneTasks: [task('d2', 90 * DAY, 's2')], dir: '/tmp/p', archivedAt: 20 * DAY }
+    const archive = { ...emptyArchive(), tasks: [task('old', 10 * DAY), task('new', 80 * DAY), task('undated', 0)], streams: [recentStream, oldStream] }
+    const next = pruneArchive(archive, 70 * DAY)
+    expect(next.tasks.map(entry => entry.task.id)).toEqual(['new', 'undated'])
+    expect(next.streams.map(entry => entry.stream.id)).toEqual(['s1'])
+    expect(next.streams[0].doneTasks.map(entry => entry.task.id)).toEqual(['d-new'])
+    expect(archivedTabIds(next).sort()).toEqual(['tab-d-new', 'tab-new', 'tab-undated'])
+  })
+
+  it('returns the archive itself when nothing is that old', () => {
+    const archive = { ...emptyArchive(), tasks: [task('new', 80 * DAY)] }
+    expect(pruneArchive(archive, 70 * DAY)).toBe(archive)
   })
 })
 

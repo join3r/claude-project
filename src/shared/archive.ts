@@ -134,6 +134,41 @@ export function withoutArchived(archive: ProjectArchive, ids: { tasks?: readonly
 }
 
 /**
+ * Settings → Keep done tasks: the moment before which archived entries go,
+ * or null when they are kept for good (`days` 0 or not a positive number).
+ */
+export function doneRetentionCutoff(days: number | undefined, now: number): number | null {
+  return typeof days === 'number' && Number.isFinite(days) && days > 0 ? now - days * 24 * 60 * 60_000 : null
+}
+
+/**
+ * Drop archived entries closed before `cutoff`: tasks on their own, a closed
+ * stream's own older `Done` tasks, and a closed stream as a whole (with its
+ * tasks) once it is that old. An entry with no date (`archivedAt` 0) stays.
+ * Returns `archive` itself when nothing is that old.
+ */
+export function pruneArchive(archive: ProjectArchive, cutoff: number): ProjectArchive {
+  const old = (entry: { archivedAt: number }): boolean => entry.archivedAt > 0 && entry.archivedAt < cutoff
+  let changed = false
+  const tasks = archive.tasks.filter(entry => !old(entry))
+  if (tasks.length !== archive.tasks.length) changed = true
+  const streams: ArchivedStream[] = []
+  for (const entry of archive.streams) {
+    if (old(entry)) {
+      changed = true
+      continue
+    }
+    const doneTasks = entry.doneTasks.filter(done => !old(done))
+    if (doneTasks.length === entry.doneTasks.length) streams.push(entry)
+    else {
+      changed = true
+      streams.push({ ...entry, doneTasks })
+    }
+  }
+  return changed ? { ...archive, tasks, streams } : archive
+}
+
+/**
  * The archive as the sidebar shows it: an entry whose task or stream is live
  * again (a reopen interrupted between its two writes) is not archived.
  */
