@@ -65,6 +65,10 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
   const attachedRef = useRef(false)
   const visibleRef = useRef(visible)
   visibleRef.current = visible
+  // Fired from the sidebar's compose box: the caret stays there for the next
+  // task instead of jumping into this one's composer. Until the tab is next hidden.
+  const [fromCompose, setFromCompose] = useState(() => !!document.activeElement?.closest('[data-testid="desk-compose"]'))
+  useEffect(() => { if (!visible) setFromCompose(false) }, [visible])
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
@@ -477,7 +481,7 @@ export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessio
           onSetMode={(mode) => { void window.api.chatSetMode(tabId, mode) }}
           onSetEffort={(effort) => { void window.api.chatSetEffort(tabId, effort) }}
           onOpenInTerminal={openInTerminal}
-          focusSignal={visible}
+          focusSignal={visible && !fromCompose}
           tabId={tabId}
         />
       </div>

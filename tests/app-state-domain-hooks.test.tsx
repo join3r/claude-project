@@ -152,7 +152,8 @@ describe('useLeaveOnPutAway', () => {
       hook.result.current.core.updateWindowViewState(prev => ({ ...prev, selectedProjectId: 'p1', selectedTaskId: 't1' }))
     })
 
-    // Off (the default): the task stays.
+    // Off: the task stays.
+    act(() => { hook.result.current.core.updateConfig({ leaveTaskOnSend: false }) })
     act(() => { hook.result.current.putAway.leaveAfterSend('p1', 't1') })
     expect(selectProject).not.toHaveBeenCalled()
 

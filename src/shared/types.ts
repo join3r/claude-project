@@ -1104,7 +1104,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   promptBoxMode: '',
   deskAgent: 'claude-chat',
   autopilotReview: false,
-  leaveTaskOnSend: false,
+  leaveTaskOnSend: true,
   externalEditors: { editors: [], defaultId: null },
   mobile: { ...DEFAULT_MOBILE_CONFIG },
   hosts: []

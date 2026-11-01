@@ -18,6 +18,7 @@ import DeskCompose from './DeskCompose'
 import DeskRow, { AutopilotMark, bestActivity, type DeskRowKind } from './DeskRow'
 import DeskScopeMenu from './DeskScopeMenu'
 import DeskSnoozeMenu, { type DeskSnoozeRequest } from './DeskSnoozeMenu'
+import { deskEvents } from './deskEvents'
 import {
   DONE_WINDOW_MS, checkRows, checkedRows, deskLists, deskTabCounts, doneEntries, keyTarget, liveScope, nextNeedsYou, pinnedFirst, scopeLabel, scopeSources, shownRows, stepRow, taskBackground,
   type DeskLists, type DoneEntry, type InboxRename
@@ -152,7 +153,7 @@ export default function DeskColumn({
   rename: InboxRename | null
 }): React.ReactElement {
   const {
-    config, updateConfig, desk, updateDesk, selectedTaskId, selectProjectHome, effectiveTheme,
+    config, updateConfig, desk, updateDesk, selectedTaskId, setSelectedProjectId, selectProjectHome, effectiveTheme,
     snoozeTask, unsnoozeTask, markTaskUnread, markTaskVisited, showArchived, reopenTask
   } = useApp()
   const allStatuses = useAllTabStatuses()
@@ -389,6 +390,19 @@ export default function DeskColumn({
     )
   }
 
+  // A click on blank sidebar space lets go of the open task and puts the caret in
+  // compose: the next keys are a new task, not E / S on the task you were reading.
+  const onBlankClick = (e: React.MouseEvent<HTMLElement>): void => {
+    const el = e.target as HTMLElement
+    // Menus are React children but not in the column's DOM; their clicks bubble here too.
+    if (!e.currentTarget.contains(el)) return
+    if (el.closest('button, a, input, textarea, select, label, [role="menu"], [role="tab"], [contenteditable="true"], [data-testid="desk-row"], [data-testid="desk-done-row"], [data-testid="desk-compose"]')) return
+    if (window.getSelection()?.toString()) return
+    if (selectedTaskId) setSelectedProjectId(null)
+    clearChecked()
+    deskEvents.focusCompose()
+  }
+
   const empty = (text: string): React.ReactElement => (
     <div className="px-6 py-10 text-center text-sm text-text-muted" data-testid="desk-empty">{text}</div>
   )
@@ -398,6 +412,7 @@ export default function DeskColumn({
       aria-label="Inbox"
       className="desk-column relative flex flex-col shrink-0 min-h-0 bg-surface border-r border-hair select-none"
       style={{ width, minWidth: width, maxWidth: width }}
+      onClick={onBlankClick}
       data-testid="desk-column"
     >
       {/* Title bar: traffic lights sit on the left, so the controls start past them. */}
