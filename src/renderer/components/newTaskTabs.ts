@@ -18,10 +18,11 @@ export type CreateTabOptions = {
   cwd?: string
   /** The tab's title, instead of the one its type and options give. */
   title?: string
+  artifact?: Tab['artifact']
 }
 
 export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
-  const { filePath, url, noteId, noteName, cwd } = options
+  const { filePath, url, noteId, noteName, cwd, artifact } = options
   const isAi = (AI_TAB_TYPES as readonly string[]).includes(type)
   let title: string
   if (options.title?.trim()) {
@@ -52,7 +53,8 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
     ...(filePath ? { filePath } : {}),
     ...(url ? { url } : {}),
     ...(noteId ? { noteId } : {}),
-    ...(cwd ? { cwd } : {})
+    ...(cwd ? { cwd } : {}),
+    ...(artifact ? { artifact } : {})
   }
 }
 

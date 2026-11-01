@@ -152,7 +152,7 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
       return <TerminalTab tabId={tab.id} visible={tabVisible} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} serverId={project.host} shellCommand={project.shellCommand} cwd={tab.cwd} isMainTab={isStatusTab(task, tab.id)} />
     }
     if (tab.type === 'browser') {
-      return <BrowserTab tabId={tab.id} visible={tabVisible} initialUrl={tab.url} projectId={projectId} taskId={task.id} sshConfig={project.ssh} serverId={project.host} />
+      return <BrowserTab tabId={tab.id} visible={tabVisible} initialUrl={tab.url} artifact={tab.artifact} projectId={projectId} taskId={task.id} sshConfig={project.ssh} serverId={project.host} />
     }
     if ((AI_TAB_TYPES as readonly string[]).includes(tab.type)) {
       return (

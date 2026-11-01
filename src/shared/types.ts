@@ -55,6 +55,8 @@ export interface Tab {
   noteId?: string
   /** Terminal spawn directory; when omitted, the task/project directory is used. */
   cwd?: string
+  /** A browser tab showing a chat's Artifact page: the chat tab it came from and the published URL. */
+  artifact?: { chatTabId: string; url: string }
 }
 
 export interface ProjectNote {

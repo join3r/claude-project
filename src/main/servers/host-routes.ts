@@ -103,6 +103,8 @@ export const HOST_ROUTES: Readonly<Record<string, HostRoute>> = {
   'chat-stop-task': tab0,
   'chat-background-task': tab0,
   'chat-respond': tab0,
+  'chat-artifact-manifest': tab0,
+  'chat-artifact-file': tab0,
   'chat-set-model': tab0,
   'chat-set-mode': tab0,
   'chat-set-effort': tab0,

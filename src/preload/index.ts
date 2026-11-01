@@ -1,3 +1,4 @@
+import type { ArtifactPreviewFile } from '../shared/artifact-preview'
 import type { StreamRunAction, StreamRunState } from '../shared/stream-run'
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
@@ -312,6 +313,14 @@ const api = {
     ipcRenderer.invoke('chat-background-task', tabId, toolUseId),
   chatRespond: (tabId: string, promptId: string, response: ChatPromptResponse): Promise<boolean> =>
     ipcRenderer.invoke('chat-respond', tabId, promptId, response),
+  /** The published paths of an artifact's local copy ('' is the page). */
+  chatArtifactManifest: (tabId: string, url: string): Promise<string[]> =>
+    ipcRenderer.invoke('chat-artifact-manifest', tabId, url),
+  chatArtifactFile: (tabId: string, url: string, path: string): Promise<ArtifactPreviewFile> =>
+    ipcRenderer.invoke('chat-artifact-file', tabId, url, path),
+  /** Hand an artifact's local copy to this desktop to serve; resolves the URL to show it at. */
+  artifactPreviewLoad: (key: string, files: ArtifactPreviewFile[]): Promise<string> =>
+    ipcRenderer.invoke('artifact-preview-load', key, files),
   chatSetModel: (tabId: string, model?: string): Promise<void> => ipcRenderer.invoke('chat-set-model', tabId, model),
   chatSetMode: (tabId: string, mode: string): Promise<void> => ipcRenderer.invoke('chat-set-mode', tabId, mode),
   chatSetEffort: (tabId: string, effort?: string): Promise<void> => ipcRenderer.invoke('chat-set-effort', tabId, effort),

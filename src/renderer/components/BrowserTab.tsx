@@ -5,6 +5,8 @@ import { BLANK_BROWSER_URL, normalizeBrowserUrl } from '../browserUrl'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import LinkContextMenu, { type LinkMenuState } from './LinkContextMenu'
 import { useServerStatus } from '../serversState'
+import { ARTIFACT_COPY_PARTITION, ARTIFACT_PARTITION, artifactPreviewKey, artifactPreviewUrl, isArtifactPreviewUrl, type ArtifactPreviewFile } from '../../shared/artifact-preview'
+import type { Tab } from '../../shared/types'
 
 interface Props {
   tabId: string
@@ -15,17 +17,42 @@ interface Props {
   sshConfig?: SshConfig
   /** A DevTool server's project: pages load through that server, so `localhost` is the server. */
   serverId?: string
+  /** A chat's Artifact page: shown from its local files, or published on claude.ai. */
+  artifact?: Tab['artifact']
 }
 
-export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, sshConfig, serverId }: Props): React.ReactElement {
+const toolbarBtn = 'bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-sm whitespace-nowrap hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)'
+
+/** An artifact tab opens on its local copy unless it was left on a web page (the published one). */
+function artifactStartUrl(artifact: NonNullable<Tab['artifact']>, initialUrl: string | undefined): string {
+  return initialUrl && /^https?:\/\//.test(initialUrl) ? initialUrl : artifactPreviewUrl(artifactPreviewKey(artifact.url))
+}
+
+/** Read the artifact's local copy from the chat's host and hand it to this desktop to serve. */
+async function loadArtifactCopy(artifact: NonNullable<Tab['artifact']>): Promise<string> {
+  const paths = await window.api.chatArtifactManifest(artifact.chatTabId, artifact.url)
+  const files: ArtifactPreviewFile[] = await Promise.all(paths.map((path) => window.api.chatArtifactFile(artifact.chatTabId, artifact.url, path)))
+  return window.api.artifactPreviewLoad(artifactPreviewKey(artifact.url), files)
+}
+
+function ipcMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  return raw.replace(/^Error invoking remote method '[^']+': (?:Error: )?/u, '')
+}
+
+export default function BrowserTab({ tabId, visible, initialUrl, projectId, taskId, sshConfig, serverId, artifact: artifactProp }: Props): React.ReactElement {
   const { updateTabUrl, browserZoomFactor, markTaskInteracted, addTab } = useApp()
-  const [url, setUrl] = useState(initialUrl || BLANK_BROWSER_URL)
+  // Its URL comes from saved tabs (a server's too): only a claude.ai page is one.
+  const artifact = artifactProp && artifactProp.url.startsWith('https://claude.ai/') ? artifactProp : undefined
+  const [url, setUrl] = useState(artifact ? artifactStartUrl(artifact, initialUrl) : (initialUrl || BLANK_BROWSER_URL))
   const [inputUrl, setInputUrl] = useState(url)
   const [devToolsOpen, setDevToolsOpen] = useState(false)
   const [proxyEnabled, setProxyEnabled] = useState(!!sshConfig)
   const [proxyLoading, setProxyLoading] = useState(false)
   // A server project's tab never loads before its session goes through the server.
-  const [proxyReady, setProxyReady] = useState(!sshConfig && !serverId)
+  const [proxyReady, setProxyReady] = useState(!!artifact || (!sshConfig && !serverId))
+  /** The local copy: being read, served, or why it can't be shown. */
+  const [copy, setCopy] = useState<{ state: 'idle' | 'loading' | 'ready' } | { state: 'error'; error: string }>({ state: 'idle' })
   const [serverProxyError, setServerProxyError] = useState<string | null>(null)
   const [serverProxyAttempt, setServerProxyAttempt] = useState(0)
   const server = useServerStatus(serverId)
@@ -41,13 +68,46 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: targetUrl })
   }, [addTab, projectId, taskId, tabId])
 
-  const isRemote = !!sshConfig
-  const isServer = !!serverId
-  const partition = isRemote || isServer ? `persist:browser-${projectId}` : undefined
+  // Artifact tabs load claude.ai or a local copy, never the project's network.
+  const isRemote = !!sshConfig && !artifact
+  const isServer = !!serverId && !artifact
+  const showingCopy = !!artifact && isArtifactPreviewUrl(url)
+  // A webview keeps its first session, so switching copy ↔ published remounts it (keyed below).
+  const partition = artifact
+    ? (showingCopy ? ARTIFACT_COPY_PARTITION : ARTIFACT_PARTITION)
+    : isRemote || isServer ? `persist:browser-${projectId}` : undefined
 
-  // The webview mounts late (first view, or once a remote proxy is ready), so
-  // effects that bind to it re-run on `webviewMounted`.
-  const webviewMounted = activated && proxyReady
+  /** (Re)read the local copy, then show it; a reload picks up what Claude published since. */
+  const showCopy = useCallback(async () => {
+    if (!artifact) return
+    setCopy({ state: 'loading' })
+    try {
+      const previewUrl = await loadArtifactCopy(artifact)
+      setCopy({ state: 'ready' })
+      setUrl(previewUrl)
+      setInputUrl(previewUrl)
+      updateTabUrl(projectId, taskId, tabId, previewUrl)
+      const webview = webviewRef.current
+      if (webview && webview.getURL() === previewUrl) webview.reload()
+    } catch (err) {
+      setCopy({ state: 'error', error: ipcMessage(err) })
+      // Shown in place of the page, with the way back to the published one.
+      const previewUrl = artifactPreviewUrl(artifactPreviewKey(artifact.url))
+      setUrl(previewUrl)
+      setInputUrl(previewUrl)
+    }
+  }, [artifact, projectId, taskId, tabId, updateTabUrl])
+
+  // A tab restored on its local copy reads it again on first view: main forgets copies on quit.
+  useEffect(() => {
+    if (activated && showingCopy && copy.state === 'idle') void showCopy()
+  }, [activated, showingCopy, copy.state, showCopy])
+
+  // The webview mounts late (first view, or once a remote proxy is ready) and
+  // again when its session changes, so effects that bind to it re-run on
+  // `webviewMounted` and `partition`.
+  const copyPending = showingCopy && copy.state !== 'ready'
+  const webviewMounted = activated && proxyReady && !copyPending
 
   useEffect(() => {
     const webview = webviewRef.current
@@ -78,7 +138,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
       webview.removeEventListener('did-navigate-in-page', handleNavigation)
       webview.removeEventListener('context-menu', handleContextMenu)
     }
-  }, [webviewMounted, projectId, taskId, tabId, updateTabUrl, markTaskInteracted])
+  }, [webviewMounted, partition, projectId, taskId, tabId, updateTabUrl, markTaskInteracted])
 
   useEffect(() => {
     const handleReload = (e: Event) => {
@@ -101,7 +161,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
     applyZoom()
     webview.addEventListener('dom-ready', applyZoom)
     return () => { webview.removeEventListener('dom-ready', applyZoom) }
-  }, [webviewMounted, browserZoomFactor])
+  }, [webviewMounted, partition, browserZoomFactor])
 
   // Initialize SOCKS proxy for remote projects, on first view only
   useEffect(() => {
@@ -236,7 +296,7 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
       <div className="flex items-center gap-1 px-2 py-1 bg-surface-2 border-b-[0.5px] border-border">
         <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.goBack()} title="Back">&larr;</button>
         <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.goForward()} title="Forward">&rarr;</button>
-        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => webviewRef.current?.reload()} title={`Reload (${formatShortcutForApp('CmdOrCtrl+R')})`}>&#8635;</button>
+        <button className="bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text transition-colors duration-(--motion-fast)" onClick={() => { if (showingCopy) void showCopy(); else webviewRef.current?.reload() }} title={`Reload (${formatShortcutForApp('CmdOrCtrl+R')})`}>&#8635;</button>
         <div className="flex-1 flex items-center relative">
           {isRemote && proxyEnabled && <span className="absolute right-2 bg-accent text-accent-ink text-2xs font-semibold px-1.5 py-px rounded-sm uppercase tracking-wider pointer-events-none z-(--z-sticky)">Remote</span>}
           {isServer && proxyReady && (
@@ -255,6 +315,23 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
             spellCheck={false}
           />
         </div>
+        {artifact && (showingCopy ? (
+          <button
+            className={toolbarBtn}
+            onClick={() => navigate(artifact.url)}
+            title="Open the published page on claude.ai, with its shared data and comments (needs a claude.ai sign-in once)"
+          >
+            Published
+          </button>
+        ) : (
+          <button
+            className={toolbarBtn}
+            onClick={() => void showCopy()}
+            title="Show the page from the files Claude published, without claude.ai"
+          >
+            Local copy
+          </button>
+        ))}
         {isRemote && (
           <button
             className={['bg-transparent border-0 text-text-muted cursor-pointer px-2 py-1 rounded-md text-md hover:bg-surface-3 hover:text-text disabled:opacity-40 disabled:cursor-not-allowed', proxyEnabled ? 'text-accent' : ''].join(' ').trim()}
@@ -281,8 +358,31 @@ export default function BrowserTab({ tabId, visible, initialUrl, projectId, task
         </button>
       </div>
       <div className="flex-1 flex flex-col overflow-hidden">
-        {!activated ? null : proxyReady ? (
+        {!activated ? null : copyPending ? (
+          copy.state === 'error' ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 px-4 text-center text-text-muted text-base" role="alert">
+              <div>Can&apos;t show the local copy: {copy.error}</div>
+              <div className="flex gap-2">
+                <button
+                  className="bg-transparent border border-border text-text cursor-pointer px-2 py-1 rounded-md text-sm hover:bg-surface-3"
+                  onClick={() => void showCopy()}
+                >
+                  Try again
+                </button>
+                <button
+                  className="bg-transparent border border-border text-text cursor-pointer px-2 py-1 rounded-md text-sm hover:bg-surface-3"
+                  onClick={() => { setCopy({ state: 'idle' }); navigate(artifact!.url) }}
+                >
+                  Open published version
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-text-muted text-base">Loading the local copy…</div>
+          )
+        ) : proxyReady ? (
           <webview
+            key={partition ?? 'default'}
             ref={webviewRef}
             src={url}
             className="flex-1 w-full h-full"

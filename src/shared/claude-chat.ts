@@ -743,6 +743,71 @@ export function chatArtifacts(items: ChatItem[]): ChatArtifact[] {
   return [...byUrl.values()].reverse()
 }
 
+/** A local file an Artifact publish sent: a path relative to `root`, then to the chat's directory. */
+export interface ArtifactSource {
+  from: string
+  root?: string
+  contentType?: string
+}
+
+/** What a published page was made of on this machine, so it can be shown without claude.ai. */
+export interface ArtifactSources {
+  page: ArtifactSource
+  /** Supporting files by published path (relative, no leading slash). */
+  files: Record<string, ArtifactSource>
+}
+
+/** A published path as a page references it, or undefined when it could leave the page's folder. */
+export function artifactPublishedPath(path: string): string | undefined {
+  const clean = path.replace(/\\/g, '/').replace(/^(\.\/)+/, '')
+  if (!clean || clean.startsWith('/') || clean.split('/').some((part) => part === '..' || part === '')) return undefined
+  return clean
+}
+
+/**
+ * The local files behind a published page, folded over every Artifact call that
+ * published to `url` (a later call replaces the page, adds or replaces files and
+ * removes the ones it maps to null). An Error says why there is no local copy.
+ */
+export function artifactSources(items: ChatItem[], url: string): ArtifactSources | Error {
+  let page: ArtifactSource | undefined
+  let typed = false
+  const files: Record<string, ArtifactSource> = {}
+  for (const item of items) {
+    if (item.kind !== 'tool' || item.artifact?.url !== url || item.input.asset === true) continue
+    const { input } = item
+    const root = str(input.root)
+    if (str(input.type_url)) typed = true
+    const filePath = str(input.file_path)
+    if (filePath) page = { from: filePath, ...(root ? { root } : {}) }
+    const entries: [string, unknown][] = Array.isArray(input.files)
+      ? input.files.map((entry): [string, unknown] => [str(obj(entry)?.path) ?? '', entry])
+      : Object.entries(obj(input.files) ?? {})
+    for (const [published, source] of entries) {
+      const key = artifactPublishedPath(published)
+      if (!key) continue
+      const spec = obj(source)
+      // Copied from another artifact on claude.ai's side: never on this machine.
+      if (spec?.artifact !== undefined) {
+        delete files[key]
+        continue
+      }
+      const from = typeof source === 'string' ? source : str(spec?.from) ?? (Array.isArray(input.files) ? str(spec?.path) : undefined)
+      if (!from) {
+        // null removes it; a file copied from another artifact never was on this machine.
+        delete files[key]
+        continue
+      }
+      const contentType = str(spec?.contentType)
+      files[key] = { from, ...(root ? { root } : {}), ...(contentType ? { contentType } : {}) }
+    }
+  }
+  if (typed) return new Error('This artifact is built on a claude.ai type, so it only shows on claude.ai.')
+  if (!page) return new Error('No local page for this artifact in this chat.')
+  if (/\.(md|markdown)$/i.test(page.from)) return new Error('Markdown pages are rendered by claude.ai, so this one only shows there.')
+  return { page, files }
+}
+
 function applyUserMessage(draft: Draft, m: Json, history: boolean): Partial<ChatState> {
   if (m.isMeta === true || m.isSynthetic === true) return {}
   const message = obj(m.message)

@@ -1,6 +1,8 @@
 import type { SshConfig } from '../../shared/types'
 import {
+  artifactSources,
   bashContextBlocks,
+  type ArtifactSources,
   emptyChatState,
   isChatPermissionMode,
   reduceChat,
@@ -17,6 +19,8 @@ import {
 import { randomUUID } from 'crypto'
 import { ChatSession } from './chat-session'
 import { runBash, type BashSpawn } from './bash-mode'
+import { artifactManifest, readArtifactFile } from './artifact-files'
+import type { ArtifactPreviewFile } from '../../shared/artifact-preview'
 import { accountFromStatus, loginArgs, loginUrlFrom, outputTail, startLogin, type LoginRun } from './auth'
 import { createRemoteSpawner, type RemoteCommand } from './remote-spawn'
 import { TAB_OWNER_ENV } from '../tab-processes'
@@ -355,6 +359,35 @@ export class ClaudeChatManager {
 
   async interrupt(tabId: string): Promise<void> {
     await this.runtimes.get(tabId)?.session?.interrupt()
+  }
+
+  /** The published paths of an artifact's local copy ('' is the page), for a window showing it. */
+  artifactManifest(tabId: string, url: string): string[] {
+    return artifactManifest(this.artifactSources(tabId, url))
+  }
+
+  /** One file of an artifact's local copy, read where the chat runs. */
+  async artifactFile(tabId: string, url: string, published: string): Promise<ArtifactPreviewFile> {
+    const sources = this.artifactSources(tabId, url)
+    const { config } = this.runtimes.get(tabId)!
+    const { sshConfig, projectId } = config
+    return readArtifactFile(sources, published, {
+      cwd: config.cwd,
+      ...(sshConfig && projectId
+        ? { remoteExec: async (script: string) => {
+          await this.deps.ensureSsh(projectId, sshConfig)
+          return this.deps.remoteExec(projectId, sshConfig, script)
+        } }
+        : {})
+    })
+  }
+
+  private artifactSources(tabId: string, url: string): ArtifactSources {
+    const runtime = this.runtimes.get(tabId)
+    if (!runtime) throw new Error('Open the chat this artifact came from, then try again.')
+    const sources = artifactSources(runtime.state.items, url)
+    if (sources instanceof Error) throw sources
+    return sources
   }
 
   /** `/btw`. Starts (resuming) the process when it isn't running, like a send does. */

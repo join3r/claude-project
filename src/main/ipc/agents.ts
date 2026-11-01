@@ -224,6 +224,10 @@ export function registerAgentHandlers(ipc: IpcRegistrar, deps: AgentDeps): void 
     deps.chatManager().backgroundTask(tabId, toolUseId))
   ipc.handle('chat-respond', [safeId, v.string({ nonEmpty: true }), chatPromptResponse], (_event, tabId, promptId, response) =>
     deps.chatManager().respond(tabId, promptId, response))
+  ipc.handle('chat-artifact-manifest', [safeId, v.string({ nonEmpty: true, max: 2048 })], (_event, tabId, url) =>
+    deps.chatManager().artifactManifest(tabId, url))
+  ipc.handle('chat-artifact-file', [safeId, v.string({ nonEmpty: true, max: 2048 }), v.string({ max: 1024 })], (_event, tabId, url, published) =>
+    deps.chatManager().artifactFile(tabId, url, published))
   ipc.handle('chat-set-model', [safeId, optStr], (_event, tabId, model) => deps.chatManager().setModel(tabId, model))
   ipc.handle('chat-set-mode', [safeId, str], (_event, tabId, mode) => deps.chatManager().setPermissionMode(tabId, mode))
   ipc.handle('chat-set-effort', [safeId, optStr], (_event, tabId, effort) => deps.chatManager().setEffort(tabId, effort))

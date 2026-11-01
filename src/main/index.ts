@@ -9,6 +9,7 @@ import { CONFIG_DIR } from './config-dir'
 import { acquireInstanceLock } from './instance-lock'
 import type { WindowGeometry, WindowViewState } from '../shared/types'
 import { isMenuZoomInKey } from '../shared/shortcut-label'
+import { installArtifactSession, registerArtifactScheme } from './artifact-preview'
 
 // Closed-pipe EIO/EPIPE after helper teardown must not show Electron's
 // "Uncaught Exception" modal. Other errors still go to Electron's handler
@@ -43,6 +44,8 @@ app.on('web-contents-created', (_event, contents) => {
     delete (webPreferences as { preloadURL?: string }).preloadURL
   })
 })
+
+registerArtifactScheme()
 
 let appRuntime: AppRuntime | null = null
 let releaseInstanceLock: (() => void) | null = null
@@ -443,6 +446,7 @@ app.whenReady().then(async () => {
     // responsibility chain and get denied silently, with no dialog.
     void systemPreferences.askForMediaAccess('microphone').catch(() => {})
   }
+  installArtifactSession()
   appRuntime = new AppRuntime((initialViewState, geometry) => createWindow(initialViewState, geometry))
   await appRuntime.start()
   buildAppMenu()

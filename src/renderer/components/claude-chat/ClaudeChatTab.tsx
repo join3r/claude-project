@@ -8,6 +8,8 @@ import { chatArtifacts, composerCommands, type ChatColdCache, type ChatImage, ty
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
+import { findTaskInProject, taskTabs } from '../../../shared/streams'
+import { openBench } from '../desk/benchState'
 import { attachChat, forgetChat, getChatState, setChatEventHandler, useChatState } from './chatStore'
 import Timeline, { type TimelineFocus } from './Timeline'
 import TaskIndicator from './TaskIndicator'
@@ -52,7 +54,7 @@ interface Props {
  * the channels the curl hooks use.
  */
 export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
-  const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab, leaveAfterSend } = useApp()
+  const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab, leaveAfterSend, projects, setActiveTab } = useApp()
   const statusStore = useTabStatusStore()
   const state = useChatState(tabId)
   const attachedRef = useRef(false)
@@ -290,6 +292,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
 
   const openLink = useCallback((url: string) => {
     addTab(projectId, taskId, { withTab: tabId }, 'browser', { url: normalizeBrowserUrl(url) })
+    // Browser tabs live in the Bench: show the one just opened.
+    openBench(taskId, 'panes')
   }, [addTab, projectId, taskId, tabId])
 
   const openContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -350,6 +354,23 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   const coldCache = state.coldCache && state.coldCache !== dismissedCache ? state.coldCache : null
 
   const artifacts = useMemo(() => chatArtifacts(state.items), [state.items])
+  // An artifact opens beside the chat on its local copy; a tab already showing it comes to the front.
+  const openArtifact = useCallback((url: string) => {
+    const task = findTaskInProject(projects.find((p) => p.id === projectId), taskId)
+    const existing = task && taskTabs(task).find((tab) => tab.artifact?.url === url && tab.artifact.chatTabId === tabId)
+    if (existing) {
+      setActiveTab(projectId, taskId, existing.id)
+    } else {
+      const title = artifacts.find((a) => a.url === url)?.title
+      addTab(projectId, taskId, { withTab: tabId }, 'browser', { artifact: { chatTabId: tabId, url }, ...(title ? { title } : {}) })
+    }
+    openBench(taskId, 'panes')
+  }, [projects, projectId, taskId, tabId, artifacts, addTab, setActiveTab])
+  // A link to one of this chat's artifacts opens the same way.
+  const openChatLink = useCallback((url: string) => {
+    if (artifacts.some((a) => a.url === url)) openArtifact(url)
+    else openLink(url)
+  }, [artifacts, openArtifact, openLink])
   const openExternal = useCallback((url: string) => {
     void window.api.openExternal(url).catch(reportError)
   }, [reportError])
@@ -368,7 +389,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
     >
       <div className="flex-1 min-h-0 relative">
         <div className="absolute top-2 right-3 z-(--z-sticky) flex items-start gap-1.5">
-          <ArtifactIndicator artifacts={artifacts} onOpen={openLink} onOpenExternal={openExternal} />
+          <ArtifactIndicator artifacts={artifacts} onOpen={openArtifact} onOpenExternal={openExternal} />
           <TaskIndicator tasks={tasks} onStop={stopTask} onBackground={backgroundTask} onJump={jumpToTool} canJump={canJump} />
         </div>
         <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto relative">
@@ -387,7 +408,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
                 compacting={state.compacting}
                 waiting={state.pending.length > 0}
                 turnStartedAt={state.turnStartedAt}
-                onOpenLink={openLink}
+                onOpenLink={openChatLink}
                 taskTools={taskTools}
                 focus={focus}
                 folded
@@ -453,7 +474,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
           tabId={tabId}
         />
       </div>
-      <LinkContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} onOpenInApp={openLink} />
+      <LinkContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} onOpenInApp={openChatLink} />
       {serverId && <ServerOfflineOverlay serverId={serverId} />}
       {serverId && cliEntry && cliGate.state === 'missing' && (
         <AgentCliMissing serverId={serverId} agent="claude" entry={cliEntry} projectId={projectId} taskId={taskId} tabId={tabId} />

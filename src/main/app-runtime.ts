@@ -25,6 +25,7 @@ import { WindowClientHub, windowClientId } from './window-client-hub'
 import { createIpcRegistrar } from './ipc/registrar'
 import { createAppUrlMatcher } from './ipc/sender'
 import { registerWindowHandlers, type WindowIpcContext } from './ipc/window'
+import { registerArtifactPreviewHandlers } from './artifact-preview'
 import { answerServerProxyLogins, registerServerBrowserHandlers, registerSocksProxyHandlers, routeBrowserDirectQuietly, routeBrowserThroughServerProxy, routeBrowserThroughSocks } from './ipc/socks-proxy'
 import { registerServerIdeHandlers } from './ipc/server-ide'
 import { ServerBrowserProxies } from './servers/server-browser-proxy'
@@ -518,6 +519,7 @@ export class AppRuntime {
       serverOf: (projectId) => this.serverOf(projectId)
     })
 
+    registerArtifactPreviewHandlers(ipc)
     registerUpdateHandlers(ipc, { updates: () => this.updates })
     registerServerHandlers(ipc, { servers: () => this.servers })
     registerSshInstallHandlers(ipc, { sshInstalls: () => this.sshInstallControl() })

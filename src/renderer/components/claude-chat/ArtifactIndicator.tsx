@@ -6,9 +6,9 @@ import { ActionButton, pillCls, usePillDismiss } from './TaskIndicator'
 
 interface Props {
   artifacts: ChatArtifact[]
-  /** Open in a browser tab beside the chat. */
+  /** Open in a tab beside the chat, on the local copy of its files. */
   onOpen: (url: string) => void
-  /** Open in the system browser, where the claude.ai login usually lives. */
+  /** Open the published page in the system browser. */
   onOpenExternal: (url: string) => void
 }
 
