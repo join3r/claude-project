@@ -59,9 +59,10 @@ export default defineConfig({
   renderer: {
     plugins: [react(), tailwindcss(), devCsp()],
     root: resolve('src/renderer'),
-    // Fixed dev port so the window never picks up another project's vite server on 5173
+    // Fixed dev port so the window never picks up another project's vite server on 5173.
+    // DEVTOOL_VITE_PORT gives a second dev run (another task's worktree) its own.
     server: {
-      port: 5197,
+      port: Number(process.env.DEVTOOL_VITE_PORT) || 5197,
       strictPort: true
     },
     build: {

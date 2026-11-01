@@ -61,6 +61,8 @@ export interface PtySessionsDeps {
   sshManager: () => SshConnectionManager
   hookInjector: () => HookInjector
   hookPort: () => number
+  /** What the tab's agent is told about where it runs (`agent-context.ts`); Codex gets it at spawn. */
+  agentContext?: (tabId: string) => string | null
   hookToken: () => string
   getConfig: () => AppConfig
   /** Push the tab's current agent activity to every window. */
@@ -457,6 +459,11 @@ export class PtySessions {
       }
       let localArgs = args
       let localEnv = extraEnv
+      // Codex has no hook to ask on: its note goes in as developer instructions (a
+      // TOML string; JSON's escapes are TOML's). Not on Windows, where the `.cmd`
+      // shim runs under cmd.exe, which would reinterpret it.
+      const codexContext = shell === AI_TAB_META.codex.command && process.platform !== 'win32' ? deps.agentContext?.(id) : null
+      if (codexContext) localArgs = ['-c', `developer_instructions=${JSON.stringify(codexContext)}`, ...(args ?? [])]
       if (isPiLocal) {
         // Ahead of the caller's args, so a first prompt stays the last argument.
         localArgs = ['-e', deps.piExtensionPath(), ...(args ?? [])]

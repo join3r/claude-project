@@ -264,6 +264,17 @@ describe('TaskLandingManager', () => {
     expect(git(ws.worktreePath, 'status', '--porcelain')).toContain('c.txt')
   })
 
+  it('lands mid-turn when the task\'s own agent asks, with its summary', async () => {
+    const ws = taskWorktree('t1')
+    write(ws.worktreePath, 'c.txt', 'x\n')
+    setTasks([task('t1', 'Busy', ws)])
+    activity.set('tab-t1', 'working')
+
+    expect(await manager.landTask('p1', 't1', { keepWorktree: true, summary: 'Adds c.', byAgent: true })).toEqual({ status: 'landed' })
+    expect(git(repo, 'log', '-1', '--format=%B', 'release')).toContain('Adds c.')
+    expect(fs.existsSync(ws.worktreePath)).toBe(true)
+  })
+
   it('stops on a conflict, and abort puts the branch back', async () => {
     const ws = taskWorktree('t1')
     makeConflict(ws.worktreePath)

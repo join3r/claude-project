@@ -10,6 +10,10 @@
  *   agent_start -> POST /hook/working      -> tab status "working"
  *   agent_end   -> POST /hook/notification -> tab status "attention"
  *
+ * Before each turn it also asks POST /hook/context for DevTool's note on where
+ * pi runs (task, stream, branch, that DevTool lands the work; see
+ * src/main/agent-context.ts) and appends it to the system prompt.
+ *
  * The tab id, hook-server port, and shared secret are passed in via env by the
  * spawn wiring in src/main/app-runtime.ts (local: the direct port; remote/SSH:
  * the reverse-tunnel port, reached over the existing `ssh -R` forward).
@@ -41,6 +45,28 @@ export default function devtoolStatus(pi) {
     }
   }
 
+  // The last note DevTool gave, for a turn where it can't be reached.
+  let context = ''
+  const fetchContext = async () => {
+    try {
+      const res = await fetch(`http://localhost:${port}/hook/context`, {
+        method: 'POST',
+        headers: { 'X-Tab-Id': tabId, 'X-Devtool-Token': token, 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(2000)
+      })
+      if (res.ok) context = (await res.text()).trim()
+    } catch {
+      // keep the last one
+    }
+    return context
+  }
+
+  pi.on('before_agent_start', async (event) => {
+    const note = await fetchContext()
+    if (!note || typeof event?.systemPrompt !== 'string') return undefined
+    return { systemPrompt: `${event.systemPrompt}\n\n${note}` }
+  })
   pi.on('agent_start', () => post('working'))
   pi.on('agent_end', () => post('notification'))
 }

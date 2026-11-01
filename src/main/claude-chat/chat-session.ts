@@ -233,6 +233,8 @@ export interface ChatSessionOptions {
   model?: string
   permissionMode?: string
   effort?: string
+  /** DevTool's note on where the agent runs (`agent-context.ts`), after Claude Code's own system prompt. */
+  appendSystemPrompt?: string
   /** Remote projects spawn through ssh; local ones let the SDK spawn. */
   spawn?: (options: SpawnOptions) => SpawnedProcess
   onEvent: (event: ChatEvent) => void
@@ -335,7 +337,7 @@ export class ChatSession {
       pathToClaudeCodeExecutable: o.executable,
       env: chatEnv(o.env),
       settingSources: ['user', 'project', 'local'],
-      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      systemPrompt: { type: 'preset', preset: 'claude_code', ...(o.appendSystemPrompt ? { append: o.appendSystemPrompt } : {}) },
       includePartialMessages: true,
       canUseTool: this.canUseTool,
       hooks,

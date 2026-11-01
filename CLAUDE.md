@@ -49,6 +49,7 @@ agent-browser click @e5
 ```
 
 Notes:
+- Several tasks may run dev at once, each in its own worktree. Give yours its own ports and config dir so it neither clashes with nor kills another's: `DEVTOOL_VITE_PORT=<free port> DEVTOOL_CDP_PORT=<free port> DEVTOOL_CONFIG_DIR=<scratch dir> npx electron-vite dev` (the renderer port is otherwise pinned to 5197 with `strictPort`, and one config dir allows one instance). Stop it by PID, never with `pkill -f electron-vite` or similar patterns that match other tasks' runs.
 - The CDP switch is opt-in; `npm run dev` and production builds do **not** open the port.
 - Multiple DevTool windows (Cmd+Shift+N) are separate CDP targets — switch via `agent-browser tab <index>`. One `agent-browser` instance handles all of them.
 - Stop the instance you started (dev server and Electron) before you finish. DevTool kills what an agent leaves behind only when its tab or task closes (`src/main/tab-processes.ts`), so a leftover stays open until then.

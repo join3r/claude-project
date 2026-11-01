@@ -253,16 +253,18 @@ export class TaskLandingManager {
    * worktree stays, on the stream's new tip. Otherwise (closing) the task's
    * tabs stop, the worktree and branch go and the task is archived, also when
    * there was nothing to land. `summary` (Autopilot's) opens the squashed
-   * commit's body, above the list of the commits it took in.
+   * commit's body, above the list of the commits it took in. `byAgent`: the
+   * task's own agent asked (`agent-context.ts`), so its turn being open is
+   * no reason to refuse.
    */
-  landTask(projectId: string, taskId: string, options: { keepWorktree?: boolean; summary?: string } = {}): Promise<TaskLandingResult> {
+  landTask(projectId: string, taskId: string, options: { keepWorktree?: boolean; summary?: string; byAgent?: boolean } = {}): Promise<TaskLandingResult> {
     const intent: TaskLandingIntent = options.keepWorktree ? 'land' : 'close'
-    return this.enqueue(projectId, taskId, at => this.land(at, intent, options.summary?.trim() || undefined))
+    return this.enqueue(projectId, taskId, at => this.land(at, intent, options.summary?.trim() || undefined, !!options.byAgent))
   }
 
   /** Rebases the task onto the stream's tip without landing (its commits stay as they are). */
-  updateFromStream(projectId: string, taskId: string): Promise<TaskLandingResult> {
-    return this.enqueue(projectId, taskId, at => this.update(at))
+  updateFromStream(projectId: string, taskId: string, options: { byAgent?: boolean } = {}): Promise<TaskLandingResult> {
+    return this.enqueue(projectId, taskId, at => this.update(at, !!options.byAgent))
   }
 
   /**
@@ -270,11 +272,11 @@ export class TaskLandingManager {
    * the rebase already continued) goes on; a blocked one tries the
    * fast-forward again. It ends the way it was asked for (`Task.landing.intent`).
    */
-  retryLanding(projectId: string, taskId: string): Promise<TaskLandingResult> {
+  retryLanding(projectId: string, taskId: string, options: { byAgent?: boolean } = {}): Promise<TaskLandingResult> {
     return this.enqueue(projectId, taskId, async at => {
       const landing = at.task.landing
       if (!landing) return failed('Nothing to retry')
-      if (this.agentWorking(at.task)) return { status: 'working' }
+      if (!options.byAgent && this.agentWorking(at.task)) return { status: 'working' }
       this.stopWatching(taskId)
       return this.resume(at, landing.intent ?? 'close')
     })
@@ -418,8 +420,8 @@ export class TaskLandingManager {
 
   // ---- the steps -------------------------------------------------------------------
 
-  private async land(at: Located, intent: TaskLandingIntent, summary?: string): Promise<TaskLandingResult> {
-    if (this.agentWorking(at.task)) return { status: 'working' }
+  private async land(at: Located, intent: TaskLandingIntent, summary: string | undefined, byAgent: boolean): Promise<TaskLandingResult> {
+    if (!byAgent && this.agentWorking(at.task)) return { status: 'working' }
     this.stopWatching(at.task.id)
     const root = at.own.worktreePath
     // A landing that already stopped: retry or abort it, don't stack another.
@@ -436,8 +438,8 @@ export class TaskLandingManager {
     return this.integrate(at, intent)
   }
 
-  private async update(at: Located): Promise<TaskLandingResult> {
-    if (this.agentWorking(at.task)) return { status: 'working' }
+  private async update(at: Located, byAgent: boolean): Promise<TaskLandingResult> {
+    if (!byAgent && this.agentWorking(at.task)) return { status: 'working' }
     this.stopWatching(at.task.id)
     const root = at.own.worktreePath
     if (await this.rebaseInProgress(root)) return this.conflict(at, at.task.landing?.intent ?? 'update')

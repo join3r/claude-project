@@ -7,7 +7,24 @@ import {
   MAX_HOOK_BODY_BYTES
 } from '../shared/hook-protocol'
 
-const VALID_ENDPOINTS = new Set(['session-start', 'working', 'stopped', 'notification', 'activity'])
+const VALID_ENDPOINTS = new Set(['session-start', 'working', 'stopped', 'notification', 'activity', 'context', 'land', 'update'])
+
+/** Endpoints only answered (by the responder), never emitted: they ask DevTool something rather than report agent status. */
+const REQUEST_ENDPOINTS = new Set(['context', 'land', 'update'])
+
+/**
+ * Endpoints that change git state. They take only the tab's own token
+ * ({@link HookServer.tabToken}), never the shared one: the agent's note carries
+ * it, so a token that leaks from a transcript or argv acts on that one task.
+ */
+const TAB_TOKEN_ENDPOINTS = new Set(['land', 'update'])
+
+/**
+ * Answers a hook with a body: `session-start` gets the agent's DevTool context
+ * as Claude hook output, `context` the same note as text (Pi), `land` /
+ * `update` run the task's landing for the agent. Undefined answers nothing.
+ */
+export type HookResponder = (endpoint: string, tabId: string, body: Record<string, unknown>) => Promise<string | undefined> | string | undefined
 
 function headerValue(headers: http.IncomingHttpHeaders, name: string): string | undefined {
   const raw = headers[name.toLowerCase()]
@@ -30,6 +47,9 @@ export class HookServer extends EventEmitter {
   private ready = false
   private logger?: (message: string) => void
   private token: string
+  /** Keys {@link tabToken}. Never leaves this process: the shared token does (hook commands, Pi's env), so it can't key tab tokens. */
+  private readonly tabSecret = crypto.randomBytes(32)
+  private responder: HookResponder | null = null
 
   /** `logger` traces every inbound hook, including rejects — the only way to tell
    *  "the agent never called" from "it called with no tab id". */
@@ -44,6 +64,15 @@ export class HookServer extends EventEmitter {
 
   getToken(): string {
     return this.token
+  }
+
+  /** The token only `tabId` may use, for {@link TAB_TOKEN_ENDPOINTS}: an HMAC of the tab id with a secret no agent sees. */
+  tabToken(tabId: string): string {
+    return crypto.createHmac('sha256', this.tabSecret).update(tabId).digest('base64url')
+  }
+
+  setResponder(responder: HookResponder | null): void {
+    this.responder = responder
   }
 
   async start(): Promise<void> {
@@ -77,7 +106,8 @@ export class HookServer extends EventEmitter {
         }
 
         const providedToken = headerValue(req.headers, HOOK_TOKEN_HEADER)
-        if (!hookTokensMatch(providedToken, this.token)) {
+        const expected = TAB_TOKEN_ENDPOINTS.has(endpoint) ? this.tabToken(tabId) : this.token
+        if (!hookTokensMatch(providedToken, expected)) {
           this.logger?.(`hook reject-unauthorized endpoint=${endpoint} tabId=${tabId}`)
           res.writeHead(401)
           res.end()
@@ -115,10 +145,27 @@ export class HookServer extends EventEmitter {
             (typeof body.message === 'string' ? ` message=${JSON.stringify(body.message)}` : '')
           )
 
-          this.emit(endpoint, tabId, body)
+          if (!REQUEST_ENDPOINTS.has(endpoint)) this.emit(endpoint, tabId, body)
 
-          res.writeHead(200)
-          res.end()
+          const responder = this.responder
+          if (!responder) {
+            res.writeHead(200)
+            res.end()
+            return
+          }
+          Promise.resolve()
+            .then(() => responder(endpoint, tabId, body))
+            .then(
+              (answer) => {
+                res.writeHead(200, answer ? { 'Content-Type': 'text/plain; charset=utf-8' } : {})
+                res.end(answer ?? '')
+              },
+              (err: unknown) => {
+                this.logger?.(`hook respond-error endpoint=${endpoint} tabId=${tabId} error=${err instanceof Error ? err.message : String(err)}`)
+                res.writeHead(500)
+                res.end()
+              }
+            )
         })
       })
 

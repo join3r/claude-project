@@ -70,6 +70,8 @@ export interface ChatManagerDeps {
   /** The process started or ended (liveness, status). */
   onProcessChange: (tabId: string, running: boolean, error?: string) => void
   log: (message: string) => void
+  /** What the tab's agent is told about where it runs (`agent-context.ts`); null for none. */
+  agentContext?: (tabId: string) => string | null
   /**
    * Every chat here signs in from another machine: this host is a DevTool
    * server, whose windows are on a desktop. `/login` then asks for the pasted
@@ -577,6 +579,7 @@ export class ClaudeChatManager {
       model: runtime.model,
       permissionMode: runtime.permissionMode,
       effort: runtime.effort,
+      appendSystemPrompt: this.deps.agentContext?.(tabId) ?? undefined,
       spawn,
       onEvent,
       onHook: (body) => {

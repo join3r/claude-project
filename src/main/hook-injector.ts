@@ -43,6 +43,15 @@ export function hookEndpointFor(event: string): string {
   return HOOK_EVENTS.find((entry) => entry.event === event)?.endpoint ?? 'activity'
 }
 
+/**
+ * What follows a hook's curl. SessionStart's stdout is the hook server's answer,
+ * the agent's DevTool context as hook JSON (`agent-context.ts`), so nothing may
+ * follow it; it still exits 0 when DevTool is gone. The others print `Success`.
+ */
+function hookCommandTail(endpoint: string): string {
+  return endpoint === 'session-start' ? ' || true' : '; printf Success'
+}
+
 function buildDevtoolHooks(mkCommand: (endpoint: string) => string): Record<string, HookEntry[]> {
   const hooks: Record<string, HookEntry[]> = {}
   for (const { event, endpoint, async } of HOOK_EVENTS) {
@@ -93,7 +102,7 @@ export class HookInjector {
     const curl = this.curlBin()
     const base = `http://localhost:${this.port}`
     return buildDevtoolHooks((endpoint) =>
-      `${curl} -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null; printf Success`
+      `${curl} -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null${hookCommandTail(endpoint)}`
     )
   }
 
@@ -253,7 +262,7 @@ export class HookInjector {
   buildRemoteInjectScript(remoteDir: string, remotePort: number): string {
     const base = `http://localhost:${remotePort}`
     const mkHookCmd = (endpoint: string): string =>
-      `curl -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null; printf Success`
+      `curl -s --max-time 5 -X POST ${base}/hook/${endpoint} -H "${HOOK_TAB_ID_HEADER}: $DEVTOOL_TAB_ID" -H "${HOOK_TOKEN_HEADER}: ${this.token}" -d @- 2>/dev/null${hookCommandTail(endpoint)}`
 
     const devtoolHooks = buildDevtoolHooks(mkHookCmd)
 

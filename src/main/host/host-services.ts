@@ -14,6 +14,7 @@ import { isVisibleOnMobile } from '../mobile/inbox'
 import { resolveLocalTerminalSpawn } from '../resolve-local-terminal'
 import { HookServer } from '../hook-server'
 import { HookInjector, hookEndpointFor } from '../hook-injector'
+import { agentContextForTab } from '../agent-context'
 import { ClaudeChatManager } from '../claude-chat/chat-manager'
 import { SshConnectionManager } from '../ssh-connection-manager'
 import { CodexSessionManager } from '../codex-session-manager'
@@ -455,6 +456,7 @@ export class HostServices {
       sendToClient: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       log: (message) => this.logDebug(message),
       piExtensionPath: () => env.resourcePath(PI_EXTENSION_RESOURCE),
+      agentContext: (tabId) => this.agentContext(tabId),
       condaEnvForProject: (projectId) => this.condaEnvForLocalProject(projectId),
       onKill: (tabId) => this.shutdownNotebookKernel(tabId),
       onExit: (tabId, exitCode) => this.streamRuns.handleExit(tabId, exitCode),
@@ -1144,6 +1146,7 @@ export class HostServices {
     for (const endpoint of ['session-start', 'working', 'stopped', 'notification', 'activity']) {
       this.hookServer.on(endpoint, (tabId: string, body: Record<string, unknown>) => this.handleHook(endpoint, tabId, body))
     }
+    this.hookServer.setResponder((endpoint, tabId, body) => this.answerHook(endpoint, tabId, body))
 
     // The desktop adds its own listener for the browser tabs' SOCKS routing.
     this.sshManager.on('status-changed', (projectId: string, status: string) => {
@@ -1155,6 +1158,62 @@ export class HostServices {
       this.logDebug(`tunnelStatus projectId=${projectId} status=${status}${error ? ` error=${error}` : ''}`)
       this.clients.broadcast('ssh-tunnel-status-changed', projectId, status, error)
     })
+  }
+
+  /** What DevTool tells the agent in `tabId` about where it runs (`agent-context.ts`); null outside a project task. */
+  agentContext(tabId: string): string | null {
+    return agentContextForTab(this.projectsStore.peek().projects, tabId, { port: this.hookServer.getPort(), token: this.hookServer.tabToken(tabId) })
+  }
+
+  private async answerHook(endpoint: string, tabId: string, body: Record<string, unknown>): Promise<string | undefined> {
+    switch (endpoint) {
+      case 'session-start': {
+        const context = this.agentContext(tabId)
+        return context ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }) : undefined
+      }
+      case 'context':
+        return this.agentContext(tabId) ?? undefined
+      case 'land':
+      case 'update':
+        return this.landForAgent(endpoint, tabId, typeof body.summary === 'string' ? body.summary : undefined)
+      default:
+        return undefined
+    }
+  }
+
+  /**
+   * A task's agent asking DevTool to land its worktree into the stream (the
+   * task stays open on the new tip) or to rebase it onto the stream's tip. A
+   * stopped landing is picked up again instead, once the agent has resolved it.
+   * The answer is a line for the agent to read.
+   */
+  private async landForAgent(endpoint: 'land' | 'update', tabId: string, summary: string | undefined): Promise<string> {
+    for (const project of this.projectsStore.peek().projects) {
+      for (const stream of project.streams ?? []) {
+        const task = stream.tasks.find(candidate => taskTabs(candidate).some(tab => tab.id === tabId))
+        if (!task) continue
+        // An SSH project's agent reaches this server through the reverse tunnel; its tasks never land.
+        if (project.ssh) return 'DevTool does not land tasks of SSH projects.'
+        if (!task.workspace) return 'This task has no worktree of its own, so there is nothing for DevTool to land: its commits are already on the branch it works on.'
+        const target = task.workspace.baseBranch
+        this.logDebug(`agentLanding endpoint=${endpoint} task=${task.id}`)
+        const result = task.landing
+          ? await this.taskLanding.retryLanding(project.id, task.id, { byAgent: true })
+          : endpoint === 'land'
+            ? await this.taskLanding.landTask(project.id, task.id, { keepWorktree: true, summary, byAgent: true })
+            : await this.taskLanding.updateFromStream(project.id, task.id, { byAgent: true })
+        switch (result.status) {
+          case 'landed': return `Landed: ${target} now has this task's work as one commit, and this worktree is on that new tip.`
+          case 'updated': return `Updated: this branch is now rebased onto the tip of ${target}.`
+          case 'nothing': return endpoint === 'land' ? `Nothing to land: ${target} already has everything on this branch.` : `Already up to date with ${target}.`
+          case 'conflict': return `Stopped on conflicts in: ${result.files.join(', ')}. Resolve them in this worktree (edit, git add, GIT_EDITOR=true git rebase --continue), then make the same call again.`
+          case 'blocked': return `Blocked: ${result.message} The user has uncommitted changes in ${target}'s checkout touching ${result.files.join(', ')}. Tell the user; try again once they are committed.`
+          case 'failed': return `Failed: ${result.error}`
+          default: return `DevTool answered: ${result.status}`
+        }
+      }
+    }
+    return 'DevTool has no task for this agent.'
   }
 
   /**
@@ -1296,6 +1355,7 @@ export class HostServices {
   private createChatManager(): ClaudeChatManager {
     return new ClaudeChatManager({
       sendToClient: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
+      agentContext: (tabId) => this.agentContext(tabId),
       resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
       resolveLocalAgent: (agent) => resolveAgentCommand(agentCommandOverride(agent, this.config).trim() || agent),
       wrapSpawn: (file, args) => conptySpawnArgv(file, args, { env: getShellEnv() }),

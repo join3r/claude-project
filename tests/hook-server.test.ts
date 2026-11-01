@@ -87,6 +87,39 @@ describe('HookServer', () => {
     expect(events[0].body.session_id).toBe('sess-123')
   })
 
+  it('answers with the responder, and never emits the request endpoints', async () => {
+    const emitted: string[] = []
+    server.on('context', () => emitted.push('context'))
+    server.on('session-start', () => emitted.push('session-start'))
+    server.setResponder((endpoint, tabId) => (endpoint === 'working' ? undefined : `${endpoint}:${tabId}`))
+
+    const answer = (path: string): Promise<{ status: number; text: string }> => new Promise((resolve, reject) => {
+      const req = http.request(
+        { hostname: '127.0.0.1', port: server.getPort(), path, method: 'POST', headers: authedHeaders(server, 'tab-9') },
+        (res) => {
+          let text = ''
+          res.on('data', (chunk) => { text += chunk })
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, text }))
+        }
+      )
+      req.on('error', reject)
+      req.end('{}')
+    })
+
+    expect(await answer('/hook/context')).toEqual({ status: 200, text: 'context:tab-9' })
+    expect(await answer('/hook/session-start')).toEqual({ status: 200, text: 'session-start:tab-9' })
+    expect(await answer('/hook/working')).toEqual({ status: 200, text: '' })
+    expect(emitted).toEqual(['session-start'])
+  })
+
+  it('takes only the tab\'s own token for land and update', async () => {
+    server.setResponder(() => 'ok')
+    const shared = await request(server.getPort(), '/hook/land', {}, authedHeaders(server, 'tab-1'))
+    const otherTab = await request(server.getPort(), '/hook/land', {}, { [HOOK_TAB_ID_HEADER]: 'tab-2', [HOOK_TOKEN_HEADER]: server.tabToken('tab-1') })
+    const own = await request(server.getPort(), '/hook/update', {}, { [HOOK_TAB_ID_HEADER]: 'tab-1', [HOOK_TOKEN_HEADER]: server.tabToken('tab-1') })
+    expect([shared, otherTab, own]).toEqual([401, 401, 200])
+  })
+
   it('emits working event', async () => {
     const events: string[] = []
     server.on('working', (tabId) => events.push(tabId))

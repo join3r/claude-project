@@ -41,6 +41,15 @@ describe('HookInjector', () => {
     }
   })
 
+  it('passes SessionStart\'s answer (the agent\'s DevTool context) through untouched', () => {
+    const injector = new HookInjector(3456, 'test-token', () => 'curl')
+    injector.inject(testDir, 'tab-1')
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+    expect(settings.hooks.SessionStart[0].hooks[0].command).not.toContain('Success')
+    expect(settings.hooks.SessionStart[0].hooks[0].command).toMatch(/\|\| true$/)
+    expect(settings.hooks.Stop[0].hooks[0].command).toMatch(/printf Success$/)
+  })
+
   it('injects the activity hooks as async posts to /hook/activity', () => {
     const injector = new HookInjector(3456, 'test-token', () => 'curl')
     injector.inject(testDir, 'tab-1')
