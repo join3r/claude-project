@@ -41,7 +41,7 @@ struct PromptCard: View {
             case .plan(let markdown):
                 PlanPromptView(markdown: markdown, busy: answering, enabled: enabled, onAnswer: onAnswer)
             case .unknown:
-                Label("Claude is waiting for an answer this app can't show. Answer it on the desktop, or update the app.",
+                Label("The agent is waiting for an answer this app can't show. Answer it on the desktop, or update the app.",
                       systemImage: "arrow.up.circle")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

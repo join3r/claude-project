@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
-import { isEphemeralProject } from '../../../shared/types'
+import { isChatTabType, isEphemeralProject } from '../../../shared/types'
 import type { Project, Task, TaskLandingResult } from '../../../shared/types'
 import { findStreamOfTask, findTaskInProject, taskTabs } from '../../../shared/streams'
 import { tabIdsOfTask } from '../../hooks/appState/projectsData'
@@ -58,7 +58,7 @@ export function useDeskDone(fallback: (projectId: string, taskId: string) => Pro
   /** Interrupts the task's working chat tabs and waits for them to go quiet. False when one can't be stopped. */
   const stopAgents = useCallback(async (task: Task): Promise<boolean> => {
     const working = taskTabs(task).filter(tab => tabStatusStore.getStatus(tab.id) === 'working')
-    if (working.some(tab => tab.type !== 'claude-chat')) {
+    if (working.some(tab => !isChatTabType(tab.type))) {
       window.alert(`"${task.name}" has an agent running in a terminal. Stop it there, then mark the task done.`)
       return false
     }

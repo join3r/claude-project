@@ -423,8 +423,8 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                   value={config.deskAgent}
                   onChange={(e) => updateConfig({ deskAgent: e.target.value as PromptBoxAgent })}
                 >
-                  {PROMPT_BOX_AGENTS.filter(agent => (agent === 'codex' ? config.enableCodex : agent === 'pi' ? config.enablePi : config.enableClaude) || agent === config.deskAgent).map(agent => (
-                    <option key={agent} value={agent}>{agent === 'claude-chat' ? 'Claude (chat)' : PROMPT_BOX_AGENT_LABEL[agent]}</option>
+                  {PROMPT_BOX_AGENTS.filter(agent => (agent.startsWith('codex') ? config.enableCodex : agent.startsWith('pi') ? config.enablePi : config.enableClaude) || agent === config.deskAgent).map(agent => (
+                    <option key={agent} value={agent}>{agent.endsWith('-chat') ? `${PROMPT_BOX_AGENT_LABEL[agent]} (chat)` : PROMPT_BOX_AGENT_LABEL[agent]}</option>
                   ))}
                 </Select>
                 <HelperText>
@@ -526,6 +526,18 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                     </HelperText>
                   </SetBlock>
                 </FormGroup>
+                <FormGroup>
+                  <SetBlock label="New Codex tasks open as">
+                    <SegCtl
+                      options={[{ value: 'terminal', label: 'Terminal' }, { value: 'chat', label: 'Chat' }] as const}
+                      value={config.codexDefaultView}
+                      onChange={(codexDefaultView) => updateConfig({ codexDefaultView })}
+                    />
+                    <HelperText>
+                      Chat drives the same `codex` (your login and settings) in DevTool&apos;s own UI. Switch a task between the two from the … menu in its header.
+                    </HelperText>
+                  </SetBlock>
+                </FormGroup>
               </>
             )}
 
@@ -553,6 +565,18 @@ export default function Settings({ onClose, initialTab }: Props): React.ReactEle
                     </div>
                     <HelperText>
                       Leave empty to use `pi` on PATH. On Windows this is often %AppData%\npm\pi.cmd.
+                    </HelperText>
+                  </SetBlock>
+                </FormGroup>
+                <FormGroup>
+                  <SetBlock label="New Pi tasks open as">
+                    <SegCtl
+                      options={[{ value: 'terminal', label: 'Terminal' }, { value: 'chat', label: 'Chat' }] as const}
+                      value={config.piDefaultView}
+                      onChange={(piDefaultView) => updateConfig({ piDefaultView })}
+                    />
+                    <HelperText>
+                      Chat drives the same `pi` (your login and settings) in DevTool&apos;s own UI. Switch a task between the two from the … menu in its header.
                     </HelperText>
                   </SetBlock>
                 </FormGroup>

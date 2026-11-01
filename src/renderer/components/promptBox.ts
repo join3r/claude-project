@@ -4,7 +4,7 @@
  * tested without a renderer.
  */
 
-import { NEW_TASK_NAME, PROMPT_BOX_AGENTS } from '../../shared/types'
+import { chatTabAgent, isChatTabType, NEW_TASK_NAME, PROMPT_BOX_AGENTS } from '../../shared/types'
 import type { AiTabType, AppConfig, Project, PromptBoxAgent } from '../../shared/types'
 import type { ChatImage } from '../../shared/claude-chat'
 import { taskNameFromPrompt } from '../../shared/task-name'
@@ -15,8 +15,10 @@ export { taskNameFromPrompt }
 export const PROMPT_BOX_AGENT_LABEL: Record<PromptBoxAgent, string> = {
   'claude-chat': 'Claude',
   claude: 'Claude (terminal)',
-  codex: 'Codex',
-  pi: 'Pi'
+  'codex-chat': 'Codex',
+  codex: 'Codex (terminal)',
+  'pi-chat': 'Pi',
+  pi: 'Pi (terminal)'
 }
 
 /** What the first spawn or first send of an agent tab carries. */
@@ -28,7 +30,7 @@ export interface PendingPrompt {
   model?: string
   /** Claude chat only. */
   effort?: string
-  /** Claude chat only: images sent along with the text. */
+  /** Chat tabs only: images sent along with the text. */
   images?: ChatImage[]
 }
 
@@ -41,17 +43,21 @@ export function shouldNameTask(currentName: string): boolean {
 /**
  * The agents this project's prompt box offers: the ones switched on in Settings, in
  * a fixed order. A shell-command project runs one command, not agents, so it gets none.
- * A DevTool server's project has no Claude chat yet (Claude runs there in its terminal).
+ * Codex and Pi chats don't run over SSH yet (their terminals do).
  */
 export function availablePromptAgents(
   config: Pick<AppConfig, 'enableClaude' | 'enableCodex' | 'enablePi'>,
-  project: Pick<Project, 'shellCommand' | 'host'>
+  project: Pick<Project, 'shellCommand' | 'host'> & { ssh?: unknown }
 ): PromptBoxAgent[] {
   if (project.shellCommand) return []
   return PROMPT_BOX_AGENTS.filter((agent) => {
-    if (agent === 'claude-chat' && !featureAvailable(project, 'chat')) return false
-    if (agent === 'claude-chat' || agent === 'claude') return config.enableClaude
-    if (agent === 'codex') return config.enableCodex
+    if (isChatTabType(agent)) {
+      if (!featureAvailable(project, 'chat')) return false
+      if (agent !== 'claude-chat' && project.ssh) return false
+    }
+    const tool = isChatTabType(agent) ? chatTabAgent(agent) : agent
+    if (tool === 'claude') return config.enableClaude
+    if (tool === 'codex') return config.enableCodex
     return config.enablePi
   })
 }

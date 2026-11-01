@@ -24,7 +24,17 @@
         },
         "effort": { "type": "string" },
         "defaultEffort": { "type": "string" },
-        "efforts": { "type": "array", "items": { "type": "string" } }
+        "efforts": { "type": "array", "items": { "type": "string" } },
+        "effortLabel": { "type": "string", "description": "The effort picker's name when not \"Effort\" (Pi: \"Thinking\")" },
+        "modes": {
+          "description": "The agent's mode picker (Codex's presets); [] = no modes (Pi); absent = the task.new modes",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["value", "label"],
+            "properties": { "value": { "type": "string" }, "label": { "type": "string" }, "description": { "type": "string" } }
+          }
+        }
       }
     },
     "limit": {
@@ -100,6 +110,7 @@
       "required": ["tabId", "title", "busy", "process", "items", "hasEarlier", "prompts"],
       "properties": {
         "tabId": { "type": "string" },
+        "agent": { "type": "string", "description": "codex | pi; absent = Claude" },
         "title": { "type": "string" },
         "busy": { "type": "boolean" },
         "turnStartedAt": { "$ref": "#/$defs/ms" },

@@ -202,7 +202,7 @@ describe('NewTaskModal', () => {
   it('drops the Claude-only options for another agent', async () => {
     renderModal()
     await act(async () => { fireEvent.click(screen.getByTitle('Agent')) })
-    await act(async () => { fireEvent.click(screen.getByText('Codex')) })
+    await act(async () => { fireEvent.click(screen.getByText('Codex (terminal)')) })
     expect(screen.queryByTitle('Model')).toBeNull()
     await typePrompt('Port it')
     await submit()
@@ -250,10 +250,22 @@ describe('NewTaskModal', () => {
       expect(createButton().disabled).toBe(false)
     })
 
-    it('ignores images for an agent that cannot take them', async () => {
+    it('sends images to a Codex chat too', async () => {
       renderModal()
       await act(async () => { fireEvent.click(screen.getByTitle('Agent')) })
       await act(async () => { fireEvent.click(screen.getByText('Codex')) })
+      await pasteImage()
+      await typePrompt('Port it')
+      await submit()
+      expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+        start: { agent: 'codex-chat', prompt: { text: 'Port it', images: [{ mediaType: 'image/png', data: 'UE5H' }] } }
+      }))
+    })
+
+    it('ignores images for an agent that cannot take them', async () => {
+      renderModal()
+      await act(async () => { fireEvent.click(screen.getByTitle('Agent')) })
+      await act(async () => { fireEvent.click(screen.getByText('Codex (terminal)')) })
       await act(async () => { fireEvent.paste(promptInput(), { clipboardData: { files: [png()] } }) })
       expect(screen.queryByLabelText('Remove image')).toBeNull()
       await typePrompt('Port it')

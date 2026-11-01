@@ -12,7 +12,7 @@ import Timeline from './claude-chat/Timeline'
 import { GrpHead, FormGroup, PrimaryButton } from './ui'
 
 const TAB_LABEL: Record<Tab['type'], string> = {
-  terminal: 'Terminal', browser: 'Browser', claude: 'Claude Code', 'claude-chat': 'Claude', codex: 'Codex', pi: 'Pi',
+  terminal: 'Terminal', browser: 'Browser', claude: 'Claude Code', 'claude-chat': 'Claude', codex: 'Codex', 'codex-chat': 'Codex', pi: 'Pi', 'pi-chat': 'Pi',
   diff: 'Diff', editor: 'Editor', notebook: 'Notebook', note: 'Note'
 }
 

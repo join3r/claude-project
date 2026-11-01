@@ -369,7 +369,7 @@ export function planTaskMove(task: Task, fromDir: string, toDir: string): TaskMo
   const restartTabIds: string[] = []
   for (const tab of taskTabs(task)) {
     if ((tab.type === 'claude' || tab.type === 'claude-chat') && tab.sessionId) sessions.push({ kind: 'claude', sessionId: tab.sessionId })
-    if (tab.type === 'pi' && tab.sessionId) sessions.push({ kind: 'pi', sessionId: tab.sessionId })
+    if ((tab.type === 'pi' || tab.type === 'pi-chat') && tab.sessionId) sessions.push({ kind: 'pi', sessionId: tab.sessionId })
     if (runsInTaskDir(tab)) {
       restartTabIds.push(tab.id)
     } else if (tab.type === 'terminal' && tab.cwd) {

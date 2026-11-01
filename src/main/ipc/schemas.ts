@@ -183,6 +183,7 @@ export const archivedStreamEntry = v.object({
 }, 'passthrough')
 
 export const chatTabConfig = v.object({
+  agent: v.optional(v.literal('claude', 'codex', 'pi')),
   cwd: v.string(),
   sessionId: v.string({ nonEmpty: true }),
   projectId: optSafeId,

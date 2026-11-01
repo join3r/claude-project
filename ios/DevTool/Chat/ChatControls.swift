@@ -13,7 +13,8 @@ enum PermissionModes {
 }
 
 /// The desktop composer's pickers and meter above the phone's composer: permission
-/// mode, model and effort menus, then the plan limits. Tapping the meter shows the
+/// mode (the agent's own when the desktop sends them; none for Pi), model and
+/// effort menus, then the plan limits. Tapping the meter shows the
 /// details, with when each window resets.
 struct ChatControlsBar: View {
     let status: ChatStatus
@@ -28,7 +29,7 @@ struct ChatControlsBar: View {
         HStack(spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    modeMenu
+                    if !modes.isEmpty { modeMenu }
                     if let settings = status.settings {
                         modelMenu(settings)
                         if !settings.efforts.isEmpty { effortMenu(settings) }
@@ -51,26 +52,40 @@ struct ChatControlsBar: View {
 
     // MARK: Menus
 
+    /// The agent's modes as the desktop names them (a Codex chat's presets, none for Pi), else Claude's.
+    private var modes: [ChatModelOption] {
+        status.settings?.modes ?? TaskOp.modes.map { ChatModelOption(value: $0, label: PermissionModes.label($0)) }
+    }
+
+    private var currentMode: String {
+        status.permissionMode ?? (status.settings?.modes == nil ? "default" : modes.first?.value ?? "")
+    }
+
+    private var modeLabel: String {
+        modes.first { $0.value == currentMode }?.label ?? PermissionModes.label(currentMode)
+    }
+
     private var modeMenu: some View {
         Menu {
-            Picker("Permission mode", selection: selection(status.permissionMode ?? "default") { change($0, nil, nil) }) {
-                ForEach(TaskOp.modes, id: \.self) { mode in
-                    Text(PermissionModes.label(mode)).tag(mode)
+            Picker("Permission mode", selection: selection(currentMode) { change($0, nil, nil) }) {
+                ForEach(modes, id: \.value) { mode in
+                    Text(mode.label).tag(mode.value)
                 }
             }
         } label: {
-            Chip(text: PermissionModes.label(status.permissionMode), symbol: modeSymbol)
+            Chip(text: modeLabel, symbol: modeSymbol)
         }
         .disabled(!editable)
-        .accessibilityLabel("Permission mode: \(PermissionModes.label(status.permissionMode))")
+        .accessibilityLabel("Permission mode: \(modeLabel)")
     }
 
     private var modeSymbol: String {
-        switch status.permissionMode {
+        switch currentMode {
         case "plan": "list.bullet.clipboard"
         case "acceptEdits": "pencil"
         case "auto": "sparkles"
-        case "bypassPermissions": "exclamationmark.shield"
+        case "bypassPermissions", "full-access": "exclamationmark.shield"
+        case "read-only": "eye"
         default: "hand.raised"
         }
     }
@@ -97,8 +112,9 @@ struct ChatControlsBar: View {
     private func effortMenu(_ settings: ChatSettings) -> some View {
         let defaultLabel = settings.defaultEffort.map { "Default (\($0))" } ?? "Default"
         let label = settings.effort ?? settings.defaultEffort ?? "Default"
+        let name = settings.effortLabel ?? "Effort"
         return Menu {
-            Picker("Effort", selection: selection(settings.effort ?? "") { change(nil, nil, $0) }) {
+            Picker(name, selection: selection(settings.effort ?? "") { change(nil, nil, $0) }) {
                 Text(defaultLabel).tag("")
                 ForEach(settings.efforts, id: \.self) { level in
                     Text(level).tag(level)
@@ -108,7 +124,7 @@ struct ChatControlsBar: View {
             Chip(text: label, symbol: "gauge.with.dots.needle.50percent")
         }
         .disabled(!editable)
-        .accessibilityLabel("Effort: \(label)")
+        .accessibilityLabel("\(name): \(label)")
     }
 
     /// A picker binding that reads the current value and sends a change; the

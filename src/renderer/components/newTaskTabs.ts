@@ -7,8 +7,8 @@
  */
 
 import { v4 as uuid } from 'uuid'
-import { AI_TAB_META, AI_TAB_TYPES, CLAUDE_CHAT_LABEL } from '../../shared/types'
-import type { AiTabType, ClaudeView, Tab, TabType } from '../../shared/types'
+import { AI_TAB_META, AI_TAB_TYPES, CHAT_TAB_LABEL, chatTabTypeFor, isChatTabType } from '../../shared/types'
+import type { AiTabType, AppConfig, ChatTabType, ClaudeView, Tab, TabType } from '../../shared/types'
 
 export type CreateTabOptions = {
   filePath?: string
@@ -35,8 +35,8 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
   } else if (cwd && type === 'terminal') {
     const folder = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'Terminal'
     title = folder
-  } else if (type === 'claude-chat') {
-    title = CLAUDE_CHAT_LABEL
+  } else if (isChatTabType(type)) {
+    title = CHAT_TAB_LABEL[type]
   } else {
     title = isAi
       ? AI_TAB_META[type as AiTabType].label
@@ -46,10 +46,10 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
     id: uuid(),
     type,
     title,
-    // pi resumes via `--session-id <uuid>`, and a chat tab creates its Claude session
-    // with the id it is given; pre-generate a stable id at creation so the same
-    // session is reloaded across app restarts.
-    ...(type === 'pi' || type === 'claude-chat' ? { sessionId: uuid() } : {}),
+    // pi resumes via `--session-id <uuid>`, and a chat tab creates its session with
+    // the id it is given (a Codex chat swaps it for its new thread's id); pre-generate
+    // a stable id at creation so the same session is reloaded across app restarts.
+    ...(type === 'pi' || isChatTabType(type) ? { sessionId: uuid() } : {}),
     ...(filePath ? { filePath } : {}),
     ...(url ? { url } : {}),
     ...(noteId ? { noteId } : {}),
@@ -58,7 +58,13 @@ export function createTab(type: TabType, options: CreateTabOptions = {}): Tab {
   }
 }
 
-/** A Claude choice opens as whichever view Settings picks; anything else is itself. */
-export function claudeTabType<T extends TabType>(type: T, claudeView: ClaudeView): T | 'claude-chat' {
-  return type === 'claude' && claudeView === 'chat' ? 'claude-chat' : type
+/** An agent choice opens as whichever view Settings picks for that agent; anything else is itself. */
+export function agentTabType<T extends TabType>(type: T, view: ClaudeView): T | ChatTabType {
+  return view === 'chat' && (AI_TAB_TYPES as readonly string[]).includes(type) ? chatTabTypeFor(type as AiTabType) : type
+}
+
+/** Settings' default view for an agent's new tabs. */
+export function defaultAgentView(config: Pick<AppConfig, 'claudeDefaultView' | 'codexDefaultView' | 'piDefaultView'> | null | undefined, agent: AiTabType): ClaudeView {
+  if (!config) return 'chat'
+  return agent === 'claude' ? config.claudeDefaultView : agent === 'codex' ? config.codexDefaultView : config.piDefaultView
 }

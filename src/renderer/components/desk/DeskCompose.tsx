@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import type { AppConfig, DeskScope, Project } from '../../../shared/types'
+import { isChatTabType, type AppConfig, type DeskScope, type Project } from '../../../shared/types'
 import ProjectTileBadge from '../ProjectTileBadge'
 import { PROMPT_BOX_AGENT_LABEL } from '../promptBox'
 import type { NewTaskSubmission } from '../newTask'
@@ -57,7 +57,7 @@ export default function DeskCompose({ projects, scope, config, theme, onCompose 
   const { agent, isDefault } = deskAgents(config, target?.project, null)
   const canAutopilot = autopilotAvailable(target?.project, agent)
   // Only the chat view takes images; aiming elsewhere hides them rather than dropping them.
-  const takesImages = agent === 'claude-chat'
+  const takesImages = !!agent && isChatTabType(agent)
   const attachments = useImageAttachments(takesImages)
   const images = takesImages ? attachments.images : []
 

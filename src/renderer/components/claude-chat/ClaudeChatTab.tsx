@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { ArrowDown } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import { useTabStatusStore } from '../../context/TabStatusContext'
-import type { SshConfig } from '../../../shared/types'
+import type { AiTabType, SshConfig } from '../../../shared/types'
 import { classifyNotification, nextAiStatus, type AiNotificationKind, type AiStatusDecision, type AiStatusEvent } from '../../../shared/ai-status'
-import { chatArtifacts, composerCommands, type ChatColdCache, type ChatImage, type ChatLoginMethod, type ChatPromptResponse } from '../../../shared/claude-chat'
+import { chatAgentFeatures, chatArtifacts, composerCommands, type ChatColdCache, type ChatImage, type ChatLoginMethod, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { parseExtraArgs } from '../aiToolTabUtils'
 import { ensureHookListeners, hookStatusCallbacks } from '../hookStatusListeners'
 import { normalizeBrowserUrl } from '../../browserUrl'
@@ -30,6 +30,8 @@ import AgentCliMissing from '../AgentCliMissing'
 import { useAgentCliGate } from '../../agentClis'
 
 interface Props {
+  /** The agent the chat runs; Claude when absent. */
+  agent?: AiTabType
   tabId: string
   visible: boolean
   sessionId?: string
@@ -37,23 +39,26 @@ interface Props {
   taskId: string
   projectDir: string
   sshConfig?: SshConfig
-  /** The DevTool server the project is on (`Project.host`): its `claude` runs the chat. */
+  /** The DevTool server the project is on (`Project.host`): its CLI runs the chat. */
   serverId?: string
-  /** The project's extra Claude CLI args (shared with the terminal tab). */
+  /** The project's extra CLI args for the agent (shared with the terminal tab). */
   extraArgs?: string
 }
 
 /**
- * Claude Code as a chat: the same `claude` binary, login, settings and session
- * files as the terminal tab, driven from main through the Agent SDK. This
- * component only draws main's state and sends intents back; the process keeps
- * running while the tab is hidden, like a PTY.
+ * A coding agent as a chat: the same CLI, login, settings and session files as
+ * the agent's terminal tab, driven from main (Claude Code through the Agent SDK,
+ * Codex through `codex app-server`, Pi through `pi --mode rpc`). This component
+ * only draws main's state and sends intents back; the process keeps running
+ * while the tab is hidden, like a PTY. Claude-only parts (/btw, /login, the
+ * permissions editor, tasks) show only where {@link chatAgentFeatures} has them.
  *
  * Status (the tab dot, the inbox) comes from the same hook events and the same
  * state machine as the terminal tab — main sends the SDK's in-process hooks on
  * the channels the curl hooks use.
  */
-export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
+export default function ClaudeChatTab({ agent = 'claude', tabId, visible, sessionId, projectId, taskId, projectDir, sshConfig, serverId, extraArgs }: Props): React.ReactElement {
+  const features = chatAgentFeatures(agent)
   const { addTab, updateTabSessionId, markTaskInteracted, markTaskEvent, convertClaudeTab, leaveAfterSend, projects, setActiveTab } = useApp()
   const statusStore = useTabStatusStore()
   const state = useChatState(tabId)
@@ -75,8 +80,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   const serverOnline = useServerOnline(serverId)
   const prevServerOnlineRef = useRef(serverOnline)
   const [attachEpoch, setAttachEpoch] = useState(0)
-  // The server's own `claude` runs the chat: without one, "isn't installed · Install".
-  const { gate: cliGate, entry: cliEntry } = useAgentCliGate(serverId, 'claude')
+  // The server's own CLI runs the chat: without one, "isn't installed · Install".
+  const { gate: cliGate, entry: cliEntry } = useAgentCliGate(serverId, agent)
   const cliReady = cliGate.state === 'ready'
 
   const applyStatus = useCallback((event: AiStatusEvent, notificationKind?: AiNotificationKind, backgroundTasks?: number): AiStatusDecision => {
@@ -144,6 +149,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
     attachedRef.current = true
     setAttachError(null)
     attachChat(tabId, {
+      ...(agent !== 'claude' ? { agent } : {}),
       cwd: projectDir,
       sessionId,
       projectId,
@@ -174,7 +180,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       attachedRef.current = false
       setAttachError(err instanceof Error ? err.message : String(err))
     })
-  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, leaveAfterSend, taskId, serverOnline, attachEpoch, cliReady])
+  }, [visible, tabId, sessionId, projectDir, projectId, sshConfig, extraArgs, applyStatus, markTaskInteracted, leaveAfterSend, taskId, serverOnline, attachEpoch, cliReady, agent])
 
   useEffect(() => {
     if (visible) applyStatus('visit')
@@ -272,7 +278,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
     })
   }, [tabId, projectId, taskId, markTaskInteracted])
 
-  const commands = useMemo(() => composerCommands(state.commands), [state.commands])
+  const commands = useMemo(() => composerCommands(state.commands, agent), [state.commands, agent])
 
   const reportError = useCallback((err: unknown) => {
     setAttachError(err instanceof Error ? err.message : String(err))
@@ -304,8 +310,8 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
   }, [])
 
   const openInTerminal = useCallback(() => {
-    convertClaudeTab(projectId, taskId, tabId, 'claude')
-  }, [convertClaudeTab, projectId, taskId, tabId])
+    convertClaudeTab(projectId, taskId, tabId, agent)
+  }, [convertClaudeTab, projectId, taskId, tabId, agent])
 
   const loadFiles = useCallback(
     () => window.api.chatListFiles(projectDir, projectId, sshConfig),
@@ -398,7 +404,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
             {empty ? (
               <div className="pt-[18vh] text-center select-none">
                 <div className="text-2xl text-accent mb-2">&#10022;</div>
-                <div className="text-md text-text">{starting ? 'Starting Claude…' : 'What should Claude work on?'}</div>
+                <div className="text-md text-text">{starting ? `Starting ${features.label}…` : `What should ${features.label} work on?`}</div>
                 <div className="text-sm text-text-subtle mt-1 font-mono truncate">{projectDir || sshConfig?.remoteDir || '~'}</div>
               </div>
             ) : (
@@ -437,7 +443,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
         {state.pending.length > 0 && (
           <div className="min-h-0 flex flex-col gap-2">
             {state.pending.map((prompt) => (
-              <PromptCard key={prompt.id} prompt={prompt} permissionMode={state.info.permissionMode} onRespond={(response) => respond(prompt.id, response)} />
+              <PromptCard key={prompt.id} prompt={prompt} agent={agent} permissionMode={state.info.permissionMode} onRespond={(response) => respond(prompt.id, response)} />
             ))}
           </div>
         )}
@@ -453,6 +459,7 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
         )}
         {side && <SideQuestion side={side} onDismiss={() => setSide(null)} onOpenLink={openLink} />}
         <Composer
+          agent={agent}
           busy={state.busy}
           info={state.info}
           usage={state.usage}
@@ -477,9 +484,9 @@ export default function ClaudeChatTab({ tabId, visible, sessionId, projectId, ta
       <LinkContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} onOpenInApp={openChatLink} />
       {serverId && <ServerOfflineOverlay serverId={serverId} />}
       {serverId && cliEntry && cliGate.state === 'missing' && (
-        <AgentCliMissing serverId={serverId} agent="claude" entry={cliEntry} projectId={projectId} taskId={taskId} tabId={tabId} />
+        <AgentCliMissing serverId={serverId} agent={agent} entry={cliEntry} projectId={projectId} taskId={taskId} tabId={tabId} />
       )}
-      {permissionsOpen && (
+      {permissionsOpen && features.permissionsEditor && (
         <PermissionsDialog
           cwd={sshConfig ? null : projectDir}
           projectId={projectId}

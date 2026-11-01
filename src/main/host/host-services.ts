@@ -65,7 +65,7 @@ import { registerHostFsHandlers } from '../ipc/host-fs'
 import { registerHostAgentHandlers } from '../ipc/host-agents'
 import { registerHostSshHandlers } from '../ipc/host-ssh'
 import { detectAgentClis } from '../agent-clis'
-import { isRemoteProject, isShellCommandProject } from '../../shared/types'
+import { chatTabAgent, isChatTabType, isRemoteProject, isShellCommandProject } from '../../shared/types'
 import {
   archiveTasksInData, archivedTabIds, archivedTaskEntry, doneRetentionCutoff, pruneArchive, syncArchiveCounts, vanishedProjectIds, withArchivedTasks,
   type ProjectArchive
@@ -1034,7 +1034,7 @@ export class HostServices {
     if (!project || !task || !tab) throw new Error('The task is gone')
     // The permission mode the New task composer last used, as a window's first prompt carries it.
     const mode = this.config.promptBoxMode
-    if (mode && tab.sessionId) {
+    if (mode && tab.sessionId && tab.type === 'claude-chat') {
       if (!this.chatManager.snapshot(tab.id)) {
         const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
         stop()
@@ -1045,10 +1045,10 @@ export class HostServices {
   }
 
   private async sendToAgentTab(project: Project, task: Task, tab: Tab, text: string): Promise<void> {
-    if (tab.type === 'claude-chat') {
+    if (isChatTabType(tab.type)) {
       if (!tab.sessionId) throw new Error('Open the task\'s chat once, then ask again')
       if (!this.chatManager.snapshot(tab.id)) {
-        const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId), () => {})
+        const { stop } = await this.chatManager.listen(tab.id, chatTabConfig(project, task, tab.sessionId, chatTabAgent(tab.type)), () => {})
         stop()
       }
       await this.chatManager.send(tab.id, text)
@@ -1297,6 +1297,8 @@ export class HostServices {
     return new ClaudeChatManager({
       sendToClient: (clientId, channel, ...args) => this.clients.send(clientId, channel, ...args),
       resolveLocalClaude: () => resolveAgentCommand(agentCommandOverride('claude', this.config).trim() || 'claude'),
+      resolveLocalAgent: (agent) => resolveAgentCommand(agentCommandOverride(agent, this.config).trim() || agent),
+      wrapSpawn: (file, args) => conptySpawnArgv(file, args, { env: getShellEnv() }),
       localEnv: () => getShellEnv(),
       // A chat spawns a fresh remote process per session, so check the master
       // actually reaches the host first: a stale one fails the spawn with 255.

@@ -612,6 +612,8 @@ var ChatOp = {
 };
 var CHAT_OPS = Object.values(ChatOp);
 var TASK_NEW_OP = "task.new";
+var TASK_NEW_MODES = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"];
+var CHAT_SETTINGS_MODES = [...TASK_NEW_MODES, "read-only", "ask", "full-access"];
 var TASK_CLOSE_OP = "task.close";
 var TASK_LAND_OP = "task.land";
 var TAB_CLOSE_OP = "tab.close";

@@ -1,7 +1,7 @@
 import { firstLine, summarizeTool } from '../../shared/agent-activity'
 import { editPairs, diffLines } from '../../shared/chat-diff'
 import { canAlwaysAllow, planText, promptQuestions } from '../../shared/chat-prompts'
-import { CHAT_EFFORT_LEVELS, findModelOption, visibleTasks } from '../../shared/claude-chat'
+import { CHAT_EFFORT_LEVELS, chatAgentFeatures, findModelOption, PI_THINKING_LEVELS, visibleTasks } from '../../shared/claude-chat'
 import type { ChatImage, ChatItem, ChatTask, ChatWorkflow, ChatWorkflowAgent, ChatLimitWindow, ChatModelOption, ChatPrompt, ChatSessionInfo, ChatState, ChatUsage } from '../../shared/claude-chat'
 import { ChatLimits, capText } from '../../../protocol/ts/index.ts'
 import type {
@@ -224,8 +224,13 @@ export function viewTasks(tasks: Record<string, ChatTask>, now: number = Date.no
   return visibleTasks(tasks, now).filter((task) => !task.nested).slice(0, ChatLimits.tasks).map(viewTask)
 }
 
-/** The composer's model and effort pickers, labelled as the desktop's are (Composer.tsx). */
+/**
+ * The composer's model, effort and mode pickers, labelled as the desktop's are
+ * (Composer.tsx). A Codex or Pi chat names its own modes (none for Pi) and Pi's
+ * effort is "Thinking"; a Claude chat leaves both to the phone's defaults.
+ */
 export function viewSettings(info: ChatSessionInfo, models: ChatModelOption[]): ChatViewSettings {
+  const agent = info.agent ?? 'claude'
   // The CLI's own "Default" row resolves to a real model; the phone adds a Default row naming it.
   const pickable = models.filter((m) => m.value !== 'default')
   const running = info.modelPicked ? info.model : info.applied?.model ?? info.model
@@ -242,7 +247,9 @@ export function viewSettings(info: ChatSessionInfo, models: ChatModelOption[]): 
     models: pickable.map((m) => ({ value: m.value, label: m.displayName, ...(m.description ? { description: m.description } : {}) })),
     ...(info.effort ? { effort: info.effort } : {}),
     ...(defaultEffort ? { defaultEffort } : {}),
-    efforts: current?.supportedEffortLevels?.length ? current.supportedEffortLevels : CHAT_EFFORT_LEVELS
+    efforts: current?.supportedEffortLevels?.length ? current.supportedEffortLevels : agent === 'pi' ? PI_THINKING_LEVELS : CHAT_EFFORT_LEVELS,
+    ...(agent === 'pi' ? { effortLabel: 'Thinking' } : {}),
+    ...(agent !== 'claude' ? { modes: chatAgentFeatures(agent).modes.map((m) => ({ value: m.value, label: m.label, ...(m.description ? { description: m.description } : {}) })) } : {})
   }
 }
 
@@ -281,6 +288,7 @@ export function toChatView(state: ChatState, tab: ChatViewTab, window: number = 
   return {
     tabId: tab.tabId,
     title: tab.title,
+    ...(state.info.agent && state.info.agent !== 'claude' ? { agent: state.info.agent } : {}),
     ...viewStatus(state),
     items: state.items.slice(start).map(mapItem),
     hasEarlier: start > 0,

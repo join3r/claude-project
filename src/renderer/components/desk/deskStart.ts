@@ -76,6 +76,8 @@ export function deskSubmission(
   images?: readonly ChatImage[]
 ): NewTaskSubmission {
   const chat = agent === 'claude-chat'
+  // Any chat takes pictures; Autopilot and the mode are Claude's.
+  const anyChat = !!agent && agent.endsWith('-chat')
   return {
     target: { kind: 'project', projectId: project.id },
     ...(stream ? { streamId: stream.id } : {}),
@@ -84,7 +86,7 @@ export function deskSubmission(
       ? { start: { agent, prompt: {
           text: prompt,
           ...(chat || agent === 'claude' ? { mode: 'auto' as const } : {}),
-          ...(chat && images?.length ? { images: [...images] } : {})
+          ...(anyChat && images?.length ? { images: [...images] } : {})
         } } }
       : { terminal: { command: prompt } })
   }

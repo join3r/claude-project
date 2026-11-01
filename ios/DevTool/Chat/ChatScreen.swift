@@ -55,6 +55,19 @@ struct ChatScreen: View {
     /// Offline, or showing the cached transcript (§8.3): nothing can be sent or answered.
     private var readOnly: Bool { offline || model.showingCache }
     private var found: (task: InboxTask, tab: InboxTab)? { app.tab(desktopId: route.desktopId, tabId: route.tabId) }
+    /// Who the chat talks to: the view's `agent`, else the tab's (a Codex/Pi chat is `codex`/`pi` + `chat`).
+    private var agentName: String {
+        switch model.view?.agent {
+        case "codex": return "Codex"
+        case "pi": return "Pi"
+        case .some: return "Claude"
+        case nil:
+            guard let tab = found?.tab, tab.chat else { return "Claude" }
+            return tab.type.displayName
+        }
+    }
+    /// /btw and /permissions are Claude's; a Codex or Pi chat sends them as text.
+    private var isClaude: Bool { agentName == "Claude" }
 
     var body: some View {
         content
@@ -146,7 +159,7 @@ struct ChatScreen: View {
 
     private var titleView: some View {
         VStack(spacing: 0) {
-            Text(found?.tab.title.nonEmpty ?? model.view?.title.nonEmpty ?? "Claude")
+            Text(found?.tab.title.nonEmpty ?? model.view?.title.nonEmpty ?? agentName)
                 .font(.headline)
                 .lineLimit(1)
             if let subtitle {
@@ -174,7 +187,7 @@ struct ChatScreen: View {
 
     /// The permission mode, when the controls bar doesn't show it (no pickers from the desktop).
     private var modeLabel: String? {
-        guard let status = model.view?.status, status.settings == nil, let mode = status.permissionMode else { return nil }
+        guard let status = model.view?.status, status.settings == nil, let mode = status.permissionMode, isClaude else { return nil }
         return Self.permissionModeLabel(mode)
     }
 
@@ -296,10 +309,10 @@ struct ChatScreen: View {
         if status.busy {
             WorkingRow(since: status.turnStartedAt.map { Date(unixMilliseconds: $0) })
         } else if status.process == .starting {
-            NoticeRow(text: "Starting Claude…", tone: .muted, symbol: "hourglass")
+            NoticeRow(text: "Starting \(agentName)…", tone: .muted, symbol: "hourglass")
         } else if status.process == .exited {
-            NoticeRow(text: status.processError.map { "Claude stopped: \($0). Sending a message restarts it." }
-                      ?? "Claude isn't running. Sending a message starts it.",
+            NoticeRow(text: status.processError.map { "\(agentName) stopped: \($0). Sending a message restarts it." }
+                      ?? "\(agentName) isn't running. Sending a message starts it.",
                       tone: status.processError == nil ? .muted : .error)
         }
     }
@@ -455,7 +468,7 @@ struct ChatScreen: View {
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             PromptTextView(text: $draft, focused: $composerFocused,
-                           placeholder: offline ? "\(app.kindTitle(route.desktopId)) offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message Claude"),
+                           placeholder: offline ? "\(app.kindTitle(route.desktopId)) offline" : model.showingCache ? "Connecting…" : (model.busy ? "Queue a message" : "Message \(agentName)"),
                            disabled: readOnly, minLines: 1, maxLines: 6) { pasted in
                 let room = SentImage.maxCount - pictures.count
                 pictures += pasted.prefix(max(room, 0)).map { PickedImage(pasted: $0) }
@@ -568,7 +581,7 @@ extension ChatScreen {
 
     private func pick(_ command: ChatCommand) {
         guard !command.terminalOnly else { return }
-        if command.name == ChatCommandMenu.permissions {
+        if isClaude, command.name == ChatCommandMenu.permissions {
             draft = ""
             composerFocused = false
             showingPermissions = true
@@ -581,7 +594,7 @@ extension ChatScreen {
     /// composer handles itself rather than sending. True when `text` was one.
     private func runCommand(_ text: String) -> Bool {
         let command = ChatCommandMenu.command(in: text)
-        if command == ChatCommandMenu.permissions {
+        if isClaude, command == ChatCommandMenu.permissions {
             draft = ""
             composerFocused = false
             showingPermissions = true
@@ -591,7 +604,7 @@ extension ChatScreen {
             model.flash("/\(command) only works in a terminal on the desktop.")
             return true
         }
-        guard let question = ChatCommandMenu.sideQuestion(in: text) else { return false }
+        guard isClaude, let question = ChatCommandMenu.sideQuestion(in: text) else { return false }
         // A bare /btw does nothing, as on the desktop.
         guard !question.isEmpty else { return true }
         draft = ""

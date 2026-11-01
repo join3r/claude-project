@@ -6,6 +6,8 @@ import {
   emptyChatState,
   isChatPermissionMode,
   reduceChat,
+  CHAT_AGENT_FEATURES,
+  type ChatAgent,
   type ChatEvent,
   type ChatImage,
   type ChatLogin,
@@ -18,6 +20,9 @@ import {
 } from '../../shared/claude-chat'
 import { randomUUID } from 'crypto'
 import { ChatSession } from './chat-session'
+import type { AgentChatSession } from '../agent-chat/session'
+import { CodexChatSession } from '../agent-chat/codex-session'
+import { PiChatSession } from '../agent-chat/pi-session'
 import { runBash, type BashSpawn } from './bash-mode'
 import { artifactManifest, readArtifactFile } from './artifact-files'
 import type { ArtifactPreviewFile } from '../../shared/artifact-preview'
@@ -28,12 +33,14 @@ import { readLocalTranscript, readRemoteTranscript, SESSION_ID_RE } from './tran
 
 /** What a window tells main about the chat tab it mounts. */
 export interface ChatTabConfig {
+  /** Which agent the tab runs; absent means Claude. */
+  agent?: ChatAgent
   /** Local dir, or the remote dir for an ssh project. */
   cwd: string
   sessionId: string
   projectId?: string
   sshConfig?: SshConfig
-  /** The project's extra Claude CLI args, already split. */
+  /** The project's extra CLI args for the tab's agent, already split. */
   extraArgs?: string[]
 }
 
@@ -41,6 +48,10 @@ export interface ChatManagerDeps {
   sendToClient: (clientId: string, channel: string, ...args: unknown[]) => void
   /** The local `claude` to run (Settings override, else PATH). */
   resolveLocalClaude: () => string
+  /** The local `codex` / `pi` to run (Settings override, else PATH). */
+  resolveLocalAgent: (agent: 'codex' | 'pi') => string
+  /** Windows: how to start a `.cmd` shim (through cmd.exe). */
+  wrapSpawn?: (file: string, args: string[]) => { file: string; args: string[] }
   /** Env for a local `claude`: the login shell's, as terminal tabs get. */
   localEnv: () => Record<string, string | undefined>
   /** Make sure the project's ssh master is up. */
@@ -87,7 +98,7 @@ interface ChatRuntime {
   /** Clients (windows) mounting the tab. */
   attached: Set<string>
   listeners: Set<ChatListener>
-  session: ChatSession | null
+  session: AgentChatSession | null
   /** History loaded (or being loaded); later attaches wait on it. */
   ready: Promise<void>
   /** The transcript exists on disk, so a (re)start resumes rather than creates. */
@@ -249,6 +260,7 @@ export class ClaudeChatManager {
     const runtime = this.runtimes.get(tabId)
     if (!runtime) throw new Error('chat tab not attached')
     await runtime.ready
+    if (!this.claudeOnly(runtime, '/login')) return
     this.endLogin(runtime)
     const { config } = runtime
     const remote = this.deps.loginRemote === true || !!(config.sshConfig && config.projectId)
@@ -324,6 +336,7 @@ export class ClaudeChatManager {
     const runtime = this.runtimes.get(tabId)
     if (!runtime) throw new Error('chat tab not attached')
     await runtime.ready
+    if (!this.claudeOnly(runtime, '/logout')) return
     this.endLogin(runtime)
     if (runtime.state.login) this.emit(runtime, { t: 'login', login: null })
     const { config } = runtime
@@ -337,6 +350,14 @@ export class ClaudeChatManager {
     }
     this.emit(runtime, { t: 'notice', text: 'Signed out. Use /login to sign in again.', tone: 'muted' })
     this.restartForAuth(runtime)
+  }
+
+  /** Claude's own commands in another agent's chat: say so instead of running `claude`. */
+  private claudeOnly(runtime: ChatRuntime, command: string): boolean {
+    const agent = runtime.config.agent ?? 'claude'
+    if (agent === 'claude') return true
+    this.emit(runtime, { t: 'notice', text: `${command} is a Claude command; ${CHAT_AGENT_FEATURES[agent].label} signs in from its own terminal.`, tone: 'warning' })
+    return false
   }
 
   private endLogin(runtime: ChatRuntime): void {
@@ -492,6 +513,8 @@ export class ClaudeChatManager {
 
   private async loadHistory(runtime: ChatRuntime): Promise<void> {
     const { sessionId, cwd, projectId, sshConfig } = runtime.config
+    // Codex and Pi read their own history back when their session starts.
+    if ((runtime.config.agent ?? 'claude') !== 'claude') return
     if (!SESSION_ID_RE.test(sessionId)) return
     try {
       let messages: unknown[]
@@ -512,6 +535,8 @@ export class ClaudeChatManager {
 
   private async startSession(runtime: ChatRuntime): Promise<void> {
     if (runtime.session && !runtime.session.isEnded()) return
+    const agent = runtime.config.agent ?? 'claude'
+    if (agent !== 'claude') return this.startAgentSession(runtime, agent)
     const { tabId, config } = runtime
     const remote = config.sshConfig && config.projectId ? { projectId: config.projectId, sshConfig: config.sshConfig } : null
     let session: ChatSession | null = null
@@ -575,6 +600,59 @@ export class ClaudeChatManager {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       this.emit(runtime, { t: 'process', state: 'exited', at: Date.now(), error: `Couldn't start Claude: ${message}` })
+      runtime.session = null
+      this.deps.onProcessChange(tabId, false, message)
+    }
+  }
+
+  /** A Codex or Pi chat: local, or on the DevTool server this host is. SSH projects use the terminal tab. */
+  private async startAgentSession(runtime: ChatRuntime, agent: 'codex' | 'pi'): Promise<void> {
+    const { tabId, config } = runtime
+    const label = CHAT_AGENT_FEATURES[agent].label
+    if (config.sshConfig && config.projectId) {
+      this.emit(runtime, { t: 'process', state: 'exited', at: Date.now(), error: `${label} chat isn't available for SSH projects yet. Open ${label} in a terminal tab instead.` })
+      return
+    }
+    let session: AgentChatSession | null = null
+    const options = {
+      cwd: config.cwd,
+      sessionId: config.sessionId,
+      executable: this.deps.resolveLocalAgent(agent),
+      env: { ...this.deps.localEnv(), [TAB_OWNER_ENV]: tabId },
+      extraArgs: config.extraArgs,
+      model: runtime.model,
+      permissionMode: runtime.permissionMode,
+      effort: runtime.effort,
+      wrap: this.deps.wrapSpawn,
+      onEvent: (event: ChatEvent): void => {
+        if (runtime.session === session) this.emit(runtime, event)
+      },
+      onHook: (body: Record<string, unknown>): void => {
+        if (runtime.session === session) this.deps.onHook(tabId, body)
+      },
+      onPromptResolved: (prompt: ChatPrompt, allowed: boolean): void => {
+        if (runtime.session === session) this.deps.onPromptResolved(tabId, prompt, allowed)
+      },
+      onExit: (error?: string): void => {
+        if (runtime.session !== session) return
+        this.deps.log(`chatExit tab=${tabId} agent=${agent}${error ? ` error=${JSON.stringify(error.slice(0, 300))}` : ''}`)
+        this.deps.onProcessChange(tabId, false, error)
+      },
+      // A new thread: a restart resumes it, not the id the tab was made with.
+      onSessionId: (id: string): void => {
+        if (runtime.session === session) runtime.config = { ...runtime.config, sessionId: id }
+      },
+      log: this.deps.log
+    }
+    session = agent === 'codex' ? new CodexChatSession(options) : new PiChatSession(options)
+    runtime.session = session
+    this.deps.log(`chatStart tab=${tabId} agent=${agent} exe=${options.executable}`)
+    this.deps.onProcessChange(tabId, true)
+    try {
+      await session.start()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (runtime.state.process !== 'exited') this.emit(runtime, { t: 'process', state: 'exited', at: Date.now(), error: `Couldn't start ${label}: ${message}` })
       runtime.session = null
       this.deps.onProcessChange(tabId, false, message)
     }

@@ -87,7 +87,9 @@ export async function reapTabProcesses(tabId: string, log: (message: string) => 
     if (pids.length === 0) return
     log(`tabReap tab=${tabId} term=${pids.join(',')}`)
     await new Promise(resolve => setTimeout(resolve, KILL_GRACE_MS))
-    const left = await listTagged(tabId, exclude)
+    // Only what was asked to end: a tab switched terminal ⇄ chat keeps its id, and
+    // the process its new view started meanwhile carries the same tag.
+    const left = (await listTagged(tabId, exclude)).filter(pid => pids.includes(pid))
     if (signal(left, 'SIGKILL').length > 0) log(`tabReap tab=${tabId} kill=${left.join(',')}`)
   } catch (err) {
     log(`tabReap tab=${tabId} error=${err instanceof Error ? err.message : String(err)}`)

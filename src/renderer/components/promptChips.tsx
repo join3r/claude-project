@@ -1,6 +1,6 @@
 import React from 'react'
 import { CHAT_PERMISSION_MODES } from '../../shared/claude-chat'
-import type { PromptBoxAgent } from '../../shared/types'
+import { isChatTabType, type PromptBoxAgent } from '../../shared/types'
 import ChipMenu from './claude-chat/ChipMenu'
 import { MODE_HELP } from './claude-chat/Composer'
 import { PROMPT_BOX_AGENT_LABEL } from './promptBox'
@@ -53,7 +53,7 @@ export function AgentMenu({ agents, value, onChange, placement }: {
         label={PROMPT_BOX_AGENT_LABEL[value]}
         title="Agent"
         placement={placement}
-        options={agents.map((a) => ({ value: a, label: PROMPT_BOX_AGENT_LABEL[a], description: a === 'claude-chat' ? 'Chat view' : a === 'claude' ? 'Terminal view' : undefined }))}
+        options={agents.map((a) => ({ value: a, label: PROMPT_BOX_AGENT_LABEL[a], description: isChatTabType(a) ? 'Chat view' : 'Terminal view' }))}
         value={value}
         onChange={(next) => onChange(next as PromptBoxAgent)}
       />

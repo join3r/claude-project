@@ -1,6 +1,6 @@
 import { DEFAULT_MOBILE_CONFIG, type MobileConfig } from './mobile'
 
-export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'pi' | 'diff' | 'editor' | 'notebook' | 'note'
+export type TabType = 'terminal' | 'browser' | 'claude' | 'claude-chat' | 'codex' | 'codex-chat' | 'pi' | 'pi-chat' | 'diff' | 'editor' | 'notebook' | 'note'
 
 export const AI_TAB_TYPES = ['claude', 'codex', 'pi'] as const
 export type AiTabType = typeof AI_TAB_TYPES[number]
@@ -12,24 +12,54 @@ export const AI_TAB_META: Record<AiTabType, { label: string; command: string }> 
 }
 
 /**
- * Tabs that run a coding agent: the terminal AI tabs plus the Claude chat tab,
- * which drives the same `claude` through the Agent SDK instead of a PTY. Status,
+ * DevTool's chat view, one tab type per agent: the same CLI, login and session
+ * files as the agent's terminal tab, driven from main instead of a PTY (Claude
+ * through the Agent SDK, Codex through `codex app-server`, Pi through `pi --mode rpc`).
+ */
+export const CHAT_TAB_TYPES = ['claude-chat', 'codex-chat', 'pi-chat'] as const
+export type ChatTabType = typeof CHAT_TAB_TYPES[number]
+
+export function isChatTabType(type: TabType | string): type is ChatTabType {
+  return (CHAT_TAB_TYPES as readonly string[]).includes(type)
+}
+
+/** The agent a chat tab runs. */
+export function chatTabAgent(type: ChatTabType): AiTabType {
+  return type === 'claude-chat' ? 'claude' : type === 'codex-chat' ? 'codex' : 'pi'
+}
+
+/** The chat tab type for an agent. */
+export function chatTabTypeFor(agent: AiTabType): ChatTabType {
+  return `${agent}-chat`
+}
+
+/**
+ * Tabs that run a coding agent: the terminal AI tabs plus the chat tabs. Status,
  * the inbox and the sidebar's activity line treat them all alike.
  */
 export function isAgentTabType(type: TabType): boolean {
-  return type === 'claude-chat' || (AI_TAB_TYPES as readonly string[]).includes(type)
+  return isChatTabType(type) || (AI_TAB_TYPES as readonly string[]).includes(type)
+}
+
+/** The agent behind a chat or terminal agent tab, or null for other tabs. */
+export function agentOfTab(type: TabType): AiTabType | null {
+  if (isChatTabType(type)) return chatTabAgent(type)
+  return (AI_TAB_TYPES as readonly string[]).includes(type) ? type as AiTabType : null
 }
 
 export const CLAUDE_CHAT_LABEL = 'Claude'
 
-/** Which way a new Claude tab opens: the terminal UI, or DevTool's chat. */
+/** A chat tab's title: the agent's short name. */
+export const CHAT_TAB_LABEL: Record<ChatTabType, string> = { 'claude-chat': CLAUDE_CHAT_LABEL, 'codex-chat': 'Codex', 'pi-chat': 'Pi' }
+
+/** Which way a new agent tab opens: the terminal UI, or DevTool's chat. */
 export type ClaudeView = 'terminal' | 'chat'
 
 /** What a task is called until its first prompt names it. */
 export const NEW_TASK_NAME = 'New Task'
 
-/** The agents an empty task's prompt box can start: Claude as a chat or a terminal, Codex, Pi. */
-export const PROMPT_BOX_AGENTS = ['claude-chat', 'claude', 'codex', 'pi'] as const
+/** The agents an empty task's prompt box can start, each as a chat or a terminal. */
+export const PROMPT_BOX_AGENTS = ['claude-chat', 'claude', 'codex-chat', 'codex', 'pi-chat', 'pi'] as const
 export type PromptBoxAgent = typeof PROMPT_BOX_AGENTS[number]
 
 /**
@@ -447,7 +477,7 @@ export interface WorkspaceDeleteResult {
   reason?: string
 }
 
-const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'claude-chat', 'codex', 'pi']
+const RENAMABLE_TAB_TYPES: readonly TabType[] = ['terminal', 'browser', 'claude', 'claude-chat', 'codex', 'codex-chat', 'pi', 'pi-chat']
 
 export function isRenamableTab(tab: Tab): boolean {
   return RENAMABLE_TAB_TYPES.includes(tab.type)
@@ -748,6 +778,9 @@ export interface AppConfig {
   autoCheckUpdates: boolean
   /** New Claude tabs (task auto-open, the tab bar's ✦) open as a terminal or a chat. */
   claudeDefaultView: ClaudeView
+  /** The same for new Codex and Pi tabs. */
+  codexDefaultView: ClaudeView
+  piDefaultView: ClaudeView
   lastProjectId: string | null
   lastTaskId: string | null
   /** The inbox column's rows by status (Needs you, Answered…), or under a heading per project. */
@@ -1058,7 +1091,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   keepAwakeWhileWorking: true,
   doneRetentionDays: 30,
   autoCheckUpdates: true,
-  claudeDefaultView: 'terminal',
+  claudeDefaultView: 'chat',
+  codexDefaultView: 'chat',
+  piDefaultView: 'chat',
   lastProjectId: null,
   lastTaskId: null,
   inboxLayout: 'flat',

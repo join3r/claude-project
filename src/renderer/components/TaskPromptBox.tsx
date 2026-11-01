@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import type { Project, PromptBoxAgent, TabType } from '../../shared/types'
+import { isChatTabType, type Project, type PromptBoxAgent, type TabType } from '../../shared/types'
 import ChipMenu from './claude-chat/ChipMenu'
 import { AttachmentStrip, toChatImages, useImageAttachments } from './claude-chat/imageAttachments'
 import { AgentMenu, EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, modeLabel, nextMode } from './promptChips'
@@ -44,7 +44,7 @@ export default function TaskPromptBox({ project, taskId, taskName, projectDir, v
   const [draft, setDraft] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // Only the chat view takes images; switching away hides them rather than dropping them.
-  const takesImages = agent === 'claude-chat'
+  const takesImages = !!agent && isChatTabType(agent)
   const attachments = useImageAttachments(takesImages)
   const images = takesImages ? attachments.images : []
 

@@ -344,7 +344,7 @@ export default function DeskCommandBar(): React.ReactElement | null {
 
 function agentLabel(agent: PromptBoxAgent | null): string {
   if (!agent) return 'Terminal'
-  return agent === 'claude-chat' ? 'Claude · chat' : PROMPT_BOX_AGENT_LABEL[agent]
+  return agent.endsWith('-chat') ? `${PROMPT_BOX_AGENT_LABEL[agent]} · chat` : PROMPT_BOX_AGENT_LABEL[agent]
 }
 
 /** A footer sigil: `>` and `/` switch the mode at the front; `*` toggles; `@` and `#` start a token at the end. */
@@ -419,7 +419,7 @@ function BarRow({ item, index, selected, agent, busy, theme, onHover, onClick }:
     case 'start': {
       const { project, stream } = item.target
       const ownWorktree = startsInOwnWorktree(project, stream)
-      const who = agent === 'claude-chat' || agent === 'claude' ? 'Claude' : agent ? PROMPT_BOX_AGENT_LABEL[agent] : 'A terminal'
+      const who = agent ? PROMPT_BOX_AGENT_LABEL[agent].replace(/ \(terminal\)$/, '') : 'A terminal'
       return (
         <div {...common} className={`${ROW} py-3 ${bg}`}>
           <ProjectTileBadge project={project} theme={theme} size={22} />

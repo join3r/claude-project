@@ -1,4 +1,4 @@
-import type { Tab, TabType, Task } from '../../../shared/types'
+import { isChatTabType, type Tab, type TabType, type Task } from '../../../shared/types'
 import { dragDivider } from '../../../shared/panes'
 
 /**
@@ -17,10 +17,10 @@ export type BenchView = 'panes' | 'files' | 'changes' | 'notes' | 'run'
 /** One entry of the Bench strip. Terminal and Browser pick (or make) a tab of that type. */
 export type BenchItem = 'terminal' | 'browser' | 'files' | 'changes' | 'notes'
 
-/** The conversation: the task's first `claude-chat` tab, in pane order. */
+/** The conversation: the task's first chat tab (any agent), in pane order. */
 export function conversationTabId(task: Task): string | null {
   for (const pane of task.panes) {
-    for (const tab of pane.tabs) if (tab.type === 'claude-chat') return tab.id
+    for (const tab of pane.tabs) if (isChatTabType(tab.type)) return tab.id
   }
   return null
 }

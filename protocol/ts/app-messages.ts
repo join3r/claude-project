@@ -71,6 +71,11 @@ export interface InboxTab {
   activity?: string
   /** What an agent tab's conversation is about: its session title, else the last prompt. */
   topic?: string
+  /**
+   * The tab answers `chat.*` (§6.3) although its `type` is a terminal agent's:
+   * a Codex or Pi chat goes out as `codex` / `pi` so an older phone still shows it.
+   */
+  chat?: true
 }
 
 export interface InboxTask {
@@ -439,6 +444,7 @@ function parseTab(value: unknown): InboxTab {
   if (activity !== undefined) tab.activity = activity
   const topic = optStr(o, 'topic')
   if (topic !== undefined) tab.topic = topic
+  if (o.chat === true) tab.chat = true
   return tab
 }
 

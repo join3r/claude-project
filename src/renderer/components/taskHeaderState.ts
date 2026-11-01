@@ -1,4 +1,4 @@
-import { AI_TAB_META, CLAUDE_CHAT_LABEL, isAgentTabType } from '../../shared/types'
+import { AI_TAB_META, CHAT_TAB_LABEL, isAgentTabType, isChatTabType } from '../../shared/types'
 import type { AiTabType, Tab, TabStatusValue, Task } from '../../shared/types'
 import { resolveMainTabId, taskTabs } from '../../shared/streams'
 import { formatWaitTime, isSnoozed, isYourTurn, taskStatus, taskStatusSince } from './inbox'
@@ -13,7 +13,7 @@ export function taskAgentTab(task: Task): Tab | undefined {
 /** What the header calls the task's agent: Claude (chat), Claude Code, Codex, Pi; Terminal for a terminal task. */
 export function taskAgentLabel(task: Task): string | null {
   const agent = taskAgentTab(task)
-  if (agent) return agent.type === 'claude-chat' ? CLAUDE_CHAT_LABEL : AI_TAB_META[agent.type as AiTabType]?.label ?? null
+  if (agent) return isChatTabType(agent.type) ? CHAT_TAB_LABEL[agent.type] : AI_TAB_META[agent.type as AiTabType]?.label ?? null
   const tabs = taskTabs(task)
   const main = tabs.find(tab => tab.id === resolveMainTabId(tabs, task.mainTabId))
   return main?.type === 'terminal' ? 'Terminal' : null

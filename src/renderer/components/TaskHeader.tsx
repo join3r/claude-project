@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { ChevronDown, MoreHorizontal } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { pinnedItemKey } from '../../shared/types'
+import { agentOfTab, AI_TAB_META, chatTabTypeFor, isChatTabType, pinnedItemKey } from '../../shared/types'
 import type { PinnedItem, Project, Stream, Task } from '../../shared/types'
 import { ContextMenu, type ContextMenuItem } from './ui'
 import type { MenuAnchor } from '../hooks/useMenuPosition'
@@ -120,12 +120,16 @@ export default function TaskHeader({
       })
     }
     const items: ContextMenuItem[] = []
-    // Same session, other face: the Claude tab flips between terminal and chat.
-    if (agentTab && (agentTab.type === 'claude' || agentTab.type === 'claude-chat')) {
-      const to = agentTab.type === 'claude' ? 'claude-chat' : 'claude'
-      const blocked = to === 'claude-chat' ? featureUnavailableReason(project, 'chat') : null
+    // Same session, other face: an agent tab flips between terminal and chat.
+    const agent = agentTab ? agentOfTab(agentTab.type) : null
+    if (agentTab && agent) {
+      const toChat = !isChatTabType(agentTab.type)
+      const to = toChat ? chatTabTypeFor(agent) : agent
+      const blocked = toChat
+        ? featureUnavailableReason(project, 'chat') ?? (agent !== 'claude' && project.ssh ? `${AI_TAB_META[agent].label} chat doesn't run over SSH yet` : null)
+        : null
       items.push({
-        label: to === 'claude' ? 'Switch to terminal' : 'Switch to chat',
+        label: toChat ? 'Switch to chat' : 'Switch to terminal',
         disabled: !!blocked,
         hint: blocked ?? undefined,
         onSelect: () => convertClaudeTab(project.id, task.id, agentTab.id, to)

@@ -181,7 +181,12 @@ export interface ChatCommand {
   argumentHint?: string
 }
 
+/** Which coding agent drives a chat tab. */
+export type ChatAgent = 'claude' | 'codex' | 'pi'
+
 export interface ChatSessionInfo {
+  /** Absent means Claude: older snapshots and the Claude session never set it. */
+  agent?: ChatAgent
   sessionId?: string
   model?: string
   permissionMode?: string
@@ -298,6 +303,17 @@ export type ChatEvent =
   | { t: 'bash-sent'; ids: string[] }
   | { t: 'cold-cache'; cache: ChatColdCache }
   | { t: 'login'; login: ChatLogin | null }
+  // Agent-neutral events: what the Codex and Pi sessions speak (Claude's stay `sdk`).
+  /** Add a row, or replace the row with the same id. */
+  | { t: 'item'; item: ChatItem; at?: number }
+  /** Streamed text for a text/thinking row; creates it (streaming) when new. */
+  | { t: 'delta'; id: string; kind: 'text' | 'thinking'; text: string; at?: number }
+  /** A turn started, or ended (`error` when it failed, `interrupted` when Stop ended it). */
+  | { t: 'turn'; state: 'start' | 'end'; error?: string; interrupted?: boolean; at?: number }
+  /** The agent took a queued message: the given one, or the oldest still queued. */
+  | { t: 'delivered'; uuid?: string }
+  /** The conversation so far, read back from the agent's own session; ignored once the timeline has rows. */
+  | { t: 'restore'; items: ChatItem[] }
 
 /** What `chat-attach` returns: the state so far and the seq it corresponds to. */
 export interface ChatSnapshot {
@@ -1320,6 +1336,46 @@ function applySdkMessage(state: ChatState, raw: unknown, at: number | undefined,
   }
 }
 
+/** Row index by id: tools through the index, other rows by a scan from the end (recent rows change). */
+function findItem(draft: Draft, id: string): number | undefined {
+  const tool = draft.tool(id)
+  if (tool !== undefined) return tool
+  for (let index = draft.items.length - 1; index >= 0; index--) {
+    if (draft.items[index].id === id) return index
+  }
+  return undefined
+}
+
+/** A row's status may not walk back from waiting-on-you to running while its prompt is open. */
+function upsertItem(draft: Draft, state: ChatState, item: ChatItem): void {
+  const index = findItem(draft, item.id)
+  if (index === undefined) {
+    draft.push(item)
+    return
+  }
+  draft.update(index, (current) => {
+    let next: ChatItem = current.at !== undefined && item.at === undefined ? { ...item, at: current.at } : item
+    if (current.kind === 'tool' && next.kind === 'tool' && current.status === 'waiting'
+      && (next.status === 'running' || next.status === 'pending')
+      && state.pending.some((prompt) => prompt.toolUseId === item.id)) {
+      next = { ...next, status: 'waiting' }
+    }
+    return next
+  })
+}
+
+/** A turn ended: nothing streams on, and tools still spinning belong to a turn that is over. */
+function settleTurn(draft: Draft): void {
+  draft.items.forEach((item, index) => {
+    if ((item.kind === 'text' || item.kind === 'thinking') && item.streaming) {
+      draft.update(index, (current) => (current.kind === 'text' || current.kind === 'thinking') ? { ...current, streaming: false } : current)
+    } else if (item.kind === 'tool' && (item.status === 'pending' || item.status === 'running' || item.status === 'waiting')) {
+      draft.update(index, (current) => current.kind === 'tool' ? { ...current, status: 'done' } : current)
+    }
+  })
+  draft.openBlocks = {}
+}
+
 /** Fold one event into the state. Pure: returns a new state, sharing what didn't change. */
 export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
   switch (event.t) {
@@ -1434,6 +1490,46 @@ export function reduceChat(state: ChatState, event: ChatEvent): ChatState {
       const { login: _login, ...rest } = state
       return rest
     }
+    case 'item': {
+      const draft = new Draft(state, 'a', event.at)
+      upsertItem(draft, state, event.item)
+      return draft.result({})
+    }
+    case 'delta': {
+      const draft = new Draft(state, 'a', event.at)
+      const index = findItem(draft, event.id)
+      if (index === undefined) {
+        draft.push({ kind: event.kind, id: event.id, text: event.text, streaming: true })
+      } else {
+        draft.update(index, (item) => (item.kind === 'text' || item.kind === 'thinking') ? { ...item, text: item.text + event.text, streaming: true } : item)
+      }
+      return draft.result(state.busy ? {} : { busy: true, turnStartedAt: event.at ?? state.turnStartedAt })
+    }
+    case 'turn': {
+      if (event.state === 'start') {
+        return state.busy ? state : { ...state, busy: true, turnStartedAt: event.at ?? Date.now() }
+      }
+      const draft = new Draft(state, 'a', event.at)
+      settleTurn(draft)
+      const interrupted = event.interrupted === true || state.interrupting === true
+      if (interrupted) draft.push({ kind: 'notice', id: draft.nextId(), text: 'Interrupted', tone: 'muted' })
+      else if (event.error) draft.push({ kind: 'notice', id: draft.nextId(), text: event.error, tone: 'error' })
+      return draft.result({ busy: false, turnStartedAt: undefined, compacting: false, interrupting: false })
+    }
+    case 'delivered': {
+      const index = state.items.findIndex((item) => item.kind === 'user' && item.queued === true && (event.uuid === undefined || item.id === event.uuid))
+      if (index < 0) return state
+      const draft = new Draft(state, 'a')
+      draft.update(index, (item) => item.kind === 'user' ? { ...item, queued: false } : item)
+      return draft.result({})
+    }
+    case 'restore': {
+      if (state.items.length > 0 || event.items.length === 0) return state
+      const draft = new Draft(state, 'h')
+      for (const item of event.items) draft.push(item)
+      settleTurn(draft)
+      return draft.result({})
+    }
     case 'bash': {
       const draft = new Draft(state, 'b')
       draft.push({ kind: 'bash', id: event.id, command: event.command, running: true })
@@ -1491,6 +1587,65 @@ export const CHAT_PERMISSION_MODES = [
 ] as const
 
 export type ChatPermissionMode = typeof CHAT_PERMISSION_MODES[number]['value']
+
+/**
+ * Codex's sandbox and approval policy as one picker, after its own `/approvals`
+ * presets. Approvals reach the tab as permission cards.
+ */
+export const CODEX_CHAT_MODES = [
+  { value: 'read-only', label: 'Read only', description: 'Read files and answer; ask before any edit or command that changes something' },
+  { value: 'ask', label: 'Ask', description: 'Work in the project folder; ask before going outside it or using the network' },
+  { value: 'auto', label: 'Auto', description: 'Work in the project folder without asking' },
+  { value: 'full-access', label: 'Full access', description: 'No sandbox and no questions — everything is allowed' }
+] as const
+
+export type CodexChatMode = typeof CODEX_CHAT_MODES[number]['value']
+export const DEFAULT_CODEX_MODE: CodexChatMode = 'ask'
+
+export function isCodexChatMode(value: unknown): value is CodexChatMode {
+  return CODEX_CHAT_MODES.some((mode) => mode.value === value)
+}
+
+/** The Codex thread settings a mode stands for. */
+export function codexModePolicy(mode: string | undefined): { sandbox: 'read-only' | 'workspace-write' | 'danger-full-access'; approvalPolicy: 'on-request' | 'never' } {
+  switch (mode) {
+    case 'read-only': return { sandbox: 'read-only', approvalPolicy: 'on-request' }
+    case 'auto': return { sandbox: 'workspace-write', approvalPolicy: 'never' }
+    case 'full-access': return { sandbox: 'danger-full-access', approvalPolicy: 'never' }
+    default: return { sandbox: 'workspace-write', approvalPolicy: 'on-request' }
+  }
+}
+
+/** Pi's thinking levels (`set_thinking_level`), for models that list none of their own. */
+export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+
+/** What each agent's chat can do; the Claude-only parts of the tab hide for the others. */
+export interface ChatAgentFeatures {
+  /** The agent's name in the tab ("Message Codex…"). */
+  label: string
+  /** The composer's mode picker, or none. */
+  modes: readonly { value: string; label: string; description?: string }[]
+  /** `/btw` side questions. */
+  sideQuestion: boolean
+  /** `/login` and `/logout` through the CLI. */
+  login: boolean
+  /** The `/permissions` rules editor. */
+  permissionsEditor: boolean
+  /** Background tasks (subagents, shells) with Stop and Background. */
+  tasks: boolean
+  /** "Allow, switch to Auto" on a permission card. */
+  autoOffer: boolean
+}
+
+export const CHAT_AGENT_FEATURES: Record<ChatAgent, ChatAgentFeatures> = {
+  claude: { label: 'Claude', modes: CHAT_PERMISSION_MODES, sideQuestion: true, login: true, permissionsEditor: true, tasks: true, autoOffer: true },
+  codex: { label: 'Codex', modes: CODEX_CHAT_MODES, sideQuestion: false, login: false, permissionsEditor: false, tasks: false, autoOffer: false },
+  pi: { label: 'Pi', modes: [], sideQuestion: false, login: false, permissionsEditor: false, tasks: false, autoOffer: false }
+}
+
+export function chatAgentFeatures(agent: ChatAgent | undefined): ChatAgentFeatures {
+  return CHAT_AGENT_FEATURES[agent ?? 'claude']
+}
 
 export function isChatPermissionMode(value: unknown): value is ChatPermissionMode {
   return CHAT_PERMISSION_MODES.some((mode) => mode.value === value)
@@ -1557,9 +1712,10 @@ export const TERMINAL_ONLY_COMMANDS = new Set([
 /**
  * The composer's `/` menu: the CLI doesn't list /btw, /permissions, /login or
  * /logout to SDK clients, so the chat tab adds them (it runs them itself), then
- * what the CLI reported.
+ * what the CLI reported. Codex and Pi chats list only their own commands.
  */
-export function composerCommands(commands: ChatCommand[]): ChatCommand[] {
+export function composerCommands(commands: ChatCommand[], agent: ChatAgent = 'claude'): ChatCommand[] {
+  if (agent !== 'claude') return commands
   const own = [SIDE_QUESTION_COMMAND, PERMISSIONS_COMMAND, LOGIN_COMMAND, LOGOUT_COMMAND].filter((command) => !commands.some((c) => c.name === command.name))
   return own.length > 0 ? [...own, ...commands] : commands
 }

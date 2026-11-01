@@ -60,6 +60,7 @@ function ensureListening(): void {
 }
 
 export interface ChatAttachConfig {
+  agent?: 'claude' | 'codex' | 'pi'
   cwd: string
   sessionId: string
   projectId?: string

@@ -290,15 +290,22 @@ public struct ChatSettings: Sendable, Equatable {
     public var defaultEffort: String?
     /// The effort levels the current model takes.
     public var efforts: [String]
+    /// The effort picker's name when it isn't "Effort" (Pi: "Thinking").
+    public var effortLabel: String?
+    /// The agent's own mode picker rows; empty = no modes (Pi); nil = Claude's (`TaskOp.modes`).
+    public var modes: [ChatModelOption]?
 
     public init(model: String? = nil, modelName: String? = nil, models: [ChatModelOption] = [],
-                effort: String? = nil, defaultEffort: String? = nil, efforts: [String] = []) {
+                effort: String? = nil, defaultEffort: String? = nil, efforts: [String] = [],
+                effortLabel: String? = nil, modes: [ChatModelOption]? = nil) {
         self.model = model
         self.modelName = modelName
         self.models = models
         self.effort = effort
         self.defaultEffort = defaultEffort
         self.efforts = efforts
+        self.effortLabel = effortLabel
+        self.modes = modes
     }
 }
 
@@ -349,6 +356,8 @@ public struct ChatUsage: Sendable, Equatable {
 public struct ChatView: Sendable, Equatable {
     public var tabId: String
     public var title: String
+    /// The agent running the chat (`codex`, `pi`); nil = Claude.
+    public var agent: String?
     public var status: ChatStatus
     /// Oldest → newest, windowed: `hasEarlier` says more exist before `items[0]`.
     public var items: [ChatItem]
@@ -356,10 +365,11 @@ public struct ChatView: Sendable, Equatable {
     /// Open prompts, oldest first.
     public var prompts: [ChatPrompt]
 
-    public init(tabId: String, title: String, status: ChatStatus = ChatStatus(), items: [ChatItem] = [],
+    public init(tabId: String, title: String, agent: String? = nil, status: ChatStatus = ChatStatus(), items: [ChatItem] = [],
                 hasEarlier: Bool = false, prompts: [ChatPrompt] = []) {
         self.tabId = tabId
         self.title = title
+        self.agent = agent
         self.status = status
         self.items = items
         self.hasEarlier = hasEarlier
@@ -708,7 +718,7 @@ public struct TaskNewResult: Sendable, Equatable {
 /// `model` or `effort` goes back to Claude's settings default.
 public struct ChatSettingsParams: Sendable, Equatable {
     public var tabId: String
-    /// One of `TaskOp.modes`.
+    /// One of `TaskOp.settingsModes` (Claude's, or a Codex chat's).
     public var mode: String?
     public var model: String?
     public var effort: String?
@@ -779,6 +789,8 @@ public enum TaskOp {
     public static let runQueued = "queue.run"
     /// The permission modes `task.new` accepts, in the order the phone offers them.
     public static let modes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
+    /// What `chat.settings` accepts: Claude's modes and a Codex chat's presets.
+    public static let settingsModes = modes + ["read-only", "ask", "full-access"]
 }
 
 /// `chat.detail` result.
@@ -905,6 +917,11 @@ extension ChatSettings {
             efforts: try f.array("efforts").map { (v) throws(ProtocolError) -> String in
                 guard let s = v.stringValue else { throw ProtocolError("efforts must hold strings") }
                 return s
+            },
+            effortLabel: try f.optStr("effortLabel"),
+            modes: f.isUnset("modes") ? nil : try f.array("modes").map { (v) throws(ProtocolError) -> ChatModelOption in
+                let m = try Fields(v, "mode")
+                return ChatModelOption(value: try m.str("value"), label: try m.str("label"), description: try m.optStr("description"))
             }
         )
     }
@@ -921,6 +938,14 @@ extension ChatSettings {
         if let effort { o["effort"] = .string(effort) }
         if let defaultEffort { o["defaultEffort"] = .string(defaultEffort) }
         o["efforts"] = .array(efforts.map { .string($0) })
+        if let effortLabel { o["effortLabel"] = .string(effortLabel) }
+        if let modes {
+            o["modes"] = .array(modes.map { m in
+                var row: JSONObject = ["value": .string(m.value), "label": .string(m.label)]
+                if let description = m.description { row["description"] = .string(description) }
+                return .object(row)
+            })
+        }
         return .object(o)
     }
 }
@@ -1112,6 +1137,7 @@ extension ChatView {
         return ChatView(
             tabId: try f.str("tabId"),
             title: try f.str("title"),
+            agent: try f.optStr("agent"),
             status: try ChatStatus(fields: f),
             items: try ChatItem.parseList(try f.array("items")),
             hasEarlier: try f.bool("hasEarlier"),
@@ -1121,6 +1147,7 @@ extension ChatView {
 
     public var json: JSONValue {
         var o: JSONObject = ["tabId": .string(tabId), "title": .string(title)]
+        if let agent { o["agent"] = .string(agent) }
         status.write(to: &o)
         o["items"] = .array(items.map(\.json))
         o["hasEarlier"] = .bool(hasEarlier)
@@ -1484,7 +1511,7 @@ extension ChatSettingsParams {
         let o = try Fields(value, "params")
         let params = ChatSettingsParams(tabId: try o.str("tabId"), mode: try o.optStr("mode"),
                                         model: try o.optStr("model"), effort: try o.optStr("effort"))
-        if let mode = params.mode, !TaskOp.modes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
+        if let mode = params.mode, !TaskOp.settingsModes.contains(mode) { throw ProtocolError("unknown mode \(mode)") }
         if params.mode == nil && params.model == nil && params.effort == nil { throw ProtocolError("nothing to change") }
         return params
     }

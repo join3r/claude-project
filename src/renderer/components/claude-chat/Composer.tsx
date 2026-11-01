@@ -2,13 +2,17 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { ArrowUp, Square, SquareTerminal } from 'lucide-react'
 import {
   CHAT_EFFORT_LEVELS,
-  CHAT_PERMISSION_MODES,
+  chatAgentFeatures,
+  CODEX_CHAT_MODES,
+  DEFAULT_CODEX_MODE,
   LOGOUT_COMMAND,
+  PI_THINKING_LEVELS,
   PERMISSIONS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
   findModelOption,
   parseLoginCommand,
   parseSideQuestion,
+  type ChatAgent,
   type ChatCommand,
   type ChatImage,
   type ChatLoginMethod,
@@ -23,6 +27,8 @@ import { onAgentInsert } from '../../agentLink/linkToAgent'
 import { AttachmentStrip, toChatImages, useImageAttachments } from './imageAttachments'
 
 interface Props {
+  /** The agent the tab runs; Claude when absent. Claude's own commands and modes are Claude's only. */
+  agent?: ChatAgent
   busy: boolean
   disabled?: boolean
   info: ChatSessionInfo
@@ -53,7 +59,13 @@ interface Props {
   tabId?: string
 }
 
-const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'auto']
+/** Shift+Tab's cycle: Claude skips Bypass, like the CLI; Codex walks its presets. */
+const MODE_CYCLE: Record<ChatAgent, string[]> = {
+  claude: ['default', 'acceptEdits', 'plan', 'auto'],
+  codex: ['read-only', 'ask', 'auto', 'full-access'],
+  pi: []
+}
+const DEFAULT_MODE: Record<ChatAgent, string> = { claude: 'default', codex: DEFAULT_CODEX_MODE, pi: '' }
 
 type Suggest =
   | { kind: 'file'; start: number; query: string }
@@ -85,7 +97,9 @@ function rankFiles(files: string[], query: string): string[] {
 }
 
 export default function Composer(props: Props): React.ReactElement {
-  const { busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onLogin, onLogout, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
+  const { agent = 'claude', busy, disabled, info, usage, models, commands, loadFiles, onSend, onSideQuestion, onBash, onPermissions, onLogin, onLogout, onStop, onSetModel, onSetMode, onSetEffort, onOpenInTerminal, focusSignal, tabId } = props
+  const features = chatAgentFeatures(agent)
+  const isClaude = agent === 'claude'
   const [text, setText] = useState('')
   const textRef = useRef(text)
   textRef.current = text
@@ -166,19 +180,19 @@ export default function Composer(props: Props): React.ReactElement {
     if (!suggest) return
     const el = textareaRef.current
     const caret = el?.selectionStart ?? text.length
-    if (suggest.kind === 'command' && value === PERMISSIONS_COMMAND.name) {
+    if (isClaude && suggest.kind === 'command' && value === PERMISSIONS_COMMAND.name) {
       setSuggest(null)
       setText('')
       onPermissions()
       return
     }
-    if (suggest.kind === 'command' && value === LOGOUT_COMMAND.name) {
+    if (isClaude && suggest.kind === 'command' && value === LOGOUT_COMMAND.name) {
       setSuggest(null)
       setText('')
       onLogout()
       return
     }
-    if (suggest.kind === 'command' && TERMINAL_ONLY_COMMANDS.has(value)) {
+    if (isClaude && suggest.kind === 'command' && TERMINAL_ONLY_COMMANDS.has(value)) {
       setSuggest(null)
       onOpenInTerminal()
       return
@@ -206,7 +220,7 @@ export default function Composer(props: Props): React.ReactElement {
       setSuggest(null)
       return
     }
-    const command = /^\/(\S+)/.exec(trimmed)?.[1]
+    const command = isClaude ? /^\/(\S+)/.exec(trimmed)?.[1] : undefined
     if (command === PERMISSIONS_COMMAND.name) {
       onPermissions()
       setText('')
@@ -219,7 +233,7 @@ export default function Composer(props: Props): React.ReactElement {
       setSuggest(null)
       return
     }
-    const login = parseLoginCommand(trimmed)
+    const login = isClaude ? parseLoginCommand(trimmed) : null
     if (login) {
       onLogin(login)
       setText('')
@@ -230,7 +244,7 @@ export default function Composer(props: Props): React.ReactElement {
       onOpenInTerminal()
       return
     }
-    const side = parseSideQuestion(trimmed)
+    const side = isClaude ? parseSideQuestion(trimmed) : null
     if (side !== null) {
       // Text only: attached images stay for the next real message.
       if (!side) return
@@ -255,10 +269,11 @@ export default function Composer(props: Props): React.ReactElement {
       if (suggest) { e.preventDefault(); setSuggest(null); return }
       if (busy) { e.preventDefault(); onStop(); return }
     }
-    if (e.key === 'Tab' && e.shiftKey) {
+    if (e.key === 'Tab' && e.shiftKey && MODE_CYCLE[agent].length > 0) {
       e.preventDefault()
-      const current = MODE_CYCLE.indexOf(info.permissionMode ?? 'default')
-      onSetMode(MODE_CYCLE[(current + 1) % MODE_CYCLE.length])
+      const cycle = MODE_CYCLE[agent]
+      const current = cycle.indexOf(info.permissionMode ?? DEFAULT_MODE[agent])
+      onSetMode(cycle[(current + 1) % cycle.length])
       return
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing) {
@@ -278,13 +293,18 @@ export default function Composer(props: Props): React.ReactElement {
     ? modelName(info.model) ?? 'Model'
     : defaultModel ? `Model: Default (${defaultModel})` : 'Model: Default'
   const modelOptions = [
-    { value: '', label: defaultModel ? `Default (${defaultModel})` : 'Default', description: 'What your Claude settings pick' },
+    { value: '', label: defaultModel ? `Default (${defaultModel})` : 'Default', description: `What your ${features.label} settings pick` },
     ...pickable.map((m) => ({ value: m.value, label: m.displayName, description: m.description }))
   ]
-  const effortLevels = currentModel?.supportedEffortLevels?.length ? currentModel.supportedEffortLevels : CHAT_EFFORT_LEVELS
+  const effortLevels = currentModel?.supportedEffortLevels?.length
+    ? currentModel.supportedEffortLevels
+    : agent === 'pi' ? PI_THINKING_LEVELS : CHAT_EFFORT_LEVELS
+  const effortWord = agent === 'pi' ? 'Thinking' : 'Effort'
   // `applied.effort` is null when no effort is sent (a model without effort levels).
   const defaultEffort = info.effort ? undefined : info.applied?.effort ?? undefined
-  const modeLabel = CHAT_PERMISSION_MODES.find((m) => m.value === info.permissionMode)?.label ?? 'Ask'
+  const modeValue = info.permissionMode ?? DEFAULT_MODE[agent]
+  const modeLabel = features.modes.find((m) => m.value === modeValue)?.label ?? 'Ask'
+  const modeHelp = isClaude ? MODE_HELP : CODEX_MODE_HELP
   const canSend = !disabled && (text.trim().length > 0 || images.length > 0)
   const bashMode = text.trimStart().startsWith('!')
 
@@ -315,7 +335,7 @@ export default function Composer(props: Props): React.ReactElement {
         rows={1}
         value={text}
         disabled={disabled}
-        placeholder={busy ? 'Add to the conversation — Claude reads it at its next step' : 'Message Claude — @ for files, / for commands, ! for shell'}
+        placeholder={busy ? `Add to the conversation — ${features.label} reads it at its next step` : `Message ${features.label} — @ for files, / for commands, ! for shell`}
         onChange={(e) => {
           setText(e.target.value)
           refreshSuggest(e.target.value, e.target.selectionStart)
@@ -328,7 +348,7 @@ export default function Composer(props: Props): React.ReactElement {
       />
       <div className="flex items-center gap-0.5 px-1.5 pb-1.5">
         {bashMode && (
-          <span className="px-1.5 text-xs text-accent" title="Runs in the project's shell. Claude gets the command and its output with your next message.">
+          <span className="px-1.5 text-xs text-accent" title={`Runs in the project's shell. ${features.label} gets the command and its output with your next message.`}>
             Shell command
           </span>
         )}
@@ -339,15 +359,17 @@ export default function Composer(props: Props): React.ReactElement {
           value={info.modelPicked ? currentModel?.value ?? info.model ?? '' : ''}
           onChange={(value) => onSetModel(value || undefined)}
         />
+        {features.modes.length > 0 && (
+          <ChipMenu
+            label={modeLabel}
+            title="Permission mode (Shift+Tab cycles)"
+            options={features.modes.map((m) => ({ value: m.value, label: m.label, description: modeHelp[m.value] }))}
+            value={modeValue}
+            onChange={onSetMode}
+          />
+        )}
         <ChipMenu
-          label={modeLabel}
-          title="Permission mode (Shift+Tab cycles)"
-          options={CHAT_PERMISSION_MODES.map((m) => ({ value: m.value, label: m.label, description: MODE_HELP[m.value] }))}
-          value={info.permissionMode ?? 'default'}
-          onChange={onSetMode}
-        />
-        <ChipMenu
-          label={info.effort ? `Effort: ${info.effort}` : defaultEffort ? `Effort: Default (${defaultEffort})` : 'Effort: Default'}
+          label={info.effort ? `${effortWord}: ${info.effort}` : defaultEffort ? `${effortWord}: Default (${defaultEffort})` : `${effortWord}: Default`}
           title="Thinking effort"
           options={[{ value: '', label: defaultEffort ? `Default (${defaultEffort})` : 'Default' }, ...effortLevels.map((level) => ({ value: level, label: level }))]}
           value={info.effort ?? ''}
@@ -386,6 +408,9 @@ export default function Composer(props: Props): React.ReactElement {
     </div>
   )
 }
+
+/** Codex's presets, as its own `/approvals` describes them. */
+export const CODEX_MODE_HELP: Record<string, string> = Object.fromEntries(CODEX_CHAT_MODES.map((m) => [m.value, m.description]))
 
 export const MODE_HELP: Record<string, string> = {
   default: 'Ask before edits and commands your rules don’t allow',

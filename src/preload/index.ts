@@ -292,10 +292,10 @@ const api = {
     return () => ipcRenderer.removeListener('agent-activity', handler)
   },
 
-  // Claude chat tabs (Agent SDK). Main owns the process; windows attach to it.
+  // Chat tabs (Claude through the Agent SDK, Codex, Pi). Main owns the process; windows attach to it.
   chatAttach: (
     tabId: string,
-    config: { cwd: string; sessionId: string; projectId?: string; sshConfig?: SshConfig; extraArgs?: string[] }
+    config: { agent?: 'claude' | 'codex' | 'pi'; cwd: string; sessionId: string; projectId?: string; sshConfig?: SshConfig; extraArgs?: string[] }
   ): Promise<ChatSnapshot> => ipcRenderer.invoke('chat-attach', tabId, config),
   chatDetach: (tabId: string): void => ipcRenderer.send('chat-detach', tabId),
   chatSend: (tabId: string, text: string, images?: ChatImage[]): Promise<void> =>

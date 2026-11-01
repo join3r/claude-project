@@ -33,6 +33,10 @@ export const TASK_NEW_FEATURE = 'task.new'
 export const TASK_NEW_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'] as const
 export type TaskNewMode = (typeof TASK_NEW_MODES)[number]
 
+/** The modes `chat.settings` may switch to (§8.5): Claude's, and a Codex chat's presets. */
+export const CHAT_SETTINGS_MODES = [...TASK_NEW_MODES, 'read-only', 'ask', 'full-access'] as const
+export type ChatSettingsMode = (typeof CHAT_SETTINGS_MODES)[number]
+
 /**
  * The handshake feature (§8.1) a desktop lists when `chat.send` and `task.new`
  * take `images`: pictures sent with the message, as the desktop composer
@@ -324,7 +328,7 @@ export const CHAT_SETTINGS_OP = 'chat.settings'
 /** The handshake feature (§8.1) a desktop lists when it answers `chat.settings`. */
 export const CHAT_SETTINGS_FEATURE = 'chat.settings'
 
-export interface ChatSettingsParams { tabId: string; mode?: TaskNewMode; model?: string; effort?: string }
+export interface ChatSettingsParams { tabId: string; mode?: ChatSettingsMode; model?: string; effort?: string }
 
 /**
  * `chat.image` (SPEC.md §8.9): one image a tool result carried (a Read of a PNG, a
@@ -537,7 +541,17 @@ export interface ChatViewSettings {
   defaultEffort?: string
   /** The effort levels the current model takes. */
   efforts: string[]
+  /** The picker's name when it isn't "Effort" (Pi: "Thinking"). */
+  effortLabel?: string
+  /**
+   * The mode picker's rows, when the agent's differ from Claude's (`task.new`'s);
+   * an empty list means the agent has no modes (Pi). Absent: Claude's.
+   */
+  modes?: ChatViewModeOption[]
 }
+
+/** One row of the mode picker. */
+export interface ChatViewModeOption { value: string; label: string; description?: string }
 
 /** One plan rate-limit window. */
 export interface ChatViewLimitWindow {
@@ -621,6 +635,8 @@ export interface ChatViewStatus {
 export interface ChatView extends ChatViewStatus {
   tabId: string
   title: string
+  /** The agent running the chat (`codex`, `pi`); absent = Claude. */
+  agent?: string
   /** Oldest → newest; the last {@link ChatLimits.window} items at `chat.open`. */
   items: ChatViewItem[]
   hasEarlier: boolean
@@ -853,6 +869,7 @@ function parseSettings(value: unknown): ChatViewSettings {
   const modelName = optStr(o, 'modelName')
   const effort = optStr(o, 'effort')
   const defaultEffort = optStr(o, 'defaultEffort')
+  const effortLabel = optStr(o, 'effortLabel')
   return {
     ...(model !== undefined ? { model } : {}),
     ...(modelName !== undefined ? { modelName } : {}),
@@ -863,7 +880,15 @@ function parseSettings(value: unknown): ChatViewSettings {
     }),
     ...(effort !== undefined ? { effort } : {}),
     ...(defaultEffort !== undefined ? { defaultEffort } : {}),
-    efforts: strings(o, 'efforts')
+    efforts: strings(o, 'efforts'),
+    ...(effortLabel !== undefined ? { effortLabel } : {}),
+    ...(absent(o, 'modes') ? {} : {
+      modes: arr(o, 'modes').map((raw) => {
+        const m = obj(raw, 'mode')
+        const description = optStr(m, 'description')
+        return { value: str(m, 'value'), label: str(m, 'label'), ...(description !== undefined ? { description } : {}) }
+      })
+    })
   }
 }
 
@@ -988,7 +1013,8 @@ function withStatus<T extends object>(head: T, status: ChatViewStatus): T & Chat
 export function parseChatView(value: unknown): ChatView {
   const o = obj(value, 'view')
   const status = parseStatus(o)
-  const view = withStatus({ tabId: str(o, 'tabId'), title: str(o, 'title') }, status)
+  const agent = optStr(o, 'agent')
+  const view = withStatus({ tabId: str(o, 'tabId'), title: str(o, 'title'), ...(agent !== undefined ? { agent } : {}) }, status)
   return {
     ...view,
     items: arr(o, 'items').map(parseChatViewItem),
@@ -1233,15 +1259,15 @@ export function parseTaskLandResult(value: unknown): TaskLandResult {
 
 /**
  * `chat.settings` params (the desktop's side). Throws ProtocolError — `bad-request` —
- * on a missing `tabId`, no field to change, or a `mode` outside {@link TASK_NEW_MODES}.
+ * on a missing `tabId`, no field to change, or a `mode` outside {@link CHAT_SETTINGS_MODES}.
  */
 export function parseChatSettingsParams(params: unknown): ChatSettingsParams {
   const o = obj(params, 'params')
   const out: ChatSettingsParams = { tabId: str(o, 'tabId') }
   const mode = optStr(o, 'mode')
   if (mode !== undefined) {
-    if (!(TASK_NEW_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
-    out.mode = mode as TaskNewMode
+    if (!(CHAT_SETTINGS_MODES as readonly string[]).includes(mode)) fail(`unknown mode ${mode}`)
+    out.mode = mode as ChatSettingsMode
   }
   const model = optStr(o, 'model')
   if (model !== undefined) out.model = model

@@ -1,4 +1,4 @@
-import type { Project, ProjectsData, Stream, Task } from '../../shared/types'
+import { isChatTabType, type Project, type ProjectsData, type Stream, type Task } from '../../shared/types'
 import type { ChatEvent, ChatItem, ChatPrompt, ChatState } from '../../shared/claude-chat'
 import { promptQuestions } from '../../shared/chat-prompts'
 import { summarizeTool } from '../../shared/agent-activity'
@@ -93,7 +93,7 @@ export class PushEmitter {
     const body = prompt.kind === 'permission'
       ? summarizeTool(prompt.toolName, prompt.input)
       : prompt.kind === 'question'
-        ? promptQuestions(prompt.input)[0]?.question || 'Claude has a question'
+        ? promptQuestions(prompt.input)[0]?.question || 'A question for you'
         : PLAN_BODY
     const wanted = prompt.kind === 'permission' ? 'permission' : 'question'
     for (const target of this.deps.targets()) {
@@ -147,7 +147,7 @@ function findChatTab(data: ProjectsData, tabId: string): { project: Project; str
     for (const stream of project.streams) {
       for (const task of stream.tasks) {
         const tab = taskTabs(task).find((t) => t.id === tabId)
-        if (tab) return tab.type === 'claude-chat' ? { project, stream, task } : null
+        if (tab) return isChatTabType(tab.type) ? { project, stream, task } : null
       }
     }
   }

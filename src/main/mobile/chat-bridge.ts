@@ -1,9 +1,11 @@
 import {
+  chatAgentFeatures,
   composerCommands,
   LOGIN_COMMAND,
   LOGOUT_COMMAND,
   PERMISSIONS_COMMAND,
   TERMINAL_ONLY_COMMANDS,
+  type ChatAgent,
   type ChatEvent,
   type ChatPrompt,
   type ChatPromptResponse,
@@ -22,7 +24,7 @@ import {
 } from '../../shared/chat-prompts'
 import type { ChatImage } from '../../shared/claude-chat'
 import { chatTabConfig, type ChatTabConfigShape } from '../../shared/chat-tab-config'
-import type { Project, ProjectsData, Tab, Task, TaskWorktreeResult } from '../../shared/types'
+import { chatTabAgent, isChatTabType, type Project, type ProjectsData, type Tab, type Task, type TaskWorktreeResult } from '../../shared/types'
 import { findStreamOfTask, needsTaskWorktree, projectTasks, taskTabs } from '../../shared/streams'
 import { isVisibleOnMobile } from './inbox'
 import {
@@ -324,9 +326,10 @@ export class ChatBridge {
         }
       }
       case CHAT_COMMANDS_OP:
-        return chatCommands(await this.ensureRuntime(resolved))
+        return chatCommands(await this.ensureRuntime(resolved), resolved.config.agent)
       case CHAT_BTW_OP: {
         if (!this.deps.chats.askSideQuestion) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot ask side questions')
+        this.claudeOnly(resolved, 'sideQuestion', 'side questions')
         await this.ensureRuntime(resolved)
         const answer = await this.deps.chats.askSideQuestion(params.tabId, (params as ChatBtwParams).question)
         const result: ChatBtwResult = { response: answer.response }
@@ -366,10 +369,17 @@ export class ChatBridge {
     }
   }
 
+  /** Claude's own parts (/btw, /permissions) in another agent's chat: unsupported. */
+  private claudeOnly(resolved: ResolvedTab, feature: 'sideQuestion' | 'permissionsEditor', what: string): void {
+    const agent = resolved.config.agent ?? 'claude'
+    if (!chatAgentFeatures(agent)[feature]) throw new OpError(AppErrorCode.Unsupported, `${chatAgentFeatures(agent).label} chats have no ${what}`)
+  }
+
   /** The folder the desktop's `/permissions` dialog edits: the chat's own, never a remote one. */
   private permissionsFor(resolved: ResolvedTab): { permissions: NonNullable<ChatBridgeDeps['permissions']>; cwd: string } {
     const permissions = this.deps.permissions
     if (!permissions) throw new OpError(AppErrorCode.Unsupported, 'This desktop cannot edit permission rules')
+    this.claudeOnly(resolved, 'permissionsEditor', 'permission rules')
     if (resolved.project.ssh) {
       throw new OpError(AppErrorCode.Unsupported, "This project's Claude settings live on the remote host. Run /permissions in a terminal there.")
     }
@@ -394,6 +404,11 @@ export class ChatBridge {
     const offered = viewSettings(chat.info, chat.models)
     if (model && offered.models.length > 0 && !offered.models.some((m) => m.value === model)) {
       throw new OpError(AppErrorCode.BadRequest, `Unknown model ${model}`)
+    }
+    // The agent's own modes: Claude's (the parser checked those), Codex's presets, none for Pi.
+    const modes = chatAgentFeatures(resolved.config.agent).modes
+    if (mode !== undefined && !modes.some((m) => m.value === mode)) {
+      throw new OpError(AppErrorCode.BadRequest, `Unknown mode ${mode}`)
     }
     if (mode !== undefined) await chats.setPermissionMode(tabId, mode)
     if (model !== undefined) await chats.setModel(tabId, model || undefined)
@@ -466,8 +481,9 @@ export class ChatBridge {
         const tab = taskTabs(task).find((t) => t.id === tabId)
         if (!tab) continue
         // A chat tab without a session id has never been mounted; a window gives it one.
-        if (tab.type !== 'claude-chat' || !tab.sessionId) return null
-        return { project, task, tab, config: chatTabConfig(project, task, tab.sessionId) }
+        if (!isChatTabType(tab.type) || !tab.sessionId) return null
+        // The tab's own agent: a phone may be the first to start a Codex or Pi chat.
+        return { project, task, tab, config: chatTabConfig(project, task, tab.sessionId, chatTabAgent(tab.type)) }
       }
     }
     return null
@@ -558,15 +574,17 @@ const DESKTOP_AUTH_COMMANDS = new Set([LOGIN_COMMAND.name, LOGOUT_COMMAND.name])
 
 /**
  * `chat.commands` (§8.14): the composer's `/` menu, as ClaudeChatTab builds it,
- * less the desktop's own /login and /logout.
+ * less the desktop's own /login and /logout. A Codex or Pi chat lists only its
+ * own commands, none of them terminal-only.
  */
-export function chatCommands(chat: ChatState): ChatCommandsResult {
+export function chatCommands(chat: ChatState, agent: ChatAgent = 'claude'): ChatCommandsResult {
+  const claude = agent === 'claude'
   return {
-    commands: composerCommands(chat.commands).filter((command) => command !== LOGIN_COMMAND && command !== LOGOUT_COMMAND).map((command) => {
+    commands: composerCommands(chat.commands, agent).filter((command) => command !== LOGIN_COMMAND && command !== LOGOUT_COMMAND).map((command) => {
       const entry: ChatCommandEntry = { name: command.name }
       if (command.description) entry.description = command.description
       if (command.argumentHint) entry.argumentHint = command.argumentHint
-      if ((TERMINAL_ONLY_COMMANDS.has(command.name) || DESKTOP_AUTH_COMMANDS.has(command.name)) && command.name !== PERMISSIONS_COMMAND.name) entry.terminalOnly = true
+      if (claude && (TERMINAL_ONLY_COMMANDS.has(command.name) || DESKTOP_AUTH_COMMANDS.has(command.name)) && command.name !== PERMISSIONS_COMMAND.name) entry.terminalOnly = true
       return entry
     })
   }

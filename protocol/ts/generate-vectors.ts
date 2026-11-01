@@ -250,7 +250,7 @@ function appMessages(): unknown {
           id: 't2', name: 'Fix the login redirect', streamId: 's-050', streamName: '0.5.0', status: 'idle',
           branch: '0.5.0--fix-the-login-redirect',
           landing: { state: 'conflict', files: ['src/auth.ts', 'src/login.ts'], fileCount: 2 },
-          tabs: [{ id: 'tab3', type: 'claude-chat', title: 'Claude', status: 'idle' }]
+          tabs: [{ id: 'tab3', type: 'claude-chat', title: 'Claude', status: 'idle' }, { id: 'tab5', type: 'codex', title: 'Codex', status: 'idle', chat: true }]
         }, {
           id: 't3', name: 'bump-deps', streamId: 's-050', streamName: '0.5.0', status: 'exited', since: 1789990000000,
           snoozedUntil: 1790003600000, branch: '0.5.0--bump-deps',
@@ -580,6 +580,18 @@ function chatMessages(): unknown {
     ],
     prompts: [{ kind: 'survey', id: 'req-9', stars: 5 }, { ...prompts[3], agent: false, risk: 'high' }]
   }
+  // A Codex chat: its agent, its own modes, and Pi-style named effort.
+  const codexView = {
+    ...view, tabId: 'tab-codex', title: 'Codex', agent: 'codex', permissionMode: 'ask', model: 'gpt-6.1-sol',
+    settings: {
+      modelName: 'GPT-6.1-Sol', models: [{ value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' }], efforts: ['low', 'high'],
+      modes: [{ value: 'read-only', label: 'Read only', description: 'Ask before any change' }, { value: 'ask', label: 'Ask' }]
+    }
+  }
+  const piView = {
+    ...view, tabId: 'tab-pi', title: 'Pi', agent: 'pi', permissionMode: undefined,
+    settings: { models: [], efforts: ['off', 'minimal'], effortLabel: 'Thinking', modes: [] }
+  }
   const params = (op: string, value: unknown): { op: string; json: string; expected: unknown } =>
     ({ op, json: text(value), expected: parseChatParams(op, value) })
   const result = (op: string, value: unknown): { op: string; json: string; expected: unknown } =>
@@ -625,6 +637,8 @@ function chatMessages(): unknown {
     results: [
       result('chat.open', { seq: 11, view }),
       result('chat.open', { seq: 3, view: viewWithUnknowns }),
+      result('chat.open', { seq: 4, view: codexView }),
+      result('chat.open', { seq: 5, view: piView }),
       result('chat.earlier', { items: items.slice(0, 2), hasEarlier: false }),
       result('chat.detail', { kind: 'tool', input: '{\n  "command": "npm test"\n}', result: '42 passing' }),
       result('chat.detail', { kind: 'tool', input: '{}' }),
@@ -1064,7 +1078,9 @@ function chatMessages(): unknown {
         text({ tabId: 'tab-chat', mode: 'plan' }),
         text({ tabId: 'tab-chat', model: 'haiku', effort: 'low' }),
         text({ tabId: 'tab-chat', model: '', effort: '' }),
-        text({ tabId: 'tab-chat', mode: null, effort: 'max', extra: true })
+        text({ tabId: 'tab-chat', mode: null, effort: 'max', extra: true }),
+        // A Codex chat's presets.
+        text({ tabId: 'tab-codex', mode: 'full-access' })
       ].map((json) => ({ json, expected: parseChatSettingsParams(JSON.parse(json)) })),
       invalid: {
         params: [

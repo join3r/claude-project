@@ -485,8 +485,11 @@ public struct InboxTab: Codable, Sendable, Equatable, Identifiable {
     public var activity: String?
     /// What an agent tab's conversation is about: Claude's session title, else the last prompt.
     public var topic: String?
+    /// A Codex or Pi chat: its `type` is the terminal agent's (older phones show
+    /// it as one), but it answers `chat.*` and opens in the chat view (spec §4.4).
+    public var chat: Bool
 
-    public init(id: String, type: TabType, title: String, status: TabStatus, since: Int64? = nil, activity: String? = nil, topic: String? = nil) {
+    public init(id: String, type: TabType, title: String, status: TabStatus, since: Int64? = nil, activity: String? = nil, topic: String? = nil, chat: Bool = false) {
         self.id = id
         self.type = type
         self.title = title
@@ -494,7 +497,11 @@ public struct InboxTab: Codable, Sendable, Equatable, Identifiable {
         self.since = since
         self.activity = activity
         self.topic = topic
+        self.chat = chat
     }
+
+    /// Opens in the chat view: a Claude chat, or a Codex/Pi chat flagged `chat`.
+    public var isChat: Bool { type == .claudeChat || chat }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -506,6 +513,7 @@ public struct InboxTab: Codable, Sendable, Equatable, Identifiable {
         since = try c.decodeIfPresent(Int64.self, forKey: .since)
         activity = try c.decodeIfPresent(String.self, forKey: .activity)
         topic = try c.decodeIfPresent(String.self, forKey: .topic)
+        chat = try c.decodeIfPresent(Bool.self, forKey: .chat) ?? false
     }
 }
 

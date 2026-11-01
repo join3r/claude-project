@@ -26,6 +26,7 @@ function manager(loginRemote: boolean | undefined) {
   const deps: ChatManagerDeps = {
     sendToClient: (_clientId, channel, _tabId, _seq, event) => { if (channel === 'chat-event') events.push(event as ChatEvent) },
     resolveLocalClaude: () => fakeClaude,
+    resolveLocalAgent: (agent) => agent,
     localEnv: () => process.env,
     ensureSsh: async () => {},
     remoteCommand: () => { throw new Error('no ssh here') },

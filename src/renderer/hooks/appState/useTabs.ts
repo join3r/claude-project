@@ -1,8 +1,8 @@
 import { useCallback, useRef } from 'react'
 import { isNotebookFile } from '../../../shared/notebook'
 import { v4 as uuid } from 'uuid'
-import { AI_TAB_META, CLAUDE_CHAT_LABEL } from '../../../shared/types'
-import type { Tab, TabType } from '../../../shared/types'
+import { agentOfTab, AI_TAB_META, CHAT_TAB_LABEL, chatTabAgent, chatTabTypeFor, isChatTabType } from '../../../shared/types'
+import type { AiTabType, ChatTabType, Tab, TabType } from '../../../shared/types'
 import { canAddTabType, findTaskInProject, isMainTab, taskTabs } from '../../../shared/streams'
 import {
   addTabToPane,
@@ -35,7 +35,7 @@ export interface TabsActions {
   reopenClosedTab: () => number | null
   updateTabUrl: (projectId: string, taskId: string, tabId: string, url: string) => void
   updateTabSessionId: (projectId: string, taskId: string, tabId: string, sessionId: string) => void
-  convertClaudeTab: (projectId: string, taskId: string, tabId: string, to: 'claude' | 'claude-chat') => void
+  convertClaudeTab: (projectId: string, taskId: string, tabId: string, to: AiTabType | ChatTabType) => void
   setActiveTab: (projectId: string, taskId: string, tabId: string) => void
   moveTab: (projectId: string, taskId: string, tabId: string, target: PaneDropTarget) => void
   /** Move the tab into a new pane to the right of its own. */
@@ -155,21 +155,24 @@ export function useTabs(
   }, [mutateProjects])
 
   /**
-   * Turn a Claude tab into the other kind — terminal ⇄ chat — on the same session.
+   * Turn an agent tab into its other kind — terminal ⇄ chat — on the same session.
    * The old kind's process is ended first (through the same `tab-removed` teardown
    * a close runs, which is what the mounted component listens for), so the new one
    * resumes a session nothing else is writing to.
    */
-  const convertClaudeTab = useCallback((projectId: string, taskId: string, tabId: string, to: 'claude' | 'claude-chat') => {
+  const convertClaudeTab = useCallback((projectId: string, taskId: string, tabId: string, to: AiTabType | ChatTabType) => {
     const owner = findTask(projectsRef.current, projectId, taskId)
     const tab = owner ? taskTabs(owner).find(candidate => candidate.id === tabId) : undefined
-    if (!tab || tab.type === to || (tab.type !== 'claude' && tab.type !== 'claude-chat')) return
-    if (to === 'claude-chat' && !featureAvailable(projectsRef.current.find(p => p.id === projectId), 'chat')) return
+    const agent = tab ? agentOfTab(tab.type) : null
+    const toAgent = isChatTabType(to) ? chatTabAgent(to) : to
+    if (!tab || tab.type === to || !agent || agent !== toAgent) return
+    if (isChatTabType(to) && !featureAvailable(projectsRef.current.find(p => p.id === projectId), 'chat')) return
     window.dispatchEvent(new CustomEvent('tab-removed', { detail: { tabId } }))
     void window.api.scrollbackDelete(tabId)
     markClaudeHandoff(tabId)
-    const defaultTitles = [AI_TAB_META.claude.label, CLAUDE_CHAT_LABEL]
-    const title = defaultTitles.includes(tab.title) ? (to === 'claude' ? AI_TAB_META.claude.label : CLAUDE_CHAT_LABEL) : tab.title
+    const chatType = chatTabTypeFor(agent)
+    const defaultTitles = [AI_TAB_META[agent].label, CHAT_TAB_LABEL[chatType]]
+    const title = defaultTitles.includes(tab.title) ? (isChatTabType(to) ? CHAT_TAB_LABEL[chatType] : AI_TAB_META[agent].label) : tab.title
     const sessionId = tab.sessionId ?? uuid()
     mutateProjects(prev => patchTab(prev, projectId, taskId, tabId, { type: to, title, sessionId }))
   }, [mutateProjects])

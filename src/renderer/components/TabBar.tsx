@@ -34,8 +34,8 @@ function tabIcon(type: TabType): string {
   if (type === 'terminal') return '>'
   if (type === 'browser') return '◉'
   if (type === 'claude' || type === 'claude-chat') return '✦'
-  if (type === 'codex') return '◫'
-  if (type === 'pi') return 'π'
+  if (type === 'codex' || type === 'codex-chat') return '◫'
+  if (type === 'pi' || type === 'pi-chat') return 'π'
   return '>'
 }
 

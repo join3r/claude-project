@@ -33,8 +33,12 @@ describe('shouldNameTask', () => {
 
 describe('availablePromptAgents', () => {
   it('offers enabled agents in a fixed order', () => {
-    expect(availablePromptAgents(allOn, {})).toEqual(['claude-chat', 'claude', 'codex', 'pi'])
-    expect(availablePromptAgents({ ...allOn, enableClaude: false }, {})).toEqual(['codex', 'pi'])
+    expect(availablePromptAgents(allOn, {})).toEqual(['claude-chat', 'claude', 'codex-chat', 'codex', 'pi-chat', 'pi'])
+    expect(availablePromptAgents({ ...allOn, enableClaude: false }, {})).toEqual(['codex-chat', 'codex', 'pi-chat', 'pi'])
+  })
+
+  it('keeps Codex and Pi to their terminals over SSH', () => {
+    expect(availablePromptAgents(allOn, { ssh: { host: 'h' } })).toEqual(['claude-chat', 'claude', 'codex', 'pi'])
   })
 
   it('offers nothing in a shell-command project', () => {

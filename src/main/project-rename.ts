@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import type { Project, ProjectsData, Stream, Tab, Task } from '../shared/types'
+import { isChatTabType, type Project, type ProjectsData, type Stream, type Tab, type Task } from '../shared/types'
 import type { ProjectArchive } from '../shared/archive'
 import type { TabStatusValue } from '../shared/types'
 import { projectTasks, taskTabs } from '../shared/streams'
@@ -169,7 +169,7 @@ async function checkRename(deps: ProjectRenameDeps, project: Project, options: R
       // A plain terminal reads as working while it prints; only an agent's turn would be lost.
       if (tab.type !== 'terminal' && deps.statusOf(tab.id) === 'working') working.push(task.name)
       if (!deps.isLive(tab.id)) continue
-      if (tab.type === 'claude-chat') running.chats++
+      if (isChatTabType(tab.type)) running.chats++
       else if (TERMINAL_AGENTS.has(tab.type)) running.agents++
       else running.terminals++
     }

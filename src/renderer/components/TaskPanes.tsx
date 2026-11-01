@@ -8,7 +8,7 @@ import DiffTab from './DiffTab'
 import EditorTab from './EditorTab'
 import NotebookTab from './NotebookTab'
 import NoteTab from './NoteTab'
-import { AI_TAB_TYPES } from '../../shared/types'
+import { AI_TAB_META, AI_TAB_TYPES, chatTabAgent, isChatTabType } from '../../shared/types'
 import { isNotebookFile } from '../../shared/notebook'
 import { dragDivider, showsTabBars } from '../../shared/panes'
 import { findStreamOfTask, needsTaskWorktree, streamGivesTaskWorktrees, streamTakesLandings, tabSpawnDir, taskTabs, taskWorktreesSupported, waitsForTaskWorktree } from '../../shared/streams'
@@ -170,11 +170,12 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
         />
       )
     }
-    if (tab.type === 'claude-chat' && !featureAvailable(project, 'chat')) {
-      return <ChatUnavailable visible={tabVisible} onSwitch={() => convertClaudeTab(projectId, task.id, tab.id, 'claude')} />
-    }
-    if (tab.type === 'claude-chat') {
-      return <ClaudeChatTab tabId={tab.id} visible={tabVisible} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} serverId={project.host} extraArgs={project.aiToolArgs?.claude} />
+    if (isChatTabType(tab.type)) {
+      const agent = chatTabAgent(tab.type)
+      if (!featureAvailable(project, 'chat')) {
+        return <ChatUnavailable agent={agent} visible={tabVisible} onSwitch={() => convertClaudeTab(projectId, task.id, tab.id, agent)} />
+      }
+      return <ClaudeChatTab agent={agent} tabId={tab.id} visible={tabVisible} sessionId={tab.sessionId} projectId={projectId} taskId={task.id} projectDir={projectDir} sshConfig={project.ssh} serverId={project.host} extraArgs={project.aiToolArgs?.[agent]} />
     }
     if (tab.type === 'diff' && tab.filePath) {
       return <DiffTab tabId={tab.id} visible={tabVisible} filePath={tab.filePath} projectDir={projectDir} projectId={projectId} effectiveTheme={effectiveTheme} />
@@ -351,16 +352,17 @@ export default function TaskPanes({ project, task, visible, projectDir, desk }: 
 }
 
 /** A Claude chat tab of a DevTool server's project: chat runs on servers in a later version. */
-function ChatUnavailable({ visible, onSwitch }: { visible: boolean; onSwitch: () => void }): React.ReactElement {
+function ChatUnavailable({ agent, visible, onSwitch }: { agent: AiTabType; visible: boolean; onSwitch: () => void }): React.ReactElement {
+  const label = AI_TAB_META[agent].label
   return (
     <div className="w-full h-full flex-col items-center justify-center gap-3 text-sm text-text-muted" style={{ display: visible ? 'flex' : 'none' }}>
-      <div>Claude chat doesn't run on DevTool servers yet.</div>
+      <div>{label} chat doesn't run on DevTool servers yet.</div>
       <button
         type="button"
         onClick={onSwitch}
         className="px-3 py-1 rounded-md border border-border bg-surface-2 text-text cursor-pointer hover:bg-surface-3"
       >
-        Open in Claude Code (terminal)
+        Open in {label} (terminal)
       </button>
     </div>
   )

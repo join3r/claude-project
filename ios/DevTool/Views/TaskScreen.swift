@@ -75,12 +75,12 @@ struct TaskScreen: View {
         }
     }
 
-    /// The chat to show: one asked for, else the task's agent when it is a Claude chat.
+    /// The chat to show: one asked for, else the task's agent when it is a chat (Claude, Codex, Pi).
     private func chatTab(_ task: InboxTask) -> InboxTab? {
         for id in [chosenTab, openTab].compactMap({ $0 }) {
-            if let tab = task.tabs.first(where: { $0.id == id }), tab.type == .claudeChat { return tab }
+            if let tab = task.tabs.first(where: { $0.id == id }), tab.isChat { return tab }
         }
-        guard let agent = task.agentTab, agent.type == .claudeChat else { return nil }
+        guard let agent = task.agentTab, agent.isChat else { return nil }
         return agent
     }
 
@@ -442,7 +442,7 @@ struct AlsoOpenSection: View {
         Section {
             ForEach(tabs) { tab in
                 Group {
-                    if tab.type == .claudeChat, let onOpenChat {
+                    if tab.isChat, let onOpenChat {
                         Button { onOpenChat(tab.id) } label: { TabRow(tab: tab) }
                             .buttonStyle(.plain)
                     } else {

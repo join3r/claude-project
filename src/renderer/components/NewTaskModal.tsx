@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, ChevronDown, Plus } from 'lucide-react'
-import type { AppConfig, Project, PromptBoxAgent, Tag } from '../../shared/types'
+import { isChatTabType, type AppConfig, type Project, type PromptBoxAgent, type Tag } from '../../shared/types'
 import { dirBasename } from '../../shared/paths'
 import { Field, HelperText, SegCtl, menuItemCls } from './ui'
 import AddLocalProject from './AddLocalProject'
@@ -175,7 +175,7 @@ export default function NewTaskModal({
   // Without an agent to hand it to, there is no prompt — the task opens blank.
   const promptText = agent || takesCommand ? prompt.trim() : ''
   // Only the chat view takes images; switching away hides them rather than dropping them.
-  const takesImages = agent === 'claude-chat'
+  const takesImages = !!agent && isChatTabType(agent)
   const attachments = useImageAttachments(takesImages, initialImages)
   const images = takesImages ? attachments.images : []
   // Images go with a prompt: one alone would name the task and branch after nothing.

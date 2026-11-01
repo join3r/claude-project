@@ -6,6 +6,8 @@ import ImageIO
 /// claude-chat tab, as far as the phone can tell).
 struct MockChatTranscript: Sendable {
     var title: String
+    /// `codex` / `pi`; nil = Claude.
+    var agent: String? = nil
     var status: ChatStatus
     var items: [ChatItem]
     var prompts: [ChatPrompt]
@@ -51,7 +53,7 @@ struct MockChatTranscript: Sendable {
 
     func view(tabId: String) -> ChatView {
         let windowed = Array(items.suffix(Self.window))
-        return ChatView(tabId: tabId, title: title, status: status, items: windowed,
+        return ChatView(tabId: tabId, title: title, agent: agent, status: status, items: windowed,
                         hasEarlier: items.count > windowed.count, prompts: prompts)
     }
 
@@ -77,7 +79,7 @@ struct MockChatTranscript: Sendable {
 /// Canned chats for `-mockDesktop`, keyed by tab ID (the claude-chat tabs of `MockInbox.sample`).
 enum MockChats {
     static func all(now: Date = Date()) -> [String: MockChatTranscript] {
-        ["tab-1": fixAuth(now: now), "tab-8": loginRedesign(now: now), "tab-11": usageCharts(now: now)]
+        ["tab-1": fixAuth(now: now), "tab-8": loginRedesign(now: now), "tab-11": usageCharts(now: now), "tab-13": cacheHeaders(now: now)]
     }
 
     private static func toolDetail(_ input: JSONValue, _ result: String?) -> ChatDetail {
@@ -173,6 +175,40 @@ enum MockChats {
                 detail: "npm test -- auth\n\nRun the auth test suite\ncwd: ~/code/api-server",
                 canAlwaysAllow: true)))],
             details: details,
+            nextId: 100
+        )
+    }
+
+    /// api-server / cache-headers: a Codex chat waiting to run a command outside its sandbox.
+    static func cacheHeaders(now: Date) -> MockChatTranscript {
+        let items: [ChatItem] = [
+            ChatItem(id: "u1", .user(text: "Send long-lived cache headers on everything under /static.", images: nil, queued: false, failed: false)),
+            ChatItem(id: "t1", .tool(ChatTool(name: "Bash", summary: "Bash · rg -n \"static\" src/server.ts", status: .done, hasDetail: true))),
+            ChatItem(id: "a1", .text(markdown: "The static files go through `express.static` in `src/server.ts`. I'll add `maxAge` and `immutable`, then check the headers against the running server.", streaming: false)),
+            ChatItem(id: "t2", .tool(ChatTool(name: "MultiEdit", summary: "Editing server.ts", status: .done, hasDetail: true))),
+            ChatItem(id: "t3", .tool(ChatTool(name: "Bash", summary: "Bash · curl -sI localhost:3000/static/app.js", status: .waiting, hasDetail: true))),
+        ]
+        let settings = ChatSettings(modelName: "GPT-6.1-Sol", models: [
+            ChatModelOption(value: "gpt-6.1-sol", label: "GPT-6.1-Sol"),
+            ChatModelOption(value: "gpt-6-luna", label: "GPT-6-Luna"),
+        ], defaultEffort: "medium", efforts: ["low", "medium", "high", "xhigh"], modes: [
+            ChatModelOption(value: "read-only", label: "Read only", description: "Read files and answer; ask before any edit or command that changes something"),
+            ChatModelOption(value: "ask", label: "Ask", description: "Work in the project folder; ask before going outside it or using the network"),
+            ChatModelOption(value: "auto", label: "Auto", description: "Work in the project folder without asking"),
+            ChatModelOption(value: "full-access", label: "Full access", description: "No sandbox and no questions — everything is allowed"),
+        ])
+        let usage = ChatUsage(contextTokens: 21_000, contextMax: 475_000,
+                              sevenDay: ChatLimitWindow(used: 49, resetsAt: now.unixMilliseconds + 2 * 86_400_000))
+        return MockChatTranscript(
+            title: "Codex",
+            agent: "codex",
+            status: ChatStatus(busy: true, turnStartedAt: now.unixMilliseconds - 20_000, process: .running, permissionMode: "ask",
+                               model: "gpt-6.1-sol", settings: settings, usage: usage),
+            items: items,
+            prompts: [ChatPrompt(id: "p-net", .permission(ChatPermission(
+                toolName: "Bash", title: "Allow Bash?", summary: "Bash · curl -sI localhost:3000/static/app.js",
+                detail: "curl -sI localhost:3000/static/app.js\n\nNeeds network access", canAlwaysAllow: false)))],
+            details: [:],
             nextId: 100
         )
     }

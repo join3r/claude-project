@@ -249,6 +249,7 @@ Desktop rules (a server follows them too):
 - A task's `status` is its one status: the strongest of its **status tabs** (its main tab, plus any agent tab) in the order `attention`, `working`, `exited`, else `idle`. An extra terminal's bell or exit lights only its own tab, never the task. `since` is when the task entered `status` (the oldest change among the status tabs in it), and `activity` the label of the first such tab that has one. The desktop Inbox and sidebar read the same status.
 - Only agent/terminal tab types are included in `tabs`: `claude-chat`, `claude`, `codex`, `pi`, `terminal`. A tab's `status` is `TabActivityRegistry`'s value, with `null` mapped to `"idle"`.
 - `activity` (on a task or a tab) is an optional short label derived from `AgentActivity`.
+- `chat: true` (on a tab) marks a Codex or Pi chat. Its `type` is the terminal agent's (`codex` / `pi`), so a phone that doesn't know the flag shows it as that agent's terminal tab. A phone that knows it opens the tab in its chat view: it answers `chat.*` (§6.3) like a `claude-chat` tab.
 - `topic` (on a tab) is an optional line saying what an agent tab's conversation is about: Claude's session title, else the first line of its last prompt. The phone heads the tab's row with it, above the tab type.
 - The triage fields carry the desktop inbox's state for the task (§8.11). `eventAt` is the task's last event: a hook notification or stop, a terminal bell, a process exit. `unread: true` is present while the desktop counts the task unread. `snoozedUntil` is present while a timed snooze hasn't passed at `generatedAt`, and `snoozeUntilAttention: true` while the task is snoozed until it needs the user. A desktop sends at most one of the two snooze fields. A receiver treats `unread` and `snoozeUntilAttention` other than `true` as absent. (Older desktops also sent `settledAt` for a task put away with Done for now, which closing a task has replaced; a receiver ignores it.)
 - `branch` and `landing` (version 3, §11) belong to a task with a worktree of its own, a new task in a worktree stream once its first tab needs a folder. `branch` is that worktree's branch (`<stream branch>--<task slug>`); it is absent for a task in `main`, in a stream without a worktree, or sharing its stream's worktree (tasks from before version 3). `landing` is present while the task lands into its stream or has stopped doing so:
@@ -302,6 +303,7 @@ The desktop maps its `ChatState` (`src/shared/claude-chat.ts`) to this schema. T
 ChatView = {
   tabId: string,
   title: string,                       // tab title
+  agent?: string,                      // 'codex' | 'pi'; absent = Claude
   busy: boolean, turnStartedAt?: number,
   process: 'idle' | 'starting' | 'running' | 'exited', processError?: string,
   permissionMode?: string, model?: string,
@@ -318,7 +320,9 @@ ChatViewSettings = {
   models: [{ value, label, description? }],   // pickable models; no "Default" row (the phone adds it)
   effort?: string,                     // the picked effort; absent = the default
   defaultEffort?: string,              // what the default effort resolves to, once known
-  efforts: string[]                    // the levels the current model takes
+  efforts: string[],                   // the levels the current model takes
+  effortLabel?: string,                // the picker's name when not "Effort" (Pi: "Thinking")
+  modes?: [{ value, label, description? }]    // the agent's mode picker (Codex's presets; [] = none, Pi); absent = the §8.4 modes
 }
 ChatViewUsage = {                      // each part once the desktop has read it
   contextTokens?: number, contextMax?: number,
@@ -363,7 +367,7 @@ All ops take `params` in the `req` object: `{ t:'req', id, op, params }`.
 
 - Ops other than `chat.open` don't need the chat to be open on this phone. When the chat has no runtime yet, the desktop attaches one first, as `chat.open` does.
 - Malformed `params` → `bad-request`.
-- New error codes: `not-found` (unknown tab or item, a hidden project, or a tab that isn't claude-chat), `gone` (prompt already answered). A tab in a `hideFromMobile` project always answers `not-found`.
+- New error codes: `not-found` (unknown tab or item, a hidden project, or a tab that isn't a chat: `claude-chat`, or one flagged `chat` in the inbox), `gone` (prompt already answered). A tab in a `hideFromMobile` project always answers `not-found`.
 
 ### 6.4 Events (desktop → phone)
 
@@ -450,7 +454,7 @@ Three parties are involved, and none of them reads the notification's content ex
 
 ### 7.6 When a desktop pushes
 
-Only Claude chat tabs (`claude-chat`) in projects visible on mobile (§4.4) push, and only to phones with a registration whose `kinds` include the push's kind:
+Only chat tabs (`claude-chat`, and Codex/Pi chats flagged `chat`, §4.4) in projects visible on mobile (§4.4) push, and only to phones with a registration whose `kinds` include the push's kind:
 - **permission / question / plan:** a prompt appears in the chat's open prompts. One push per (phone, prompt ID). `body` is the permission's `summary` (§6.2, e.g. "Bash · npm test"), the first question's text, or "Plan ready for review".
 - **done:** the chat goes from busy to idle, and the turn that just ended was started by a `chat.send` from this phone. One push per such turn. `body` is the first line of the last assistant text, or "Finished".
 - A phone that has this tab open (`chat.open`) in a live session gets no push for it. It is already looking.
@@ -516,7 +520,7 @@ The `features` array of both hellos (§4.3) names optional ops a side supports, 
 |---|---|---|
 | `chat.settings` | `{ tabId, mode?, model?, effort? }` | `{}` |
 
-- Changes the chat's permission mode, model or effort, as the desktop composer's pickers do. An absent field stays as it is; at least one must be present. `mode` is one of the §8.4 modes. `model` is a `settings.models[].value` and `effort` one of `settings.efforts`; `""` for either goes back to Claude's settings default.
+- Changes the chat's permission mode, model or effort, as the desktop composer's pickers do. An absent field stays as it is; at least one must be present. `mode` is one of the chat's modes: `settings.modes` when sent, else the §8.4 modes. `model` is a `settings.models[].value` and `effort` one of `settings.efforts`; `""` for either goes back to Claude's settings default.
 - The desktop applies them in that order (mode, model, effort), so an effort is checked against the model just picked. It answers `{}` once they are applied; the new values arrive in the next `evt chat`. The chat need not be open on this phone. A chat without a live process keeps the values for its next start, as the desktop does.
 - A desktop that implements this op lists `"chat.settings"` in its features (§8.1) and sends `settings` and `usage` in the chat view (§6.2). The phone shows the pickers read-only for a desktop that sends `settings` without listing the feature.
 - Errors: unknown tab, as §6.3 → `not-found`. No field, an unknown `mode`, `model` or `effort` → `bad-request`.

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { CHAT_PERMISSION_MODES, type ChatPrompt, type ChatPromptResponse } from '../../../shared/claude-chat'
+import { CHAT_PERMISSION_MODES, chatAgentFeatures, type ChatAgent, type ChatPrompt, type ChatPromptResponse } from '../../../shared/claude-chat'
 import { summarizeTool } from '../../../shared/agent-activity'
 import {
   canAlwaysAllow,
@@ -19,6 +19,8 @@ import { diffLines, editPairs } from './diff'
 
 interface Props {
   prompt: ChatPrompt
+  /** The agent asking; Claude when absent. */
+  agent?: ChatAgent
   onRespond: (response: ChatPromptResponse) => void
   /** The session's permission mode, so a card doesn't offer the one already on. */
   permissionMode?: string
@@ -65,23 +67,35 @@ function Card({ title, summary, children, footer }: CardProps): React.ReactEleme
   )
 }
 
-export default function PromptCard({ prompt, onRespond, permissionMode }: Props): React.ReactElement {
+export default function PromptCard({ prompt, agent, onRespond, permissionMode }: Props): React.ReactElement {
   if (prompt.kind === 'question') return <QuestionCard prompt={prompt} onRespond={onRespond} />
   if (prompt.kind === 'plan') return <PlanCard prompt={prompt} onRespond={onRespond} />
-  return <PermissionCard prompt={prompt} onRespond={onRespond} permissionMode={permissionMode} />
+  return <PermissionCard prompt={prompt} agent={agent} onRespond={onRespond} permissionMode={permissionMode} />
+}
+
+/**
+ * "Always allow" on a card: Claude's own suggested rules; Codex's "for this
+ * session" (`acceptForSession`). A Pi extension's yes/no has neither.
+ */
+function alwaysOffer(prompt: ChatPrompt, agent: ChatAgent): { can: boolean; text: string } {
+  if (agent === 'codex') return { can: true, text: 'for the rest of this session' }
+  if (agent === 'pi') return { can: false, text: '' }
+  const can = canAlwaysAllow(prompt)
+  return { can, text: can ? describeSuggestions(prompt.suggestions) : '' }
 }
 
 /** Modes that already skip this prompt's kind of question: no point offering to switch to them. */
 const NO_AUTO_OFFER = new Set(['auto', 'bypassPermissions'])
 
-function PermissionCard({ prompt, onRespond, permissionMode }: Props): React.ReactElement {
+function PermissionCard({ prompt, agent = 'claude', onRespond, permissionMode }: Props): React.ReactElement {
   const [denying, setDenying] = useState(false)
   const [reason, setReason] = useState('')
   const input = prompt.input
   const pairs = editPairs(prompt.toolName, input)
-  const canAlways = canAlwaysAllow(prompt)
-  const always = canAlways ? describeSuggestions(prompt.suggestions) : ''
-  const offerAuto = !NO_AUTO_OFFER.has(permissionMode ?? 'default')
+  const { can: canAlways, text: always } = alwaysOffer(prompt, agent)
+  const offerAuto = chatAgentFeatures(agent).autoOffer && !NO_AUTO_OFFER.has(permissionMode ?? 'default')
+  // Only Claude takes a reason with a denial.
+  const askReason = agent === 'claude'
   const label = summarizeTool(prompt.toolName, input)
   let detail: React.ReactNode = null
   if ((prompt.toolName === 'Bash' || prompt.toolName === 'PowerShell') && typeof input.command === 'string') {
@@ -133,7 +147,7 @@ function PermissionCard({ prompt, onRespond, permissionMode }: Props): React.Rea
             Allow, switch to Auto
           </button>
         )}
-        <button type="button" className={quietBtn} onClick={() => setDenying(true)}>Deny…</button>
+        <button type="button" className={quietBtn} onClick={() => askReason ? setDenying(true) : onRespond({ behavior: 'deny' })}>{askReason ? 'Deny…' : 'Deny'}</button>
       </div>
       {always && <div className="text-xs text-text-subtle whitespace-pre-line">Always allow: {always}</div>}
     </>

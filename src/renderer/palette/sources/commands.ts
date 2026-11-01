@@ -4,7 +4,7 @@ import type { AppCtx } from '../types'
 import { getPaletteReturnFocus, paletteEvents } from '../paletteEvents'
 import { AI_TAB_TYPES, AI_TAB_META, NEW_TASK_NAME, isShellCommandProject, pinnedItemKey, type AiTabType, type PinnedItem } from '../../../shared/types'
 import { shortcutPlatform } from '../../../shared/shortcut-label'
-import { claudeTabType, createTab } from '../../components/newTaskTabs'
+import { agentTabType, createTab, defaultAgentView } from '../../components/newTaskTabs'
 import { featureAvailable } from '../../../shared/project-features'
 import { currentStreamId, findStreamOfTask, findTaskInProject, taskTabs } from '../../../shared/streams'
 
@@ -121,9 +121,10 @@ for (const aiType of AI_TAB_TYPES) {
       const { selectedProjectId, selectedTaskId, projects, config } = ctx.actions
       const project = projects.find(p => p.id === selectedProjectId)
       if (!project) return
-      // No chat view on a DevTool server's project yet: Claude starts in its terminal there.
-      const view = featureAvailable(project, 'chat') ? config?.claudeDefaultView ?? 'terminal' : 'terminal'
-      const tab = createTab(claudeTabType(aiType, view))
+      // Codex and Pi chats don't run over SSH yet: those start in their terminals.
+      const chatOk = featureAvailable(project, 'chat') && (aiType === 'claude' || !project.ssh)
+      const view = chatOk ? defaultAgentView(config, aiType as AiTabType) : 'terminal'
+      const tab = createTab(agentTabType(aiType, view))
       ctx.actions.addTask(project.id, NEW_TASK_NAME, [tab], currentStreamId(project, selectedTaskId))
     }
   })

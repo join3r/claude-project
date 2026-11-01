@@ -457,7 +457,8 @@ extension Inbox {
             status: try parseStatus(o),
             since: try optInt(o, "since"),
             activity: try optStr(o, "activity"),
-            topic: try optStr(o, "topic")
+            topic: try optStr(o, "topic"),
+            chat: o["chat"] == .bool(true)
         )
     }
 
@@ -556,6 +557,7 @@ extension InboxTab {
         if let since { o["since"] = .int(since) }
         if let activity { o["activity"] = .string(activity) }
         if let topic { o["topic"] = .string(topic) }
+        if chat { o["chat"] = .bool(true) }
         return .object(o)
     }
 }

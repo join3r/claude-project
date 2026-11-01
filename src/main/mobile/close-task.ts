@@ -205,7 +205,8 @@ export async function landTask(deps: { peek(): ProjectsData; landing: PhoneLandi
   }
 }
 
-const MOBILE_TAB_TYPES: ReadonlySet<string> = new Set<string>(INBOX_TAB_TYPES)
+// Codex and Pi chats show on the phone as their terminal kind (mobile/inbox.ts).
+const MOBILE_TAB_TYPES: ReadonlySet<string> = new Set<string>([...INBOX_TAB_TYPES, 'codex-chat', 'pi-chat'])
 
 /**
  * A tab the phone sees in its inbox (§4.4), with its task. A task's main tab

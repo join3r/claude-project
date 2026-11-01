@@ -43,8 +43,15 @@ export interface InboxTabLookup {
   sinceOf: (tabId: string) => number | null
 }
 
-function isMobileTab(tab: Tab): tab is Tab & { type: MobileTabType } {
-  return MOBILE_TAB_TYPES.has(tab.type)
+/**
+ * Codex and Pi chat tabs reach the phone as their terminal kind with `chat: true`:
+ * a phone that knows the flag opens them in its chat view, an older one shows
+ * their status and says they run on the desktop.
+ */
+const PHONE_TYPE: Partial<Record<Tab['type'], MobileTabType>> = { 'codex-chat': 'codex', 'pi-chat': 'pi' }
+
+function isMobileTab(tab: Tab): boolean {
+  return MOBILE_TAB_TYPES.has(tab.type) || PHONE_TYPE[tab.type] !== undefined
 }
 
 function shortLabel(label: string | undefined): string | undefined {
@@ -52,11 +59,11 @@ function shortLabel(label: string | undefined): string | undefined {
   return label.length > ACTIVITY_LIMIT ? `${label.slice(0, ACTIVITY_LIMIT - 1)}…` : label
 }
 
-function buildTab(tab: Tab & { type: MobileTabType }, lookup: InboxTabLookup): MobileInboxTab {
+function buildTab(tab: Tab, lookup: InboxTabLookup): MobileInboxTab {
   const status = lookup.statusOf(tab.id)
   const out: MobileInboxTab = {
     id: tab.id,
-    type: tab.type,
+    type: PHONE_TYPE[tab.type] ?? tab.type,
     title: tab.title,
     status: status ?? 'idle'
   }
@@ -67,6 +74,7 @@ function buildTab(tab: Tab & { type: MobileTabType }, lookup: InboxTabLookup): M
   if (label) out.activity = label
   const topic = shortLabel(activity?.title ?? activity?.lastPrompt)
   if (topic) out.topic = topic
+  if (PHONE_TYPE[tab.type]) out.chat = true
   return out
 }
 

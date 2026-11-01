@@ -163,7 +163,7 @@ struct RootView: View {
         for desktop in model.desktops where !model.isOffline(desktop.id) {
             for project in model.inboxes[desktop.id]?.projects ?? [] {
                 for task in project.tasks {
-                    for tab in task.tabs where tab.type == .claudeChat {
+                    for tab in task.tabs where tab.isChat {
                         if let wanted {
                             if tab.id == wanted { return (desktop.id, task.id, tab.id) }
                         } else if tab.status == .attention {
@@ -285,7 +285,7 @@ struct RootView: View {
                     // `taskStatus`: the first terminal agent's task.
                     let wanted = LaunchOptions.current.demoTask
                     let pick = demoRoute == .taskStatus
-                        ? tasks.first { $0.agentTab.map { $0.type.isAgent && $0.type != .claudeChat } ?? false }
+                        ? tasks.first { $0.agentTab.map { $0.type.isAgent && !$0.isChat } ?? false }
                         : tasks.first { $0.id == wanted } ?? tasks.first
                     if let task = pick {
                         open(TaskRef(desktopId: inbox.desktop.id, taskId: task.id))

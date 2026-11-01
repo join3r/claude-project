@@ -376,8 +376,9 @@ public actor MockDesktopConnection: DesktopConnection {
             }
             return .object([:])
         case ChatOp.commands:
-            guard chats[try string("tabId")] != nil else { throw notFound() }
-            return ChatCommandsResult(commands: MockChats.commands).json
+            guard let chat = chats[try string("tabId")] else { throw notFound() }
+            // A Codex or Pi chat lists only its own commands; this one has none.
+            return ChatCommandsResult(commands: chat.agent == nil ? MockChats.commands : []).json
         case ChatOp.btw:
             let parsed: ChatBtwParams
             do {
@@ -1422,7 +1423,7 @@ public enum MockInbox {
                          landing: TaskLanding(state: .blocked, intent: .land, files: ["package.json"], fileCount: 1,
                                               message: "error: Your local changes to the following files would be overwritten by merge:\n\tpackage.json"),
                          tabs: [
-                        InboxTab(id: "tab-13", type: .codex, title: "Codex", status: .idle, since: ago(40), topic: "Send cache headers on static files"),
+                        InboxTab(id: "tab-13", type: .codex, title: "Codex", status: .attention, since: ago(1), activity: "Wants to run curl", topic: "Send cache headers on static files", chat: true),
                     ]),
                     task("t-flaky", "flaky-login-test", apiBugs, lastInteractedAt: ago(30), eventAt: ago(30), tabs: [
                         InboxTab(id: "tab-4", type: .codex, title: "Codex", status: .exited, since: ago(30)),
