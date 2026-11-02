@@ -1,6 +1,8 @@
 import type { AgentActivity } from '../shared/agent-activity'
-import { autopilotActive, autopilotSupported, stoppedAutopilot } from '../shared/autopilot'
-import { mapTaskInProject, needsTaskWorktree, streamTakesLandings, taskDirectory, taskTabs, taskWorktreesSupported } from '../shared/streams'
+import { autopilotActive, autopilotSupported, autopilotTab, stoppedAutopilot } from '../shared/autopilot'
+
+export { autopilotTab }
+import { mapTaskInProject, needsTaskWorktree, streamTakesLandings, taskDirectory, taskWorktreesSupported } from '../shared/streams'
 import type { Project, ProjectsData, Stream, Tab, TabStatusValue, Task, TaskAutopilot, TaskLandingIntent, TaskLandingResult } from '../shared/types'
 import { codexFindingsPrompt, codexReviewPrompt, type CodexReview } from './codex-review'
 import type { GitRunner } from './git-runner'
@@ -80,12 +82,6 @@ export interface AutopilotDiff {
 function oneLine(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim()
   return line.length > REASON_MAX ? `${line.slice(0, REASON_MAX - 1)}…` : line
-}
-
-/** The tab Autopilot follows: the task's first Claude chat (the conversation). */
-export function autopilotTab(task: Task): Tab | undefined {
-  const chats = taskTabs(task).filter(tab => tab.type === 'claude-chat')
-  return chats.find(tab => tab.id === task.mainTabId) ?? chats[0]
 }
 
 /** Why a turn that ended waiting on you stops the run. */

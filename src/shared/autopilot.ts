@@ -1,4 +1,5 @@
-import type { Project, Task, TaskAutopilot } from './types'
+import { taskTabs } from './streams'
+import type { Project, Tab, Task, TaskAutopilot } from './types'
 
 /**
  * Autopilot (desk redesign decision 7), the parts both processes read: where a
@@ -17,6 +18,12 @@ export function autopilotNeedsYou(task: Task): boolean {
 export function autopilotBusy(task: Task): boolean {
   const phase = task.autopilot?.phase
   return phase === 'reviewing' || phase === 'landing'
+}
+
+/** The tab Autopilot follows: the task's first Claude chat (the conversation). */
+export function autopilotTab(task: Task): Tab | undefined {
+  const chats = taskTabs(task).filter(tab => tab.type === 'claude-chat')
+  return chats.find(tab => tab.id === task.mainTabId) ?? chats[0]
 }
 
 /** Still running: not handed back. */

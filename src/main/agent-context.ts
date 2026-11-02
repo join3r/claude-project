@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { Project, Stream, Task } from '../shared/types'
 import { taskDirectory, taskTabs } from '../shared/streams'
+import { autopilotActive, autopilotSupported, autopilotTab } from '../shared/autopilot'
 import { HOOK_TAB_ID_HEADER, HOOK_TOKEN_HEADER } from '../shared/hook-protocol'
 import { readWorktreeConfig } from './worktree-setup'
 
@@ -40,6 +41,8 @@ export interface AgentContextInput {
   dir: string
   hook?: AgentContextHook
   links?: SharedLink[]
+  /** The task runs on Autopilot and this is the chat it follows: what Autopilot does when the turn ends. */
+  autopilot?: { review: boolean }
 }
 
 function code(text: string): string {
@@ -111,7 +114,27 @@ export function buildAgentContext(input: AgentContextInput): string {
   }
 
   lines.push(...sharedLines(input.links ?? []))
+  if (input.autopilot) lines.push(...autopilotLines(input.autopilot.review))
   return lines.join('\n')
+}
+
+/**
+ * Autopilot (src/main/autopilot.ts) hands the task back on anything that ends
+ * the turn waiting on the user, a closing question included. The note is fixed
+ * for the session, so it has to stay true after the user takes over.
+ */
+function autopilotLines(review: boolean): string[] {
+  const after = review
+    ? 'checks that files changed, has Codex review the diff (any findings come back to you once to fix), then lands the task'
+    : 'checks that files changed, then lands the task'
+  return [
+    '- This task was started on Autopilot: until the user writes to you, nobody is watching. ' +
+      `When your turn ends DevTool ${after}. Don't land it yourself.`,
+    '- Anything that ends your turn waiting on the user stops Autopilot and hands the task back: a question, an offer such as "Want me to also…?", a permission request. ' +
+      'So make reasonable calls yourself, finish the whole task in this turn, check it works, and end with a short summary of what you did and anything left open, not a question. ' +
+      'If you really cannot go on without the user, say what you need and stop.',
+    '- Once the user writes to you, they are back: the usual rules apply from then on.'
+  ]
 }
 
 /** The `.devtool/worktree.json` symlinks that are links in `root`, and where they point. */
@@ -153,7 +176,11 @@ export function agentContextForTab(
         task,
         dir: taskDirectory(project, task),
         hook: task.workspace && hook ? { ...hook, tabId } : undefined,
-        links: root ? sharedLinksIn(root) : []
+        links: root ? sharedLinksIn(root) : [],
+        // Only the chat Autopilot follows (`autopilotTab`): the task's first Claude chat.
+        ...(task.autopilot && autopilotActive(task) && autopilotSupported(project) && autopilotTab(task)?.id === tabId
+          ? { autopilot: { review: !!task.autopilot.review } }
+          : {})
       })
     }
   }
