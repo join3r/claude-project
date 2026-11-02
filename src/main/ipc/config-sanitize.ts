@@ -74,6 +74,7 @@ const CONFIG_FIELDS: { [K in keyof AppConfig]-?: Validator<AppConfig[K]> } = {
   inboxLayout: v.literal('flat', 'grouped'),
   showProjectIcons: bool,
   mainTaskWorktrees: bool,
+  mainTaskWorktreesAsked: bool,
   autoWorktreeSetup: bool,
   promptBoxAgent: v.literal('claude-chat', 'claude', 'codex-chat', 'codex', 'pi-chat', 'pi'),
   promptBoxMode: v.literal('', 'default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'),

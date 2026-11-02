@@ -172,7 +172,12 @@ export class Storage {
 
   loadConfig(): AppConfig {
     const result = readJsonRecord(this.configPath)
-    if (result.kind === 'missing') return { ...DEFAULT_CONFIG }
+    if (result.kind === 'missing') {
+      // No settings and no projects: a fresh install, so the first window asks
+      // whether main's tasks get worktrees (FirstRunWorktreesPrompt).
+      const fresh = !fs.existsSync(this.projectsPath)
+      return { ...DEFAULT_CONFIG, mainTaskWorktreesAsked: !fresh }
+    }
     if (result.kind === 'corrupt') {
       // Keep the user's settings file for manual recovery instead of letting the
       // next save overwrite it with defaults.

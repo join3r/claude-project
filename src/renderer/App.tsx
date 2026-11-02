@@ -15,6 +15,7 @@ import { toggleBench, toggleBenchView } from './components/desk/benchState'
 import DeskStatusBar from './components/desk/DeskStatusBar'
 import DeskCommandBar from './components/desk/DeskCommandBar'
 import { TokenUsageModal } from './components/TokenUsage'
+import FirstRunWorktreesPrompt from './components/FirstRunWorktreesPrompt'
 
 function AppInner(): React.ReactElement {
   const {
@@ -123,6 +124,7 @@ function AppInner(): React.ReactElement {
       <DeskStatusBar />
       <DeskCommandBar />
       <MobilePairingPrompt />
+      <FirstRunWorktreesPrompt />
       <ServerIdeConsentModal />
       <StreamRunHost />
       <EntityActionsHost />

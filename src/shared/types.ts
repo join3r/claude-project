@@ -794,6 +794,12 @@ export interface AppConfig {
    */
   mainTaskWorktrees: boolean
   /**
+   * The first-run question about {@link mainTaskWorktrees} was answered. False
+   * only on a fresh install (`Storage.loadConfig` with no config.json and no
+   * projects.json); existing configs without the key count as asked.
+   */
+  mainTaskWorktreesAsked: boolean
+  /**
    * Settings → Inbox: a new worktree runs its repo's `.devtool/worktree.json`
    * setup commands without asking, and a repo without one gets DevTool's
    * suggested config added on its own. Off asks first, per config content.
@@ -1099,6 +1105,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   inboxLayout: 'flat',
   showProjectIcons: false,
   mainTaskWorktrees: false,
+  mainTaskWorktreesAsked: true,
   autoWorktreeSetup: true,
   promptBoxAgent: 'claude-chat',
   promptBoxMode: '',

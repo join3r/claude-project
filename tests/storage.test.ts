@@ -47,6 +47,17 @@ describe('Storage', () => {
     expect(config.externalEditors).toEqual({ editors: [], defaultId: null })
   })
 
+  it('marks a fresh install as not yet asked about worktrees on main', () => {
+    expect(storage.loadConfig().mainTaskWorktreesAsked).toBe(false)
+  })
+
+  it('does not ask about worktrees on main when projects exist or the config predates the question', () => {
+    fs.writeFileSync(path.join(testDir, 'projects.json'), '{}')
+    expect(storage.loadConfig().mainTaskWorktreesAsked).toBe(true)
+    fs.writeFileSync(path.join(testDir, 'config.json'), JSON.stringify({ fontSize: 16 }))
+    expect(storage.loadConfig().mainTaskWorktreesAsked).toBe(true)
+  })
+
   it('drops the retired new-task auto-open setting on load', () => {
     fs.writeFileSync(path.join(testDir, 'config.json'), JSON.stringify({ newTaskAutoOpen: 'claude' }))
     const config = storage.loadConfig() as unknown as Record<string, unknown>
