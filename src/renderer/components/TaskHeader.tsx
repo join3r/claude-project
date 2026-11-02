@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ChevronDown, MoreHorizontal } from 'lucide-react'
+import { ChevronDown, MoreHorizontal, Play } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { agentOfTab, AI_TAB_META, chatTabTypeFor, isChatTabType, pinnedItemKey } from '../../shared/types'
 import type { PinnedItem, Project, Stream, Task } from '../../shared/types'
@@ -14,10 +14,10 @@ import { useTaskLandingActions } from './useTaskLandingActions'
 import { canLandTask, useLandingOp, useStreamAhead } from '../taskLanding'
 import { useTabStatusStore } from '../context/TabStatusContext'
 import { featureUnavailableReason } from '../../shared/project-features'
-import { isEphemeralProject } from '../../shared/types'
+import { isEphemeralProject, isShellCommandProject } from '../../shared/types'
 import { taskMoveBlocker } from '../../shared/streams'
 import { EntityMenuPopup, type EntityMenuTarget } from './menus/EntityMenus'
-import { SidebarStreamRunBadge, taskRunMenuEntry } from './StreamRunControls'
+import { SidebarStreamRunBadge, taskHeaderRunMenu, taskRunMenuEntry } from './StreamRunControls'
 import { useStreamRuns } from '../streamRuns'
 import { useMoveTask } from '../hooks/useTaskMenuActions'
 
@@ -68,6 +68,9 @@ export default function TaskHeader({
   const landingOp = useLandingOp(task?.id ?? '')
   const streamAhead = useStreamAhead(task?.id ?? '')
   const streamRuns = useStreamRuns(project.id, stream?.id ?? '')
+  const mainStreamId = project.streams.find(s => s.isMain)?.id
+  const mainRuns = useStreamRuns(project.id, stream && !stream.isMain ? mainStreamId ?? '' : '')
+  const [runMenu, setRunMenu] = useState<MenuAnchor | null>(null)
   const [menu, setMenu] = useState<(MenuAnchor & { page: 'main' | 'snooze' | 'move' }) | null>(null)
   const [entityMenu, setEntityMenu] = useState<EntityMenuTarget | null>(null)
   const closeEntityMenu = React.useCallback(() => setEntityMenu(null), [])
@@ -263,6 +266,22 @@ export default function TaskHeader({
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {tools}
+          {task && stream && menusOn && !isShellCommandProject(project) && (
+            <button
+              type="button"
+              className={iconBtnCls}
+              aria-haspopup="menu"
+              aria-expanded={runMenu !== null}
+              title="Run, install or deploy: in this task or its stream"
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                setRunMenu(runMenu ? null : { x: rect.left, y: rect.bottom + 4 })
+              }}
+              data-testid="task-header-run"
+            >
+              <Play size={14} />
+            </button>
+          )}
           {task && (
             <button
               type="button"
@@ -282,6 +301,11 @@ export default function TaskHeader({
         </div>
       </div>
       <ContextMenu menu={menu} items={menuItems()} onClose={() => setMenu(null)} />
+      <ContextMenu
+        menu={runMenu}
+        items={runMenu && task && stream ? taskHeaderRunMenu(project, stream, task, streamRuns, mainRuns) : []}
+        onClose={() => setRunMenu(null)}
+      />
       <EntityMenuPopup menu={entityMenu} onClose={closeEntityMenu} />
       {closeTaskFlow.dialog}
     </>

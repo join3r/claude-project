@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { streamRunMenuEntries, taskRunMenuEntry } from '../src/renderer/components/StreamRunControls'
+import { streamRunMenuEntries, taskHeaderRunMenu, taskRunMenuEntry } from '../src/renderer/components/StreamRunControls'
 import { streamRunTask, type StreamRunState } from '../src/shared/stream-run'
 import { createMainStream } from '../src/shared/types'
 import type { Project, Stream, Task } from '../src/shared/types'
@@ -57,6 +57,35 @@ describe('taskRunMenuEntry', () => {
     expect(taskRunMenuEntry({ ...project, runCommands: [] }, stream, own, [], { x: 0, y: 0 })).toBeNull()
     expect(taskRunMenuEntry(project, stream, own, [], { x: 0, y: 0 })?.label).toBe('Run here…')
     expect(taskRunMenuEntry(project, stream, own, [running('c-run', 't-auth')], { x: 0, y: 0 })?.hint).toBe('1 running')
+  })
+})
+
+describe('taskHeaderRunMenu', () => {
+  const labels = (entries: { label: string; dividerBefore?: boolean }[]) => entries.map(e => (e.dividerBefore ? '— ' : '') + e.label)
+
+  it('offers this task, its stream and main, each with its own runs', () => {
+    const entries = taskHeaderRunMenu(project, stream, own, [running('c-run', 't-auth')], [running('c-install')])
+    expect(labels(entries)).toEqual([
+      'Run install in this task', '— Restart run in this task', 'Stop run in this task', 'run logs in this task',
+      '— Run install in x', 'Run run in x',
+      '— Restart install in main', 'Stop install in main', 'install logs in main', '— Run run in main',
+      '— Edit commands…'
+    ])
+    // Run in the stream's folder moves the run out of the task's worktree.
+    expect(entries.find(e => e.label === 'Run run in x')?.hint).toBe('moves it')
+    entries.find(e => e.label === 'Run run in x')?.onSelect()
+    expect(control).toHaveBeenCalledWith('p', 's-x', 'c-run', 'start')
+    entries.find(e => e.label === 'Restart install in main')?.onSelect()
+    expect(control).toHaveBeenCalledWith('p', 's-main', 'c-install', 'restart')
+  })
+
+  it('leaves out this task without a worktree, and main when the task is in it', () => {
+    const main = project.streams[0]
+    expect(labels(taskHeaderRunMenu(project, main, shared, [], []))).toEqual(['Run install in main', 'Run run in main', '— Edit commands…'])
+  })
+
+  it('offers to set commands up when there are none', () => {
+    expect(labels(taskHeaderRunMenu({ ...project, runCommands: [] }, stream, own, [], []))).toEqual(['Set up commands…'])
   })
 })
 

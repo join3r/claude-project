@@ -125,11 +125,20 @@ export interface RunMenuEntry { label: string; hint?: string; title?: string; di
  * (here). A command removed while it still runs keeps Stop and its logs.
  */
 export function streamRunMenuEntries(
-  project: Project, stream: Stream | undefined, runs: readonly StreamRunState[], task?: Task
+  project: Project, stream: Stream | undefined, runs: readonly StreamRunState[], task?: Task,
+  /**
+   * `where` names the place in every label ("Run deploy in main") for a menu that
+   * offers several places. Without a task, `inFolder` counts only runs in the
+   * stream's own folder as here, so Run moves one out of a task's worktree.
+   */
+  place?: { where: string; inFolder?: boolean }
 ): RunMenuEntry[] {
   if (!stream) return []
   const commands = streamRunCommands(project, stream)
   const taskId = task?.workspace ? task.id : undefined
+  const at = place ? ` ${place.where}` : ''
+  const isHere = (run: StreamRunState | undefined): boolean =>
+    task ? run?.taskId === taskId : place?.inFolder ? !!run && !run.taskId : true
   const ids = new Set(commands.map(c => c.id))
   const orphans = runs.filter(run => !ids.has(run.commandId) && run.status === 'running')
   const rows = [...commands.map(c => ({ id: c.id, name: c.name, command: c.command, removed: false })),
@@ -139,22 +148,22 @@ export function streamRunMenuEntries(
     const group: RunMenuEntry[] = []
     groups.push(group)
     const run = runs.find(r => r.commandId === row.id)
-    const here = !task || run?.taskId === taskId
+    const here = isHere(run)
     const running = run?.status === 'running'
     const control = (action: StreamRunAction) => () => void controlStreamRun(project.id, stream.id, row.id, action, taskId)
     if (running && here) {
-      if (!row.removed) group.push({ label: `Restart ${row.name}`, hint: 'running', title: `$ ${run.command}`, onSelect: control('restart') })
-      group.push({ label: `Stop ${row.name}`, onSelect: () => void controlStreamRun(project.id, stream.id, row.id, 'stop') })
+      if (!row.removed) group.push({ label: `Restart ${row.name}${at}`, hint: 'running', title: `$ ${run.command}`, onSelect: control('restart') })
+      group.push({ label: `Stop ${row.name}${at}`, onSelect: () => void controlStreamRun(project.id, stream.id, row.id, 'stop') })
     } else if (!row.removed) {
       group.push({
-        label: task ? `Run ${row.name} here` : `Run ${row.name}`,
+        label: place ? `Run ${row.name}${at}` : task ? `Run ${row.name} here` : `Run ${row.name}`,
         hint: running ? 'moves it' : undefined,
         title: running ? `Moves ${row.name} here from where it runs: $ ${row.command}` : `$ ${row.command}`,
         onSelect: control('start')
       })
     }
     if (run && here) {
-      group.push({ label: `${row.name} logs`, onSelect: () => openStreamRunLogs({ projectId: project.id, streamId: stream.id, commandId: row.id }) })
+      group.push({ label: `${row.name} logs${at}`, onSelect: () => openStreamRunLogs({ projectId: project.id, streamId: stream.id, commandId: row.id }) })
     }
   })
   // A rule sets off a command with several items (one that ran); plain Run items sit together.
@@ -166,6 +175,35 @@ export function streamRunMenuEntries(
     entries.push(...group)
     previous = group
   }
+  return entries
+}
+
+/**
+ * The task header's ▶ menu: the stream's commands in each place a task leads to,
+ * so neither needs a trip through another menu. In this task's own worktree (when
+ * it has one), in its stream's folder, and in `main`'s folder when the task is in
+ * another stream; then Edit commands…. `mainRuns`: the main stream's runs.
+ */
+export function taskHeaderRunMenu(
+  project: Project, stream: Stream, task: Task, runs: readonly StreamRunState[], mainRuns: readonly StreamRunState[]
+): RunMenuEntry[] {
+  const sections: RunMenuEntry[][] = []
+  if (task.workspace) sections.push(streamRunMenuEntries(project, stream, runs, task, { where: 'in this task' }))
+  sections.push(streamRunMenuEntries(project, stream, runs, undefined, { where: `in ${stream.name}`, inFolder: true }))
+  const main = stream.isMain ? undefined : project.streams.find(s => s.isMain)
+  if (main) sections.push(streamRunMenuEntries(project, main, mainRuns, undefined, { where: `in ${main.name}`, inFolder: true }))
+  const entries: RunMenuEntry[] = []
+  for (const section of sections) {
+    if (section.length === 0) continue
+    if (entries.length > 0) section[0] = { ...section[0], dividerBefore: true }
+    entries.push(...section)
+  }
+  entries.push({
+    label: entries.length > 0 ? 'Edit commands…' : 'Set up commands…',
+    title: 'Run, install or deploy: commands for this project or stream',
+    dividerBefore: entries.length > 0,
+    onSelect: () => openStreamRunCommands({ projectId: project.id, streamId: stream.id })
+  })
   return entries
 }
 
