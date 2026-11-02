@@ -139,9 +139,15 @@ describe('nextAiStatus', () => {
       expect(nextAiStatus('attention', 'hook-input-resolved', hookTab())).toBe('working')
     })
 
-    it('does not restart a finished turn', () => {
-      expect(nextAiStatus(null, 'hook-input-resolved', hookTab())).toBe('keep')
+    it('goes back to working when opening the task already cleared the attention', () => {
+      const visited = nextAiStatus('attention', 'visit', hookTab({ visible: true }))
+      expect(visited).toBe(null)
+      expect(nextAiStatus(visited as null, 'hook-input-resolved', hookTab())).toBe('working')
+    })
+
+    it('leaves working and exited alone', () => {
       expect(nextAiStatus('working', 'hook-input-resolved', hookTab())).toBe('keep')
+      expect(nextAiStatus('exited', 'hook-input-resolved', hookTab())).toBe('keep')
     })
   })
 

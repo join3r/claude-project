@@ -181,9 +181,12 @@ export function nextAiStatus(
       return 'attention'
 
     case 'hook-input-resolved':
-      // You answered, so the agent is running again. Only lifts an 'attention' —
-      // it must not resurrect "working" after the turn ended.
-      return current === 'attention' ? 'working' : 'keep'
+      // You answered, so the agent is running again. Opening the task may already
+      // have cleared the 'attention' ('visit'), so a cleared status is lifted too:
+      // otherwise the agent works on while the task reads as waiting on you. This
+      // can't restart a finished turn: the event only comes for a wait that is
+      // still open, and Stop clears every wait.
+      return current === 'attention' || current === null ? 'working' : 'keep'
 
     case 'bell':
       return 'attention'
