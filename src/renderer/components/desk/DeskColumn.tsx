@@ -24,6 +24,7 @@ import {
   type DeskLists, type DoneEntry, type InboxRename
 } from './deskInbox'
 import { stopBackground } from './useDeskDone'
+import { isTaskJumpKey, jumpDigit } from '../../hooks/useMetaHeld'
 
 export const DESK_DEFAULT_WIDTH = 420
 const clampDeskWidth = (width: number): number => Math.min(640, Math.max(340, width))
@@ -119,7 +120,8 @@ function inboxKind(lists: DeskLists, entry: InboxEntry): DeskRowKind {
  * The desk's left column (redesign step 1): scope menu and the bar button, the
  * compose box, the Inbox / Working / Snoozed / Done tabs and the mail-style
  * list. Rows offer ✓ Done (E) and Snooze (S); W wakes, U marks unread and ⌫
- * removes; ⌥↓ / ⌥↑ walk the list and ⌘J jumps to the next task that needs you.
+ * removes; ⌥↓ / ⌥↑ walk the list, ⌘J jumps to the next task that needs you
+ * and ⌘1–9 opens the row with that number (the numbers show while ⌘ is held).
  * Pinned tasks sit at the top of their group, and the header's toggle groups
  * the list by project. ⌘-click and ⇧-click tick rows (X ticks the hovered
  * one, ⌘A all of them once one is ticked); while any is ticked, the tabs give
@@ -275,6 +277,16 @@ export default function DeskColumn({
     const onKey = (e: KeyboardEvent): void => {
       // A modal (Settings, a form, the bar) has the keys: E must not land the task behind it.
       if (e.defaultPrevented || document.querySelector('[data-modal]')) return
+      // ⌘1–9: the row with that number (shown while ⌘ is held), from anywhere, a terminal included.
+      const jump = !e.shiftKey && isTaskJumpKey(e) ? jumpDigit(e) : null
+      if (jump !== null) {
+        const entry = keyState.current.listed[jump]
+        if (!entry) return
+        e.preventDefault()
+        onSelectTask(entry.project.id, entry.task.id)
+        document.querySelector(`[data-testid="desk-row"][data-task-id="${entry.task.id}"]`)?.scrollIntoView({ block: 'nearest' })
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'j') {
         const next = nextNeedsYou(keyState.current.needsYou, keyState.current.selectedTaskId)
         if (!next) return
@@ -351,6 +363,7 @@ export default function DeskColumn({
     return () => window.removeEventListener('keydown', onKey)
   }, [onDone, onRemove, onSelectTask, unsnoozeTask, markTaskUnread, markTaskVisited, clearChecked])
 
+  const jumpIndex = new Map(shown.slice(0, 9).map((entry, i) => [entry.task.id, i + 1]))
   const renderRow = (entry: InboxEntry, kind: DeskRowKind): React.ReactElement => {
     const background = kind === 'working' ? taskBackground(entry.task, activities) : null
     return (
@@ -364,6 +377,7 @@ export default function DeskColumn({
         diff={kind === 'snoozed' ? undefined : diffs.get(entry.task.id)}
         onStopBackground={background && background.tasks.length > 0 ? () => { void stopBackground(background) } : undefined}
         selected={selectedTaskId === entry.task.id}
+        jumpNumber={jumpIndex.get(entry.task.id)}
         checked={checked.has(entry.task.id)}
         checking={checking}
         pinned={pinnedTaskIds.has(entry.task.id)}

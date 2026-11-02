@@ -2,6 +2,7 @@ import React from 'react'
 import { Check, MoreHorizontal, Pin } from 'lucide-react'
 import type { GitDiffSummary, Project } from '../../../shared/types'
 import { formatLineCount } from '../../hooks/useTaskDiffSummaries'
+import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import type { AgentActivity } from '../../../shared/agent-activity'
 import ProjectTileBadge from '../ProjectTileBadge'
 import {
@@ -75,7 +76,7 @@ function preview(kind: DeskRowKind, entry: InboxEntry, agent: TaskActivitySummar
 const actionCls = 'px-2 py-1 rounded-md border-0 bg-border text-sm text-text cursor-pointer hover:bg-border-strong whitespace-nowrap'
 
 export default function DeskRow({
-  entry, kind, agent, activity, background = null, diff, selected, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
+  entry, kind, agent, activity, background = null, diff, selected, jumpNumber, checked = false, checking = false, pinned = false, offline = false, showTile = true, now, theme, onSelect, onCheck, onScopeProject, onContextMenu, onDone, onSnooze, onWake, onStopBackground, onHover, rename
 }: {
   entry: InboxEntry
   kind: DeskRowKind
@@ -86,6 +87,8 @@ export default function DeskRow({
   /** Lines the task added and removed, shown before its age. */
   diff?: GitDiffSummary
   selected: boolean
+  /** 1–9: ⌘ and this digit open the row; while ⌘ is held the number stands in for the age. */
+  jumpNumber?: number
   /** Ticked for a bulk action. */
   checked?: boolean
   /** Some row is ticked: the tile gives way to a checkbox. */
@@ -137,6 +140,13 @@ export default function DeskRow({
       data-kind={kind}
       data-checked={checked || undefined}
     >
+      {jumpNumber !== undefined && (
+        <span
+          className="absolute right-3 top-2 z-10 min-w-6 h-5 px-1 flex items-center justify-center rounded-md border border-border-strong bg-surface-3 text-2xs font-semibold text-text tabular-nums pointer-events-none invisible [body.meta-held_&]:visible"
+          aria-hidden="true"
+          data-testid="desk-row-jump"
+        >{formatShortcutForApp(`CmdOrCtrl+${jumpNumber}`)}</span>
+      )}
       {checking ? (
         <button
           type="button"
@@ -168,7 +178,7 @@ export default function DeskRow({
             <strong className="font-semibold text-body">{project.name}</strong>
             {!stream.isMain && <> › <span className="font-mono">{stream.name}</span></>}
           </span>
-          <span className={`shrink-0 tabular-nums flex items-center gap-1.5 ${checking ? '' : 'group-hover:invisible'}`}>
+          <span className={`shrink-0 tabular-nums flex items-center gap-1.5 ${checking ? '' : 'group-hover:invisible'} ${jumpNumber !== undefined ? '[body.meta-held_&]:invisible' : ''}`}>
             {/* Background work: a steady dot, since the agent itself is idle. */}
             {kind === 'working' && (inBackground
               ? <span className="w-[7px] h-[7px] rounded-full bg-status-working" aria-label="background" data-testid="desk-row-background" />

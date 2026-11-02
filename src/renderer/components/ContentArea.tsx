@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { Folder, GitBranch, StickyNote } from 'lucide-react'
 import { useApp } from '../context/AppContext'
-import { useMetaHeld } from '../hooks/useMetaHeld'
+import { isTabJumpKey, jumpDigit, useMetaHeld } from '../hooks/useMetaHeld'
 import { buildWindowTitle } from '../hooks/useAppState'
 import { isRemoteProject, isRenamableTab, isShellCommandProject, type FileBrowserTab } from '../../shared/types'
 import { featureAvailable, openInIdeAvailable } from '../../shared/project-features'
@@ -195,19 +195,21 @@ export default function ContentArea(): React.ReactElement {
     return () => window.removeEventListener('keydown', handler, true)
   }, [selectedProjectId, currentTask, actionPane, focusPane, splitTabRight])
 
-  // Cmd+1..9: that tab of the focused pane. Cmd+Shift+1..9: focus pane N.
+  // Ctrl+1..9 (Alt off macOS): that tab of the focused pane. Cmd+Shift+1..9: focus pane N.
+  // Cmd+1..9 itself opens a sidebar task (DeskColumn).
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((!e.metaKey && !e.ctrlKey) || !selectedProjectId || !selectedTaskId) return
+      if (!selectedProjectId || !selectedTaskId) return
+      const paneKey = e.shiftKey && (e.metaKey || e.ctrlKey) && !e.altKey
+      if (!paneKey && (e.shiftKey || !isTabJumpKey(e))) return
 
-      const digit = e.code.match(/^Digit([1-9])$/)?.[1]
-      if (!digit) return
+      const index = jumpDigit(e)
+      if (index === null) return
 
       const task = currentTask()
       if (!task) return
 
-      const index = parseInt(digit, 10) - 1
-      if (e.shiftKey) {
+      if (paneKey) {
         if (index >= task.panes.length) return
         e.preventDefault()
         focusPane(task, index)

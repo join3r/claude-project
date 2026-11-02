@@ -9,6 +9,7 @@ import type { TabDragState, TabDropTarget } from './tabDrag'
 import { formatShortcutForApp } from '../../shared/shortcut-label'
 import { menuCls, menuItemCls } from './ui'
 import NewTabMenu from './NewTabMenu'
+import { desktopPlatform } from '../hostPlatform'
 
 interface Props {
   tabs: Tab[]
@@ -218,8 +219,8 @@ export default function TabBar({
               }}
             >
               {focused && index < 9 && (
-                <span className="text-2xs text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.meta-held_&]:visible">
-                  {formatShortcutForApp(`CmdOrCtrl+${index + 1}`)}
+                <span className="text-2xs text-text-subtle px-1 py-px rounded-sm bg-surface-3 pointer-events-none shrink-0 invisible [body.tabkey-held_&]:visible">
+                  {formatShortcutForApp(`${desktopPlatform() === 'darwin' ? 'Ctrl' : 'Alt'}+${index + 1}`)}
                 </span>
               )}
               <span className="text-xs shrink-0">{tabIcon(tab.type)}</span>
