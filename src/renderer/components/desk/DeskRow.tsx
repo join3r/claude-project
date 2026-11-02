@@ -6,7 +6,6 @@ import { formatShortcutForApp } from '../../../shared/shortcut-label'
 import type { AgentActivity } from '../../../shared/agent-activity'
 import ProjectTileBadge from '../ProjectTileBadge'
 import {
-  formatRelativeAge,
   formatWaitTime,
   inboxState,
   landingStatusLabel,
@@ -84,10 +83,10 @@ export default function DeskRow({
   activity: AgentActivity | undefined
   /** Working rows: the Background state, when the turn ended but its work still runs. */
   background?: TaskBackground | null
-  /** Lines the task added and removed, shown before its age. */
+  /** Lines the task added and removed. */
   diff?: GitDiffSummary
   selected: boolean
-  /** 1–9: ⌘ and this digit open the row; while ⌘ is held the number stands in for the age. */
+  /** 1–9: ⌘ and this digit open the row; while ⌘ is held the number covers the row's meta. */
   jumpNumber?: number
   /** Ticked for a bulk action. */
   checked?: boolean
@@ -117,7 +116,6 @@ export default function DeskRow({
   rename?: InboxRename
 }): React.ReactElement {
   const { task, project, stream } = entry
-  const at = lastActivityAt(task)
   // A landing being fixed reads as the landing, not as the work around it.
   const inBackground = kind === 'working' && background !== null && !entry.task.landing
   const { lead, text } = preview(kind, entry, agent, activity, now)
@@ -189,7 +187,6 @@ export default function DeskRow({
                 <span className="text-running">+{formatLineCount(diff.added)}</span> <span className="text-crashed">−{formatLineCount(diff.deleted)}</span>
               </span>
             )}
-            {at > 0 ? formatRelativeAge(now - at) : ''}
           </span>
         </div>
         {rename ? (
