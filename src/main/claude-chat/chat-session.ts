@@ -47,6 +47,11 @@ export const FORWARDED_HOOK_EVENTS: HookEvent[] = [
 export class TurnStopTracker {
   private open = false
 
+  /** A turn started (UserPromptSubmit) and hasn't ended yet. */
+  get turnOpen(): boolean {
+    return this.open
+  }
+
   hook(event: unknown): void {
     if (event === 'UserPromptSubmit') this.open = true
     else if (event === 'Stop' || event === 'StopFailure') this.open = false
@@ -163,6 +168,83 @@ export function backgroundTasksOf(message: unknown): BackgroundTaskEntry[] | nul
     })
   }
   return out
+}
+
+/**
+ * How long a hook may run before it stops counting as background work. Claude
+ * Code kills a command hook after 600 s by default, which ends a rewake hook with
+ * a `hook_response`; a plain async hook that prints nothing never reports at all,
+ * and must not hold the tab "working" for that long.
+ */
+export const HOOK_WAIT_MAX_MS = 5 * 60_000
+
+/**
+ * Command hooks Claude Code started and has not reported finished
+ * (`includeHookEvents`), as background tasks. The one that matters is an
+ * `asyncRewake` hook such as the security-guidance plugin's review: it runs
+ * after the turn's Stop and, when it finds something, wakes Claude with a new
+ * turn. Until it reports, the agent isn't done, and Autopilot must not land.
+ *
+ * A rewake hook ends with `hook_response`. A plain `async` hook never sends one:
+ * it ends with a `hook_progress` when it printed anything (DevTool's own hooks
+ * print `Success`), else only {@link HOOK_WAIT_MAX_MS} drops it.
+ *
+ * Every hook a turn runs is seen, most of them over in milliseconds. Only those
+ * that can outlive the turn are reported (`entries`): Stop hooks, and once the
+ * turn is over, whatever still runs. SessionStart and UserPromptSubmit hooks
+ * open a session or a turn and never hold one.
+ */
+export class PendingHooks {
+  private readonly hooks = new Map<string, { name: string; event: string; startedAt: number }>()
+
+  constructor(private readonly maxMs = HOOK_WAIT_MAX_MS) {}
+
+  /** Folds one SDK message in; true when the set changed. */
+  apply(message: unknown, now: number): boolean {
+    const m = message as { type?: unknown; subtype?: unknown; hook_id?: unknown; hook_name?: unknown; hook_event?: unknown } | null
+    if (!m || m.type !== 'system' || typeof m.hook_id !== 'string') return false
+    if (m.subtype === 'hook_started') {
+      if (this.hooks.has(m.hook_id)) return false
+      const event = typeof m.hook_event === 'string' ? m.hook_event : ''
+      const name = typeof m.hook_name === 'string' && m.hook_name ? m.hook_name : event || 'hook'
+      this.hooks.set(m.hook_id, { name, event, startedAt: now })
+      return true
+    }
+    if (m.subtype === 'hook_response' || m.subtype === 'hook_progress') return this.hooks.delete(m.hook_id)
+    return false
+  }
+
+  /** Drops hooks that ran past the limit; true when any went. */
+  expire(now: number): boolean {
+    let changed = false
+    for (const [id, hook] of this.hooks) {
+      if (now - hook.startedAt >= this.maxMs) {
+        this.hooks.delete(id)
+        changed = true
+      }
+    }
+    return changed
+  }
+
+  /** When the oldest hook runs out, or null with none running. */
+  nextExpiry(): number | null {
+    let oldest: number | null = null
+    for (const hook of this.hooks.values()) {
+      if (oldest === null || hook.startedAt < oldest) oldest = hook.startedAt
+    }
+    return oldest === null ? null : oldest + this.maxMs
+  }
+
+  /** The hooks that hold the agent: Stop hooks, and with `turnOpen` false any still running. */
+  entries(turnOpen: boolean): BackgroundTaskEntry[] {
+    return [...this.hooks]
+      .filter(([, hook]) => hook.event !== 'SessionStart' && hook.event !== 'UserPromptSubmit' && (hook.event === 'Stop' || !turnOpen))
+      .map(([id, hook]) => ({ id: `hook:${id}`, type: 'hook', description: `${hook.name} hook` }))
+  }
+
+  clear(): void {
+    this.hooks.clear()
+  }
 }
 
 /** SDK messages no window draws; dropped before they cost an IPC hop. */
@@ -310,6 +392,11 @@ export class ChatSession {
   /** A turn reported its cost; that running total (it includes a resumed session's past turns) wins over `/usage`'s. */
   private sawResultCost = false
   private readonly turnStop = new TurnStopTracker()
+  /** The CLI's last `background_tasks_changed` level; reported together with the running hooks. */
+  private sdkBackground: BackgroundTaskEntry[] = []
+  private readonly pendingHooks = new PendingHooks()
+  private hookExpiry: ReturnType<typeof setTimeout> | null = null
+  private reportedBackground = ''
 
   constructor(private readonly options: ChatSessionOptions) {}
 
@@ -321,6 +408,8 @@ export class ChatSession {
       hooks[event] = [{
         hooks: [async (input) => {
           this.turnStop.hook(input.hook_event_name)
+          // Hooks still running as the turn ends count before its Stop does.
+          if (input.hook_event_name === 'Stop') this.reportBackground()
           try { o.onHook(input as unknown as Record<string, unknown>) } catch { /* status is best-effort */ }
           return {}
         }]
@@ -339,6 +428,8 @@ export class ChatSession {
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code', ...(o.appendSystemPrompt ? { append: o.appendSystemPrompt } : {}) },
       includePartialMessages: true,
+      // hook_started/hook_response: a rewake hook still running after Stop is background work.
+      includeHookEvents: true,
       canUseTool: this.canUseTool,
       hooks,
       extraArgs: extra,
@@ -397,9 +488,12 @@ export class ChatSession {
         if (started) this.onSessionStart(started)
         const background = backgroundTasksOf(message)
         if (background !== null) {
-          try { this.options.onHook({ hook_event_name: 'DevtoolBackgroundTasks', count: background.length, tasks: background }) } catch { /* status is best-effort */ }
+          this.sdkBackground = background
+          this.reportBackground()
         }
+        if (this.pendingHooks.apply(message, Date.now())) this.reportBackground()
         if ((message as { type?: string }).type === 'result' && this.turnStop.result()) {
+          this.reportBackground()
           const sessionId = (message as { session_id?: unknown }).session_id
           try { this.options.onHook({ hook_event_name: 'Stop', session_id: sessionId }) } catch { /* status is best-effort */ }
         }
@@ -423,6 +517,30 @@ export class ChatSession {
     if (cache) this.options.onEvent({ t: 'cold-cache', cache })
   }
 
+  /**
+   * The background level main sees: the CLI's tasks and the hooks still running.
+   * Sent only when it changed, and re-armed so a hook that never reports runs out.
+   */
+  private reportBackground(): void {
+    if (this.ended) return
+    if (this.hookExpiry) clearTimeout(this.hookExpiry)
+    this.hookExpiry = null
+    const tasks = [...this.sdkBackground, ...this.pendingHooks.entries(this.turnStop.turnOpen)]
+    const key = JSON.stringify(tasks)
+    if (key !== this.reportedBackground) {
+      this.reportedBackground = key
+      try { this.options.onHook({ hook_event_name: 'DevtoolBackgroundTasks', count: tasks.length, tasks }) } catch { /* status is best-effort */ }
+    }
+    const expiry = this.pendingHooks.nextExpiry()
+    if (expiry !== null) {
+      this.hookExpiry = setTimeout(() => {
+        this.hookExpiry = null
+        this.pendingHooks.expire(Date.now())
+        this.reportBackground()
+      }, Math.max(0, expiry - Date.now()))
+    }
+  }
+
   private markRunning(): void {
     if (this.running || this.ended) return
     this.running = true
@@ -436,6 +554,9 @@ export class ChatSession {
       held.resolve({ behavior: 'deny', message: 'The session ended.' })
     }
     this.held.clear()
+    this.pendingHooks.clear()
+    if (this.hookExpiry) clearTimeout(this.hookExpiry)
+    this.hookExpiry = null
     this.input.end()
     this.options.onEvent({ t: 'process', state: 'exited', at: Date.now(), ...(error ? { error } : {}) })
     this.options.onExit(error)

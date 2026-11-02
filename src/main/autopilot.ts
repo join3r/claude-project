@@ -20,6 +20,11 @@ import type { TaskLandingManager } from './task-landing'
  * unhappy after the fix round, Codex failing, a landing that won't go through.
  * A stopped run is never picked up again: you take it from there.
  *
+ * A turn is over when the tab leaves `working`, which waits for what the turn
+ * left running: background agents and shells, and hooks still going after its
+ * Stop. One of those is an `asyncRewake` review (the security-guidance plugin)
+ * that can wake Claude with findings to fix; Autopilot acts after that turn.
+ *
  * Main is the one place this can live: it outlasts the windows, and every
  * window sees the same projects (a window-side runner would act once per window).
  * State is on `Task.autopilot`, so the inbox shows where a run is; a restart

@@ -5,7 +5,8 @@ import { buildTimeline, summarizeGroup } from '../src/renderer/components/claude
 import { contextTone, formatCost, formatResetAt, formatResetIn, formatTokens, limitTone } from '../src/renderer/components/claude-chat/UsageMeter'
 import { diffLines, diffStats, editPairs } from '../src/renderer/components/claude-chat/diff'
 import { JsonLineGate, sdkAddedEnv } from '../src/main/claude-chat/remote-spawn'
-import { backgroundTasksOf, coldCacheFrom, extraArgsRecord, isDisplayRelevant, sessionStartInput, TurnStopTracker } from '../src/main/claude-chat/chat-session'
+import { backgroundTasksOf, coldCacheFrom, extraArgsRecord, isDisplayRelevant, PendingHooks, sessionStartInput, TurnStopTracker } from '../src/main/claude-chat/chat-session'
+import { TabActivityRegistry } from '../src/main/tab-activity-registry'
 import { coldCacheText, formatIdle } from '../src/renderer/components/claude-chat/ColdCacheNotice'
 import { parseTranscriptLines, remoteTranscriptScript } from '../src/main/claude-chat/transcript'
 import { agentTabType, createTab } from '../src/renderer/components/newTaskTabs'
@@ -476,5 +477,77 @@ describe('TurnStopTracker', () => {
 
   it('owes nothing for a result with no turn behind it', () => {
     expect(new TurnStopTracker().result()).toBe(false)
+  })
+})
+
+describe('PendingHooks', () => {
+  const started = (id: string, name = 'Stop') => ({ type: 'system', subtype: 'hook_started', hook_id: id, hook_name: name, hook_event: 'Stop' })
+  const response = (id: string) => ({ type: 'system', subtype: 'hook_response', hook_id: id, hook_name: 'Stop', hook_event: 'Stop', outcome: 'error', exit_code: 2 })
+
+  it('holds a hook from hook_started until its hook_response', () => {
+    const hooks = new PendingHooks()
+    expect(hooks.apply(started('h1'), 0)).toBe(true)
+    expect(hooks.apply(started('h1'), 0)).toBe(false)
+    expect(hooks.entries(false)).toEqual([{ id: 'hook:h1', type: 'hook', description: 'Stop hook' }])
+    expect(hooks.apply(response('h1'), 8000)).toBe(true)
+    expect(hooks.entries(false)).toEqual([])
+  })
+
+  it('lets a plain async hook go on the hook_progress it sends instead of a response', () => {
+    const hooks = new PendingHooks()
+    hooks.apply(started('h1', 'PostToolUse:Bash'), 0)
+    expect(hooks.apply({ type: 'system', subtype: 'hook_progress', hook_id: 'h1' }, 3000)).toBe(true)
+    expect(hooks.entries(false)).toEqual([])
+  })
+
+  it('drops a hook that never reports once it runs past the limit', () => {
+    const hooks = new PendingHooks(1000)
+    hooks.apply(started('h1'), 0)
+    hooks.apply(started('h2'), 500)
+    expect(hooks.nextExpiry()).toBe(1000)
+    expect(hooks.expire(999)).toBe(false)
+    expect(hooks.expire(1000)).toBe(true)
+    expect(hooks.entries(false).map((entry) => entry.id)).toEqual(['hook:h2'])
+    expect(hooks.nextExpiry()).toBe(1500)
+  })
+
+  it('reports only hooks that can outlive the turn', () => {
+    const hooks = new PendingHooks()
+    hooks.apply({ type: 'system', subtype: 'hook_started', hook_id: 's', hook_name: 'SessionStart:startup', hook_event: 'SessionStart' }, 0)
+    hooks.apply({ type: 'system', subtype: 'hook_started', hook_id: 'u', hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit' }, 0)
+    hooks.apply({ type: 'system', subtype: 'hook_started', hook_id: 'p', hook_name: 'PostToolUse:Bash', hook_event: 'PostToolUse' }, 0)
+    hooks.apply(started('stop'), 0)
+    // Mid-turn a tool's hook is the turn's own business; a Stop hook is about to outlive it.
+    expect(hooks.entries(true).map((entry) => entry.id)).toEqual(['hook:stop'])
+    expect(hooks.entries(false).map((entry) => entry.id)).toEqual(['hook:p', 'hook:stop'])
+  })
+
+  it('ignores other messages', () => {
+    const hooks = new PendingHooks()
+    expect(hooks.apply({ type: 'system', subtype: 'init' }, 0)).toBe(false)
+    expect(hooks.apply({ type: 'result' }, 0)).toBe(false)
+    expect(hooks.nextExpiry()).toBeNull()
+  })
+
+  it('keeps the tab working past Stop until a rewake hook reports, then the rewake turn takes over', () => {
+    const registry = new TabActivityRegistry(() => 0)
+    const level = (tasks: unknown[]) => {
+      const update = registry.applyHook('t', { hook_event_name: 'DevtoolBackgroundTasks', count: tasks.length, tasks })
+      if (update?.statusEvent) registry.statusEvent('t', update.statusEvent)
+    }
+    registry.applyHook('t', { hook_event_name: 'UserPromptSubmit', prompt: 'go' })
+    registry.working('t')
+    const hooks = new PendingHooks()
+    hooks.apply(started('review'), 0)
+    level(hooks.entries(false))
+    registry.applyHook('t', { hook_event_name: 'Stop' })
+    registry.stopped('t')
+    expect(registry.getStatus('t')).toBe('working')
+    hooks.apply(response('review'), 20_000)
+    level(hooks.entries(false))
+    expect(registry.getStatus('t')).toBeNull()
+    // The findings wake Claude: a new turn.
+    registry.working('t')
+    expect(registry.getStatus('t')).toBe('working')
   })
 })
