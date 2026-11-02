@@ -40,7 +40,7 @@ export async function readArtifactFile(sources: ArtifactSources, published: stri
     if (status === 'missing') throw new Error(`${file} is no longer there`)
     if (status === 'large') throw tooLarge(published)
     if (status !== 'ok') throw new Error(`Couldn't read ${file}`)
-    return { path: published, data: data.trim(), ...contentType }
+    return { path: published, data: withEdits(data.trim(), source.edits), ...contentType }
   }
 
   const file = path.resolve(host.cwd, source.root ?? '', source.from)
@@ -53,5 +53,20 @@ export async function readArtifactFile(sources: ArtifactSources, published: stri
     throw new Error(`${file} is no longer there`)
   }
   if (size > ARTIFACT_FILE_MAX_BYTES) throw tooLarge(published)
-  return { path: published, data: (await fs.readFile(file)).toString('base64'), ...contentType }
+  return { path: published, data: withEdits((await fs.readFile(file)).toString('base64'), source.edits), ...contentType }
+}
+
+/**
+ * Replay the edits claude.ai made after the file was sent. An edit whose text
+ * isn't there exactly once is skipped: the file most likely has it already.
+ */
+function withEdits(base64: string, edits: ArtifactSource['edits']): string {
+  if (!edits?.length) return base64
+  let text = Buffer.from(base64, 'base64').toString('utf8')
+  for (const edit of edits) {
+    const at = text.indexOf(edit.old)
+    if (at < 0 || text.indexOf(edit.old, at + 1) >= 0) continue
+    text = text.slice(0, at) + edit.new + text.slice(at + edit.old.length)
+  }
+  return Buffer.from(text, 'utf8').toString('base64')
 }

@@ -695,11 +695,35 @@ const ARTIFACT_PUBLISHED = /^Published .+? at (https:\/\/claude\.ai\/\S+)/
  * `toolUseResult`), the only place the page's title shows up.
  */
 function artifactOf(item: ChatToolItem, text: string, meta: Json | undefined): ChatToolItem['artifact'] {
+  if (mcpArtifactCall(item.name)) return mcpArtifactOf(item, text)
   if (item.name !== 'Artifact') return undefined
   const url = ARTIFACT_PUBLISHED.exec(text)?.[1]
   if (!url) return undefined
   const title = (meta && str(meta.url) === url ? str(meta.title) : undefined) ?? str(item.input.title)
   return title ? { url, title } : { url }
+}
+
+/**
+ * The claude-artifacts MCP server's publishing calls (`mcp__claude-artifacts__publish_files`
+ * and friends): which one, or undefined for any other tool.
+ */
+export function mcpArtifactCall(name: string): 'publish_files' | 'publish_version' | 'edit_version' | undefined {
+  const m = /^mcp__[^_]*artifacts[^_]*__(publish_files|publish_version|edit_version)$/i.exec(name)
+  return m ? m[1] as 'publish_files' | 'publish_version' | 'edit_version' : undefined
+}
+
+/** The MCP server answers with the artifact as JSON: `{"url": "https://claude.ai/artifact/…", "title": …}`. */
+function mcpArtifactOf(item: ChatToolItem, text: string): ChatToolItem['artifact'] {
+  for (const line of text.split('\n')) {
+    if (!line.trimStart().startsWith('{')) continue
+    let parsed: Json | undefined
+    try { parsed = obj(JSON.parse(line)) } catch { continue }
+    const url = str(parsed?.url)
+    if (!url || !url.startsWith('https://claude.ai/')) continue
+    const title = str(parsed?.title) ?? str(item.input.title)
+    return title ? { url, title } : { url }
+  }
+  return undefined
 }
 
 function applyToolResults(draft: Draft, content: unknown[], meta?: Json): void {
@@ -764,6 +788,56 @@ export interface ArtifactSource {
   from: string
   root?: string
   contentType?: string
+  /** Text replacements claude.ai applied after the file was sent (MCP `edit_version`), in order. */
+  edits?: { old: string; new: string }[]
+}
+
+/** A page published as text in the call itself (MCP `publish_version`): nothing on disk to show. */
+const INLINE_PAGE: ArtifactSource = { from: '' }
+
+/** Fold one claude-artifacts MCP call into the page and files; returns the new page. */
+function foldMcpArtifactCall(
+  call: 'publish_files' | 'publish_version' | 'edit_version',
+  input: Record<string, unknown>,
+  page: ArtifactSource | undefined,
+  files: Record<string, ArtifactSource>
+): ArtifactSource | undefined {
+  if (call === 'publish_version') {
+    for (const key of Object.keys(files)) delete files[key]
+    return INLINE_PAGE
+  }
+  if (call === 'edit_version') {
+    const edits = (Array.isArray(input.edits) ? input.edits : []).flatMap((raw) => {
+      const e = obj(raw)
+      const old = str(e?.old_text)
+      return old ? [{ old, new: str(e?.new_text) ?? '' }] : []
+    })
+    const target = str(input.path)
+    const key = target ? artifactPublishedPath(target) : undefined
+    const source = !target || key === 'index.html' ? page : key ? files[key] : undefined
+    if (!source || source === INLINE_PAGE || edits.length === 0) return page
+    const edited = { ...source, edits: [...(source.edits ?? []), ...edits] }
+    if (source === page) return edited
+    if (key) files[key] = edited
+    return page
+  }
+  if (input.mode === 'replace') {
+    page = undefined
+    for (const key of Object.keys(files)) delete files[key]
+  }
+  for (const removed of Array.isArray(input.remove) ? input.remove : []) {
+    const key = typeof removed === 'string' ? artifactPublishedPath(removed) : undefined
+    if (key) delete files[key]
+  }
+  for (const raw of Array.isArray(input.files) ? input.files : []) {
+    const entry = obj(raw)
+    const key = artifactPublishedPath(str(entry?.as) ?? '')
+    const from = str(entry?.path)
+    if (!key || !from) continue
+    if (key === 'index.html') page = { from }
+    else files[key] = { from }
+  }
+  return page
 }
 
 /** What a published page was made of on this machine, so it can be shown without claude.ai. */
@@ -792,6 +866,11 @@ export function artifactSources(items: ChatItem[], url: string): ArtifactSources
   for (const item of items) {
     if (item.kind !== 'tool' || item.artifact?.url !== url || item.input.asset === true) continue
     const { input } = item
+    const mcp = mcpArtifactCall(item.name)
+    if (mcp) {
+      page = foldMcpArtifactCall(mcp, input, page, files)
+      continue
+    }
     const root = str(input.root)
     if (str(input.type_url)) typed = true
     const filePath = str(input.file_path)
@@ -819,6 +898,7 @@ export function artifactSources(items: ChatItem[], url: string): ArtifactSources
     }
   }
   if (typed) return new Error('This artifact is built on a claude.ai type, so it only shows on claude.ai.')
+  if (page === INLINE_PAGE) return new Error('Claude sent this page as text rather than from a file, so it only shows on claude.ai.')
   if (!page) return new Error('No local page for this artifact in this chat.')
   if (/\.(md|markdown)$/i.test(page.from)) return new Error('Markdown pages are rendered by claude.ai, so this one only shows there.')
   return { page, files }

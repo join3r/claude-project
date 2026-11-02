@@ -101,7 +101,56 @@ describe('artifactSources', () => {
   })
 })
 
+describe('claude-artifacts MCP publishes', () => {
+  const MCP = 'mcp__claude-artifacts__'
+  const mcpResult = (url: string, title: string): string =>
+    `${JSON.stringify({ slug: 'x', title, url, version: '1793609751-fa33', read: 'owner' })}\nOnce this session's watch on this artifact connects…`
+  const reduce = (events: ChatEvent[]) => events.reduce(reduceChat, emptyChatState()).items
+
+  it('lists a publish_files page and finds its local files', () => {
+    const items = reduce([
+      call('m1', { files: [{ as: 'index.html', path: '/s/themes.html' }, { as: 'app.js', path: '/s/app.js' }], title: 'Sidebar Themes' }, `${MCP}publish_files`),
+      result('m1', mcpResult(URL_A, 'Sidebar Themes')),
+      call('m2', { slug: 'x', base_version: 'v', files: [{ as: 'more.css', path: '/s/more.css' }], remove: ['app.js'] }, `${MCP}publish_files`),
+      result('m2', mcpResult(URL_A, 'Sidebar Themes')),
+      call('m3', { slug: 'x', base_version: 'v', edits: [{ old_text: 'Dark', new_text: 'Night' }] }, `${MCP}edit_version`),
+      result('m3', mcpResult(URL_A, 'Sidebar Themes'))
+    ])
+    expect(chatArtifacts(items).map((a) => [a.url, a.title, a.publishes])).toEqual([[URL_A, 'Sidebar Themes', 3]])
+    expect(artifactSources(items, URL_A)).toEqual({
+      page: { from: '/s/themes.html', edits: [{ old: 'Dark', new: 'Night' }] },
+      files: { 'more.css': { from: '/s/more.css' } }
+    })
+  })
+
+  it('has no local copy for a page sent inline with publish_version', () => {
+    const items = reduce([
+      call('m1', { content: '<!DOCTYPE html><p>hi</p>', title: 'Inline' }, `${MCP}publish_version`),
+      result('m1', mcpResult(URL_A, 'Inline'))
+    ])
+    expect(chatArtifacts(items).map((a) => a.title)).toEqual(['Inline'])
+    expect(artifactSources(items, URL_A)).toBeInstanceOf(Error)
+  })
+
+  it('ignores reads and other MCP servers', () => {
+    const items = reduce([
+      call('r1', { slug: URL_A }, `${MCP}read_artifact`),
+      result('r1', mcpResult(URL_A, 'Read')),
+      call('o1', { files: [] }, 'mcp__other__publish_files'),
+      result('o1', mcpResult(URL_B, 'Other'))
+    ])
+    expect(chatArtifacts(items)).toEqual([])
+  })
+})
+
 describe('readArtifactFile', () => {
+  it('replays edit_version edits on the local file, skipping ones already there', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-'))
+    fs.writeFileSync(path.join(dir, 'p.html'), '<h1>Dark</h1><p>Light</p>')
+    const page = await readArtifactFile({ page: { from: 'p.html', edits: [{ old: 'Dark', new: 'Night' }, { old: 'gone', new: 'x' }] }, files: {} }, '', { cwd: dir })
+    expect(Buffer.from(page.data, 'base64').toString()).toBe('<h1>Night</h1><p>Light</p>')
+  })
+
   it('reads only the files the publishes named, resolved from the chat directory', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-'))
     fs.mkdirSync(path.join(dir, 'out'))
