@@ -1,10 +1,10 @@
 import { spawn } from 'child_process'
 
-/** Past this the suggestion gives up: the agent reads a few files, which takes seconds. */
+/** Past this the suggestion gives up: the agent reads a few files and scripts, which takes seconds. */
 export const RUN_COMMAND_SUGGEST_TIMEOUT_MS = 180_000
 
 /** At most this many come back; the rest are dropped. */
-const MAX_COMMANDS = 8
+const MAX_COMMANDS = 10
 const NAME_MAX = 40
 const COMMAND_MAX = 500
 
@@ -49,11 +49,13 @@ const SCHEMA = JSON.stringify({
 })
 
 const SYSTEM_PROMPT = [
-  'You set up the buttons a developer clicks to install and run the app in a folder.',
-  'Read the folder (package.json, lockfiles, Makefile, justfile, docker-compose, pyproject, Cargo.toml, README, CLAUDE.md and the like) to find how this project is really installed and started.',
+  'You set up the buttons a developer clicks to work with the project in a folder: install, run, and the other jobs the project really has, such as test, build, install the app locally, release or deploy.',
+  'Look before you answer: package.json scripts, lockfiles, Makefile, justfile, Taskfile, Procfile, docker-compose, pyproject, Cargo.toml, README, CLAUDE.md and AGENTS.md, and the folders that hold the project\'s own scripts and procedures (scripts/, bin/, tools/, deploy/, .claude/skills/, .github/workflows/), plus deploy config such as fly.toml, vercel.json, netlify.toml, wrangler.toml or Dockerfile.',
+  'When the project has its own script for a job, call that script (./scripts/install.sh, make deploy) instead of rebuilding its steps by hand, and read it first to learn what it does and name it after that: a script that builds the app and copies it into /Applications installs the app, it does not install dependencies.',
+  'Suggest a deploy, release or publish command only when the project shows how it is done (a script, a make target, a package script, a documented procedure in README, CLAUDE.md or a skill, a deploy tool config). Never make one up. These are buttons the developer presses on purpose and checks before saving, so do include them when they exist.',
   'Each command is one shell command line run with sh -c in that folder: no comments, no line breaks; join steps with &&.',
-  'Names are short and lowercase: install first when dependencies need installing, then run, then others only when they matter (test, build, run (staging)).',
-  'Use the package manager the lockfile says. Never suggest commands that deploy, publish, push, delete data or need secrets you do not see.',
+  'Names are short and lowercase and say what the button does: install first when dependencies need installing, then run, then the others (test, build, install app, deploy, deploy (staging), release). Only the command named run is the app\'s main run button: never give that name to anything that deploys, releases or installs.',
+  'Use the package manager the lockfile says. Never suggest commands that delete data, rewrite git history or put secrets on the command line; a deploy script that reads its own credentials is fine.',
   'Reply with the commands as the JSON schema asks, nothing else.'
 ].join(' ')
 
@@ -63,7 +65,7 @@ function listText(list: SuggestedRunCommand[]): string {
 
 /** The user message: what is set already, and for a stream what it gets from the project. */
 export function suggestPrompt(request: RunCommandSuggestRequest): string {
-  const parts = ['Suggest the install and run commands for this folder.']
+  const parts = ['Suggest the commands for this folder: install and run, and the other jobs this project has its own way of doing (its scripts, deploys, releases).']
   if (request.inherited) {
     parts.push(
       request.inherited.length > 0

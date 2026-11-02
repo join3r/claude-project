@@ -54,6 +54,10 @@ describe('suggestPrompt', () => {
   it('lists the commands set already', () => {
     expect(suggestPrompt({ dir: '/x', current: [{ name: 'install', command: 'npm i' }] })).toContain('- install: npm i')
   })
+
+  it('asks for the project\'s own scripts and deploys, not just install and run', () => {
+    expect(suggestPrompt({ dir: '/x', current: [] })).toMatch(/scripts, deploys, releases/)
+  })
 })
 
 describe('mergeSuggestedCommands', () => {
