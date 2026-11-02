@@ -116,7 +116,7 @@ describe('Settings › Servers', () => {
     expect(rows).toHaveLength(3)
     const online = within(rows[0])
     expect(online.getByTestId('server-state').textContent).toBe('Online')
-    expect(rows[0].textContent).toContain('DevTool 0.6.0 (c439870), devtool-srv-test, Linux arm64')
+    expect(rows[0].textContent).toContain('devtool-srv-test · Linux arm64 · DevTool 0.6.0 (c439870)')
     expect((online.getByRole('button', { name: 'Add another device' }) as HTMLButtonElement).disabled).toBe(false)
     const offline = within(rows[1])
     expect(rows[1].textContent).toContain('Last seen 3 h ago')

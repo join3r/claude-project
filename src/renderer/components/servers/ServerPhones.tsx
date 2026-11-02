@@ -146,7 +146,7 @@ export function PhonePairingPanel({ serverName, online, phones, now }: {
   }
 
   return (
-    <div className="ml-3.5 mt-1 rounded-md border border-border bg-surface-2 px-2.5 py-2 flex flex-col gap-1.5" data-testid="phone-pairing">
+    <div className="rounded-md border border-border bg-surface-2 px-2.5 py-2 flex flex-col gap-1.5" data-testid="phone-pairing">
       {pending ? (
         <div role="alert" className="flex flex-col gap-1.5">
           {/* A phone picks its own name: no bidi controls that could reorder the line. */}
@@ -203,12 +203,12 @@ export function PairedPhones({ online, phones, now }: { online: boolean; phones:
   const devices = phones.state?.devices ?? []
   if (devices.length === 0) return null
   return (
-    <div className="pl-3.5 flex flex-col gap-0.5" data-testid="server-phones">
+    <div className="flex flex-col gap-1" data-testid="server-phones">
       {devices.map(device => (
         <div key={device.id} className="flex items-center gap-2 text-sm text-text-muted min-w-0" data-testid="server-phone">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${device.online ? 'bg-ssh-connected' : 'bg-status-exited'}`} />
-          <span className="text-text truncate">{stripBidi(device.name)}</span>
-          <span className="truncate">
+          <span className="text-text truncate shrink-0 max-w-[45%]">{stripBidi(device.name)}</span>
+          <span className="truncate text-xs">
             {device.outdated
               ? (device.outdated === 'phone' ? 'Update DevTool on this phone' : 'Needs a newer server')
               : `${device.online ? 'Online' : formatLastSeen(device.lastSeen, now)}${device.push ? ' · Notifications on' : ''}`}

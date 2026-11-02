@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { MonitorSmartphone, Pencil, RefreshCw, Smartphone } from 'lucide-react'
 import type { ServerDeviceCode, ServerStatus, ServerUpdateResult } from '../../../shared/servers'
 import { useServersState } from '../../serversState'
 import { formatCountdown, formatLastSeen, useNow } from '../../hooks/useMobileState'
@@ -24,6 +24,13 @@ const DOT: Record<Tone, string> = {
   busy: 'bg-warn status-pulse',
   offline: 'bg-status-exited',
   bad: 'bg-danger'
+}
+
+const PILL: Record<Tone, string> = {
+  online: 'bg-success/12 text-success',
+  busy: 'bg-warn/15 text-warn',
+  offline: 'bg-surface-3 text-text-muted',
+  bad: 'bg-danger/12 text-danger'
 }
 
 /** The state as one word or two, and a sentence when there's something to do about it. */
@@ -136,102 +143,171 @@ function ServerRow({ server, now, projects, onRemove }: { server: ServerStatus; 
 
   const codeLive = code && code.expiresAt > now
 
+  const offlineTitle = online ? undefined : 'The server has to be online'
+  const machine = [
+    host && host.hostname !== server.name ? host.hostname : null,
+    host ? describePlatform(host) : null,
+    build?.version ? `DevTool ${build.version}${build.commit ? ` (${build.commit.slice(0, 7)})` : ''}` : 'Not connected yet'
+  ].filter(Boolean).join(' · ')
+  const when = online
+    ? `Paired ${new Date(server.pairedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+    : formatLastSeen(server.lastSeen, now)
+  const devices = phones.state?.devices ?? []
+
   return (
-    <div className="px-3 py-2.5 border-t border-hair first:border-t-0 flex flex-col gap-1" data-testid="server-row" data-server={server.id}>
-      <div className="flex items-center gap-2 min-w-0">
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[status.tone]}`} />
-        {renaming ? (
-          <RenameField server={server} onDone={() => setRenaming(false)} />
-        ) : (
-          <button
-            type="button"
-            className="group flex items-center gap-1.5 min-w-0 bg-transparent border-0 p-0 text-base text-text font-medium cursor-text text-left"
-            onClick={() => setRenaming(true)}
-            title="Rename"
-            aria-label={`Rename ${server.name}`}
-          >
-            <span className="truncate">{server.name}</span>
-            <Pencil size={11} className="shrink-0 text-text-subtle opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)" />
-          </button>
-        )}
-        <span className="ml-auto text-sm text-text-muted shrink-0" data-testid="server-state">{status.label}</span>
-      </div>
-      <div className="pl-3.5 flex flex-col gap-0.5 text-sm text-text-muted">
-        <div>
-          {build?.version ? `DevTool ${build.version}${build.commit ? ` (${build.commit.slice(0, 7)})` : ''}` : 'Not connected yet'}
-          {host ? `, ${host.hostname}, ${describePlatform(host)}` : ''}
+    <div className="border-t border-hair first:border-t-0 flex flex-col" data-testid="server-row" data-server={server.id}>
+      <div className="px-3 pt-2.5 pb-2 flex flex-col gap-0.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[status.tone]}`} />
+          {renaming ? (
+            <RenameField server={server} onDone={() => setRenaming(false)} />
+          ) : (
+            <button
+              type="button"
+              className="group flex items-center gap-1.5 min-w-0 bg-transparent border-0 p-0 text-base text-text font-semibold cursor-text text-left"
+              onClick={() => setRenaming(true)}
+              title="Rename"
+              aria-label={`Rename ${server.name}`}
+            >
+              <span className="truncate">{server.name}</span>
+              <Pencil size={11} className="shrink-0 text-text-subtle opacity-0 group-hover:opacity-100 transition-opacity duration-(--motion-fast)" />
+            </button>
+          )}
+          <span className={`ml-auto shrink-0 rounded-full px-2 py-px text-xs ${PILL[status.tone]}`} data-testid="server-state">{status.label}</span>
         </div>
-        <div>{online ? `Paired ${new Date(server.pairedAt).toLocaleDateString()}` : formatLastSeen(server.lastSeen, now)}</div>
-        {projects && (
-          <div className="truncate" title={projects.join(', ')} data-testid="server-projects">
-            {projects.length === 0 ? 'No projects' : `${projects.length} project${projects.length === 1 ? '' : 's'} · ${projects.join(', ')}`}
+        <div className="pl-3.5 text-xs text-text-muted truncate" title={`${machine} · ${when}`}>{machine} · {when}</div>
+        {status.note && <div className={`pl-3.5 text-sm ${status.tone === 'bad' ? 'text-danger' : 'text-text-muted'}`}>{status.note}</div>}
+      </div>
+
+      {(projects || online || devices.length > 0) && (
+        <dl className="ml-6.5 mr-3 mb-2 py-1.5 border-y border-hair grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+          {projects && (
+            <Detail label="Projects">
+              <div className="truncate text-text" title={projects.join(', ')} data-testid="server-projects">
+                {projects.length === 0 ? <span className="text-text-subtle">None yet</span> : projects.join(', ')}
+              </div>
+            </Detail>
+          )}
+          {online && (
+            <Detail label="New projects in">
+              <ServerProjectsFolder serverId={server.id} />
+            </Detail>
+          )}
+          {devices.length > 0 && (
+            <Detail label={devices.length === 1 ? 'Phone' : 'Phones'}>
+              <PairedPhones online={online} phones={phones} now={now} />
+            </Detail>
+          )}
+        </dl>
+      )}
+
+      <div className="pl-6.5 pr-3 pb-2 flex flex-col gap-2 empty:hidden">
+        {server.updateReady && (
+          <div className="rounded-md border border-accent/50 bg-accent/10 px-2.5 py-2 flex items-center gap-3" data-testid="update-ready">
+            <span className="text-sm text-text flex-1 min-w-0">
+              Update ready: DevTool {server.updateReady.version}{server.updateReady.commit ? ` (${server.updateReady.commit.slice(0, 7)})` : ''}{builtLabel(server.updateReady.builtAt)}. It switches once no tab is working.
+            </span>
+            <LinkBtn disabled={busy !== null} onClick={() => act('restart', () => window.api.serversRestart(server.id))}>
+              {busy === 'restart' ? 'Restarting…' : 'Restart into update'}
+            </LinkBtn>
           </div>
         )}
-        {status.note && <div className={status.tone === 'bad' ? 'text-danger' : ''}>{status.note}</div>}
-      </div>
-      {server.updateReady && (
-        <div className="ml-3.5 mt-1 rounded-md border border-accent/50 bg-accent/10 px-2.5 py-2 flex items-center gap-3" data-testid="update-ready">
-          <span className="text-sm text-text flex-1 min-w-0">
-            Update ready: DevTool {server.updateReady.version}{server.updateReady.commit ? ` (${server.updateReady.commit.slice(0, 7)})` : ''}{builtLabel(server.updateReady.builtAt)}. It switches once no tab is working.
-          </span>
-          <LinkBtn disabled={busy !== null} onClick={() => act('restart', () => window.api.serversRestart(server.id))}>
-            {busy === 'restart' ? 'Restarting…' : 'Restart into update'}
-          </LinkBtn>
-        </div>
-      )}
-      {code && (
-        <div className="ml-3.5 mt-1 rounded-md border border-border bg-surface-2 px-2.5 py-2 flex flex-col gap-1.5" data-testid="device-code">
-          {codeLive ? (
-            <>
-              <div className="text-sm text-text">In DevTool on the other computer: Add server, I have a code, then paste this.</div>
-              <code className="font-mono text-xs text-text break-all select-all leading-relaxed">{code.code}</code>
+        {code && (
+          <div className="rounded-md border border-border bg-surface-2 px-2.5 py-2 flex flex-col gap-1.5" data-testid="device-code">
+            {codeLive ? (
+              <>
+                <div className="text-sm text-text">In DevTool on the other computer: Add server, I have a code, then paste this.</div>
+                <code className="font-mono text-xs text-text break-all select-all leading-relaxed">{code.code}</code>
+                <div className="flex items-center gap-3 text-sm text-text-muted">
+                  <LinkBtn onClick={() => {
+                    void navigator.clipboard.writeText(code.code)
+                      .then(() => setMessage({ text: 'Copied the code.' }))
+                      .catch(() => {})
+                  }}>Copy</LinkBtn>
+                  <span>Works once · expires in {formatCountdown(code.expiresAt / 1000, now)}</span>
+                  <span className="ml-auto"><LinkBtn onClick={() => setCode(null)}>Hide</LinkBtn></span>
+                </div>
+              </>
+            ) : (
               <div className="flex items-center gap-3 text-sm text-text-muted">
-                <LinkBtn onClick={() => {
-                  void navigator.clipboard.writeText(code.code)
-                    .then(() => setMessage({ text: 'Copied the code.' }))
-                    .catch(() => {})
-                }}>Copy</LinkBtn>
-                <span>Works once · expires in {formatCountdown(code.expiresAt / 1000, now)}</span>
-                <span className="ml-auto"><LinkBtn onClick={() => setCode(null)}>Hide</LinkBtn></span>
+                <span>The code expired.</span>
+                <LinkBtn disabled={!online || busy !== null} onClick={() => act('code', async () => setCode(await window.api.serversDeviceCode(server.id)))}>New code</LinkBtn>
               </div>
-            </>
-          ) : (
-            <div className="flex items-center gap-3 text-sm text-text-muted">
-              <span>The code expired.</span>
-              <LinkBtn disabled={!online || busy !== null} onClick={() => act('code', async () => setCode(await window.api.serversDeviceCode(server.id)))}>New code</LinkBtn>
-            </div>
-          )}
-        </div>
-      )}
-      {online && <ServerProjectsFolder serverId={server.id} />}
-      <PairedPhones online={online} phones={phones} now={now} />
-      <PhonePairingPanel serverName={server.name} online={online} phones={phones} now={now} />
-      {message && <div className={`pl-3.5 text-sm ${message.bad ? 'text-danger' : 'text-text-muted'}`}>{message.text}</div>}
-      {(phones.error || phones.notice) && (
-        <div className={`pl-3.5 text-sm ${phones.error ? 'text-danger' : 'text-text-muted'}`} data-testid="phone-message">{phones.error ?? phones.notice}</div>
-      )}
-      <div className="pl-3.5 pt-1 flex items-center gap-4">
-        <LinkBtn
+            )}
+          </div>
+        )}
+        <PhonePairingPanel serverName={server.name} online={online} phones={phones} now={now} />
+        {message && <div className={`text-sm ${message.bad ? 'text-danger' : 'text-text-muted'}`}>{message.text}</div>}
+        {(phones.error || phones.notice) && (
+          <div className={`text-sm ${phones.error ? 'text-danger' : 'text-text-muted'}`} data-testid="phone-message">{phones.error ?? phones.notice}</div>
+        )}
+      </div>
+
+      <div className="pl-6.5 pr-3 pt-1 pb-2.5 flex items-center gap-1.5 flex-wrap">
+        <ActionButton
+          icon={<MonitorSmartphone size={13} />}
           disabled={!online || busy !== null}
-          title={online ? undefined : 'The server has to be online'}
+          title={offlineTitle ?? 'A one-time code that pairs another computer with this server'}
           onClick={() => act('code', async () => setCode(await window.api.serversDeviceCode(server.id)))}
-        >{busy === 'code' ? 'Asking the server…' : 'Add another device'}</LinkBtn>
-        <LinkBtn
+        >{busy === 'code' ? 'Asking the server…' : 'Add another device'}</ActionButton>
+        <ActionButton
+          icon={<Smartphone size={13} />}
           disabled={!online || phones.busy || phones.panelOpen}
-          title={online ? undefined : 'The server has to be online'}
+          title={offlineTitle}
           onClick={phones.start}
-        >Pair a phone</LinkBtn>
-        <LinkBtn
+        >Pair a phone</ActionButton>
+        <ActionButton
+          icon={<RefreshCw size={13} className={busy === 'update' ? 'animate-spin' : ''} />}
           disabled={!online || busy !== null || !!server.upload}
-          title={online ? undefined : 'The server has to be online'}
+          title={offlineTitle ?? 'Send this DevTool build to the server if it is newer'}
           onClick={() => act('update', async () => {
             const result = await window.api.serversUpdate(server.id)
             setMessage({ text: UPDATE_RESULT[result.reason] })
           })}
-        >{busy === 'update' ? 'Checking…' : 'Update now'}</LinkBtn>
-        <span className="ml-auto"><LinkBtn danger onClick={onRemove}>Remove…</LinkBtn></span>
+        >{busy === 'update' ? 'Checking…' : 'Update now'}</ActionButton>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-auto bg-transparent border-0 px-1.5 h-(--ctl-h-sm) rounded-md text-sm text-text-muted hover:text-danger hover:bg-danger/10 cursor-pointer transition-colors duration-(--motion-fast)"
+        >Remove…</button>
       </div>
     </div>
+  )
+}
+
+/** One label/value pair of a server's details. */
+function Detail({ label, children }: { label: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <>
+      <dt className="text-text-muted py-px">{label}</dt>
+      <dd className="m-0 min-w-0 py-px">{children}</dd>
+    </>
+  )
+}
+
+/** A small bordered button with an icon: a server's everyday actions. */
+function ActionButton({ icon, disabled, title, onClick, children }: {
+  icon: React.ReactNode
+  disabled?: boolean
+  title?: string
+  onClick: () => void
+  children: React.ReactNode
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={[
+        'inline-flex items-center gap-1.5 h-(--ctl-h-sm) px-2 rounded-md border border-border bg-surface-2 text-sm text-text cursor-pointer',
+        'hover:bg-surface-3 transition-colors duration-(--motion-fast)',
+        'disabled:opacity-50 disabled:cursor-default disabled:hover:bg-surface-2'
+      ].join(' ')}
+    >
+      <span className="text-text-muted flex items-center">{icon}</span>
+      {children}
+    </button>
   )
 }
 
@@ -251,11 +327,10 @@ function ServerProjectsFolder({ serverId }: { serverId: string }): React.ReactEl
   }, [serverId])
 
   return (
-    <div className="pl-3.5 flex flex-col gap-1 text-sm text-text-muted" data-testid="server-projects-folder">
+    <div className="flex flex-col gap-1 text-sm text-text-muted" data-testid="server-projects-folder">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="shrink-0">New projects in</span>
-        <span className="font-mono text-xs truncate" title={dir ?? ''}>{dir ?? '…'}</span>
-        <LinkBtn disabled={dir === null} onClick={() => setBrowsing(open => !open)}>Change…</LinkBtn>
+        <span className="font-mono text-xs text-text truncate" title={dir ?? ''}>{dir ?? '…'}</span>
+        <span className="ml-auto shrink-0"><LinkBtn disabled={dir === null} onClick={() => setBrowsing(open => !open)}>{browsing ? 'Close' : 'Change…'}</LinkBtn></span>
       </div>
       {browsing && (
         <div className="flex flex-col gap-2">
